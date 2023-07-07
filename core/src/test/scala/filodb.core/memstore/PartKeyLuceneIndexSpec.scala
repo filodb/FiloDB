@@ -3,8 +3,10 @@ package filodb.core.memstore
 import com.googlecode.javaewah.IntIterator
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
-import filodb.core.metadata.Schemas
+import filodb.core.memstore.ratelimit.{CardinalityTracker, RocksDbCardinalityStore}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.memory.{BinaryRegionConsumer, MemFactory}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -786,6 +788,39 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
   }
 
+  it("toStringPairsMap should return a map of label key value pairs") {
+    val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long", "tags:map")
+    val options = DatasetOptions.DefaultOptions.copy(metricColumn = "_metric_")
+    val dataset1 = Dataset("metrics1",
+      Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long", "_metric_:string", "tags:map"),
+      columns, options)
+    val partSchema = dataset1.schema.partition
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+
+    val extraTags = Map(
+      "_ws_".utf8 -> "my_ws".utf8,
+      "_ns_".utf8 -> "my_ns".utf8,
+      "job".utf8 -> "test_job".utf8
+    )
+    val binRecords = new collection.mutable.ArrayBuffer[(Any, Long)]
+    val binConsumer = new BinaryRegionConsumer {
+      def onNext(base: Any, offset: Long): Unit = binRecords += ((base, offset))
+    }
+    val data = MachineMetricsData.withMap(
+      MachineMetricsData.linearMultiSeries(numSeries = 1),
+      extraTags = extraTags).take(1)
+    MachineMetricsData.addToBuilder(builder, data, dataset1.schema)
+    val containers = builder.allContainers
+    containers.head.consumeRecords(binConsumer)
+
+    for (elem <- binRecords) {
+      val labelKV = partSchema.binSchema.toStringPairs(elem._1, elem._2).toMap
+      for(tag <- extraTags){
+        labelKV(tag._1.toString) shouldEqual tag._2.toString
+      }
+    }
+  }
+
   it("should match the regex after anchors stripped") {
     for ((regex, regexNoAnchors) <- Map(
       """^.*$""" -> """.*""", // both anchor are stripped.
@@ -931,5 +966,46 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           shardDirectory.setWritable(true)
         }
     }
+  }
+
+  it("should correctly build cardinality count") {
+    // build card tracker
+    val rocksDBStore = new RocksDbCardinalityStore(MachineMetricsData.dataset2.ref, 10)
+    val cardTracker = new CardinalityTracker(MachineMetricsData.dataset2.ref, 10, 3,
+      Seq(5000, 5000, 5000, 5000), rocksDBStore, flushCount = Some(100))
+
+    // build lucene index and add records
+    val idx = new PartKeyLuceneIndex(
+      MachineMetricsData.dataset2.ref,
+      MachineMetricsData.dataset2.schema.partition, true, true,
+      10, 1.hour.toMillis,
+      Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
+    // create 1000 time series with different metric names
+    for {i <- 1 until 1001} {
+      val counterNum = i % 10
+      val tags = Map("_ws_".utf8 -> s"my_ws$counterNum".utf8,
+        "_ns_".utf8 -> s"my_ns$counterNum".utf8,
+        "instance".utf8 -> s"instance$counterNum".utf8,
+        "_metric_".utf8 -> s"counter$i".utf8)
+      val partKey = partBuilder.partKeyFromObjects(MachineMetricsData.dataset2.schema, s"counter$i", tags)
+      idx.addPartKey(
+        partKeyOnHeap(MachineMetricsData.dataset2.schema.partition.binSchema, ZeroPointer, partKey), i, 5)()
+    }
+    idx.refreshReadersBlocking()
+
+    // trigger cardinality count calculation
+    idx.calculateCardinality(MachineMetricsData.dataset2.schema.partition, cardTracker)
+
+    cardTracker.scan(Seq(), 0)(0).value.tsCount shouldEqual 1000
+    for {i <- 1 until 1001} {
+      val counterNum = i % 10
+      cardTracker.scan(Seq(s"my_ws$counterNum"), 1)(0).value.tsCount shouldEqual 100
+      cardTracker.scan(Seq(s"my_ws$counterNum", s"my_ns$counterNum"), 2)(0).value.tsCount shouldEqual 100
+      cardTracker.scan(Seq(s"my_ws$counterNum", s"my_ns$counterNum", s"counter$i"), 3)(0)
+        .value.tsCount shouldEqual 1
+    }
+
+    // close CardinalityTracker to avoid leaking of resources
+    cardTracker.close()
   }
 }

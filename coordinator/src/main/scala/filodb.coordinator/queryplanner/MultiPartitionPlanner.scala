@@ -128,6 +128,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
           val remoteContext = logicalPlan match {
+            case tls: TopLevelSubquery =>
+              val instantTime = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].startSecs
+              val stepSecs = tls.stepMs / 1000
+              generateRemoteExecParamsWithStep(qContext, instantTime, stepSecs, instantTime)
             case psp: PeriodicSeriesPlan =>
               val startSecs = psp.startMs / 1000
               val stepSecs = psp.stepMs / 1000
@@ -228,7 +232,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
     //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
-    val routingKeyMap = leafFilters.map(cf => {
+    val routingKeyMap = leafFilters.filter(_.nonEmpty).map(cf => {
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
@@ -647,6 +651,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val httpEndpoint = partitionAssignment.httpEndPoint +
       finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+      urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient, queryConfig)
   }
 }

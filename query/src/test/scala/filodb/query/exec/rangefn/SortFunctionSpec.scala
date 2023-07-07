@@ -153,8 +153,12 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       CustomRangeVectorKey(groupBy)
     }
    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-   val resultObs1 = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(testSample), grouping, queryContext = QueryContext())
-   val resultObs2 = RangeVectorAggregator.mapReduce(agg, true, resultObs1, grouping, queryContext = QueryContext())
+   val resultObs1 = RangeVectorAggregator.mapReduce(
+     agg, false, Observable.fromIterable(testSample), grouping, queryContext = QueryContext(), QueryWarnings()
+   )
+   val resultObs2 = RangeVectorAggregator.mapReduce(
+     agg, true, resultObs1, grouping, queryContext = QueryContext(), queryWarnings = QueryWarnings()
+   )
    val resultAgg = resultObs2.toListL.runToFuture.futureValue
    resultAgg.size shouldEqual 2
    resultAgg.flatMap(_.rows.map(_.getDouble(1)).toList) shouldEqual(List(5.0, 1.0))

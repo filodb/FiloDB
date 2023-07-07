@@ -1,7 +1,7 @@
 package filodb.core.query
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.Seq
 import scala.collection.concurrent.TrieMap
@@ -27,9 +27,9 @@ case class PerQueryLimits(
         execPlanResultBytes: Long = 18000000, // Limit on ExecPlan results in bytes, default is 18MB
         groupByCardinality: Int = 100000,     // Limit on "group by" clause results, default is 100K
         joinQueryCardinality: Int = 100000,   // Limit on binary join input size, default is 100K
-        timeSeriesSamplesScannedBytes: Long = 300000000, // Limit on max data scanned per shard, default is 300 MB
-        timeSeriesScanned: Int = 1000000)    // Limit on max number of time series scanned, default is 1M
-
+        timeSeriesSamplesScannedBytes: Long = 300000000, // max estimated data scanned per shard, default is 300 MB
+        timeSeriesScanned: Int = 1000000,     // Limit on max number of time series scanned, default is 1M
+        rawScannedBytes: Long = 200000000)    // Limit on max actual data scanned per shard. default is 200 MB
 object PerQueryLimits {
 
   def defaultEnforcedLimits(): PerQueryLimits = {
@@ -42,12 +42,101 @@ object PerQueryLimits {
       execPlanResultBytes = 15000000,
       groupByCardinality = 50000,
       joinQueryCardinality = 50000,
-      timeSeriesSamplesScannedBytes = 150000,
-      timeSeriesScanned = 500000
+      timeSeriesSamplesScannedBytes = 150000000,
+      timeSeriesScanned = 500000,
+      rawScannedBytes = 100000000
     )
   }
 
 }
+
+object QueryWarnings {
+
+}
+case class QueryWarnings(
+  execPlanSamples: AtomicInteger = new AtomicInteger(0),
+  execPlanResultBytes: AtomicLong = new AtomicLong(0),
+  groupByCardinality: AtomicInteger = new AtomicInteger(0),
+  joinQueryCardinality: AtomicInteger = new AtomicInteger(0),
+  timeSeriesSamplesScannedBytes: AtomicLong = new AtomicLong(0),
+  timeSeriesScanned: AtomicInteger = new AtomicInteger(0),
+  rawScannedBytes: AtomicLong = new AtomicLong(0)
+) {
+
+  def hasWarnings() : Boolean = {
+    execPlanSamples.get() > 0 ||
+    execPlanResultBytes.get() > 0 ||
+    groupByCardinality.get() > 0 ||
+    joinQueryCardinality.get() > 0 ||
+    timeSeriesSamplesScannedBytes.get() > 0 ||
+    timeSeriesScanned.get() > 0 ||
+    rawScannedBytes.get() > 0
+  }
+
+  def merge(warnings: QueryWarnings) : Unit = {
+    updateExecPlanSamples(warnings.execPlanSamples.get())
+    updateExecPlanResultBytes(warnings.execPlanResultBytes.get())
+    updateGroupByCardinality(warnings.groupByCardinality.get())
+    updateJoinQueryCardinality(warnings.joinQueryCardinality.get())
+    updateTimeSeriesSampleScannedBytes(warnings.timeSeriesSamplesScannedBytes.get())
+    updateTimeSeriesScanned(warnings.timeSeriesScanned.get())
+    updateRawScannedBytes(warnings.rawScannedBytes.get())
+  }
+
+  def updateExecPlanSamples(samples: Int): Unit = {
+    execPlanSamples.updateAndGet(s => if (s < samples) samples else s)
+  }
+
+  def updateExecPlanResultBytes(bytes: Long): Unit = {
+    execPlanResultBytes.updateAndGet(b => if (b < bytes) bytes else b)
+  }
+
+  def updateGroupByCardinality(cardinality: Int): Unit = {
+    groupByCardinality.updateAndGet(c => if (c < cardinality) cardinality else c)
+  }
+
+  def updateJoinQueryCardinality(cardinality: Int): Unit = {
+    joinQueryCardinality.updateAndGet(c => if (c < cardinality) cardinality else c)
+  }
+
+  def updateTimeSeriesScanned(series: Int): Unit = {
+    timeSeriesScanned.updateAndGet(s => if (s<series) series else s)
+  }
+
+  def updateTimeSeriesSampleScannedBytes(bytes: Long): Unit = {
+    timeSeriesSamplesScannedBytes.updateAndGet(b => if (b<bytes) bytes else b)
+  }
+
+  def updateRawScannedBytes(bytes: Long): Unit = {
+    rawScannedBytes.updateAndGet(b => if (b < bytes) bytes else b)
+  }
+
+  override def equals(w2Compare: Any): Boolean = {
+    w2Compare match {
+      case w2: QueryWarnings =>
+        execPlanSamples.get().equals(w2.execPlanSamples.get()) &&
+          execPlanResultBytes.get().equals(w2.execPlanResultBytes.get()) &&
+          groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
+          joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
+          timeSeriesSamplesScannedBytes.get().equals(w2.timeSeriesSamplesScannedBytes.get()) &&
+          timeSeriesScanned.get().equals(w2.timeSeriesScanned.get()) &&
+          rawScannedBytes.get().equals(w2.rawScannedBytes.get())
+      case _ => false
+    }
+  }
+
+  override def hashCode(): Int = {
+    var c = execPlanSamples.get().hashCode()
+    c = 31 * c + execPlanResultBytes.get().hashCode()
+    c = 31 * c + groupByCardinality.get().hashCode()
+    c = 31 * c + joinQueryCardinality.get().hashCode()
+    c = 31 * c + timeSeriesSamplesScannedBytes.get().hashCode()
+    c = 31 * c + timeSeriesScanned.get().hashCode()
+    c = 31 * c + rawScannedBytes.get().hashCode()
+    c
+  }
+}
+
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
@@ -103,7 +192,8 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
       s" promQL = -=# ${promQl} #=-" +
       s" queryOrigin = ${plannerParams.queryOrigin}" +
       s" queryPrincipal = ${plannerParams.queryPrincipal}" +
-      s" queryOriginId = ${plannerParams.queryOriginId}"
+      s" queryOriginId = ${plannerParams.queryOriginId}" +
+      s" queryId = ${queryId}"
     logLine
   }
 }
@@ -208,6 +298,7 @@ case class QuerySession(qContext: QueryContext,
                         catchMultipleLockSetErrors: Boolean = false) {
 
   val queryStats: QueryStats = QueryStats()
+  val warnings: QueryWarnings = QueryWarnings()
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false
   var partialResultsReason: Option[String] = None

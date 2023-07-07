@@ -61,8 +61,10 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
           (transf.apply(acc._1, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
-          QueryResult(queryContext.queryId, resultSchema, _, QueryStats(), querySession.resultCouldBePartial,
-            querySession.partialResultsReason)
+          QueryResult(queryContext.queryId, resultSchema, _,
+            QueryStats(), QueryWarnings(), querySession.resultCouldBePartial,
+            querySession.partialResultsReason
+          )
         })
       }.flatten
     }

@@ -59,8 +59,11 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, evaluate))
     Task.eval { // not async
-      QueryResult(queryContext.queryId, resultSchema, rangeVectors, QueryStats(), querySession.resultCouldBePartial,
-        querySession.partialResultsReason)
+      QueryResult(
+        queryContext.queryId, resultSchema, rangeVectors, QueryStats(), QueryWarnings(),
+        querySession.resultCouldBePartial,
+        querySession.partialResultsReason
+      )
     }
   }
 }

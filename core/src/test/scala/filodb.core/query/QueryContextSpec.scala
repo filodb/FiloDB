@@ -21,7 +21,8 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
         joinQueryCardinality = 129,
         execPlanResultBytes = 130,
         execPlanSamples = 131,
-        timeSeriesSamplesScannedBytes = 132),
+        timeSeriesSamplesScannedBytes = 132,
+        rawScannedBytes = 133),
       queryOrigin = Option("rr"),
       queryOriginId = Option("rr_id"),
       timeSplitEnabled = true,
@@ -37,7 +38,8 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     )
     val logLine = queryContext.getQueryLogLine("My log message")
     logLine should equal (
-      "My log message promQL = -=# myQuery #=- queryOrigin = Some(rr) queryPrincipal = None queryOriginId = Some(rr_id)"
+      s"My log message promQL = -=# myQuery #=- queryOrigin = Some(rr) queryPrincipal = None " +
+        s"queryOriginId = Some(rr_id) queryId = ${queryContext.queryId}"
     )
   }
 }

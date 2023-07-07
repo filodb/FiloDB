@@ -11,7 +11,7 @@ import kamon.metric.MeasurementUnit
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
-import filodb.core.query.{QueryContext, RawDataRangeVector}
+import filodb.core.query.{QueryContext, QueryLimitException, RawDataRangeVector}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
@@ -330,11 +330,14 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 
 object CountingChunkInfoIterator {
   val dataBytesScannedCtr = Kamon.counter("data-scanned-by-queries", MeasurementUnit.information.bytes).withoutTags()
+  val numSamplesScannedCtr = Kamon.counter("num-samples-scanned-by-queries").withoutTags()
 }
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
                                 columnIDs: Array[Int],
-                                dataBytesScannedCtr: AtomicLong) extends ChunkInfoIterator {
+                                dataBytesScannedCtr: AtomicLong,
+                                maxBytesScanned: Long,
+                                queryId: String) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {
@@ -347,13 +350,22 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
     // Why two counters ?
     // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
     dataBytesScannedCtr.addAndGet(bytesRead)
+    if (dataBytesScannedCtr.get() > maxBytesScanned) {
+      val exMessage = s"Actual raw data bytes scan of ${dataBytesScannedCtr.get()} bytes exceeds limit of " +
+        s"${maxBytesScanned} bytes queried per shard. " +
+        s"Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer time series matches " +
+        s"(b) reduce query time range"
+      throw QueryLimitException(exMessage, queryId)
+    }
+
 
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
+    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows)
     reader
   }
   override def nextInfo: ChunkSetInfo = {
-    dataBytesScannedCtr.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()

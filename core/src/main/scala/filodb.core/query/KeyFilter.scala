@@ -52,6 +52,14 @@ object Filter {
     def valuesStrings: Set[Any] = Set(value)
   }
 
+  /**
+   * Returns true iff the filter matches by regex.
+   */
+  def isRegex(filter: Filter): Boolean = filter match {
+    case _: EqualsRegex => true
+    case _: NotEqualsRegex => true
+    case _ => false
+  }
 }
 
 final case class ColumnFilter(column: String, filter: Filter)

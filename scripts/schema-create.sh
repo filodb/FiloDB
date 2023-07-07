@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_$SHARD (
 EOF
 done
 
+cat << EOF
+CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeysv2 (
+    shard int,
+    bucket int,
+    partKey blob,
+    startTime bigint,
+    endTime bigint,
+    PRIMARY KEY ((shard, bucket), partKey)
+) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+EOF
+
 if [[ "${KEYSP}" != "${FILO_DOWNSAMPLE_KEYSPACE}" ]]; then
 cat << EOF
 

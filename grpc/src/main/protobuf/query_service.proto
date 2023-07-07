@@ -25,8 +25,9 @@ message PerQueryLimits {
   optional uint64 execPlanResultBytes           = 2; // Limit on ExecPlan results in bytes
   optional uint32 groupByCardinality            = 3; // Limit on "group by" clause results
   optional uint32 joinQueryCardinality          = 4; // Limit on binary join results
-  optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max data scanned per shard
+  optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max estimated data scanned per shard
   optional uint32 timeSeriesScanned             = 6; // Limit on max time series scanned
+  optional uint64 rawScannedBytes               = 7; // Limit on max actual scanned bytes per shard
 }
 
 message PlannerParams {
@@ -73,6 +74,7 @@ message StreamingFooterResponse {
   bool mayBePartial                              = 3;
   optional string partialResultReason            = 4;
   string planId                                  = 5;
+  optional QueryWarnings warnings                = 6;
 }
 
 
@@ -117,6 +119,7 @@ message Response {
   repeated SerializableRangeVector result        = 5;
   optional bool mayBePartial                     = 6;
   optional string partialResultReason            = 7;
+  optional QueryWarnings warnings                = 8;
 }
 
 // Objects for Query stats
@@ -134,6 +137,15 @@ message QueryResultStats {
   map<string, Stat> stats     = 1;
 }
 
+message QueryWarnings {
+  uint32 execPlanSamples               = 1;
+  uint64 execPlanResultBytes           = 2;
+  uint32 groupByCardinality            = 3;
+  uint32 joinQueryCardinality          = 4;
+  uint64 timeSeriesSamplesScannedBytes = 5;
+  uint32 timeSeriesScanned             = 6;
+  uint64 rawScannedBytes               = 7;
+}
 
 
 service RemoteExec {

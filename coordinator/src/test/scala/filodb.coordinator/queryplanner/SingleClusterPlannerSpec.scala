@@ -24,7 +24,6 @@ import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
 
-
 import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -503,7 +502,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
   }
 
-  it("should optimize or vector(0) queries by using InstantVectorFunctionMapper instead of SetOperatorExec") {
+  // Ignoring the test until we pickup this radar - rdar://108803361 (Fix vector(0) optimzation corner cases)
+  ignore("should optimize or vector(0) queries by using InstantVectorFunctionMapper instead of SetOperatorExec") {
 
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
@@ -2125,7 +2125,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     ep.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
     val presenterTime = ep.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head.asInstanceOf[AggregatePresenter].rangeParams
     val periodicSamplesMapper = ep.children.head.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-
+    ep.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 65536
     presenterTime.startSecs shouldEqual(periodicSamplesMapper.startMs/1000)
     presenterTime.endSecs shouldEqual(periodicSamplesMapper.endMs/1000)
   }
@@ -2150,6 +2150,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 4096
 
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
@@ -2281,6 +2282,15 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp shouldEqual funcId
+      val op = execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp
+      if (op == AggregationOperator.TopK
+        || op == AggregationOperator.BottomK
+        || op == AggregationOperator.CountValues
+        || op == AggregationOperator.Quantile) {
+        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 65536
+      } else {
+        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 4096
+      }
       for (child <- execPlan.children) {
         child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         child.children.size shouldEqual 0

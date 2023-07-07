@@ -13,8 +13,7 @@ import filodb.cassandra.FiloCassandraConnector
 import filodb.core.{DatasetRef, Response}
 import filodb.core.store.PartKeyRecord
 
-sealed class PartitionKeysTable(val dataset: DatasetRef,
-                                val shard: Int,
+sealed class PartitionKeysV2Table(val dataset: DatasetRef,
                                 val connector: FiloCassandraConnector,
                                 writeConsistencyLevel: ConsistencyLevel,
                                 readConsistencyLevel: ConsistencyLevel)
@@ -22,85 +21,87 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
 
   import filodb.cassandra.Util._
 
-  val suffix = s"partitionkeys_$shard"
+  val suffix = s"partitionkeysv2"
 
   val createCql =
     s"""CREATE TABLE IF NOT EXISTS $tableString (
+       |    shard int,
+       |    bucket int,
        |    partKey blob,
        |    startTime bigint,
        |    endTime bigint,
-       |    PRIMARY KEY (partKey)
+       |    PRIMARY KEY ((shard, bucket), partKey)
        |) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
 
   private lazy val writePartitionCql = session.prepare(
-      s"INSERT INTO ${tableString} (partKey, startTime, endTime) " +
-      s"VALUES (?, ?, ?) USING TTL ?")
+      s"INSERT INTO ${tableString} (shard, bucket, partKey, startTime, endTime) " +
+      s"VALUES (?, ?, ?, ?, ?) USING TTL ?")
       .setConsistencyLevel(writeConsistencyLevel)
-      .setIdempotent(true)
 
   private lazy val writePartitionCqlNoTtl = session.prepare(
-      s"INSERT INTO ${tableString} (partKey, startTime, endTime) " +
-        s"VALUES (?, ?, ?)")
+      s"INSERT INTO ${tableString} (shard, bucket, partKey, startTime, endTime) " +
+        s"VALUES (?, ?, ?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
-      .setIdempotent(true)
 
   private lazy val scanCql = session.prepare(
-    s"SELECT * FROM $tableString " +
-    s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
-    .setConsistencyLevel(readConsistencyLevel)
-    .setIdempotent(true)
+    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE shard = ? and bucket = ?"
+  ).setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
-    s"SELECT partKey, startTime, endTime FROM $tableString " +
-      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND " +
+    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND " +
       s"startTime >= ? AND startTime <= ? AND " +
       s"endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
-    .setIdempotent(true)
 
   private lazy val scanCqlForStartTime = session.prepare(
-    s"SELECT partKey, startTime, endTime FROM $tableString " +
-      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
+    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND startTime >= ? AND startTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
-    .setIdempotent(true)
 
   private lazy val scanCqlForEndTime = session.prepare(
-    s"SELECT partKey, startTime, endTime FROM $tableString " +
-      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND endTime >= ? AND endTime <= ? " +
+    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
-    .setIdempotent(true)
 
   private lazy val readCql = session.prepare(
-    s"SELECT partKey, startTime, endTime FROM $tableString " +
-      s"WHERE partKey = ? ")
+    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE shard = ? and bucket = ? and partKey = ?")
     .setConsistencyLevel(readConsistencyLevel)
-    .setIdempotent(true)
 
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
-      s"WHERE partKey = ?")
-    .setIdempotent(true)
-    .setConsistencyLevel(writeConsistencyLevel)
+    s"WHERE shard = ? and bucket = ? and partKey = ?"
+  ).setConsistencyLevel(writeConsistencyLevel)
 
-  def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
+  def writePartKey(bucket: Int, pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {
-      connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
+      connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(pk.shard: JInt, bucket: JInt,
         toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
     } else {
-      connector.execStmtWithRetries(writePartitionCql.bind(
+      connector.execStmtWithRetries(writePartitionCql.bind(pk.shard: JInt, bucket: JInt,
         toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLiveSeconds.toInt: JInt))
     }
   }
 
-  def scanPartKeys(tokens: Seq[(String, String)], scanParallelism: Int): Observable[PartKeyRecord] = {
-    val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
-      .mapParallelUnordered(scanParallelism) { range =>
-        val fut = session.executeAsync(scanCql.bind(range._1.toLong: JLong, range._2.toLong: JLong))
+  def scanPartKeys(shard: Int, scanParallelism: Int, numBuckets: Int): Observable[PartKeyRecord] = {
+
+    /*
+    TODO If this is slow, then another option to evaluate is to do token scan with shard filter.
+    SELECT partKey, startTime, endTime, shard FROM $tableString " +
+      s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND " +
+      s"shard = ? ALLOW FILTERING")
+     */
+
+    val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(0 until numBuckets)
+      .mapParallelUnordered(scanParallelism) { bucket =>
+        val fut = session.executeAsync(scanCql.bind(shard: JInt, bucket: JInt))
                          .toIterator.handleErrors
-                         .map { rowIt => rowIt.map(r => PartitionKeysTable.rowToPartKeyRecord(r, shard)) }
+                         .map { rowIt => rowIt.map(PartitionKeysV2Table.rowToPartKeyRecord) }
         Task.fromFuture(fut)
       }
     for {
@@ -139,8 +140,8 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
    * Rows consist of partKey, start and end time. Refer the CQL used below.
    */
   def scanRowsByEndTimeRangeNoAsync(tokens: Seq[(String, String)],
-                                      startTime: Long,
-                                      endTime: Long): Set[Row] = {
+                                    startTime: Long,
+                                    endTime: Long): Set[Row] = {
     tokens.iterator.flatMap { case (start, end) =>
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
@@ -175,7 +176,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
         startTimeLTE: java.lang.Long,
         endTimeGTE: java.lang.Long,
         endTimeLTE: java.lang.Long)
-    session.execute(stmt).iterator.asScala.map(r => PartitionKeysTable.rowToPartKeyRecord(r, shard))
+    session.execute(stmt).iterator.asScala.map(PartitionKeysV2Table.rowToPartKeyRecord)
   }
 
   /**
@@ -184,10 +185,10 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
    * @param pk partKey bytes
    * @return Option[PartKeyRecord]
    */
-  def readPartKey(pk: Array[Byte]) : Option[PartKeyRecord] = {
-    val iterator = session.execute(readCql.bind().setBytes(0, toBuffer(pk))).iterator()
+  def readPartKey(shard: Int, bucket: Int, pk: Array[Byte]) : Option[PartKeyRecord] = {
+    val iterator = session.execute(readCql.bind(shard: JInt, bucket: JInt, toBuffer(pk))).iterator()
     if (iterator.hasNext) {
-      Some(PartitionKeysTable.rowToPartKeyRecord(iterator.next(), shard))
+      Some(PartitionKeysV2Table.rowToPartKeyRecord(iterator.next()))
     } else {
       None
     }
@@ -199,16 +200,16 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
    * @param pk partKey bytes
    * @return Future[Response]
    */
-  def deletePartKeyNoAsync(pk: Array[Byte]): Response = {
-    val stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
+  def deletePartKeyNoAsync(shard: Int, bucket: Int, pk: Array[Byte]): Response = {
+    val stmt = deleteCql.bind(shard: JInt, bucket: JInt, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
     connector.execCqlNoAsync(stmt)
   }
 
 }
 
-object PartitionKeysTable {
-  private[columnstore] def rowToPartKeyRecord(row: Row, shard: Int) = {
+object PartitionKeysV2Table {
+  private[columnstore] def rowToPartKeyRecord(row: Row) = {
     PartKeyRecord(row.getBytes("partKey").array(),
-      row.getLong("startTime"), row.getLong("endTime"), shard)
+      row.getLong("startTime"), row.getLong("endTime"), row.getInt("shard"))
   }
 }

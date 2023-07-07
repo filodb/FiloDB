@@ -24,6 +24,7 @@ import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.facet.{FacetsCollector, FacetsConfig}
+import org.apache.lucene.facet.FacetsConfig.DrillDownTermsIndexing
 import org.apache.lucene.facet.sortedset.{SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
 import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState
 import org.apache.lucene.index._
@@ -37,6 +38,7 @@ import spire.syntax.cfor._
 import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
+import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter}
@@ -302,7 +304,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       if (name.nonEmpty && value.nonEmpty &&
         (always || facetEnabledForLabel(name)) &&
         value.length < FACET_FIELD_MAX_LEN) {
-        facetsConfig.setRequireDimensionDrillDown(name, false)
+        facetsConfig.setDrillDownTermsIndexing(name, DrillDownTermsIndexing.NONE)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
       }
@@ -497,14 +499,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .maximumSize(100)
     .recordStats()
     .build((key: (IndexReader, String)) => {
-      new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
+      new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2, new FacetsConfig())
     })
   private val readerStateCacheNonShardKeys: LoadingCache[(IndexReader, String), DefaultSortedSetDocValuesReaderState] =
     Caffeine.newBuilder()
       .maximumSize(200)
       .recordStats()
       .build((key: (IndexReader, String)) => {
-        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
+        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2, new FacetsConfig())
       })
 
   def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
@@ -959,6 +961,54 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     partIdFromPartKeyLookupLatency.record(System.nanoTime - startExecute)
     chosenPartId
   }
+
+  /**
+   * Iterate through the LuceneIndex and calculate cardinality count
+   */
+  def calculateCardinality(partSchema: PartitionSchema, cardTracker: CardinalityTracker): Unit = {
+    val coll = new CardinalityCountBuilder(partSchema, cardTracker)
+    withNewSearcher(s => s.search(new MatchAllDocsQuery(), coll))
+    // IMPORTANT: making sure to flush all the data in rocksDB
+    cardTracker.flushCardinalityCount()
+  }
+}
+
+/**
+ * In this lucene index collector, we read through the entire lucene index periodically and re-calculate
+ * the cardinality count from scratch. This class iterates through each document in lucene, extracts a shard-key
+ * and updates the cardinality count using the given CardinalityTracker.
+ * */
+class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: CardinalityTracker)
+  extends SimpleCollector with StrictLogging {
+
+  private var partKeyDv: BinaryDocValues = _
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc)) {
+      val binaryValue = partKeyDv.binaryValue()
+      val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(binaryValue.offset)
+      val shardKey = partSchema.binSchema.colValues(
+        binaryValue.bytes, unsafePkOffset, partSchema.options.shardKeyColumns)
+
+      try {
+        // update the cardinality count by 1, since the shardKey for each document in index is unique
+        cardTracker.modifyCount(shardKey, 1, 0)
+      } catch {
+        case t: Throwable =>
+          logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)
+      }
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {

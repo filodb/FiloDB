@@ -10,7 +10,8 @@ final case class ErrorResponse(errorType: String, error: String, status: String 
 final case class SuccessResponse(data: Data, status: String = "success",
                                  partial: Option[Boolean] = None,
                                  message: Option[String] = None,
-                                 queryStats: Option[Seq[QueryStatistics]]) extends PromQueryResponse
+                                 queryStats: Option[Seq[QueryStatistics]],
+                                 queryWarnings: Option[QueryWarningsResponse]) extends PromQueryResponse
 
 final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success",
                                      partial: Option[Boolean]= None,
@@ -18,6 +19,15 @@ final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "s
 
 final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
                                  dataBytesScanned: Long, resultBytes: Long, cpuNanos: Long)
+final case class QueryWarningsResponse(
+  execPlanSamples: Int = 0,
+  execPlanResultBytes: Long  = 0,
+  groupByCardinality: Int = 0,
+  joinQueryCardinality: Int = 0,
+  timeSeriesSamplesScannedBytes: Long = 0,
+  timeSeriesScanned: Int = 0,
+  rawScannedBytes: Long = 0
+)
 
 final case class Data(resultType: String, result: Seq[Result])
 

@@ -213,7 +213,7 @@ trait  DefaultPlanner {
         // If number of children is above a threshold, parallelize aggregation
         val groupSize = Math.sqrt(toReduceLevel.plans.size).ceil.toInt
         toReduceLevel.plans.grouped(groupSize).map { nodePlans =>
-          val reduceDispatcher = nodePlans.head.dispatcher
+          val reduceDispatcher = PlannerUtil.pickDispatcher(nodePlans)
           LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel.plans
@@ -416,19 +416,24 @@ trait  DefaultPlanner {
    * Note that vector(0) on left side of operator, example `vector(0) or foo` is not
    * optimized yet since it is uncommon and almost unseen, and not worth the additional
    * complexity at the moment.
+   *
+   * 05/01/2023: We are disabling this optimization until we handle the corner cases like:
+   * 1. when the given metrics is not present or is not actively ingesting
+   * rdar://108803361 (Fix vector(0) optimzation corner cases)
    */
   def optimizeOrVectorDouble(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
-    if (logicalPlan.operator == BinaryOperator.LOR) {
-      logicalPlan.rhs match {
-        case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
-          val planRes = materializeApplyInstantFunction(
-                              qContext, ApplyInstantFunction(logicalPlan.lhs,
-                                                             InstantFunctionId.OrVectorDouble,
-                                                             Seq(ScalarFixedDoublePlan(value, rangeParams))))
-          Some(planRes)
-        case _ => None // TODO add more matchers to cover cases where rhs is a fully scalar plan
-      }
-    } else None
+    None
+//    if (logicalPlan.operator == BinaryOperator.LOR) {
+//      logicalPlan.rhs match {
+//        case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
+//          val planRes = materializeApplyInstantFunction(
+//                              qContext, ApplyInstantFunction(logicalPlan.lhs,
+//                                                             InstantFunctionId.OrVectorDouble,
+//                                                             Seq(ScalarFixedDoublePlan(value, rangeParams))))
+//          Some(planRes)
+//        case _ => None // TODO add more matchers to cover cases where rhs is a fully scalar plan
+//      }
+//    } else None
   }
 
   def materializeBinaryJoin(qContext: QueryContext,
@@ -474,7 +479,6 @@ trait  DefaultPlanner {
       PlanResult(Seq(execPlan))
     }
   }
-
 }
 
 object PlannerUtil extends StrictLogging {
