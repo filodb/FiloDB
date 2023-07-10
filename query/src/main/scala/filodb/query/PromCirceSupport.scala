@@ -2,9 +2,8 @@ package filodb.query
 
 import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
 import io.circe.syntax._
-import filodb.query.AggregationOperator.Avg
 
-import scala.collection.immutable.Map
+import filodb.query.AggregationOperator.Avg
 
 object PromCirceSupport {
   // necessary to encode sample in promql response as an array with long and double value as string
@@ -22,15 +21,8 @@ object PromCirceSupport {
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
     case t @ TsCardinalitiesSampl(group, cardinality) =>
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
-    // TODO: Question, TsCardinalitiesSampl is a single row/value, so why we are encoding as Seq in above encoding
-    // Following the same pattern below for now. TODO: Sync on best way forward
-    case a @ TsCardinalitiesSamplV2(result) =>
-        Json.fromValues(
-        result.map(resp => Json.obj(
-          (
-            resp._1, // dataset ( raw, aggregated, recording-rules )
-            resp._2.map(y => Seq(y.group.asJson, y.cardinality.asJson)).asJson // TsCardinalitiesSampl data for dataset
-          ))))
+    case a @ TsCardinalitiesSamplV2(group, cardinality, cluster, dataset) =>
+        Json.fromValues(Seq(group.asJson, cardinality.asJson, cluster.asJson, dataset.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -56,13 +48,6 @@ object PromCirceSupport {
       }
     }
 
-//  implicit val decodeTSCardinalitiesSampl: Decoder[TsCardinalitiesSampl] = Decoder.instance { c =>
-//    for {
-//      group <- c.get[Map[String, String]]("group")
-//      card <- c.get[Map[String, Int]]("cardinality")
-//    } yield TsCardinalitiesSampl(group, card)
-//  }
-
   implicit val decodeMetadataSampl: Decoder[MetadataSampl] = new Decoder[MetadataSampl] {
     def apply(c: HCursor): Decoder.Result[MetadataSampl] = {
       // TODO: Not the best way to find if this is a cardinality response, is there a better way?
@@ -73,6 +58,13 @@ object PromCirceSupport {
             metric <- c.get[Map[String, String]]("metric")
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
+        } else if (c.downField("group").focus.nonEmpty && c.downField("cluster").focus.nonEmpty) {
+          for {
+            group <- c.get[Map[String, String]]("group")
+            card <- c.get[Map[String, Int]]("cardinality")
+            cluster <- c.get[String]("cluster")
+            dataset <- c.get[String]("dataset")
+          } yield TsCardinalitiesSamplV2(group, card, cluster, dataset)
         } else if (c.downField("group").focus.nonEmpty) {
           for {
             group <- c.get[Map[String, String]]("group")

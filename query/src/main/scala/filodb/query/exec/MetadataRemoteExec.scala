@@ -99,24 +99,20 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
 
-    val rows = response.data.asInstanceOf[TsCardinalitiesSamplV2].result.values.flatten
+    val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSamplV2]]
       .map { ts =>
         val groupSize = ts.group.size;
         val shardKeyLabelsSize = groupSize - 2; // last 2 value is cluster and dataset
-        val prefix = new Array[String](groupSize);
-        for (i <- 0 until SHARD_KEY_LABELS.size) {
+        val prefix = new Array[String](groupSize)
+        // First get the shard key labels
+        for (i <- 0 until shardKeyLabelsSize) {
           prefix(i) = ts.group(SHARD_KEY_LABELS(i))
         }
+        // Now add the cluster and dataset info as well
         for (i <- 0 until CARD_SUFFIX_INFO.size) {
           prefix(i + shardKeyLabelsSize) = ts.group(CARD_SUFFIX_INFO(i))
         }
-        var counts = CardCounts(0, 0)
-        if (prefix(shardKeyLabelsSize).contains("downsample")) {
-          counts = CardCounts(0, ts.cardinality("long-term"))
-        }
-        else {
-          counts = CardCounts(ts.cardinality("active"), ts.cardinality("short-term"))
-        }
+        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("short-term"), ts.cardinality("long-term"))
         CardRowReader(prefixToGroup(prefix), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)

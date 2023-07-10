@@ -464,7 +464,8 @@ final case object TsCardExec {
 
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.IntColumn),
-                                       ColumnInfo("total", ColumnType.IntColumn)), 1)
+                                       ColumnInfo("total", ColumnType.IntColumn),
+                                       ColumnInfo("longterm", ColumnType.IntColumn)), 1)
 
   /**
    * Convert a shard key prefix to a row's group name.
@@ -474,13 +475,14 @@ final case object TsCardExec {
     prefix.mkString(PREFIX_DELIM).utf8
   }
 
-  case class CardCounts(active: Int, total: Int) {
+  case class CardCounts(active: Int, total: Int, longterm: Int = 0) {
     if (total < active) {
       qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")
     }
     def add(other: CardCounts): CardCounts = {
       CardCounts(active + other.active,
-                 total + other.total)
+                 total + other.total,
+                 longterm + other.longterm)
     }
   }
 
@@ -490,6 +492,7 @@ final case object TsCardExec {
     override def getInt(columnNo: Int): Int = columnNo match {
       case 1 => counts.active
       case 2 => counts.total
+      case 3 => counts.longterm
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
     override def getLong(columnNo: Int): Long = ???
@@ -514,8 +517,7 @@ final case object TsCardExec {
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
-      val counts = CardCounts(rr.getInt(1),
-                              rr.getInt(2))
+      val counts = CardCounts(rr.getInt(1), rr.getInt(2), rr.getInt(3))
       RowData(group, counts)
     }
   }
