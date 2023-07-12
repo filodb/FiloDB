@@ -258,6 +258,7 @@ case class TimeSeriesShardInfo(shardNum: Int,
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
+                      numShards: Int,
                       quotaSource: QuotaSource,
                       val shardNum: Int,
                       val bufferMemoryManager: NativeMemoryManager,
@@ -365,7 +366,25 @@ class TimeSeriesShard(val ref: DatasetRef,
   val ingestSched = Scheduler.singleThread(s"$IngestSchedName-$ref-$shardNum",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
-  private val blockMemorySize = storeConfig.shardMemSize
+  private[memstore] val blockMemorySize = {
+    val size = if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val numNodes = filodbConfig.getInt("min-num-nodes-in-cluster")
+      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
+      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
+      val blockMemForDatasetPercent = storeConfig.shardMemPercent // fraction of block memory for this dataset
+      val numShardsPerNode = Math.ceil(numShards / numNodes.toDouble)
+      logger.info(s"Calculating Block memory size with automatic allocation strategy. " +
+        s"Dataset dataset=$ref has blockMemForDatasetPercent=$blockMemForDatasetPercent " +
+        s"numShardsPerNode=$numShardsPerNode")
+      (availableMemoryBytes * blockMemoryManagerPercent *
+        blockMemForDatasetPercent / 100 / 100 / numShardsPerNode).toLong
+    } else {
+      storeConfig.shardMemSize
+    }
+    logger.info(s"Block Memory for dataset=$ref shard=$shardNum bytesAllocated=$size")
+    size
+  }
+
   protected val numGroups = storeConfig.groupsPerShard
   private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
   private[memstore] val pagingEnabled = storeConfig.demandPagingEnabled

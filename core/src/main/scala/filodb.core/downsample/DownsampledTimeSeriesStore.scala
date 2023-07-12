@@ -59,7 +59,7 @@ extends TimeSeriesStore with StrictLogging {
   override def metastore: MetaStore = ??? // Not needed
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig, numShards: Int,
             downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[DownsampledTimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,

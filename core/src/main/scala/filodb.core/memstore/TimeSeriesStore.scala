@@ -75,7 +75,7 @@ trait TimeSeriesStore extends ChunkSource {
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
    */
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
-            storeConf: StoreConfig,
+            storeConf: StoreConfig, numShards: Int,
             downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
 
   /**

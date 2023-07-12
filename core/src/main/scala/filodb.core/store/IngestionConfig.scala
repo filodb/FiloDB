@@ -17,6 +17,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              maxBlobBufferSize: Int,
                              // Number of bytes to allocate to chunk storage in each shard
                              shardMemSize: Long,
+                             shardMemPercent: Double,
                              maxBufferPoolSize: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
@@ -45,6 +46,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-chunks-size" -> maxChunksSize,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
+                               "shard-mem-percent" -> shardMemPercent,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
                                "groups-per-shard" -> groupsPerShard,
                                "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
@@ -81,6 +83,7 @@ object StoreConfig {
                                            |max-blob-buffer-size = 15000
                                            |max-buffer-pool-size = 10000
                                            |groups-per-shard = 60
+                                           |shard-mem-percent = 100 # assume only one dataset per node by default
                                            |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
@@ -119,6 +122,7 @@ object StoreConfig {
                 config.getInt("max-chunks-size"),
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
+                config.getDouble("shard-mem-percent"),
                 config.getInt("max-buffer-pool-size"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),

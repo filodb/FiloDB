@@ -26,7 +26,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
                                                |shard-mem-size = 200MB""".stripMargin)
                                 .withFallback(TestData.sourceConf.getConfig("store"))
 
-  memStore.setup(dataset1.ref, Schemas(schema1), 0, StoreConfig(sourceConf))
+  memStore.setup(dataset1.ref, Schemas(schema1), 0, StoreConfig(sourceConf), 1)
   val onDemandPartMaker = memStore.getShardE(dataset1.ref, 0).partitionMaker
 
   after {

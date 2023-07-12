@@ -11,7 +11,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types}
+import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types, Utils}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
@@ -33,7 +33,6 @@ extends TimeSeriesStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  private val datasetMemFactories = new HashMap[DatasetRef, NativeMemoryManager]
   private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]
 
   val stats = new ChunkSourceStats
@@ -44,7 +43,18 @@ extends TimeSeriesStore with StrictLogging {
   private val partEvictionPolicy = evictionPolicy.getOrElse(
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
 
-  private lazy val ingestionMemory = filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
+  private[memstore] lazy val ingestionMemory = {
+    if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
+      val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")
+      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
+      val lucenePercent = filodbConfig.getDouble("memstore.memory-alloc.lucene-memory-percent")
+      require(nativeMemoryManagerPercent + blockMemoryManagerPercent + lucenePercent == 100.0,
+        s"Configured Block($nativeMemoryManagerPercent), Native($nativeMemoryManagerPercent) " +
+        s"and Lucene($lucenePercent) memory percents don't sum to 100.0")
+      (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
+    } else filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
+  }
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
     logger.info(s"Allocating $ingestionMemory bytes for WriteBufferPool/PartitionKeys")
@@ -67,7 +77,7 @@ extends TimeSeriesStore with StrictLogging {
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig, numShards: Int,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,
@@ -75,8 +85,8 @@ extends TimeSeriesStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, ingestionMemFactory, store,
-        metastore, partEvictionPolicy, filodbConfig)
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, numShards, quotaSource, shard,
+        ingestionMemFactory, store, metastore, partEvictionPolicy, filodbConfig)
       shards.put(shard, tsdb)
     }
   }
