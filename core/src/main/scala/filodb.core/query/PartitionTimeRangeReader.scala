@@ -1,12 +1,10 @@
 package filodb.core.query
 
-import com.typesafe.scalalogging.StrictLogging
 import spire.syntax.cfor._
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoReader, ReadablePartition}
 import filodb.memory.format.{vectors => bv, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.EmptyHistogramException
 
 /**
  * A RowReader iterator which iterates over a time range in the ReadablePartition.  Designed to be relatively memory
@@ -18,7 +16,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
                                      startTime: Long,
                                      endTime: Long,
                                      infos: ChunkInfoIterator,
-                                     columnIDs: Array[Int]) extends RangeVectorCursor with StrictLogging {
+                                     columnIDs: Array[Int]) extends RangeVectorCursor {
   // MinValue = no current chunk
   private var curChunkID = Long.MinValue
   private final val vectorIts = new Array[TypedIterator](columnIDs.size)
@@ -35,23 +33,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     def getDouble(columnNo: Int): Double = vectorIts(columnNo).asDoubleIt.next
     def getFloat(columnNo: Int): Float = ???
     def getString(columnNo: Int): String = ???
-    override def getHistogram(columnNo: Int): bv.Histogram = {
-      try {
-        vectorIts(columnNo).asHistIt.next
-      } catch {
-        case e : EmptyHistogramException => {
-          var message = s"EmptyHistogramException ${e.getMessage} infos=["
-           while (infos.hasNext) {
-             val info = infos.nextInfo
-             message +=
-               s"""${info.debugString} """
-           }
-          message += "]"
-          logger.error(s"message ${message}")
-          throw new IllegalArgumentException(message)
-        }
-      }
-    }
+    override def getHistogram(columnNo: Int): bv.Histogram = vectorIts(columnNo).asHistIt.next
     def getAny(columnNo: Int): Any = ???
 
     override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = vectorIts(columnNo).asUTF8It.next
