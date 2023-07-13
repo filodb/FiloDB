@@ -462,7 +462,7 @@ object SerializedRangeVector extends StrictLogging {
           val nextRow = rows.next()
           // Don't encode empty / NaN data over the wire
           if (!canRemoveEmptyRows(rv.outputRange, schema) ||
-            schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
+            schema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
             numRows += 1
             builder.addFromReader(nextRow, schema, 0)

@@ -228,7 +228,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     // Allow addition when type of bucket is different
     if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
-      if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
+      if (java.lang.Double.isNaN(values(0))) java.util.Arrays.fill(values, 0.0)
       cforRange { 0 until numBuckets } { b =>
         values(b) += other.bucketValue(b)
       }
@@ -272,7 +272,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     cforRange { 0 until values.size } { b =>
       // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
       // newer buckets are introduced and not all instances are updated with that bucket.
-      if (values(b) < max || values(b).isNaN) values(b) = max // assign previous max
+      if (values(b) < max || java.lang.Double.isNaN(values(b))) values(b) = max // assign previous max
       else if (values(b) > max) max = values(b) // update max
     }
   }
