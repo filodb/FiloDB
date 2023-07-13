@@ -540,7 +540,8 @@ class RecordBuilder(memFactory: MemFactory,
       val oldOffset = curRecordOffset
       if (reuseOneContainer) resetContainerPointers() else newContainer()
       logger.trace(s"Moving $recordNumBytes bytes from end of old container to new container")
-      require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes), "Record too big for container")
+      require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes),
+        "The intermediate or final result is too big. For queries, please try to add more query filters or time range.")
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
       if (mapOffset != -1L) mapOffset = curRecordOffset + (mapOffset - oldOffset)
       curRecEndOffset = curRecordOffset + recordNumBytes
