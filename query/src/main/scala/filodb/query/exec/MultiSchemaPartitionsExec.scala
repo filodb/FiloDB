@@ -150,6 +150,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     finalPlan.lookupRes.foreach(plr =>
       if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
         queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
+        val msg =
+          s"Query scanned ${plr.dataBytesScannedCtr.get()} bytes, which exceeds a max warn limit of " +
+            s"${queryContext.plannerParams.warnLimits.rawScannedBytes} bytes allowed to be scanned per shard. "
+        qLogger.info(queryContext.getQueryLogLine(msg))
       }
     )
   }
