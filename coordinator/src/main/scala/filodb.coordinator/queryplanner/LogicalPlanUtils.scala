@@ -34,6 +34,7 @@ object LogicalPlanUtils extends StrictLogging {
    */
   def hasDescendantAggregate(lp: LogicalPlan): Boolean = lp match {
     case _: Aggregate                 => true
+    case bj: BinaryJoin                => bj.operator == BinaryOperator.LUnless
     case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregate(_))
     case _                            => false
   }
