@@ -27,27 +27,19 @@ import filodb.memory.format.UnsafeUtils
  *   (1) only the least-significant prefix name is stored.
  *   (2) no shard ID is store
  */
-case class CardinalityValue(name: String, tsCount: Int, activeTsCount: Int,
+case class CardinalityValue(tsCount: Int, activeTsCount: Int,
                             childrenCount: Int, childrenQuota: Int)
 
 case object CardinalityValue {
-  def fromCardinalityRecord(card: CardinalityRecord): CardinalityValue = {
-    CardinalityValue(if (card.prefix.nonEmpty) card.prefix.last else "",
-                    card.tsCount, card.activeTsCount,
-                    card.childrenCount, card.childrenQuota)
-  }
-
   def toCardinalityRecord(card: CardinalityValue,
                           prefix: Seq[String],
                           shard: Int): CardinalityRecord = {
-    CardinalityRecord(shard, prefix, card.tsCount, card.activeTsCount,
-                      card.childrenCount, card.childrenQuota)
+    CardinalityRecord(shard, prefix, card)
   }
 }
 
 class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
-    output.writeString(card.name)
     output.writeInt(card.tsCount, true)
     output.writeInt(card.activeTsCount, true)
     output.writeInt(card.childrenCount, true)
@@ -55,7 +47,7 @@ class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   }
 
   def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
-    CardinalityValue(input.readString(), input.readInt(true), input.readInt(true),
+    CardinalityValue(input.readInt(true), input.readInt(true),
                     input.readInt(true), input.readInt(true))
   }
 }
@@ -249,7 +241,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   override def store(card: CardinalityRecord): Unit = {
     val key = toCompleteStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
-    db.put(key, cardinalityValueToBytes(CardinalityValue.fromCardinalityRecord(card)))
+    db.put(key, cardinalityValueToBytes(card.value))
   }
 
   def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord = {
@@ -316,8 +308,8 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             it.next()
           } while (it.isValid())
         }
-        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX,
-          tsCount, activeTsCount, childrenCount, childrenQuota))
+        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX, CardinalityValue(
+          tsCount, activeTsCount, childrenCount, childrenQuota)))
       }
     } finally {
       it.close();

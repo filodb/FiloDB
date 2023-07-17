@@ -213,7 +213,7 @@ trait  DefaultPlanner {
         // If number of children is above a threshold, parallelize aggregation
         val groupSize = Math.sqrt(toReduceLevel.plans.size).ceil.toInt
         toReduceLevel.plans.grouped(groupSize).map { nodePlans =>
-          val reduceDispatcher = nodePlans.head.dispatcher
+          val reduceDispatcher = PlannerUtil.pickDispatcher(nodePlans)
           LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel.plans
@@ -479,7 +479,6 @@ trait  DefaultPlanner {
       PlanResult(Seq(execPlan))
     }
   }
-
 }
 
 object PlannerUtil extends StrictLogging {

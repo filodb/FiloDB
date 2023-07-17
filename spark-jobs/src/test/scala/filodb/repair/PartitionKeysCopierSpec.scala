@@ -140,7 +140,9 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   def prepareTestData(colStore: CassandraColumnStore, dataset: Dataset): Unit = {
     val shardStats = new TimeSeriesShardStats(dataset.ref, -1)
 
-    def writePartKeys(pk: PartKeyRecord, shard: Int): Unit = {
+    def writePartKeys(pk: PartKeyRecord,
+                      shard: Int // TODO unused in v2; remove when migration to v2 tables is done
+                     ): Unit = {
       colStore.writePartKeys(dataset.ref, shard, Observable.now(pk), 259200, 0L, false).futureValue
     }
 
@@ -172,22 +174,22 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
        */
 
       gauge1PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge1", getSeriesTags(ws + "1", ns + "1")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge1PartKeyBytes, 1507923801000L, 1510611624000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge1PartKeyBytes, 1507923801000L, 1510611624000L, shard), shard)
 
       gauge2PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge2", getSeriesTags(ws + "2", ns + "2")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge2PartKeyBytes, 1510611624000L, 1602561600000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge2PartKeyBytes, 1510611624000L, 1602561600000L, shard), shard)
 
       gauge3PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge3", getSeriesTags(ws + "3", ns + "3")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge3PartKeyBytes, 1602554400000L, 1602561600000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge3PartKeyBytes, 1602554400000L, 1602561600000L, shard), shard)
 
       gauge4PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge4", getSeriesTags(ws + "4", ns + "4")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge4PartKeyBytes, 1602561600000L, 1609855200000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge4PartKeyBytes, 1602561600000L, 1609855200000L, shard), shard)
 
       gauge5PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge5", getSeriesTags(ws + "5", ns + "5")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge5PartKeyBytes, 1609855200000L, 1610028000000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge5PartKeyBytes, 1609855200000L, 1610028000000L, shard), shard)
 
       gauge6PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge6", getSeriesTags(ws + "6", ns + "6")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge6PartKeyBytes, 1507923801000L, 1610028000000L, Some(150)), shard)
+      writePartKeys(PartKeyRecord(gauge6PartKeyBytes, 1507923801000L, 1610028000000L, shard), shard)
     }
   }
 

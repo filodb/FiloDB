@@ -55,7 +55,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
     session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt))
       .toObservable.handleObservableErrors
-      .map(PartitionKeysTable.rowToPartKeyRecord)
+      .map(r => PartitionKeysTable.rowToPartKeyRecord(r, shard))
   }
 
 }

@@ -5,13 +5,13 @@ import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryplanner.SingleClusterPlanner
-import filodb.core.{query, MachineMetricsData, SpreadChange}
-import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.{MachineMetricsData, SpreadChange, query}
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordSchema}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.MapColumn
 import filodb.core.query.QueryConfig
 import filodb.core.store.IngestionConfig
 import filodb.memory.format.{SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
@@ -352,4 +352,43 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       plannerParams = PlannerParams(spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0))))))
     roundTrip(execPlan) shouldEqual execPlan
   }
+
+  private def toRv(samples: Seq[(Long, Double)],
+                   rangeVectorKey: RangeVectorKey,
+                   rvPeriod: RvRange): RangeVector = {
+    new RangeVector {
+
+      import NoCloseCursor._
+
+      override def key: RangeVectorKey = rangeVectorKey
+
+      override def rows(): RangeVectorCursor = samples.map(r => new TransientRow(r._1, r._2)).iterator
+
+      override def outputRange: Option[RvRange] = Some(rvPeriod)
+    }
+  }
+
+  it("should serialize and deserialize the SRV with minimal required bytes") {
+    val builder = SerializedRangeVector.newBuilder()
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)))
+    val keysMap = Map(UTF8Str("key1") -> UTF8Str("val1"),
+      UTF8Str("key2") -> UTF8Str("val2"))
+    val rand = new scala.util.Random(0)
+    val srvs = Range(0, 100).map( x => {
+      val keys = CustomRangeVectorKey(keysMap + (UTF8Str("key3") -> UTF8Str(x + "key3")))
+      val rv = toRv(Range(0, 10001, 100).map(x => (x.toLong, rand.nextDouble())), keys, RvRange(0, 100, 10000))
+      val queryStats = QueryStats()
+      SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
+    })
+    val rs = ResultSchema(Seq(ColumnInfo("tags", MapColumn)), 2)
+
+    val result = QueryResult2("someId", rs, srvs)
+    val oneSrv = srvs.head
+    val roundQR = roundTrip(result).asInstanceOf[QueryResult2]
+    val roundSrv = roundQR.result.head.asInstanceOf[SerializedRangeVector]
+    roundSrv.containersIterator.length shouldEqual oneSrv.containersIterator.length
+    oneSrv.containersIterator.length shouldEqual 1
+  }
 }
+

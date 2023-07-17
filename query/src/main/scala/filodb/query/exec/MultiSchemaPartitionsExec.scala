@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession, QueryWarnings}
 import filodb.core.query.Filter.Equals
 import filodb.core.store._
 import filodb.query.Query.qLogger
@@ -107,7 +107,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),
-                                                  schema.isDefined, colIDs)
+                                                  schema.isDefined, colIDs, planId)
             qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
             newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
             newPlan
@@ -115,7 +115,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")
             SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                     None, Some(lookupRes),
-                                    schema.isDefined, Nil)
+                                    schema.isDefined, Nil, planId)
           }
   }
   // scalastyle:on method.length
@@ -143,6 +143,19 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
        s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
          printFunctionArgument(t, level + i + 1).mkString("\n")
     }
+  }
+
+  override def checkResultBytes(resultSize: Long, queryConfig: QueryConfig, queryWarnings: QueryWarnings): Unit = {
+    super.checkResultBytes(resultSize, queryConfig, queryWarnings)
+    finalPlan.lookupRes.foreach(plr =>
+      if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
+        queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
+        val msg =
+          s"Query scanned ${plr.dataBytesScannedCtr.get()} bytes, which exceeds a max warn limit of " +
+            s"${queryContext.plannerParams.warnLimits.rawScannedBytes} bytes allowed to be scanned per shard. "
+        qLogger.info(queryContext.getQueryLogLine(msg))
+      }
+    )
   }
 }
 

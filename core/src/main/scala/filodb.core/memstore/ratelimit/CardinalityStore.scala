@@ -11,8 +11,7 @@ package filodb.core.memstore.ratelimit
  * @param childrenCount number of immediate children for this shardKey (example, number of ns under ws)
  * @param childrenQuota quota for number of immediate children
  */
-case class CardinalityRecord(shard: Int, prefix: Seq[String], tsCount: Int,
-                             activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
+case class CardinalityRecord(shard: Int, prefix: Seq[String], value: CardinalityValue)
 
 /**
  *

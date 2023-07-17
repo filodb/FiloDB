@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
@@ -18,10 +19,9 @@ import monix.execution.Scheduler
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
-import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
+import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats, QueryWarnings}
 import filodb.core.store.ChunkSource
 import filodb.query._
-
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
@@ -96,12 +96,14 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       "warnJoinQueryCardinality" -> w.joinQueryCardinality.toString,
       "warnTimeSeriesSamplesScannedBytes" -> w.timeSeriesSamplesScannedBytes.toString,
       "warnTimeSeriesScanned" -> w.timeSeriesScanned.toString,
+      "warnRawScannedBytes" -> w.rawScannedBytes.toString,
       "execPlanSamples" -> e.execPlanSamples.toString,
       "resultByteLimit" -> e.execPlanResultBytes.toString,
       "groupByCardinality" -> e.groupByCardinality.toString,
       "joinQueryCardinality" -> e.joinQueryCardinality.toString,
       "timeSeriesSamplesScannedBytes" -> e.timeSeriesSamplesScannedBytes.toString,
-      "timeSeriesScanned" -> e.timeSeriesScanned.toString
+      "timeSeriesScanned" -> e.timeSeriesScanned.toString,
+      "rawScannedBytes" -> e.rawScannedBytes.toString
     )
     limitParams
   }
@@ -115,6 +117,20 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       queryStats.getCpuNanosCounter(stat.group).addAndGet(stat.cpuNanos)
     }
     queryStats
+  }
+
+  def readQueryWarnings(queryWarningsResponse: Option[QueryWarningsResponse]): QueryWarnings = {
+    val qws = queryWarningsResponse.getOrElse(QueryWarningsResponse())
+    val queryWarnings = QueryWarnings(
+      new AtomicInteger(qws.execPlanSamples),
+      new AtomicLong(qws.execPlanResultBytes),
+      new AtomicInteger(qws.groupByCardinality),
+      new AtomicInteger(qws.joinQueryCardinality),
+      new AtomicLong(qws.timeSeriesSamplesScannedBytes),
+      new AtomicInteger(qws.timeSeriesScanned),
+      new AtomicLong(qws.rawScannedBytes)
+    )
+    queryWarnings
   }
 }
 

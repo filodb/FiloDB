@@ -99,7 +99,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
           queryParams.promQl match {
             case """foo{app="app1"}"""  => sendNonEmptyTestResponse.foreach(x => responseObserver.onNext(x.toProto))
             case """error_metric{app="app1"}""" => responseObserver.onNext(
-                  StreamQueryError("errorId", QueryStats(), new Throwable("Inevitable has happened")).toProto)
+                  StreamQueryError("errorId", "planId", QueryStats(), new Throwable("Inevitable has happened")).toProto)
             case _                      => // empty results
           }
           responseObserver.onCompleted()
@@ -107,7 +107,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   private def sendNonEmptyTestResponse: Seq[StreamQueryResponse] = {
-    val header = StreamQueryResultHeader("someId", resultSchema)
+    val header = StreamQueryResultHeader("someId", "planId", resultSchema)
 
 
     val builder = SerializedRangeVector.newBuilder()
@@ -122,9 +122,11 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
       RvRange(0, 100, 1000))
     val stats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
-    val streamingQueryBody = StreamQueryResult("someId", srv)
+    val streamingQueryBody = StreamQueryResult("someId", "planId", Seq(srv))
 
-    val footer = StreamQueryResultFooter("someId", stats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+
+    val footer = StreamQueryResultFooter("someId", "planId", stats, warnings, true, Some("Reason"))
     Seq(header, streamingQueryBody, footer)
   }
 
@@ -138,13 +140,11 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it ("should convert the streaming records from gRPC service to a QueryResponse with data") {
 
-
     val params = PromQlQueryParams("""foo{app="app1"}""", 0, 0, 0)
     val queryContext = QueryContext(origQueryParams = params)
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
     val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
-
 
     val qr = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryResult]
     qr.resultSchema shouldEqual resultSchema
@@ -187,6 +187,5 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     er.queryStats shouldEqual QueryStats()
     er.t.getMessage shouldEqual "Inevitable has happened"
   }
-
 
 }

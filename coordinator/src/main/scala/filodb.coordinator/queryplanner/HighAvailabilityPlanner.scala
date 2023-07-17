@@ -113,14 +113,14 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
             case lp: LabelNames         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             Map("match[]" -> queryParams.promQl), newQueryContext,
-                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
-                                              dsRef, remoteExecHttpClient)
+                                              dsRef, remoteExecHttpClient, queryConfig)
             case _                       =>
               if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
                 queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
