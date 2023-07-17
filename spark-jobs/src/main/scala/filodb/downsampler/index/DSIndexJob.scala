@@ -116,11 +116,11 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
         if (eligible) count += 1
         eligible
       }
-    }.map(pkr => rawDataSource.getPartKeyRecordOrDefault(ref = rawDatasetRef, shard = shard.toInt,
-        partKeyRecord = pkr)) // Merge with persisted (if exists) partKey.
+    }.map(pkr => rawDataSource.getPartKeyRecordOrDefault(ref = rawDatasetRef, shard = shard,
+        pkr = pkr)) // Merge with persisted (if exists) partKey.
       .map(toDownsamplePkrWithHash)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
-    Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+    Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard,
       partKeys = pkRecords,
       diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution), updateHour,
       writeToPkUTTable = false), dsSettings.cassWriteTimeout)
@@ -134,7 +134,6 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     */
   private def toDownsamplePkrWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
     val dsPartKey = RecordBuilder.buildDownsamplePartKey(pkRecord.partKey, schemas)
-    val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
-    PartKeyRecord(dsPartKey.get, pkRecord.startTime, pkRecord.endTime, hash)
+    PartKeyRecord(dsPartKey.get, pkRecord.startTime, pkRecord.endTime, pkRecord.shard)
   }
 }

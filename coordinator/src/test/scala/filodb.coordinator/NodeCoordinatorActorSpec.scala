@@ -155,7 +155,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
-        case QueryResult(_, schema, srvs, _, _, _) =>
+        case QueryResult(_, schema, srvs, _, _, _, _) =>
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (1)
           srvs(0).rows.toSeq should have length (2)   // 2 samples per series
@@ -166,7 +166,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         Seq("min"), Some(300000), None), qOpt)
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
-        case QueryResult(_, schema, Nil, _, _, _) =>
+        case QueryResult(_, schema, Nil, _, _, _, _) =>
           schema.columns shouldEqual Nil
       }
     }
@@ -202,7 +202,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
-        case QueryResult(_, schema, vectors, _, _, _) =>
+        case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
@@ -215,7 +215,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                      RawSeries(AllChunksSelector, multiFilter, Seq("count"), Some(300000), None), 120000L, 10000L, 130000L)), qOpt)
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
-        case QueryResult(_, schema, vectors, _, _, _) =>
+        case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
@@ -229,7 +229,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                      10000L, 130000L)),  qOpt)
       probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
-        case QueryResult(_, schema, vectors, _, _, _) =>
+        case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual Nil
           vectors should have length (0)
       }
@@ -254,7 +254,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
-          case QueryResult(_, schema, vectors, _, _, _) =>
+          case QueryResult(_, schema, vectors, _, _, _, _) =>
             schema.columns shouldEqual valueSchema.columns
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
@@ -284,7 +284,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                       queryOpt)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
-        case QueryResult(_, schema, vectors, _, _, _) =>
+        case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
@@ -308,7 +308,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         queryOpt)
       probe.send(coordinatorActor, q2)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
-        case QueryResult(_, schema, srvs, _, _, _) =>
+        case QueryResult(_, schema, srvs, _, _, _, _) =>
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
@@ -380,7 +380,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                    RawSeries(AllChunksSelector, Seq(ColumnFilter("notALabel", NotEquals("foo"))), Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
-      case QueryResult(_, schema, vectors, _, _, _) =>
+      case QueryResult(_, schema, vectors, _, _, _, _) =>
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn, false),
                                        ColumnInfo("value", DoubleColumn, true))
         vectors should have length (1)

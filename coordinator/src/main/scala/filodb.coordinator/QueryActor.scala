@@ -1,8 +1,5 @@
 package filodb.coordinator
 
-import java.lang.Thread.UncaughtExceptionHandler
-import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
-
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
@@ -11,13 +8,10 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
-import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
 import monix.catnap.CircuitBreaker
 import monix.eval.Task
-import monix.execution.Scheduler
 import monix.execution.exceptions.ExecutionRejectedException
-import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -33,7 +27,6 @@ import filodb.core.query.QuerySession
 import filodb.core.query.QueryStats
 import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
-import filodb.memory.data.Shutdown
 import filodb.query._
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PlanDispatcher}
 
@@ -88,7 +81,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   val queryPlanner = new SingleClusterPlanner(dataset, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, "raw",
                                               functionalSpreadProvider)
-  val queryScheduler = createInstrumentedQueryScheduler()
+  val queryScheduler = QueryScheduler.queryScheduler
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
@@ -109,47 +102,6 @@ final class QueryActor(memStore: TimeSeriesStore,
     onHalfOpen = Task.eval(logger.info("Query CircuitBreaker is now half-open")),
     onOpen = Task.eval(logger.info("Query CircuitBreaker is now open"))
   )
-
-  /**
-    * Instrumentation adds following metrics on the Query Scheduler
-    *
-    * # Counter
-    * executor_tasks_submitted_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Counter
-    * executor_tasks_completed_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Histogram
-    * executor_threads_active{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Histogram
-    * executor_queue_size_count{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    *
-    */
-  private def createInstrumentedQueryScheduler(): SchedulerService = {
-    val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
-                                      * sys.runtime.availableProcessors).toInt
-    val schedName = s"$QuerySchedName-$dsRef"
-    val exceptionHandler = new UncaughtExceptionHandler {
-      override def uncaughtException(t: Thread, e: Throwable): Unit = {
-        logger.error("Uncaught Exception in Query Scheduler", e)
-        uncaughtExceptions.increment()
-        e match {
-          case ie: InternalError => Shutdown.haltAndCatchFire(ie)
-          case _ => { /* Do nothing. */ }
-        }
-      }
-    }
-    val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
-      def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
-        val thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool)
-        thread.setDaemon(true)
-        thread.setUncaughtExceptionHandler(exceptionHandler)
-        thread.setName(s"$schedName-${thread.getPoolIndex}")
-        thread
-      }
-    }
-    val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
-
-    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
-  }
 
   // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
@@ -172,7 +124,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         val execTask = if (querySession.streamingDispatch) {
           q.executeStreaming(memStore, querySession)(queryScheduler)
             .onErrorHandle { t =>
-              StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
+              StreamQueryError(q.queryContext.queryId, q.planId, querySession.queryStats, t)
             }.map { resp =>
               // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
               // the query on the current/Actor thread instead of the scheduler
@@ -227,7 +179,7 @@ final class QueryActor(memStore: TimeSeriesStore,
               case t: ExecutionRejectedException =>
                 logQueryErrors(t)
                 if (querySession.streamingDispatch)
-                  replyTo ! StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
+                  replyTo ! StreamQueryError(q.queryContext.queryId, q.planId, querySession.queryStats, t)
                 else
                   replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, t)
               case _ => // all other errors are already handled
@@ -315,8 +267,8 @@ final class QueryActor(memStore: TimeSeriesStore,
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (q.addInactive) x.tsCount - y.tsCount
-        else x.activeTsCount - y.activeTsCount
+        if (q.addInactive) x.value.tsCount - y.value.tsCount
+        else x.value.activeTsCount - y.value.activeTsCount
       }
     }.reverse
     try {

@@ -59,21 +59,38 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
     val numShards = dsIndexJobSettings.numShards
     val busterForShard = new PerShardCardinalityBuster(dsSettings, inDownsampleTables)
 
-    val numPksDeleted = spark.sparkContext
-      .makeRDD(0 until numShards)
-      .mapPartitions { shards =>
-        Kamon.init() // kamon init should be first thing in worker jvm
-        val splits = busterForShard.colStore.getScanSplits(busterForShard.dataset)
-        for { sh <- shards
-              sp <- splits.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens).iterator } yield {
-          (sh, sp)
-        }
-      }.map { case (shard, sp) =>
-        Kamon.init() // kamon init should be first thing in worker jvm
-        busterForShard.bustIndexRecords(shard, sp, isSimulation)
-      }.sum()
-    BusterContext.log.info(s"CardinalityBuster completed successfully with " +
-      s"isSimulation=$isSimulation numPksDeleted=$numPksDeleted")
+    if (busterForShard.colStore.partKeysV2TableEnabled) {
+
+      val numPksDeleted = spark.sparkContext
+        .makeRDD(busterForShard.colStore.getScanSplits(busterForShard.dataset))
+        .mapPartitions { split =>
+          Kamon.init() // kamon init should be first thing in worker jvm
+          split.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens)
+        }.map { sp =>
+          Kamon.init() // kamon init should be first thing in worker jvm
+          busterForShard.bustIndexRecords( -1 /* not used for v2 */, sp, isSimulation)
+        }.sum()
+      BusterContext.log.info(s"CardinalityBuster completed successfully with " +
+        s"isSimulation=$isSimulation numPksDeleted=$numPksDeleted")
+
+    } else {
+
+      val numPksDeleted = spark.sparkContext
+        .makeRDD(0 until numShards)
+        .mapPartitions { shards =>
+          Kamon.init() // kamon init should be first thing in worker jvm
+          val splits = busterForShard.colStore.getScanSplits(busterForShard.dataset)
+          for {sh <- shards
+               sp <- splits.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens).iterator} yield {
+            (sh, sp)
+          }
+        }.map { case (shard, sp) =>
+          Kamon.init() // kamon init should be first thing in worker jvm
+          busterForShard.bustIndexRecords(shard, sp, isSimulation)
+        }.sum()
+      BusterContext.log.info(s"CardinalityBuster completed successfully with " +
+        s"isSimulation=$isSimulation numPksDeleted=$numPksDeleted")
+    }
     spark
   }
 

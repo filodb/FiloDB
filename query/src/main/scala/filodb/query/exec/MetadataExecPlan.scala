@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
+import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
@@ -27,8 +27,6 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   require(children.nonEmpty)
 
   override def enforceSampleLimit: Boolean = false
-
-  override val maxRecordContainerSize: Int = 64 * 1024
 
   /**
    * Args to use for the ExecPlan for printTree purposes only.
@@ -131,7 +129,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, schema, result, _, _, _), _) => (schema, result)
+      case (QueryResult(_, schema, result, _, _, _, _), _) => (schema, result)
     }.toListL.map { resp =>
       val colType = resp.head._1.columns.head.colType
       if (colType == MapColumn) {
@@ -311,8 +309,7 @@ final case class PartKeysExec(queryContext: QueryContext,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
-                              end: Long,
-                              override val maxRecordContainerSize: Int = 64 * 1024) extends LeafExecPlan {
+                              end: Long) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
@@ -348,8 +345,6 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
-
-  override val maxRecordContainerSize: Int = 64 * 1024
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -554,14 +549,14 @@ final case class TsCardExec(queryContext: QueryContext,
     source.acquireSharedLock(dataset, shard, querySession)
 
     val rvs = source match {
-      case tsMemStore: TimeSeriesMemStore =>
+      case tsMemStore: TimeSeriesStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
-          val it = cards.map{ card =>
+          val it = cards.map { card =>
             CardRowReader(prefixToGroup(card.prefix),
-                          CardCounts(card.activeTsCount, card.tsCount))
-            }.iterator
+              CardCounts(card.value.activeTsCount, card.value.tsCount))
+          }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
       case other =>

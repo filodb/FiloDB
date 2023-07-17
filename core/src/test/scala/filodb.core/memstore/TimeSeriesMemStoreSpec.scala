@@ -313,8 +313,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val colStore = new NullColumnStore() {
       override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
         val keys = Seq(
-          PartKeyRecord(pks(0), 50, 100, None), // series that has ended ingestion
-          PartKeyRecord(pks(1), 250, Long.MaxValue, None) // series that is currently ingesting
+          PartKeyRecord(pks(0), 50, 100, 0), // series that has ended ingestion
+          PartKeyRecord(pks(1), 250, Long.MaxValue, 0) // series that is currently ingesting
         )
         Observable.fromIterable(keys)
       }

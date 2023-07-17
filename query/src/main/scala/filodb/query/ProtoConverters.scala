@@ -1,9 +1,12 @@
 package filodb.query
 
+
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.JavaConverters._
 
+import akka.pattern.AskTimeoutException
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
 
@@ -14,10 +17,10 @@ import filodb.core.query._
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
 
-
-
 // scalastyle:off number.of.methods
 // scalastyle:off number.of.types
+// scalastyle:off file.size.limit
+// scalastyle:off method.length
 object ProtoConverters {
 
   implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
@@ -249,6 +252,7 @@ object ProtoConverters {
       quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
       quotaBuilder.setTimeSeriesSamplesScannedBytes(sq.timeSeriesSamplesScannedBytes)
       quotaBuilder.setTimeSeriesScanned(sq.timeSeriesScanned)
+      quotaBuilder.setRawScannedBytes(sq.rawScannedBytes)
       quotaBuilder.build()
     }
   }
@@ -288,7 +292,12 @@ object ProtoConverters {
           if (giq.hasTimeSeriesScanned)
             giq.getTimeSeriesScanned
           else
-            defaultQ.timeSeriesScanned
+            defaultQ.timeSeriesScanned,
+        rawScannedBytes =
+          if (giq.hasRawScannedBytes)
+            giq.getRawScannedBytes
+          else
+            defaultQ.rawScannedBytes
       )
       limits
     }
@@ -336,6 +345,35 @@ object ProtoConverters {
     }
   }
 
+  implicit class QueryWarningsToProtoConverter(w: QueryWarnings) {
+    def toProto: GrpcMultiPartitionQueryService.QueryWarnings = {
+      val builder = GrpcMultiPartitionQueryService.QueryWarnings.newBuilder()
+      builder.setExecPlanSamples(w.execPlanSamples.get())
+      builder.setExecPlanResultBytes(w.execPlanResultBytes.get())
+      builder.setGroupByCardinality(w.groupByCardinality.get())
+      builder.setJoinQueryCardinality(w.joinQueryCardinality.get())
+      builder.setTimeSeriesSamplesScannedBytes(w.timeSeriesSamplesScannedBytes.get())
+      builder.setTimeSeriesScanned(w.timeSeriesScanned.get())
+      builder.setRawScannedBytes(w.rawScannedBytes.get())
+      builder.build()
+    }
+  }
+
+  implicit class QueryWarningsFromProtoConverter(wGrpc: GrpcMultiPartitionQueryService.QueryWarnings) {
+    def fromProto: QueryWarnings = {
+      val ws = QueryWarnings(
+        new AtomicInteger(wGrpc.getExecPlanSamples()),
+        new AtomicLong(wGrpc.getExecPlanResultBytes()),
+        new AtomicInteger(wGrpc.getGroupByCardinality()),
+        new AtomicInteger(wGrpc.getJoinQueryCardinality()),
+        new AtomicLong(wGrpc.getTimeSeriesSamplesScannedBytes()),
+        new AtomicInteger(wGrpc.getTimeSeriesScanned()),
+        new AtomicLong(wGrpc.getRawScannedBytes())
+      )
+      ws
+    }
+  }
+
   implicit class StackTraceElementToProtoConverter(stackTraceElement: StackTraceElement) {
     def toProto: GrpcMultiPartitionQueryService.StackTraceElement = {
       val builder = GrpcMultiPartitionQueryService.StackTraceElement.newBuilder()
@@ -360,6 +398,9 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.Throwable = {
       val builder = GrpcMultiPartitionQueryService.Throwable.newBuilder()
       t match {
+        case filodb.core.query.QueryLimitException(message, queryId)                          =>
+                                                      builder.putMetadata("queryId", queryId)
+                                                      builder.putMetadata("message", message)
         case filodb.core.QueryTimeoutException(elapsedQueryTime, timedOutAt)                  =>
                                                       builder.putMetadata("timedOutAt", timedOutAt)
                                                       builder.putMetadata("elapsedQueryTime", s"$elapsedQueryTime")
@@ -395,6 +436,11 @@ object ProtoConverters {
       // to avoid multiple combinations, we will treat null message as an empty string
       val message  = if (throwableProto.hasMessage) throwableProto.getMessage else ""
       val t = throwableProto.getExceptionClass match {
+        case "filodb.core.query.QueryLimitException" =>
+                val metaMap = throwableProto.getMetadataMap
+                val queryId = metaMap.getOrDefault("queryId", "")
+                val message = metaMap.getOrDefault("message", "")
+                QueryLimitException(message, queryId)
         case "filodb.core.QueryTimeoutException"     =>
                   val metaMap = throwableProto.getMetadataMap
                   val eqt = metaMap.getOrDefault("elapsedQueryTime", "0").toLong
@@ -428,6 +474,8 @@ object ProtoConverters {
           val errorType = metaMap.getOrDefault("errorType", "")
           val errorMessage = metaMap.getOrDefault("errorMessage", "")
           RemoteQueryFailureException(statusCode, requestStatus, errorType, errorMessage)
+        case "akka.pattern.AskTimeoutException"               =>
+          cause.map(new AskTimeoutException(message, _)).getOrElse(new AskTimeoutException(message))
         case _          =>
             cause.map(new Throwable(message, _)).getOrElse(new Throwable(message))
       }
@@ -479,10 +527,11 @@ object ProtoConverters {
                                           builder.setId(id)
                                           builder.setStats(stats.toProto)
                                           builder.setThrowable(throwable.toProto)
-        case QueryResult(id, resultSchema, result, queryStats, mayBePartial, partialResultReason)   =>
+        case QueryResult(id, resultSchema, result, queryStats, warnings, mayBePartial, partialResultReason)   =>
                                           builder.setId(id)
                                           builder.setResultSchema(resultSchema.toProto)
                                           builder.setStats(queryStats.toProto)
+                                          builder.setWarnings(warnings.toProto)
                                           builder.setMayBePartial(mayBePartial)
                                           builder.addAllResult(
                                             result.map(_.asInstanceOf[SerializableRangeVector].toProto).asJava)
@@ -500,8 +549,11 @@ object ProtoConverters {
       if (responseProto.hasThrowable) {
         QueryError(responseProto.getId, responseProto.getStats.fromProto, responseProto.getThrowable.fromProto)
       } else {
-        QueryResult(responseProto.getId, responseProto.getResultSchema.fromProto,
-          responseProto.getResultList.asScala.map(_.fromProto).toList, responseProto.getStats.fromProto,
+        QueryResult(
+          responseProto.getId, responseProto.getResultSchema.fromProto,
+          responseProto.getResultList.asScala.map(_.fromProto).toList,
+          responseProto.getStats.fromProto,
+          if (responseProto.hasWarnings) responseProto.getWarnings.fromProto else QueryWarnings(),
           responseProto.getMayBePartial,
           if (responseProto.hasPartialResultReason) Some(responseProto.getPartialResultReason) else None)
       }
@@ -512,29 +564,31 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.StreamingResponse = {
       val builder = GrpcMultiPartitionQueryService.StreamingResponse.newBuilder()
       response match {
-        case StreamQueryResultHeader(queryId, resultSchema) =>
+        case StreamQueryResultHeader(id, planId, resultSchema) =>
                                     builder.setHeader(
                                     builder
                                       .getHeaderBuilder
-                                      .setQueryId(queryId)
+                                      .setQueryId(id)
+                                      .setPlanId(planId)
                                       .setResultSchema(resultSchema.toProto))
-        case StreamQueryResult(queryId, result) =>
-                                    builder.setBody(builder.getBodyBuilder.setQueryId(queryId)
-                                      .addResult(result match {
-                                        case srv: SerializableRangeVector   => srv.toProto
-                                        case other: RangeVector             =>
-                                          throw new IllegalStateException(s"Expected a SerializableRangeVector," +
-                                            s"got ${other.getClass}")
-                                      }))
-        case StreamQueryResultFooter(queryId, queryStats, mayBePartial, partialResultReason) =>
-                                  val footerBuilder = builder.getFooterBuilder.setQueryId(queryId)
+        case StreamQueryResult(id, planId, result) =>
+                                    val bodyBuilder = builder.getBodyBuilder.setQueryId(id).setPlanId(planId)
+                                    result.foreach {
+                                      case srv: SerializableRangeVector   => bodyBuilder.addResult(srv.toProto)
+                                      case other: RangeVector             =>
+                                        throw new IllegalStateException(s"Expected a SerializableRangeVector," +
+                                          s"got ${other.getClass}")
+                                    }
+        case StreamQueryResultFooter(id, planId, queryStats, warnings, mayBePartial, partialResultReason) =>
+                                  val footerBuilder = builder.getFooterBuilder.setQueryId(id).setPlanId(planId)
                                     .setStats(queryStats.toProto)
+                                    .setWarnings(warnings.toProto)
                                     .setMayBePartial(mayBePartial)
                                   partialResultReason.foreach(footerBuilder.setPartialResultReason)
                                   builder.setFooter(footerBuilder)
-        case StreamQueryError(queryId, queryStats, t) =>
+        case StreamQueryError(id, planId, queryStats, t) =>
                                   builder.setError(
-                                    builder.getErrorBuilder.setQueryId(queryId)
+                                    builder.getErrorBuilder.setQueryId(id).setPlanId(planId)
                                       .setStats(queryStats.toProto).setThrowable(t.toProto)
                                   )
       }
@@ -548,18 +602,22 @@ object ProtoConverters {
       // Not checking optional type's existence
       if (responseProto.hasBody) {
         val body = responseProto.getBody
-        StreamQueryResult(body.getQueryId, body.getResult(0).fromProto)
+        StreamQueryResult(body.getQueryId, body.getPlanId, body.getResultList.fromProto)
       } else if (responseProto.hasFooter) {
         val footer = responseProto.getFooter
-        StreamQueryResultFooter(footer.getQueryId, footer.getStats.fromProto,
+        StreamQueryResultFooter(
+          footer.getQueryId,
+          footer.getPlanId,
+          footer.getStats.fromProto,
+          if (footer.hasWarnings) footer.getWarnings.fromProto else new QueryWarnings(),
           footer.getMayBePartial,
           if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None)
       } else if (responseProto.hasHeader) {
         val header = responseProto.getHeader
-        StreamQueryResultHeader(header.getQueryId, header.getResultSchema.fromProto)
+        StreamQueryResultHeader(header.getQueryId, header.getPlanId, header.getResultSchema.fromProto)
       } else {
         val error = responseProto.getError
-        StreamQueryError(error.getQueryId, error.getStats.fromProto, error.getThrowable.fromProto)
+        StreamQueryError(error.getQueryId, error.getPlanId, error.getStats.fromProto, error.getThrowable.fromProto)
       }
     }
   }
@@ -570,32 +628,42 @@ object ProtoConverters {
       responseProto.foldLeft(
         // Reduce streaming response to a
         // Tuple of (id, result schema, list of rvs, query stats, partial result flag, partial result reason, exception)
-
-      ("", ResultSchema.empty, List.empty[SerializableRangeVector],
-                  QueryStats(), false, Option.empty[String], Option.empty[Throwable])) {
-        case ((id, schema, rvs, stats, isPartial, partialReason, t), response) =>
+        (
+          "",
+          ResultSchema.empty,
+          List.empty[SerializableRangeVector],
+          QueryStats(),
+          QueryWarnings(),
+          false, Option.empty[String], Option.empty[Throwable]
+        )
+      ) {
+        case ((id, schema, rvs, stats, warnings, isPartial, partialReason, t), response) =>
           if (response.hasBody) {
               val body = response.getBody
               (id, schema,
-                body.getResultList.asScala.map(_.fromProto).toList::: rvs, stats, isPartial, partialReason, t)
+                body.getResultList.asScala.map(_.fromProto).toList::: rvs, stats, warnings, isPartial, partialReason, t)
           } else if (response.hasFooter) {
             val footer = response.getFooter
-            (id, schema, rvs, footer.getStats.fromProto, footer.getMayBePartial,
-              if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None, t)
+            (
+              id, schema, rvs, footer.getStats.fromProto,
+              if (footer.hasWarnings) footer.getWarnings.fromProto else QueryWarnings(),
+              footer.getMayBePartial,
+              if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None,
+              t
+            )
           } else if (response.hasHeader) {
             val header = response.getHeader
-            (header.getQueryId, header.getResultSchema.fromProto, rvs, stats, isPartial, partialReason, t)
+            (header.getQueryId, header.getResultSchema.fromProto, rvs, stats, warnings, isPartial, partialReason, t)
           } else {
             val error = response.getError
-            (error.getQueryId, schema, rvs, error.getStats.fromProto, isPartial,
+            (error.getQueryId, schema, rvs, error.getStats.fromProto, QueryWarnings(), isPartial,
               partialReason, Some(error.getThrowable.fromProto))
           }
       } match {
-        case (id, schema, rvs, stats, isPartial, partialReason, None) =>
-                                                          QueryResult(id, schema, rvs, stats, isPartial, partialReason)
-        case (id, _, _, stats, _, _, Some(t))                        =>
-                                                          QueryError(id, stats, t)
-
+        case (id, schema, rvs, stats, warnings, isPartial, partialReason, None) =>
+          QueryResult(id, schema, rvs, stats, warnings, isPartial, partialReason)
+        case (id, _, _, stats, _, _, _, Some(t))                                =>
+          QueryError(id, stats, t)
       }
   }
 
@@ -770,6 +838,13 @@ object ProtoConverters {
       }
   }
 
+
+  implicit class SerializableRangeVectorListFromProtoConverter(
+                                            rvList: java.util.List[ProtoRangeVector.SerializableRangeVector]) {
+    import collection.JavaConverters._
+    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto)
+  }
+
   implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {
     def toProto: ProtoRangeVector.SerializableRangeVector = {
       val builder = ProtoRangeVector.SerializableRangeVector.newBuilder()
@@ -789,6 +864,13 @@ object ProtoConverters {
     }
   }
 
+  implicit class SerializableRangeVectorListToProtoConverter(rvSeq: Seq[SerializableRangeVector]) {
+    import collection.JavaConverters._
+    def toProto: java.util.List[ProtoRangeVector.SerializableRangeVector] = rvSeq.map(_.toProto).asJava
+  }
+
+
 }
 // scalastyle:on number.of.methods
 // scalastyle:on number.of.types
+// scalastyle:on file.size.limit
