@@ -439,7 +439,6 @@ trait ExecPlan extends QueryCommand {
       }
     }
 
-
     def makeResult(
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
@@ -530,7 +529,9 @@ trait ExecPlan extends QueryCommand {
   }
 
   protected def queryWithPlanName(queryContext: QueryContext): String = {
-    s"${this.getClass.getSimpleName}-${queryContext.origQueryParams}"
+    // Disabling this since it showed up in local method profiles. Re-enable if needed for debugging
+    // s"${this.getClass.getSimpleName}-${queryContext.origQueryParams}"
+    s"${queryContext.queryId}:$planId"
   }
 
   def curNodeText(level: Int): String =
