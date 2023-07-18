@@ -83,22 +83,28 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
     val numCouldNotDelete = AtomicInt(0)
     val numCandidateKeys = AtomicInt(0)
     val keysToDelete = candidateKeys.filter { pk =>
-      val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
-      val schema = schemas(rawSchemaId)
-      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
-      val willDelete = deleteFilter.exists { filter => // at least one filter should match
-        filter.forall { case (filterKey, filterValRegex) => // should match all tags in this filter
-          pkPairs.exists { case (pkKey, pkVal) =>
-            pkKey == filterKey && filterValRegex.matcher(pkVal).matches
+      try {
+        val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
+        val schema = schemas(rawSchemaId)
+        val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+        val willDelete = deleteFilter.exists { filter => // at least one filter should match
+          filter.forall { case (filterKey, filterValRegex) => // should match all tags in this filter
+            pkPairs.exists { case (pkKey, pkVal) =>
+              pkKey == filterKey && filterValRegex.matcher(pkVal).matches
+            }
           }
         }
+        if (willDelete) {
+          BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
+            s"endTime=${pk.endTime} split=$split isSimulation=$isSimulation")
+        }
+        numCandidateKeys += 1
+        willDelete
+      } catch {
+        case e : Exception =>
+          BusterContext.log.warn(s"skip busting pk=$pk because of exception $e")
+          false
       }
-      if (willDelete) {
-        BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
-          s"endTime=${pk.endTime} split=$split isSimulation=$isSimulation")
-      }
-      numCandidateKeys += 1
-      willDelete
     }
     val fut = Observable.fromIteratorUnsafe(keysToDelete)
                         .mapParallelUnordered(numParallelDeletesPerSparkThread.getOrElse(1)) { pk =>
