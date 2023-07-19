@@ -401,7 +401,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
       val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
         new TsCardExec(QueryContext(), executeDispatcher,
-          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields)
+          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "raw")
       }.toSeq
 
       val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)

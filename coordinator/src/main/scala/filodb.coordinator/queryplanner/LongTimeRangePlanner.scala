@@ -190,6 +190,27 @@ import filodb.query.exec._
     PlanResult(Seq(execPlan))
   }
 
+  /**
+   * Materialize Ts cardinality plan. For v1 version, we only go to raw cluster for back compatibility. For v2 versions,
+   * we would go to both downsample and raw cluster
+   *
+   * @param logicalPlan  The TsCardinalities logical plan to materialize
+   * @param queryContext The QueryContext object
+   * @return
+   */
+  private def materializeTSCardinalityPlan(queryContext: QueryContext, logicalPlan: TsCardinalities): PlanResult = {
+    logicalPlan.version match {
+      case 2 => {
+        val rawPlan = rawClusterPlanner.materialize(logicalPlan, queryContext)
+        val dsPlan = downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+        val stitchedPlan = TsCardReduceExec(queryContext, stitchDispatcher, Seq(rawPlan, dsPlan))
+        PlanResult(Seq(stitchedPlan))
+      }
+      // version 1 and default to raw as done before
+      case _ => rawClusterMaterialize(queryContext, logicalPlan)
+    }
+  }
+
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
@@ -199,13 +220,13 @@ import filodb.query.exec._
       logicalPlan match {
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
+        case ts: TsCardinalities           => materializeTSCardinalityPlan(qContext, ts)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
-             _: LabelNames |
-             _: TsCardinalities            => rawClusterMaterialize(qContext, logicalPlan)
+             _: LabelNames                 => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
     else logicalPlan match {
@@ -219,7 +240,7 @@ import filodb.query.exec._
       case lp: BinaryJoin                  => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
-      case lp: TsCardinalities             => rawClusterMaterialize(qContext, lp)
+      case lp: TsCardinalities             => materializeTSCardinalityPlan(qContext, lp)
       case lp: SeriesKeysByFilters         => rawClusterMaterialize(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)

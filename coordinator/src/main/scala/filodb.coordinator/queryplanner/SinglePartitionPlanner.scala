@@ -74,12 +74,9 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   }
 
   private def materializeTsCardinalities(logicalPlan: TsCardinalities, qContext: QueryContext): PlanResult = {
-    // TODO: Add handling for all the edge cases
     val execPlans = logicalPlan.datasets.map(d => planners.get(d))
       .map(x => x.get.materialize(logicalPlan, qContext))
     PlanResult(Seq(TsCardReduceExec(qContext, inProcessPlanDispatcher, execPlans)))
-//    planners.get(defaultPlanner).map(p => PlanResult(Seq(p.materialize(logicalPlan, qContext))))
-//    .getOrElse(PlanResult(Seq()))
   }
 
 

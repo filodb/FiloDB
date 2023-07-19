@@ -58,18 +58,22 @@ object PromCirceSupport {
             metric <- c.get[Map[String, String]]("metric")
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
-        } else if (c.downField("group").focus.nonEmpty && c.downField("cluster").focus.nonEmpty) {
-          for {
-            group <- c.get[Map[String, String]]("group")
-            card <- c.get[Map[String, Int]]("cardinality")
-            cluster <- c.get[String]("cluster")
-            dataset <- c.get[String]("dataset")
-          } yield TsCardinalitiesSamplV2(group, card, cluster, dataset)
         } else if (c.downField("group").focus.nonEmpty) {
-          for {
-            group <- c.get[Map[String, String]]("group")
-            card <- c.get[Map[String, Int]]("cardinality")
-          } yield TsCardinalitiesSampl(group, card)
+            // V2 Cardinality API also has a cluster field
+            if (c.downField("cluster").focus.nonEmpty) {
+              for {
+                group <- c.get[Map[String, String]]("group")
+                card <- c.get[Map[String, Int]]("cardinality")
+                cluster <- c.get[String]("cluster")
+                dataset <- c.get[String]("dataset")
+              } yield TsCardinalitiesSamplV2(group, card, cluster, dataset)
+            }
+            else {
+              for {
+                group <- c.get[Map[String, String]]("group")
+                card <- c.get[Map[String, Int]]("cardinality")
+              } yield TsCardinalitiesSampl(group, card)
+            }
         } else {
           throw new IllegalArgumentException("could not decode any expected cardinality-related field")
         }

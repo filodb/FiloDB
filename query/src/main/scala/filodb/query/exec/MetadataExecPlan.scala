@@ -475,6 +475,12 @@ final case object TsCardExec {
     prefix.mkString(PREFIX_DELIM).utf8
   }
 
+  def prefixToGroupWithClusterAndDataset(prefix: Seq[String], clusterName: String,
+                                         datasetName: String):ZeroCopyUTF8String = {
+    // just concat the prefix together with a single char delimiter
+    s"${prefix.mkString(PREFIX_DELIM)}$PREFIX_DELIM$clusterName$PREFIX_DELIM$datasetName".utf8
+  }
+
   case class CardCounts(active: Int, total: Int, longterm: Int = 0) {
     if (total < active) {
       qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")
@@ -532,7 +538,8 @@ final case class TsCardExec(queryContext: QueryContext,
                             dataset: DatasetRef,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
-                            numGroupByFields: Int) extends LeafExecPlan with StrictLogging {
+                            numGroupByFields: Int,
+                            clusterName: String) extends LeafExecPlan with StrictLogging {
   require(numGroupByFields >= 1,
     "numGroupByFields must be positive")
   require(numGroupByFields >= shardKeyPrefix.size,
@@ -556,7 +563,9 @@ final case class TsCardExec(queryContext: QueryContext,
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
-            CardRowReader(prefixToGroup(card.prefix),
+            val groupKey = prefixToGroupWithClusterAndDataset(card.prefix, clusterName, dataset.dataset)
+            CardRowReader(
+              groupKey,
               CardCounts(card.value.activeTsCount, card.value.tsCount))
           }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
