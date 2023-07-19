@@ -34,7 +34,10 @@ object LogicalPlanUtils extends StrictLogging {
    */
   def hasDescendantAggregate(lp: LogicalPlan): Boolean = lp match {
     case _: Aggregate                 => true
-    case bj: BinaryJoin                => bj.operator == BinaryOperator.LUnless
+    // consider this BinaryJoin example foo + on(h) + bar.
+    // partition1 has foo{h=1}, bar{h1=2} and partition2 has foo{h=2}, bar{h1=1}
+    // the binary join cannot happen on a partition locally. InProcessPlanDispatcher is required.
+    case _: BinaryJoin               => true
     case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregate(_))
     case _                            => false
   }
