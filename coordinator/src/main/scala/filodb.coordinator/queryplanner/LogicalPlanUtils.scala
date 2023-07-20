@@ -423,6 +423,9 @@ object LogicalPlanUtils extends StrictLogging {
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
       }
     }
+    if (rsTschemaOpts.isEmpty) {
+      return None
+    }
     // make sure all tschemas are defined, and they all match
     val referenceSchema = rsTschemaOpts.head
     if (referenceSchema.isDefined
