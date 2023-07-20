@@ -3366,4 +3366,34 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       validatePlan(ep, test.expected, sort = true)
     }
   }
+
+  it("should generate correct plan for aggregations/joins without selectors") {
+    val queryExpectedPairs = Seq(
+      // FIXME: this first plan is needlessly complex (but will return the correct result)
+      ("""sum(vector(123)) by(foo)""",
+            """E~StitchRvsExec() on InProcessPlanDispatcher
+              |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172830,300,1634777330))
+              |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher
+              |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(foo))
+              |----T~VectorFunctionMapper(funcParams=List())
+              |-----E~ScalarFixedDoubleExec(params = RangeParams(1634172830,300,1634777330), value = 123.0) on InProcessPlanDispatcher
+              |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634172530))
+              |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher
+              |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(foo))
+              |----T~VectorFunctionMapper(funcParams=List())
+              |-----E~ScalarFixedDoubleExec(params = RangeParams(1633913330,300,1634172530), value = 123.0) on InProcessPlanDispatcher""".stripMargin),
+      ("""vector(123) + on(foo) vector(123)""",
+            """E~BinaryJoinExec(binaryOp=ADD, on=List(foo), ignoring=List()) on InProcessPlanDispatcher
+              |-T~VectorFunctionMapper(funcParams=List())
+              |--E~ScalarFixedDoubleExec(params = RangeParams(1633913330,300,1634777330), value = 123.0) on InProcessPlanDispatcher
+              |-T~VectorFunctionMapper(funcParams=List())
+              |--E~ScalarFixedDoubleExec(params = RangeParams(1633913330,300,1634777330), value = 123.0) on InProcessPlanDispatcher""".stripMargin),
+    )
+    val timeParams = TimeStepParams(startSeconds, step, endSeconds)
+    for ((query, expected) <- queryExpectedPairs) {
+      val lp = Parser.queryRangeToLogicalPlan(query, timeParams, Antlr)
+      val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+      validatePlan(execPlan, expected)
+    }
+  }
 }
