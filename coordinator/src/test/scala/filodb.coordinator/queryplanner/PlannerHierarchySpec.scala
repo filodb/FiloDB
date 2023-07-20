@@ -113,8 +113,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
   private val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     // we may have mixed of a regex filter and a non-regex filter.
-    if (shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex])) {
-      println(shardColumnFilters)
+    if (shardColumnFilters.exists(f =>  f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex])) {
       // to ensure that tests dont call something else that is not configured
       require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
         && (
@@ -132,6 +131,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
           Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs")))
         )
       }
+    } else if (shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[Equals])) {
+      Seq(shardColumnFilters)
     } else {
       Nil
     }  // i.e. filters for a scalar
