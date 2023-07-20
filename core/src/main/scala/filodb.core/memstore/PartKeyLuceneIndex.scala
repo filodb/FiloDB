@@ -235,7 +235,18 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
   //scalastyle:off
-  private val searcherManager = new SearcherManager(indexWriter, null)
+  private val noOpQcp = new QueryCachingPolicy {
+    override def onUse(query: Query): Unit = {}
+    override def shouldCache(query: Query): Boolean = false
+  }
+
+  private val searcherManager = new SearcherManager(indexWriter, new SearcherFactory() {
+    override def newSearcher(reader: IndexReader, previousReader: IndexReader): IndexSearcher = {
+      val searcher = super.newSearcher(reader, previousReader)
+      searcher.setQueryCachingPolicy(noOpQcp)
+      searcher
+    }
+  })
   //scalastyle:on
 
   //start this thread to flush the segments and refresh the searcher every specific time period
@@ -912,7 +923,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
-    val query: BooleanQuery = colFiltersToQuery(columnFilters, startTime, endTime)
+    val query = colFiltersToQuery(columnFilters, startTime, endTime)
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     withNewSearcher(s => s.search(query, collector))
     val latency = System.nanoTime - startExecute
@@ -929,7 +940,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
-    query
+    new ConstantScoreQuery(query) // disable scoring
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,

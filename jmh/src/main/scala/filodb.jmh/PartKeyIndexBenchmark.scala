@@ -74,7 +74,7 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
             ColumnFilter("_ws_", Filter.Equals("demo")),
-            ColumnFilter("host", Filter.EqualsRegex("H0")),
+            ColumnFilter("host", Filter.Equals("H0")),
             ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
         now,
         now + 1000)
@@ -90,7 +90,7 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
-          ColumnFilter("host", Filter.EqualsRegex("H0")),
+          ColumnFilter("host", Filter.Equals("H0")),
           ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
         now,
         now + 1000)
