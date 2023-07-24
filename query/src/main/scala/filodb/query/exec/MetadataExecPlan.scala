@@ -462,6 +462,10 @@ final case object TsCardExec {
 
   val PREFIX_DELIM = ","
 
+  val RESULT_SCHEMA_V1 = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
+                                          ColumnInfo("active", ColumnType.IntColumn),
+                                          ColumnInfo("total", ColumnType.IntColumn)), 1)
+
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.IntColumn),
                                        ColumnInfo("total", ColumnType.IntColumn),
@@ -556,7 +560,7 @@ final case class TsCardExec(queryContext: QueryContext,
 
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-
+    val clusterNameLowercase = clusterName.toLowerCase()
     val rvs = source match {
       case tsMemStore: TimeSeriesStore =>
         Observable.eval {
@@ -564,9 +568,20 @@ final case class TsCardExec(queryContext: QueryContext,
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
             val groupKey = prefixToGroupWithClusterAndDataset(card.prefix, clusterName, dataset.dataset)
-            CardRowReader(
-              groupKey,
-              CardCounts(card.value.activeTsCount, card.value.tsCount))
+
+            // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
+            // user perspective, the cardinality data in downsample is a longterm data. Hence, we are forking the
+            // data path based on the cluster the data is being served from
+            if (clusterNameLowercase.contains("downsample")) {
+              CardRowReader(
+                groupKey,
+                CardCounts(0, 0, card.value.tsCount))
+            }
+            else {
+              CardRowReader(
+                groupKey,
+                CardCounts(card.value.activeTsCount, card.value.tsCount))
+            }
           }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }

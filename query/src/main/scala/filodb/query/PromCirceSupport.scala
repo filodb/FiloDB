@@ -21,8 +21,8 @@ object PromCirceSupport {
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
     case t @ TsCardinalitiesSampl(group, cardinality) =>
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
-    case a @ TsCardinalitiesSamplV2(group, cardinality, cluster, dataset) =>
-        Json.fromValues(Seq(group.asJson, cardinality.asJson, cluster.asJson, dataset.asJson))
+    case a @ TsCardinalitiesSamplV2(group, cardinality, dataset, _type) =>
+        Json.fromValues(Seq(group.asJson, cardinality.asJson, dataset.asJson, _type.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -60,13 +60,13 @@ object PromCirceSupport {
           } yield LabelCardinalitySampl(metric, card)
         } else if (c.downField("group").focus.nonEmpty) {
             // V2 Cardinality API also has a cluster field
-            if (c.downField("cluster").focus.nonEmpty) {
+            if (c.downField("dataset").focus.nonEmpty) {
               for {
                 group <- c.get[Map[String, String]]("group")
                 card <- c.get[Map[String, Int]]("cardinality")
-                cluster <- c.get[String]("cluster")
                 dataset <- c.get[String]("dataset")
-              } yield TsCardinalitiesSamplV2(group, card, cluster, dataset)
+                _type <- c.get[String]("_type")
+              } yield TsCardinalitiesSamplV2(group, card, dataset, _type)
             }
             else {
               for {

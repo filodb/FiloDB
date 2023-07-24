@@ -89,9 +89,17 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
     // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
     val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext), dummyQueryStats)
-    QueryResult(id, RESULT_SCHEMA, Seq(srv))
+
+    // NOTE: We are using the RESULT_SCHEMA definitions to determine the iteration of shardKeyPrefix in v1 result.
+    // Hence, we are sending the older result schema which was used for V1 Cardinality API
+    QueryResult(id, RESULT_SCHEMA_V1, Seq(srv))
   }
 
+  /**
+  * @param response
+  * @param id
+  * @return
+  */
   private def mapTsCardinalitiesResponseV2(response: MetadataSuccessResponse, id: String): QueryResponse = {
     import NoCloseCursor._
     import TsCardinalities._
@@ -101,19 +109,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSamplV2]]
       .map { ts =>
-        val groupSize = ts.group.size;
-        val shardKeyLabelsSize = groupSize - 2; // last 2 value is cluster and dataset
-        val prefix = new Array[String](groupSize)
-        // First get the shard key labels
-        for (i <- 0 until shardKeyLabelsSize) {
-          prefix(i) = ts.group(SHARD_KEY_LABELS(i))
-        }
-        // Now add the cluster and dataset info as well
-        for (i <- 0 until CARD_SUFFIX_INFO.size) {
-          prefix(i + shardKeyLabelsSize) = ts.group(CARD_SUFFIX_INFO(i))
-        }
-        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("short-term"), ts.cardinality("long-term"))
-        CardRowReader(prefixToGroup(prefix), counts)
+        val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
+        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("shortTerm"), ts.cardinality("longTerm"))
+        CardRowReader(prefixToGroupWithClusterAndDataset(prefix, ts.dataset, ts._type), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
     // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
