@@ -48,7 +48,6 @@ final class FilodbSettings(val conf: Config) {
 
   lazy val datasetConfPaths = config.as[Seq[String]]("dataset-configs")
 
-  lazy val numNodes = config.getInt("cluster-discovery.num-nodes")
   lazy val k8sHostFormat = config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
 
   // used for development mode only
