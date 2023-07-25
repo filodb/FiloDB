@@ -1042,5 +1042,21 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val filter5 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
     val result3 = keyIndex.partKeyRecordsFromFilters(Seq(filter4, filter5), 0, Long.MaxValue)
     result3 shouldEqual Seq()
+
+    // Query with non existent label name with an empty regex
+    val filter6 = ColumnFilter("dummy", EqualsRegex("".utf8))
+    val filter7 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result4 = keyIndex.partKeyRecordsFromFilters(Seq(filter6, filter7), 0, Long.MaxValue)
+    val expected4 = Seq(pkrs(7), pkrs(8), pkrs(9))
+    result4.map(_.partKey.toSeq) shouldEqual expected4.map(_.partKey.toSeq)
+    result4.map(p => (p.startTime, p.endTime)) shouldEqual expected4.map(p => (p.startTime, p.endTime))
+
+    // Query with non existent label name with an empty equals
+    val filter8 = ColumnFilter("dummy", Equals("".utf8))
+    val filter9 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result5 = keyIndex.partKeyRecordsFromFilters(Seq(filter8, filter9), 0, Long.MaxValue)
+    val expected5 = Seq(pkrs(7), pkrs(8), pkrs(9))
+    result5.map(_.partKey.toSeq) shouldEqual expected5.map(_.partKey.toSeq)
+    result5.map(p => (p.startTime, p.endTime)) shouldEqual expected5.map(p => (p.startTime, p.endTime))
   }
 }
