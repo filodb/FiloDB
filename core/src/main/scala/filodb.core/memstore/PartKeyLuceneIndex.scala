@@ -817,12 +817,20 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
+  //scalastyle:off method.length
   private def leafFilter(column: String, filter: Filter): Query = {
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if (regex.nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
+        if(regex.r.unapplySeq("").isDefined) {
+          // Check if the given regex matches the empty string, if yes, then do not consider this label
+          val booleanQuery = new BooleanQuery.Builder
+          val allDocs = new MatchAllDocsQuery
+          booleanQuery.add(allDocs, Occur.FILTER).build()
+        } else {
+          if (regex.nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
+          else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+        }
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
         val allDocs = new MatchAllDocsQuery
@@ -864,7 +872,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       case _ => throw new UnsupportedOperationException
     }
   }
-
+  //scalastyle:on method.length
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): debox.Buffer[Int] = {

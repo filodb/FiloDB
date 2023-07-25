@@ -1008,4 +1008,39 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // close CardinalityTracker to avoid leaking of resources
     cardTracker.close()
   }
+
+  it("should match records without label when .* is provided on a non existent label") {
+
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.schema.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+
+   // Query with just the existing Label name
+    val filter1 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result1 = keyIndex.partKeyRecordsFromFilters(Seq(filter1), 0, Long.MaxValue)
+    val expected1 = Seq(pkrs(7), pkrs(8), pkrs(9))
+
+    result1.map(_.partKey.toSeq) shouldEqual expected1.map(_.partKey.toSeq)
+    result1.map(p => (p.startTime, p.endTime)) shouldEqual expected1.map(p => (p.startTime, p.endTime))
+
+    // Query with non existent label name with an empty regex
+    val filter2 = ColumnFilter("dummy", EqualsRegex(".*".utf8))
+    val filter3 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result2 = keyIndex.partKeyRecordsFromFilters(Seq(filter2, filter3), 0, Long.MaxValue)
+    val expected2 = Seq(pkrs(7), pkrs(8), pkrs(9))
+
+    result2.map(_.partKey.toSeq) shouldEqual expected2.map(_.partKey.toSeq)
+    result2.map(p => (p.startTime, p.endTime)) shouldEqual expected2.map(p => (p.startTime, p.endTime))
+
+    // Query with non existent label name with an regex matching at least 1 character
+    val filter4 = ColumnFilter("dummy", EqualsRegex(".+".utf8))
+    val filter5 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result3 = keyIndex.partKeyRecordsFromFilters(Seq(filter4, filter5), 0, Long.MaxValue)
+    result3 shouldEqual Seq()
+  }
 }
