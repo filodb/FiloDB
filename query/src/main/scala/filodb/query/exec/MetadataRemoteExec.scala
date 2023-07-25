@@ -111,7 +111,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
       .map { ts =>
         val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
         val counts = CardCounts(ts.cardinality("active"), ts.cardinality("shortTerm"), ts.cardinality("longTerm"))
-        CardRowReader(prefixToGroupWithClusterAndDataset(prefix, ts.dataset, ts._type), counts)
+        CardRowReader(prefixToGroupWithDataset(prefix, ts._type), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
     // dont add this size to queryStats since it was already added by callee use dummy QueryStats()

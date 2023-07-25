@@ -206,8 +206,9 @@ import filodb.query.exec._
         val stitchedPlan = TsCardReduceExec(queryContext, stitchDispatcher, Seq(rawPlan, dsPlan))
         PlanResult(Seq(stitchedPlan))
       }
-      // version 1 and default to raw as done before
-      case _ => rawClusterMaterialize(queryContext, logicalPlan)
+      // version 1 defaults to raw as done before
+      case 1 => rawClusterMaterialize(queryContext, logicalPlan)
+      case _ => throw new UnsupportedOperationException(s"version ${logicalPlan.version} not supported!")
     }
   }
 

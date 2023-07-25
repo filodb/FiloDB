@@ -2,6 +2,7 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
+import filodb.query.exec.TsCardExec
 
 //scalastyle:off number.of.types
 //scalastyle:off file.size.limit
@@ -184,9 +185,7 @@ object TsCardinalities {
 case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
                            version: Int = 1,
-                           datasets: Seq[String] = Seq(),
-                           params: collection.mutable.Map[String, String] = collection.mutable.Map()
-                          ) extends LogicalPlan {
+                           datasets: Seq[String] = Seq()) extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
@@ -197,11 +196,25 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
     "cannot group at the metric level when prefix does not contain ws and ns")
 
   // TODO: this should eventually be "true" to enable HAP/LTRP routing
-  // TODO: ask if we should enable it
   override def isRoutable: Boolean = false
 
   def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
     ColumnFilter(label, Equals(value))}
+
+  /**
+   * Helper function to create a Map of all the query parameters to be sent for the remote API call
+   * @return Immutable Map[String, String]
+   */
+  def queryParams(): Map[String, String] = {
+    Map(
+        "match[]" -> ("{" + SHARD_KEY_LABELS.zip(shardKeyPrefix)
+                       .map{ case (label, value) => s"""$label="$value""""}
+                       .mkString(",") + "}"),
+        "numGroupByFields" -> numGroupByFields.toString,
+        "verbose" -> "true", // Using this plan to determine if we need to pass additional values in groupKey or not
+        "datasets" -> datasets.mkString(TsCardExec.PREFIX_DELIM)
+    )
+  }
 }
 
 /**

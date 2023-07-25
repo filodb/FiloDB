@@ -479,10 +479,9 @@ final case object TsCardExec {
     prefix.mkString(PREFIX_DELIM).utf8
   }
 
-  def prefixToGroupWithClusterAndDataset(prefix: Seq[String], clusterName: String,
-                                         datasetName: String):ZeroCopyUTF8String = {
+  def prefixToGroupWithDataset(prefix: Seq[String], datasetName: String):ZeroCopyUTF8String = {
     // just concat the prefix together with a single char delimiter
-    s"${prefix.mkString(PREFIX_DELIM)}$PREFIX_DELIM$clusterName$PREFIX_DELIM$datasetName".utf8
+    s"${prefix.mkString(PREFIX_DELIM)}$PREFIX_DELIM$datasetName".utf8
   }
 
   case class CardCounts(active: Int, total: Int, longterm: Int = 0) {
@@ -550,6 +549,9 @@ final case class TsCardExec(queryContext: QueryContext,
     s"numGroupByFields ($numGroupByFields) must indicate at least as many " +
     s"fields as shardKeyPrefix.size (${shardKeyPrefix.size})")
 
+  // Making the passed cluster name to lowercase to avoid case complexities for string comparisions
+  val clusterNameLowercase = clusterName.toLowerCase()
+
   override def enforceSampleLimit: Boolean = false
 
   // scalastyle:off method.length
@@ -560,14 +562,13 @@ final case class TsCardExec(queryContext: QueryContext,
 
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-    val clusterNameLowercase = clusterName.toLowerCase()
     val rvs = source match {
       case tsMemStore: TimeSeriesStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
-            val groupKey = prefixToGroupWithClusterAndDataset(card.prefix, clusterName, dataset.dataset)
+            val groupKey = prefixToGroupWithDataset(card.prefix, dataset.dataset)
 
             // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
             // user perspective, the cardinality data in downsample is a longterm data. Hence, we are forking the
