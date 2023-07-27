@@ -79,11 +79,11 @@ case class TenantIngestionMetering(settings: FilodbSettings,
                            "cluster_type" -> CLUSTER_TYPE)
 
             if (CLUSTER_TYPE == "downsample") {
-              Kamon.gauge(METRIC_LONGTERM).withTags(TagSet.from(tags)).update(data.counts.longterm.toDouble)
+              Kamon.gauge(METRIC_LONGTERM).withTags(TagSet.from(tags)).update(data.counts.longTerm.toDouble)
             }
             else {
               Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
-              Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
+              Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.shortTerm.toDouble)
             }
           })
         case Success(QueryError(_, _, t)) => logger.warn("QueryError: " + t.getMessage)
