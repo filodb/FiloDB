@@ -822,7 +822,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if(regex.r.pattern.matcher("").matches()) {
+        if(regex.replaceAll("\\.\\*", "") == "") {
           // Check if the given regex matches the empty string, if yes, then do not consider this label
           new MatchAllDocsQuery
         } else {
