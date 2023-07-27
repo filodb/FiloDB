@@ -73,7 +73,8 @@ final case class TsCardinalitiesSampl(group: Map[String, String],
 /**
  * @param group map of shardKeyPrefix and its values. Key includes - _ws_, _ns_, __name__
  * @param cardinality map of string and int (cardinality count). Key includes - active, shortTerm, longTerm
- * @param dataset This is the user specified dataset. Valid values are - raw, aggregated, recordingrules
+ * @param dataset This is the user specified dataset for the cureent row.
+ *                Valid value includes - raw, aggregated, recordingrules
  * @param _type This is the internal filodb dataset. Example values - prometheus, prometheus_preagg,
  *              prometheus_rules_longterm, prometheus_rules_1m
  */

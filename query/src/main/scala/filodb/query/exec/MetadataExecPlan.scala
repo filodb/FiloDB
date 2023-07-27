@@ -109,7 +109,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     val taskOfResults = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
-        val it = aggMap.toSeq.sortBy(-_._2.total).map{ case (group, counts) =>
+        val it = aggMap.toSeq.sortBy(-_._2.shortTerm).map{ case (group, counts) =>
           CardRowReader(group, counts)
         }.iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
@@ -475,8 +475,8 @@ final case object TsCardExec {
    */
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.IntColumn),
-                                       ColumnInfo("total", ColumnType.IntColumn),
-                                       ColumnInfo("longterm", ColumnType.IntColumn)), 1)
+                                       ColumnInfo("shortTerm", ColumnType.IntColumn),
+                                       ColumnInfo("longTerm", ColumnType.IntColumn)), 1)
 
   /**
    * Convert a shard key prefix to a row's group name.
@@ -497,17 +497,17 @@ final case object TsCardExec {
 
   /**
    * @param active Actively (1 hourt) Ingesting Cardinality Count
-   * @param total aka shortTerm. This is the 7 day running Cardinality Count
-   * @param longterm upto 6 month running Cardinality Count
+   * @param shortTerm This is the 7 day running Cardinality Count
+   * @param longTerm upto 6 month running Cardinality Count
    */
-  case class CardCounts(active: Int, total: Int, longterm: Int = 0) {
-    if (total < active) {
-      qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")
+  case class CardCounts(active: Int, shortTerm: Int, longTerm: Int = 0) {
+    if (shortTerm < active) {
+      qLogger.warn(s"CardCounts created with total < active; shortTerm: $shortTerm, active: $active")
     }
     def add(other: CardCounts): CardCounts = {
       CardCounts(active + other.active,
-                 total + other.total,
-                 longterm + other.longterm)
+                 shortTerm + other.shortTerm,
+                 longTerm + other.longTerm)
     }
   }
 
@@ -516,8 +516,8 @@ final case object TsCardExec {
     override def getBoolean(columnNo: Int): Boolean = ???
     override def getInt(columnNo: Int): Int = columnNo match {
       case 1 => counts.active
-      case 2 => counts.total
-      case 3 => counts.longterm
+      case 2 => counts.shortTerm
+      case 3 => counts.longTerm
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
     override def getLong(columnNo: Int): Long = ???
