@@ -462,10 +462,17 @@ final case object TsCardExec {
 
   val PREFIX_DELIM = ","
 
+  /**
+   * This is the V1 schema version of QueryResult for TSCardinalities query
+   */
   val RESULT_SCHEMA_V1 = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                           ColumnInfo("active", ColumnType.IntColumn),
                                           ColumnInfo("total", ColumnType.IntColumn)), 1)
 
+  /**
+   * V2 schema version of QueryResult for TSCardinalities query. One more additional column `longterm` is added
+   * to represent the cardinality count of downsample clusters
+   */
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.IntColumn),
                                        ColumnInfo("total", ColumnType.IntColumn),
@@ -479,11 +486,20 @@ final case object TsCardExec {
     prefix.mkString(PREFIX_DELIM).utf8
   }
 
+  /**
+   * @param prefix ShardKeyPrefix from the Cardinality Record
+   * @param datasetName FiloDB dataset name
+   * @return concatenation of ShardKeyPrefix and filodb dataset
+   */
   def prefixToGroupWithDataset(prefix: Seq[String], datasetName: String):ZeroCopyUTF8String = {
-    // just concat the prefix together with a single char delimiter
     s"${prefix.mkString(PREFIX_DELIM)}$PREFIX_DELIM$datasetName".utf8
   }
 
+  /**
+   * @param active Actively (1 hourt) Ingesting Cardinality Count
+   * @param total aka shortTerm. This is the 7 day running Cardinality Count
+   * @param longterm upto 6 month running Cardinality Count
+   */
   case class CardCounts(active: Int, total: Int, longterm: Int = 0) {
     if (total < active) {
       qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")

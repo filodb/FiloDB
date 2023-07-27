@@ -59,7 +59,8 @@ object PromCirceSupport {
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
         } else if (c.downField("group").focus.nonEmpty) {
-            // V2 Cardinality API also has a cluster field
+            // V2 Cardinality API also has a dataset field. So we are using it to distinguish
+            // between the TsCardinalitiesSamplV2 vs TsCardinalitiesSampl response
             if (c.downField("dataset").focus.nonEmpty) {
               for {
                 group <- c.get[Map[String, String]]("group")

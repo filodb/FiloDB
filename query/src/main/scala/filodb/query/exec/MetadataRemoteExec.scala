@@ -96,9 +96,10 @@ case class MetadataRemoteExec(queryEndpoint: String,
   }
 
   /**
-  * @param response
-  * @param id
-  * @return
+  * @param response Metadata Response from the remote query server API call.
+  * @param id QueryId
+  * @return We convert the TsCardinalitiesSamplV2 response to QueryResult which can be appropriately parsed
+   *         by the query service and return the response to the user
   */
   private def mapTsCardinalitiesResponseV2(response: MetadataSuccessResponse, id: String): QueryResponse = {
     import NoCloseCursor._
