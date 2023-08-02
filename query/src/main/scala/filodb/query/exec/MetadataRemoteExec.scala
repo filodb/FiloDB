@@ -68,6 +68,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
         case _: MetadataMapSampl         => mapTypeQueryResponse(response, id)
         case _: LabelCardinalitySampl    => mapLabelCardinalityResponse(response, id)
         case _: TsCardinalitiesSampl     => mapTsCardinalitiesResponse(response, id)
+        case _: TsCardinalitiesSamplV2   => mapTsCardinalitiesResponseV2(response, id)
         case _                           => labelsQueryResponse(response, id)
       }
   }
@@ -84,6 +85,34 @@ case class MetadataRemoteExec(queryEndpoint: String,
         val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
         val counts = CardCounts(ts.cardinality("active"), ts.cardinality("total"))
         CardRowReader(prefixToGroup(prefix), counts)
+      }
+    val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
+    // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
+    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext), dummyQueryStats)
+
+    // NOTE: We are using the RESULT_SCHEMA definitions to determine the iteration of shardKeyPrefix in v1 result.
+    // Hence, we are sending the older result schema which was used for V1 Cardinality API
+    QueryResult(id, RESULT_SCHEMA_V1, Seq(srv))
+  }
+
+  /**
+  * @param response Metadata Response from the remote query server API call.
+  * @param id QueryId
+  * @return We convert the TsCardinalitiesSamplV2 response to QueryResult which can be appropriately parsed
+   *         by the query service and return the response to the user
+  */
+  private def mapTsCardinalitiesResponseV2(response: MetadataSuccessResponse, id: String): QueryResponse = {
+    import NoCloseCursor._
+    import TsCardinalities._
+    import TsCardExec._
+
+    val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
+
+    val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSamplV2]]
+      .map { ts =>
+        val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
+        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("shortTerm"), ts.cardinality("longTerm"))
+        CardRowReader(prefixToGroupWithDataset(prefix, ts._type), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
     // dont add this size to queryStats since it was already added by callee use dummy QueryStats()

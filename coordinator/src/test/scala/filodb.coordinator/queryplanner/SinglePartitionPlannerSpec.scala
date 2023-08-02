@@ -4,7 +4,6 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
-
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
@@ -81,10 +80,13 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   }
 
   val planners = Map("local" -> highAvailabilityPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
-  val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
-  else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, "local", plannerSelector, dataset, queryConfig)
+  val plannerSelector = (metricName: String) => {
+    if (metricName.equals("rr1")) "rules1"
+    else if (metricName.equals("rr2")) "rules2" else "local"
+  }
+
+  val engine = new SinglePartitionPlanner(planners, plannerSelector, dataset, queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
@@ -160,7 +162,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }
 
-  it("should generate correct ExecPlan for TsCardinalities") {
+  it("should generate correct ExecPlan for TsCardinalities version 1") {
 
     // Note: this test is expected to break when TsCardinalities.isRoutable = true
     // Note: unrelated to the above, this test is setup to confirm that a hacky fix to
@@ -169,15 +171,63 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val localPlanner = new SingleClusterPlanner(
       dataset, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig, "raw-temp")
     val planners = Map("raw-temp" -> localPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
-    val engine = new SinglePartitionPlanner(planners, "raw-temp", plannerSelector, dataset, queryConfig)
-    val lp = TsCardinalities(Seq("a", "b"), 2)
+    val engine = new SinglePartitionPlanner(planners, plannerSelector, dataset, queryConfig)
+    val lp = TsCardinalities(Seq("a", "b"), 2, 1, Seq("raw-temp"))
 
     // Plan should just contain a single root TsCardReduceExec and its TsCardExec children.
     // Currently, queries are routed only to the planner who's name equals the SPP's "defaultPlanner" member.
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
     execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
-    execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(32)
-    execPlan.children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
+
+    // UPDATE: We added another TsCardReduceExec to merge data across different datasets
+    execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(1)
+    execPlan.asInstanceOf[TsCardReduceExec].children(0).children.length shouldEqual(32)
+    execPlan.children.forall(_.isInstanceOf[TsCardReduceExec]) shouldEqual true
+    execPlan.children(0).children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
+  }
+
+  it("should generate correct ExecPlan for TsCardinalities version 2") {
+
+    // Note: this test is expected to break when TsCardinalities.isRoutable = true
+    // Note: unrelated to the above, this test is setup to confirm that a hacky fix to
+    //   SPP::materializeTsCardinalities is working. See there for additional details.
+
+    val rawPlanner = new SingleClusterPlanner(
+      dataset, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig, "raw")
+
+    val downsamplePlanner = new SingleClusterPlanner(
+      dataset, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig, "downsample")
+
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, 0, 0,
+      InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), queryConfig, dataset)
+
+    val planners = Map("longtime" -> longTermPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
+
+    val engine = new SinglePartitionPlanner(planners, plannerSelector, dataset, queryConfig)
+    val lp = TsCardinalities(Seq("a", "b"), 2, 2, Seq("longtime", "rules1", "rules2"))
+
+    // Plan should just contain a single root TsCardReduceExec and its TsCardExec children.
+    // Currently, queries are routed only to the planner who's name equals the SPP's "defaultPlanner" member.
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
+
+    // UPDATE: should have 3 children, since we passed 3 datasets
+    execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual (3)
+
+    // the longtime should have 2 children for downsample and raw
+    val longTermExecPlan = execPlan.asInstanceOf[TsCardReduceExec].children(0)
+    longTermExecPlan.children.length shouldEqual (2)
+    longTermExecPlan.children(0).dispatcher.clusterName shouldEqual "raw"
+    longTermExecPlan.children(1).dispatcher.clusterName shouldEqual "downsample"
+
+    longTermExecPlan.children(0).children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
+    longTermExecPlan.children(1).children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
+
+    // rules plan
+    val rules1ExecPlan = execPlan.asInstanceOf[TsCardReduceExec].children(1).asInstanceOf[MockExecPlan]
+    rules1ExecPlan.name shouldEqual "rules1"
+    val rules2ExecPlan = execPlan.asInstanceOf[TsCardReduceExec].children(2).asInstanceOf[MockExecPlan]
+    rules2ExecPlan.name shouldEqual "rules2"
   }
 
   it("should generate Exec plan for Scalar query which does not have any metric") {
