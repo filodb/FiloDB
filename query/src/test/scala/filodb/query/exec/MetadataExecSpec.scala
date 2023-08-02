@@ -367,44 +367,55 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     //   and converted to ZeroCopyUTF8Strings.
     Seq(
       TestSpec(Seq(), 1, Seq(
-        Seq("demo") -> CardCounts(4,4),
-        Seq("demo-A") -> CardCounts(1,1),
-        Seq("testws") -> CardCounts(1,1)
+        Seq("demo", "timeseries") -> CardCounts(4,4,4),
+        Seq("testws", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo-A", "timeseries") -> CardCounts(1,1,1)
         )),
       TestSpec(Seq(), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4),
-        Seq("demo-A", "App-A") -> CardCounts(1,1),
-        Seq("testws", "testns") -> CardCounts(1,1))),
+        Seq("demo", "App-0", "timeseries") -> CardCounts(4,4,4),
+        Seq("testws", "testns", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo-A", "App-A", "timeseries") -> CardCounts(1,1,1)
+      )),
       TestSpec(Seq(), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("testws", "testns", "long_labels_metric") -> CardCounts(1,1),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
-        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+        Seq("demo", "App-0", "http_req_total", "timeseries") -> CardCounts(2,2,2),
+        Seq("demo", "App-0", "http_bar_total", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo", "App-0", "http_foo_total", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo-A", "App-A", "http_req_total-A", "timeseries") -> CardCounts(1,1,1),
+        Seq("testws", "testns", "long_labels_metric", "timeseries") -> CardCounts(1,1,1)
+      )),
       TestSpec(Seq("demo"), 1, Seq(
-        Seq("demo") -> CardCounts(4,4))),
+        Seq("demo", "timeseries") -> CardCounts(4,4,4))),
       TestSpec(Seq("demo"), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4))),
+        Seq("demo", "App-0", "timeseries") -> CardCounts(4,4,4))),
       TestSpec(Seq("demo"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+        Seq("demo", "App-0", "http_req_total", "timeseries") -> CardCounts(2,2,2),
+        Seq("demo", "App-0", "http_bar_total", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo", "App-0", "http_foo_total", "timeseries") -> CardCounts(1,1,1)
+      )),
       TestSpec(Seq("demo", "App-0"), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4))),
+        Seq("demo", "App-0", "timeseries") -> CardCounts(4,4,4)
+      )),
       TestSpec(Seq("demo", "App-0"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+        Seq("demo", "App-0", "http_req_total", "timeseries") -> CardCounts(2,2,2),
+        Seq("demo", "App-0", "http_bar_total", "timeseries") -> CardCounts(1,1,1),
+        Seq("demo", "App-0", "http_foo_total", "timeseries") -> CardCounts(1,1,1)
+      )),
       TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
+        Seq("demo", "App-0", "http_req_total", "timeseries") -> CardCounts(2,2,2)))
     ).foreach{ testSpec =>
 
-      val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-        new TsCardExec(QueryContext(), executeDispatcher,
-          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields)
+      val leavesRaw = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+        new TsCardExec(QueryContext(), executeDispatcher,timeseriesDatasetMultipleShardKeys.ref,
+          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "raw")
+      }.toSeq
+      // UPDATE: Simulating the call to downsample cluster to get longterm metrics as well
+      val leavesDownsample = (0 until shardPartKeyLabelValues.size).map { ishard =>
+        new TsCardExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "downsample")
       }.toSeq
 
-      val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
+      val allLeaves = leavesRaw ++ leavesDownsample
+      val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, allLeaves)
 
       val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
       val result = (resp: @unchecked) match {

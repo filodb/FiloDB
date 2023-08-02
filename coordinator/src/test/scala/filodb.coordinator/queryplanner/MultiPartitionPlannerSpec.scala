@@ -1049,7 +1049,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       (endSeconds * 1000)
   }
 
-  it ("should generate correct ExecPlan for TsCardinalities query") {
+  it ("should generate correct ExecPlan for TsCardinalities query version 1") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
         TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
@@ -1066,7 +1066,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = TsCardinalities(Seq("a", "b"), 3)
     val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v1/metering/cardinality/timeseries"))
-    val expectedUrlParams = Map("match[]" -> """{_ws_="a",_ns_="b"}""", "numGroupByFields" -> "3")
+    val expectedUrlParams = Map("match[]" -> """{_ws_="a",_ns_="b"}""", "numGroupByFields" -> "3", "verbose" -> "true",
+      "datasets" -> "")
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
@@ -1075,6 +1076,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     execPlan.children(0).isInstanceOf[TsCardReduceExec] shouldEqual(true)
     execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
     execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams)
+  }
+
+  it("should generate correct ExecPlan for TsCardinalities query version 2") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange):List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local",
+      dataset, queryConfig)
+    val lp = TsCardinalities(Seq("a", "b"), 3, 2, Seq("longtime-prometheus","recordingrules-prometheus_rules_1m"))
+    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds,
+      Some("/api/v2/metering/cardinality/timeseries"))
+    val expectedUrlParams = Map("match[]" -> """{_ws_="a",_ns_="b"}""", "numGroupByFields" -> "3","verbose" -> "true",
+      "datasets" -> "longtime-prometheus,recordingrules-prometheus_rules_1m")
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[TsCardReduceExec] shouldEqual (true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual (true)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual (expectedUrlParams)
   }
 
   it ("should generate multipartition BinaryJoin") {

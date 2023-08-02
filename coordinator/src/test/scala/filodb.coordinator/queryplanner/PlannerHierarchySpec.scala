@@ -63,7 +63,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     if (metricName.contains(":1m")) "recordingRules" else "longTerm"
   }
   val planners = Map("longTerm" -> longTermPlanner, "recordingRules" -> recordingRulesPlanner)
-  val singlePartitionPlanner = new SinglePartitionPlanner(planners, "longTerm", plannerSelector,
+  val singlePartitionPlanner = new SinglePartitionPlanner(planners, plannerSelector,
     dataset, queryConfig)
 
   private val oneRemotePartitionLocationProvider = new PartitionLocationProvider {
