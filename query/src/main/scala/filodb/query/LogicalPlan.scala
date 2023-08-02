@@ -2,6 +2,7 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
+import filodb.query.exec.TsCardExec
 
 //scalastyle:off number.of.types
 //scalastyle:off file.size.limit
@@ -181,7 +182,10 @@ object TsCardinalities {
  *     [ws, ns]           { 2, 3 }
  *     [ws, ns, metric]   { 3 }
  */
-case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) extends LogicalPlan {
+case class TsCardinalities(shardKeyPrefix: Seq[String],
+                           numGroupByFields: Int,
+                           version: Int = 1,
+                           datasets: Seq[String] = Seq()) extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
@@ -196,6 +200,21 @@ case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) e
 
   def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
     ColumnFilter(label, Equals(value))}
+
+  /**
+   * Helper function to create a Map of all the query parameters to be sent for the remote API call
+   * @return Immutable Map[String, String]
+   */
+  def queryParams(): Map[String, String] = {
+    Map(
+        "match[]" -> ("{" + SHARD_KEY_LABELS.zip(shardKeyPrefix)
+                       .map{ case (label, value) => s"""$label="$value""""}
+                       .mkString(",") + "}"),
+        "numGroupByFields" -> numGroupByFields.toString,
+        "verbose" -> "true", // Using this plan to determine if we need to pass additional values in groupKey or not
+        "datasets" -> datasets.mkString(TsCardExec.PREFIX_DELIM)
+    )
+  }
 }
 
 /**
