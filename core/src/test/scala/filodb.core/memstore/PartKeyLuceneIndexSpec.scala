@@ -458,6 +458,19 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     partNums1 shouldEqual debox.Buffer(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 73, 81, 90)
   }
 
+  it("should be able to convert prefix regex to PrefixQuery") {
+    // Add the first ten keys and row numbers
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(99)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("Actor2Name", EqualsRegex("C.*".utf8)))
+    val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1 shouldEqual debox.Buffer(3, 12, 22, 23, 24, 31, 59, 60, 66, 69, 72, 78, 79, 80, 88, 89)
+  }
+
   it("should ignore unsupported columns and return empty filter") {
     val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, true, true, 0, 1.hour.toMillis)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>

@@ -101,7 +101,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(8)
-  def partIdsLookupWithSuffixRegexFilters(): Unit = {
+  def partIdsLookupWithPrefixRegexFilters(): Unit = {
     cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
@@ -117,7 +117,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(8)
-  def partIdsLookupWithPrefixRegexFilters(): Unit = {
+  def partIdsLookupWithSuffixRegexFilters(): Unit = {
     cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),

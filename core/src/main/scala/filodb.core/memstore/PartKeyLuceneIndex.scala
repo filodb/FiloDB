@@ -235,18 +235,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
   //scalastyle:off
-  private val noOpQcp = new QueryCachingPolicy {
-    override def onUse(query: Query): Unit = {}
-    override def shouldCache(query: Query): Boolean = false
-  }
-
-  private val searcherManager = new SearcherManager(indexWriter, new SearcherFactory() {
-    override def newSearcher(reader: IndexReader, previousReader: IndexReader): IndexSearcher = {
-      val searcher = super.newSearcher(reader, previousReader)
-      searcher.setQueryCachingPolicy(noOpQcp)
-      searcher
-    }
-  })
+  private val searcherManager = new SearcherManager(indexWriter, null)
   //scalastyle:on
 
   //start this thread to flush the segments and refresh the searcher every specific time period
@@ -788,7 +777,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     coll.numHits
   }
 
-
   def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
                                    startTime: Long,
                                    endTime: Long, func: (BytesRef) => Unit): Int = {
@@ -842,16 +830,25 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        val regexCharArray = regex.toCharArray
-        if (regexCharArray.forall(c => !regexChars.contains(c))) { // if all regex chars absent
-          // treat like Equals
+        if (regex.forall(c => !regexChars.contains(c))) {
+          // if all regex special chars absent, then treat like Equals
           equalsQuery(regex)
-        } else if (regexCharArray.forall(c => !regexCharsMinusPipe.contains(c))) { // if pipe is only regex char present
+        } else if (regex.forall(c => !regexCharsMinusPipe.contains(c))) {
+          // if pipe is only regex special char present, then convert to IN query
           new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
+        } else if (regex.endsWith(".*") && regex.length > 2 &&
+          regex.dropRight(2).forall(c => !regexChars.contains(c))) {
+          // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
+          new PrefixQuery(new Term(column, regex.dropRight(2)))
         } else if (regex.replaceAll("\\.\\*", "").nonEmpty) {
+          // regular non-empty regex query
           new RegexpQuery(new Term(column, regex), RegExp.NONE)
+        } else {
+          // value="" means the label is absent or has an empty value
+          // FIXME: there was already a bug here
+          // FIXME: label=~".*" should also match label="foo" case which the code below wont
+          leafFilter(column, NotEqualsRegex(".+"))
         }
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
 
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
