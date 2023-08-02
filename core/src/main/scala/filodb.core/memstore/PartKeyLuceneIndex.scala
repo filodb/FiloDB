@@ -828,13 +828,30 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
-  //scalastyle:off method.length
+  val regexChars = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+  val regexCharsMinusPipe = (regexChars.toSet - '|').toArray
+
+  // scalastyle:off method.length
   private def leafFilter(column: String, filter: Filter): Query = {
+
+    def equalsQuery(value: String): Query = {
+      if (value.nonEmpty) new TermQuery(new Term(column, value))
+      else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+    }
+
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if (regex.replaceAll("\\.\\*", "").nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+        val regexCharArray = regex.toCharArray
+        if (regexCharArray.forall(c => !regexChars.contains(c))) { // if all regex chars absent
+          // treat like Equals
+          equalsQuery(regex)
+        } else if (regexCharArray.forall(c => !regexCharsMinusPipe.contains(c))) { // if pipe is only regex char present
+          new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
+        } else if (regex.replaceAll("\\.\\*", "").nonEmpty) {
+          new RegexpQuery(new Term(column, regex), RegExp.NONE)
+        }
+        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
 
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
@@ -843,9 +860,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.add(allDocs, Occur.FILTER)
         booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
+
       case Equals(value) =>
-        if (value.toString.nonEmpty) new TermQuery(new Term(column, value.toString))
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
+        equalsQuery(value.toString)
+
       case NotEquals(value) =>
         val str = value.toString
         val term = new Term(column, str)
@@ -862,18 +880,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.build()
 
       case In(values) =>
-        if (values.size < 2)
-          throw new IllegalArgumentException("In filter should have atleast 2 values")
-        val booleanQuery = new BooleanQuery.Builder
-        values.foreach { value =>
-          booleanQuery.add(new TermQuery(new Term(column, value.toString)), Occur.SHOULD)
-        }
-        booleanQuery.build()
+        new TermInSetQuery(column, values.toArray.map(t => new BytesRef(t.toString)): _*)
+
       case And(lhs, rhs) =>
         val andQuery = new BooleanQuery.Builder
         andQuery.add(leafFilter(column, lhs), Occur.FILTER)
         andQuery.add(leafFilter(column, rhs), Occur.FILTER)
         andQuery.build()
+
       case _ => throw new UnsupportedOperationException
     }
   }
