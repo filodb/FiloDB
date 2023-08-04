@@ -831,11 +831,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
         if (regex == "") {
-          // Empty regex query
-          // label="" should return the data when the label is an empty string or label is not present
+          // if label=~"" then match empty string or label not present condition too
           leafFilter(column, NotEqualsRegex(".+"))
         } else if (regex.replaceAll("\\.\\*", "") == "") {
-          // if ".*" then match all docs since promQL matches .* with absent label too
+          // if label=~".*" then match all docs since promQL matches .* with absent label too
           new MatchAllDocsQuery
         } else if (regex.forall(c => !regexChars.contains(c))) {
           // if all regex special chars absent, then treat like Equals
@@ -844,7 +843,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
           // if pipe is only regex special char present, then convert to IN query
           new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
         } else if (regex.endsWith(".*") && regex.length > 2 &&
-          regex.dropRight(2).forall(c => !regexChars.contains(c))) {
+                   regex.dropRight(2).forall(c => !regexChars.contains(c))) {
           // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
           new PrefixQuery(new Term(column, regex.dropRight(2)))
         } else {
