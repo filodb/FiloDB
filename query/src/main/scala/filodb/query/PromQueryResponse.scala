@@ -69,3 +69,16 @@ final case class LabelCardinalitySampl(metric: Map[String, String],
 
 final case class TsCardinalitiesSampl(group: Map[String, String],
                                       cardinality: Map[String, Int]) extends MetadataSampl
+
+/**
+ * @param group map of shardKeyPrefix and its values. Key includes - _ws_, _ns_, __name__
+ * @param cardinality map of string and int (cardinality count). Key includes - active, shortTerm, longTerm
+ * @param dataset This is the user specified dataset for the cureent row.
+ *                Valid value includes - raw, aggregated, recordingrules
+ * @param _type This is the internal filodb dataset. Example values - prometheus, prometheus_preagg,
+ *              prometheus_rules_longterm, prometheus_rules_1m
+ */
+final case class TsCardinalitiesSamplV2(group: Map[String, String],
+                                        cardinality: Map[String, Int],
+                                        dataset: String,
+                                        _type: String) extends MetadataSampl

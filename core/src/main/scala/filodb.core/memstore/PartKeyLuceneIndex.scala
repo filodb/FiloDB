@@ -830,7 +830,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if (regex.forall(c => !regexChars.contains(c))) {
+        if (regex == "") {
+          // Empty regex query
+          // label="" should return the data when the label is an empty string or label is not present
+          leafFilter(column, NotEqualsRegex(".+"))
+        } else if (regex.replaceAll("\\.\\*", "") == "") {
+          // if ".*" then match all docs since promQL matches .* with absent label too
+          new MatchAllDocsQuery
+        } else if (regex.forall(c => !regexChars.contains(c))) {
           // if all regex special chars absent, then treat like Equals
           equalsQuery(regex)
         } else if (regex.forall(c => !regexCharsMinusPipe.contains(c))) {
@@ -840,14 +847,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
           regex.dropRight(2).forall(c => !regexChars.contains(c))) {
           // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
           new PrefixQuery(new Term(column, regex.dropRight(2)))
-        } else if (regex.replaceAll("\\.\\*", "").nonEmpty) {
+        } else {
           // regular non-empty regex query
           new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        } else {
-          // value="" means the label is absent or has an empty value
-          // FIXME: there was already a bug here
-          // FIXME: label=~".*" should also match label="foo" case which the code below wont
-          leafFilter(column, NotEqualsRegex(".+"))
         }
 
       case NotEqualsRegex(value) =>
