@@ -162,7 +162,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
           Some(RvRange(rangeParams.startSecs * 1000,
             rangeParams.stepSecs * 1000,
             rangeParams.endSecs * 1000)))
-        queryStats.getResultBytesCounter(Nil).getAndAdd(srv.estimatedSerializedBytes)
+        val resultSize = srv.estimatedSerializedBytes
+        queryStats.getResultBytesCounter(Nil).getAndAdd(resultSize)
+        SerializedRangeVector.queryResultBytes.record(resultSize)
         srv
       }.toSeq
     } finally {

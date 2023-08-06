@@ -51,9 +51,10 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 108
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 96
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
+    srv.estimateSerializedRowBytes shouldEqual 80 // 4 non nan records each of 20 bytes
     val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
@@ -77,9 +78,10 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 248
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 236
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 11
+    srv.estimateSerializedRowBytes shouldEqual 220
     val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
@@ -105,13 +107,35 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 188
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 176
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     val res = srv.rows.map(r => (r.getLong(0), r.getHistogram(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isEmpty) shouldEqual Seq(h1, h1, h1, h1)
+  }
+
+  it("should calculate estimateSerializedRowBytes correctly when builder is used for several SRVs") {
+    val builder = SerializedRangeVector.newBuilder()
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)))
+    val keysMap = Map(UTF8Str("key1") -> UTF8Str("val1"),
+      UTF8Str("key2") -> UTF8Str("val2"))
+    val key = CustomRangeVectorKey(keysMap)
+
+    (0 to 200).foreach { i =>
+      val rv = toRv(Seq((0, Double.NaN), (100, 1.0), (200, Double.NaN),
+        (300, 3.0), (400, Double.NaN),
+        (500, 5.0), (600, 6.0),
+        (700, Double.NaN), (800, Double.NaN),
+        (900, Double.NaN), (1000, Double.NaN)), key,
+        RvRange(1000, 100, 1000))
+      val queryStats = QueryStats()
+      val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
+      srv.numRowsSerialized shouldEqual 11
+      srv.estimateSerializedRowBytes shouldEqual 220
+    }
   }
 
 }

@@ -233,7 +233,6 @@ trait ExecPlan extends QueryCommand {
     def makeResult(rv: Observable[RangeVector], recordSchema: RecordSchema,
                    resultSchema: ResultSchema): Observable[StreamQueryResponse] = {
       @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      @volatile var resultSize = 0L
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
         .map {
           case srvable: SerializableRangeVector => srvable
@@ -251,8 +250,8 @@ trait ExecPlan extends QueryCommand {
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
           numResultSamples += srv.numRowsSerialized
           checkSamplesLimit(numResultSamples, querySession.warnings)
-          resultSize += srv.estimatedSerializedBytes
-          checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
+          checkResultBytes(querySession.queryStats.getResultBytesCounter().get(),
+                           querySession.queryConfig, querySession.warnings)
           srv
         }
         .filter(_.numRowsSerialized > 0)
@@ -267,7 +266,7 @@ trait ExecPlan extends QueryCommand {
           // for stats is not formed yet at the beginning
           querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           span.mark("after-last-materialized-result-rv")
-          span.mark(s"resultBytes=$resultSize")
+          span.mark(s"resultBytes=${querySession.queryStats.getResultBytesCounter().get()}")
           span.mark(s"resultSamples=$numResultSamples")
           span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
         })
@@ -443,7 +442,6 @@ trait ExecPlan extends QueryCommand {
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-        @volatile var resultSize = 0L
         val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
@@ -461,8 +459,8 @@ trait ExecPlan extends QueryCommand {
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               numResultSamples += srv.numRowsSerialized
               checkSamplesLimit(numResultSamples, querySession.warnings)
-              resultSize += srv.estimatedSerializedBytes
-              checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
+              checkResultBytes(querySession.queryStats.getResultBytesCounter().get(),
+                               querySession.queryConfig, querySession.warnings)
               srv
           }
           .filter(_.numRowsSerialized > 0)
@@ -476,7 +474,7 @@ trait ExecPlan extends QueryCommand {
             // recording and adding step1 to queryStats at the end of execution since the grouping
             // for stats is not formed yet at the beginning
             querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
-            span.mark(s"resultBytes=$resultSize")
+            span.mark(s"resultBytes=${querySession.queryStats.getResultBytesCounter().get()}")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")

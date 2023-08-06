@@ -213,8 +213,8 @@ sealed trait ScalarSingleValue extends ScalarRangeVector {
     else it
   }
 
-  // Negligible bytes sent over-the-wire.
-  override def estimateSerializedRowBytes: Long = 0
+  // Negligible bytes sent over-the-wire. Don't bother calculating accurately.
+  override def estimateSerializedRowBytes: Long = SerializableRangeVector.SizeOfDouble
 }
 
 /**
@@ -399,7 +399,10 @@ final class SerializedRangeVector(val key: RangeVectorKey,
     } else it
   }
 
-  override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
+  override def estimateSerializedRowBytes: Long =
+    containers.toIterator.flatMap(_.iterate(schema))
+      .slice(startRecordNo, startRecordNo + numRowsSerialized)
+      .foldLeft(0)(_ + _.recordLength)
 
   def containersIterator : Iterator[RecordContainer] = containers.toIterator
 
