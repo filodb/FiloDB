@@ -233,6 +233,7 @@ trait ExecPlan extends QueryCommand {
     def makeResult(rv: Observable[RangeVector], recordSchema: RecordSchema,
                    resultSchema: ResultSchema): Observable[StreamQueryResponse] = {
       @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+      @volatile var resultSize = 0L
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
         .map {
           case srvable: SerializableRangeVector => srvable
@@ -250,8 +251,10 @@ trait ExecPlan extends QueryCommand {
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
           numResultSamples += srv.numRowsSerialized
           checkSamplesLimit(numResultSamples, querySession.warnings)
-          checkResultBytes(querySession.queryStats.getResultBytesCounter().get(),
-                           querySession.queryConfig, querySession.warnings)
+          val srvBytes = srv.estimatedSerializedBytes
+          resultSize += srvBytes
+          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
+          checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
           srv
         }
         .filter(_.numRowsSerialized > 0)
@@ -262,11 +265,12 @@ trait ExecPlan extends QueryCommand {
             MeasurementUnit.time.milliseconds)
             .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
+          SerializedRangeVector.queryResultBytes.record(resultSize)
           // recording and adding step1 to queryStats at the end of execution since the grouping
           // for stats is not formed yet at the beginning
           querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           span.mark("after-last-materialized-result-rv")
-          span.mark(s"resultBytes=${querySession.queryStats.getResultBytesCounter().get()}")
+          span.mark(s"resultBytes=$resultSize")
           span.mark(s"resultSamples=$numResultSamples")
           span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
         })
@@ -442,6 +446,7 @@ trait ExecPlan extends QueryCommand {
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        @volatile var resultSize = 0L
         val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
@@ -459,14 +464,17 @@ trait ExecPlan extends QueryCommand {
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               numResultSamples += srv.numRowsSerialized
               checkSamplesLimit(numResultSamples, querySession.warnings)
-              checkResultBytes(querySession.queryStats.getResultBytesCounter().get(),
-                               querySession.queryConfig, querySession.warnings)
+              val srvBytes = srv.estimatedSerializedBytes
+              resultSize += srvBytes
+              querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
+              checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
               srv
           }
           .filter(_.numRowsSerialized > 0)
           .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
+            SerializedRangeVector.queryResultBytes.record(resultSize)
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
@@ -474,7 +482,7 @@ trait ExecPlan extends QueryCommand {
             // recording and adding step1 to queryStats at the end of execution since the grouping
             // for stats is not formed yet at the beginning
             querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
-            span.mark(s"resultBytes=${querySession.queryStats.getResultBytesCounter().get()}")
+            span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")

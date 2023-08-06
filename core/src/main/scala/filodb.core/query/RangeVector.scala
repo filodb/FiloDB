@@ -490,11 +490,7 @@ object SerializedRangeVector extends StrictLogging {
         case None => builder.allContainers.toList
         case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
       }
-      val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
-      val resultSize = srv.estimatedSerializedBytes
-      SerializedRangeVector.queryResultBytes.record(resultSize)
-      queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-      srv
+      new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
     } finally {
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }

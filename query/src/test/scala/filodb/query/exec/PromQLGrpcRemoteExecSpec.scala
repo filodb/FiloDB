@@ -157,7 +157,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     deserializedSrv.numRowsSerialized shouldEqual 4
     val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     deserializedSrv.key shouldEqual rvKey
-    qr.queryStats.getResultBytesCounter(List()).get()shouldEqual 108
+    qr.queryStats.getResultBytesCounter(List()).get()shouldEqual 96
     (qr.queryStats.getCpuNanosCounter(List()).get() > 0) shouldEqual true
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)

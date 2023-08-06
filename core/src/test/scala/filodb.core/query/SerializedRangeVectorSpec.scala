@@ -51,7 +51,6 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 96
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     srv.estimateSerializedRowBytes shouldEqual 80 // 4 non nan records each of 20 bytes
@@ -78,7 +77,6 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 236
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 11
     srv.estimateSerializedRowBytes shouldEqual 220
@@ -107,7 +105,6 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     val queryStats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
-    queryStats.getResultBytesCounter(Nil).get() shouldEqual 176
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     val res = srv.rows.map(r => (r.getLong(0), r.getHistogram(1))).toList
