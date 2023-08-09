@@ -777,7 +777,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     coll.numHits
   }
 
-
   def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
                                    startTime: Long,
                                    endTime: Long, func: (BytesRef) => Unit): Int = {
@@ -817,16 +816,40 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
-  //scalastyle:off method.length
+  val regexChars = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+  val regexCharsMinusPipe = (regexChars.toSet - '|').toArray
+
+  // scalastyle:off method.length
   private def leafFilter(column: String, filter: Filter): Query = {
+
+    def equalsQuery(value: String): Query = {
+      if (value.nonEmpty) new TermQuery(new Term(column, value))
+      else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+    }
+
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if (regex.replaceAll("\\.\\*", "") == "")
+        if (regex == "") {
+          // if label=~"" then match empty string or label not present condition too
+          leafFilter(column, NotEqualsRegex(".+"))
+        } else if (regex.replaceAll("\\.\\*", "") == "") {
+          // if label=~".*" then match all docs since promQL matches .* with absent label too
           new MatchAllDocsQuery
-        else if (regex.nonEmpty)
+        } else if (regex.forall(c => !regexChars.contains(c))) {
+          // if all regex special chars absent, then treat like Equals
+          equalsQuery(regex)
+        } else if (regex.forall(c => !regexCharsMinusPipe.contains(c))) {
+          // if pipe is only regex special char present, then convert to IN query
+          new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
+        } else if (regex.endsWith(".*") && regex.length > 2 &&
+                   regex.dropRight(2).forall(c => !regexChars.contains(c))) {
+          // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
+          new PrefixQuery(new Term(column, regex.dropRight(2)))
+        } else {
+          // regular non-empty regex query
           new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+        }
 
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
@@ -835,9 +858,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.add(allDocs, Occur.FILTER)
         booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
+
       case Equals(value) =>
-        if (value.toString.nonEmpty) new TermQuery(new Term(column, value.toString))
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
+        equalsQuery(value.toString)
+
       case NotEquals(value) =>
         val str = value.toString
         val term = new Term(column, str)
@@ -854,18 +878,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.build()
 
       case In(values) =>
-        if (values.size < 2)
-          throw new IllegalArgumentException("In filter should have atleast 2 values")
-        val booleanQuery = new BooleanQuery.Builder
-        values.foreach { value =>
-          booleanQuery.add(new TermQuery(new Term(column, value.toString)), Occur.SHOULD)
-        }
-        booleanQuery.build()
+        new TermInSetQuery(column, values.toArray.map(t => new BytesRef(t.toString)): _*)
+
       case And(lhs, rhs) =>
         val andQuery = new BooleanQuery.Builder
         andQuery.add(leafFilter(column, lhs), Occur.FILTER)
         andQuery.add(leafFilter(column, rhs), Occur.FILTER)
         andQuery.build()
+
       case _ => throw new UnsupportedOperationException
     }
   }
@@ -915,7 +935,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
-    val query: BooleanQuery = colFiltersToQuery(columnFilters, startTime, endTime)
+    val query = colFiltersToQuery(columnFilters, startTime, endTime)
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     withNewSearcher(s => s.search(query, collector))
     val latency = System.nanoTime - startExecute
@@ -932,7 +952,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
-    query
+    new ConstantScoreQuery(query) // disable scoring
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
