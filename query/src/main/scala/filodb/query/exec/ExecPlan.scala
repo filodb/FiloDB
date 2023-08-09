@@ -251,7 +251,9 @@ trait ExecPlan extends QueryCommand {
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
           numResultSamples += srv.numRowsSerialized
           checkSamplesLimit(numResultSamples, querySession.warnings)
-          resultSize += srv.estimatedSerializedBytes
+          val srvBytes = srv.estimatedSerializedBytes
+          resultSize += srvBytes
+          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
           checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
           srv
         }
@@ -263,6 +265,7 @@ trait ExecPlan extends QueryCommand {
             MeasurementUnit.time.milliseconds)
             .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
+          SerializedRangeVector.queryResultBytes.record(resultSize)
           // recording and adding step1 to queryStats at the end of execution since the grouping
           // for stats is not formed yet at the beginning
           querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
@@ -461,7 +464,9 @@ trait ExecPlan extends QueryCommand {
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               numResultSamples += srv.numRowsSerialized
               checkSamplesLimit(numResultSamples, querySession.warnings)
-              resultSize += srv.estimatedSerializedBytes
+              val srvBytes = srv.estimatedSerializedBytes
+              resultSize += srvBytes
+              querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
               checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
               srv
           }
@@ -469,6 +474,7 @@ trait ExecPlan extends QueryCommand {
           .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
+            SerializedRangeVector.queryResultBytes.record(resultSize)
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
