@@ -45,7 +45,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
     TimeRange(timeRange.startMs, timeRange.endMs)))
-  val partitionLocationProvider = new PartitionLocationProvider {
+  val mppPartitionLocationProvider = new PartitionLocationProvider {
     override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
       if (routingKey.equals(Map("_ns_" -> "App-1", "_ws_" -> "demo")))
         List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -56,9 +56,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
       partitions(timeRange)
   }
+  val simplePartitionLocationProvider = new PartitionLocationProvider {
+    override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment(s"part-${routingKey("_ns_")}", "http://dummy-url.com", timeRange))
+    override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+      getPartitions(nonMetricShardKeyFilters.map(f => (f.column, f.filter.valuesStrings.head.toString)).toMap, timeRange)
+  }
   val c = QueryConfig(config).copy(plannerSelector = Some("plannerSelector"))
   val mpp = new MultiPartitionPlanner(
-    partitionLocationProvider, localPlanner, "local", dataset, c
+    mppPartitionLocationProvider, localPlanner, "local", dataset, c
   )
   val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     Seq(
@@ -72,20 +78,20 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     )
   }
-  val skrp = new ShardKeyRegexPlanner(dataset, mpp, shardKeyMatcherFn, queryConfig)
+  val skrp = new ShardKeyRegexPlanner(dataset, mpp, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -94,14 +100,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams(
       """test{_ns_ =~ "App.*", instance = "Inst-1" }""", 100, 1, 1000)))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ws_", Equals("demo"))) shouldEqual(true)
@@ -113,7 +119,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
 
     val nonMetricShardColumns = dataset.options.nonMetricShardColumns
     val implicitLp = Parser.queryToLogicalPlan("test{_ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000, 1000)
@@ -141,7 +147,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000, 1000
     )
 
-    val engine = new ShardKeyRegexPlanner(dataset, mpp, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, mpp, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(
       lp,
       QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
@@ -159,13 +165,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -177,14 +183,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -213,21 +219,21 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
   it("should generate Exec plan for time()") {
     val lp = Parser.queryToLogicalPlan("time()", 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq((Seq.empty)) }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
   }
@@ -238,7 +244,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams(
     """1 + test{_ws_ = \"demo\",_ns_ =~ \"App.*\", instance = \"Inst-1\" }""", 100, 1, 1000)))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
@@ -246,14 +252,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
 
     // Child plans should have only inner periodic query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-2\"}"
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -263,7 +269,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
       PromQlQueryParams("""test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"}""".stripMargin, 100,1, 1000)))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
@@ -277,7 +283,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
   }
@@ -288,7 +294,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].rangeVectorTransformers(0).
@@ -304,15 +310,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -322,7 +328,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].rangeVectorTransformers(0).
@@ -338,15 +344,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -354,7 +360,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lp = Parser.queryToLogicalPlan("""test{_ws_ = "demo", _ns_ = "App-1" }""", 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec]
@@ -369,7 +375,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
     execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarOperationMapper] shouldEqual true
@@ -385,15 +391,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiPartitionExec.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual true
 
     // Child plans should have only inner query in PromQlQueryParams
-    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
+    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
       .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-2"}"""
   }
 
   it ("should generate Exec plan for Metadata Label values query") {
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq.empty
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo", _ns_=~".*" """),
       TimeStepParams(1000, 20, 5000) )
 
@@ -408,7 +414,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it ("should generate ExecPlan for TsCardinalities") {
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Nil
-    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
     val promQlQueryParams = PromQlQueryParams(
       "", 1000, 20, 5000, Some("/api/v1/metering/cardinality/timeseries"))
@@ -425,22 +431,22 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
     execPlan.children(0).isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
     lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -454,22 +460,22 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
     execPlan.children(0).isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
     lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -482,7 +488,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App-2"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
@@ -491,9 +497,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       contains(ColumnFilter("_ns_", Equals("App-0"))) shouldEqual (true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual (true)
   }
 
@@ -504,7 +510,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App-1"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
@@ -518,7 +524,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           Seq(ColumnFilter("_ws_", Equals("demo")),
             ColumnFilter("_ns_", Equals("App-2"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual true
     }
@@ -531,7 +537,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App-1"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers(0).
@@ -557,7 +563,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
@@ -572,7 +578,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
@@ -591,7 +597,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         )
       )
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp shouldEqual Sum
@@ -625,7 +631,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         ColumnFilter("_ns_", Equals("App1")))
       )
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     // Since we resolve to just one namespace, the entire plan should be materialized by the wrapped planner
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
@@ -647,7 +653,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         ColumnFilter("_ns_", Equals("App1")))
       )
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(
       origQueryParams = PromQlQueryParams("""test1{_ws_="demo",_ns_="App-1"} + test2{_ws_="demo",_ns_="App-1"}""",
         100, 1, 1000)))
@@ -670,7 +676,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
     // Top level plan to be done in-process, both left & right operations will be executed by the wrapped query planner
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
     val inJoin = execPlan.asInstanceOf[BinaryJoinExec]
@@ -687,7 +693,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should handle multi partition multi level binary join appropriately with instant fn") {
 
-    val lp = Parser.queryToLogicalPlan("""ln(test1{_ws_ = "demo", _ns_ =~ "App-1"})""", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan("""ln(test1{_ws_ = "demo", _ns_ =~ "App.*"})""", 1000, 1000)
 
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -698,13 +704,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    println(execPlan.printTree())
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
     // Since we get data from multiple partitions, the dispatcher will be in process
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""test1{_ws_="demo",_ns_="App1"}""",
@@ -733,7 +740,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         )
       )
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
     // Since the dispatcher is ActorDispatcher, its materialized by the underlying queryPlanner
@@ -743,7 +750,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.head.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual
       InstantFunctionId.Ln
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""test1{_ws_="demo",_ns_="App-1"}""",
@@ -758,7 +765,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
       PromQlQueryParams("""ln(test1{_ws_="demo",_ns_="App-1"})""", 100, 1, 1000)))
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
@@ -779,7 +786,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
       PromQlQueryParams("""sum(ln(test1{_ws_="demo",_ns_="App-1"}))""", 100, 1, 1000)))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
@@ -808,7 +815,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
@@ -824,7 +831,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       x.rangeVectorTransformers.isEmpty shouldEqual true
     })
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -845,7 +852,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
@@ -861,7 +868,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       x.rangeVectorTransformers.isEmpty shouldEqual true
     })
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -884,7 +891,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     // val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -928,7 +935,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
@@ -948,7 +955,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
 
     child.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -966,7 +973,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         ColumnFilter("_ns_", Equals("App-1"))))
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
       PromQlQueryParams("""absent(foo{_ws_="Demo", _ns_ =~ "App-1"} , "foo", "," "instance", "job")""",
         100, 1, 1000)))
@@ -985,7 +992,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
       PromQlQueryParams("""vector(scalar(sum(foo{_ws_="demo",_ns_="App-1"})))""", 100, 1, 1000)))
 
@@ -1016,7 +1023,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       )
     }
 
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     // Entre Plan should be materialized on the wrapped
@@ -1051,7 +1058,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.isEmpty shouldEqual true
@@ -1063,7 +1070,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.isEmpty shouldEqual true
@@ -1076,7 +1083,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.size shouldEqual 4 // _ws_, _ns_, __name__ & instance
@@ -1088,7 +1095,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.size shouldEqual 4 // _ws_, _ns_, __name__ & instance
@@ -1101,7 +1108,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.size shouldEqual 4 // _ws_, _ns_, __name__ & instance
@@ -1113,7 +1120,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
         Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
       }
-      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
         .asInstanceOf[AbsentFunctionMapper].columnFilter.size shouldEqual 4 // _ws_, _ns_, __name__ & instance
@@ -1141,18 +1148,18 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~InstantVectorFunctionMapper(function=ClampMax)
           |-FA1~
           |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
           |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)""".stripMargin)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)""".stripMargin)
     )
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
     }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
 
     queryExpectedPairs.foreach{ case (query, expected) =>
       val lp = Parser.queryToLogicalPlan(query, 1000, 1000)

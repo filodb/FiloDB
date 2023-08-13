@@ -20,7 +20,7 @@ trait PlanValidationSpec extends Matchers {
   /**
    * Prints the same tree for all logically-identical plans.
    */
-  private def sortTree(planString: String): Unit = {
+  private def sortTree(planString: String): String = {
     // Returns the index to resume reading from "lines" and a sorted string tree.
     def helper(lines: Seq[String], index: Int): (Int, String) = {
       // Recursively build a list of child strings, then sort and concatenate.

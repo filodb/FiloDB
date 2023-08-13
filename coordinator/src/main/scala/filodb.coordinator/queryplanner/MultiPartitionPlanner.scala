@@ -1,6 +1,5 @@
 package filodb.coordinator.queryplanner
 
-
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.concurrent.{Map => ConcurrentMap}
@@ -44,7 +43,7 @@ trait PartitionLocationProvider {
  * @param remoteExecHttpClient      If the partition is not local, a remote call is made to the correct partition to
  *                                  query and retrieve the data.
  */
-class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider,
+class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProvider,
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             val dataset: Dataset,
@@ -52,7 +51,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
                             new ConcurrentHashMap[String, ManagedChannel]().asScala)
-  extends QueryPlanner with StrictLogging with DefaultPlanner {
+  extends PartitionLocationPlanner(dataset, partitionLocationProvider) with StrictLogging {
 
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
@@ -219,58 +218,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       origQueryParams = queryParams.copy(startSecs = startSecs, stepSecs = stepSecs, endSecs = endSecs),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false)
     )
-  }
-
-  /**
-   * Gets the partition Assignment for the given plan
-   */
-  private def getPartitions(logicalPlan: LogicalPlan,
-                            queryParams: PromQlQueryParams,
-                            infiniteTimeRange: Boolean = false) : Seq[PartitionAssignment] = {
-
-    //1.  Get a Seq of all Leaf node filters
-    val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
-    val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
-    //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
-    val routingKeyMap = leafFilters.filter(_.nonEmpty).map(cf => {
-      cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
-        x => (x.column, x.filter.valuesStrings.head.toString)).toMap
-    })
-
-    // 3. Determine the query time range
-    val queryTimeRange = if (infiniteTimeRange) {
-      TimeRange(0, Long.MaxValue)
-    } else {
-      // 3a. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
-      val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-        .foldLeft((Long.MinValue, Long.MaxValue)) {
-          case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
-        }
-
-      val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
-        (queryParams.endSecs * 1000) - minOffsetMs)
-      val lookBackMs = getLookBackMillis(logicalPlan).max
-
-      //3b Get the Query time range based on user provided range, offsets in previous steps and lookback
-      TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
-        periodicSeriesTimeWithOffset.endMs)
-    }
-
-    //4. Based on the map in 2 and time range in 5, get the partitions to query
-    routingKeyMap.flatMap(metricMap =>
-      partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
-  }
-
-  /**
-   * Checks if all the PartitionAssignments belong to same partition
-   */
-  private def isSinglePartition(partitions: Seq[PartitionAssignment]) : Boolean = {
-    if (partitions.isEmpty)
-      true
-    else {
-      val partName = partitions.head.partitionName
-      partitions.forall(_.partitionName.equals(partName))
-    }
   }
 
   /**

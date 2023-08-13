@@ -373,7 +373,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
       targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
-    println(execPlan.children.size)
+    println(execPlan)
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
@@ -416,7 +416,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("__name__", Equals("name")),
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
-        ), qContext, start, end, useTargetSchemaForShards = true)
+        ), qContext, start, end, useTargetSchemaForShards = (filts) => true)
     } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 

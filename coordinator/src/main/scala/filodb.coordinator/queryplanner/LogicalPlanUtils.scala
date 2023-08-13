@@ -6,7 +6,8 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.TargetSchemaProvider
-import filodb.core.query.{ColumnFilter, QueryContext, RangeParams}
+import filodb.core.query.{ColumnFilter, QueryContext, QueryUtils, RangeParams}
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
@@ -422,7 +423,15 @@ object LogicalPlanUtils extends StrictLogging {
       .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
       val shardKeyFilters = getShardKeyFilters(rs)
       val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
-      shardKeyFilters.map{ shardKey =>
+      val resolvedFilters = shardKeyFilters.flatMap{ filters =>
+        val updFilters = filters.map { filter => filter.filter match {
+          case EqualsRegex(values: String) if !QueryUtils.containsUnescapedNonPipeRegexChars(values) =>
+            values.split('|').map(value => ColumnFilter(filter.column, Equals(value))).toSeq
+          case other => Seq(filter)
+        }}
+        QueryUtils.combinations(updFilters)
+      }
+      resolvedFilters.map{ shardKey =>
         val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
       }

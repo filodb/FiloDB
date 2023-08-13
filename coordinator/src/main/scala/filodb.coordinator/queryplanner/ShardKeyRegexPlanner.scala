@@ -1,10 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.Seq
+import scala.collection.{mutable, Seq}
 
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
@@ -31,9 +31,10 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
+                           partitionLocationProvider: PartitionLocationProvider,
                            config: QueryConfig,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
-  extends QueryPlanner with DefaultPlanner {
+  extends PartitionLocationPlanner(dataset, partitionLocationProvider) {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -142,6 +143,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
+    // Materialize for each key with the inner planner if:
+    //   - all plan data lies on one partition
+    //   - all RawSeries filters are identical
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val filterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
+    val headFilters = filterGroups.headOption.map(_.toSet)
+    // Note: unchecked .get is OK here since it will only be called for each tail element.
+    val sameFilters = filterGroups.tail.forall(_.toSet == headFilters.get)
+    val partitions = getShardKeys(logicalPlan)
+      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
+    if (partitions.isEmpty) {
+      return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
+    } else if (sameFilters && isSinglePartition(partitions)) {
+      val plans = generateExecForEachKey(logicalPlan, getShardKeys(logicalPlan), qContext)
+      return PlanResult(plans)
+    }
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -165,39 +183,76 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     generateExecForEachKey(logicalPlan, shardKeyMatches, qContext)
   }
 
+  /**
+   * Updates the time params and query of the the argument PromQlQueryParams according to the argument LogicalPlan.
+   */
+  private def updateQueryParams(logicalPlan: LogicalPlan,
+                                queryParams: PromQlQueryParams): PromQlQueryParams = {
+    logicalPlan match {
+      case tls: TopLevelSubquery => {
+        val instantTime = queryParams.startSecs
+        queryParams.copy(
+          promQl = LogicalPlanParser.convertToQuery(logicalPlan),
+          startSecs = instantTime,
+          endSecs = instantTime
+        )
+      }
+      case psp: PeriodicSeriesPlan => {
+        queryParams.copy(
+          promQl = LogicalPlanParser.convertToQuery(logicalPlan),
+          startSecs = psp.startMs / 1000,
+          endSecs = psp.endMs / 1000,
+          stepSecs = psp.stepMs / 1000
+        )
+      }
+      case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan))
+    }
+  }
+
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
                                      qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val skipAggregatePresentValue = keys.length > 1
-    keys.map { result =>
-      val newLogicalPlan = logicalPlan.replaceFilters(result)
+
+    // maps individual partitions to the sequence of shard-keys they contain.
+    val partitionsToKeys = new mutable.HashMap[String, mutable.Buffer[Seq[ColumnFilter]]]()
+    keys.foreach { key =>
+      val newLogicalPlan = logicalPlan.replaceFilters(key)
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
       // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
-      val newQueryParams = logicalPlan match {
-        case tls: TopLevelSubquery => {
-          val instantTime = queryParams.startSecs
-          queryParams.copy(
-            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
-            startSecs = instantTime,
-            endSecs = instantTime
-          )
-        }
-        case psp: PeriodicSeriesPlan => {
-          queryParams.copy(
-            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
-            startSecs = psp.startMs / 1000,
-            endSecs = psp.endMs / 1000,
-            stepSecs = psp.stepMs / 1000
-          )
-        }
-        case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+      getPartitions(newLogicalPlan, newQueryParams)
+        .map(_.partitionName)
+        .distinct
+        .foreach(part => partitionsToKeys.getOrElseUpdate(part, new mutable.ArrayBuffer).append(key))
+    }
+
+    val skipAggregatePresentValue = partitionsToKeys.size > 1
+    partitionsToKeys.map{ case (part, keys) =>
+      // Create a map of key->values, then create a ColumnFilter for each key.
+      val keyToValues = new mutable.HashMap[String, mutable.Set[String]]()
+      keys.flatten.foreach{ filter =>
+        // Find the key's list of values in the map (or create it), then add the filter's values.
+        val values = keyToValues.getOrElseUpdate(filter.column, new mutable.HashSet[String]())
+        filter.filter.valuesStrings.map(_.toString).foreach(values.add)
       }
+      val newFilters = keyToValues.map{case (key, values) =>
+        val filter = if (values.size == 1) {
+          Filter.Equals(values.head)
+        } else {
+          // Concatenate values with "|" for multi-valued keys.
+          Filter.EqualsRegex(values.toSeq.sorted.mkString("|"))
+        }
+        ColumnFilter(key, filter)
+      }.toSeq
+      // Update the LogicalPlan with the new partition-specific filters, then materialize.
+      val newLogicalPlan = logicalPlan.replaceFilters(newFilters)
+      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
       val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
         copy(skipAggregatePresent = skipAggregatePresentValue))
       queryPlanner.materialize(newLogicalPlan, newQueryContext)
-    }
+    }.toSeq
   }
 
   /**
