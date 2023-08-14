@@ -1961,6 +1961,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }
     }
 
+    //  Sum()
+    //    Stitch()
+     //     RemoteExec(test{job="app"}[])
+     //     RemoteExec(test{job="app"}[])
+    //
+
+
     val tests = Seq(
       // aggregate
       Test("""sum(test{job="app"} offset 10m)""",

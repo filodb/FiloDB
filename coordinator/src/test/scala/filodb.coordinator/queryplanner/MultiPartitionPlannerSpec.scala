@@ -15,7 +15,7 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
+import filodb.query.{IntervalSelector, LabelCardinality, LogicalPlan, PlanValidationSpec, RawSeries, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
@@ -1633,5 +1633,34 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams(test{job="app2"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@73c48264)"""
     validatePlan(remoteExecPlan, expectedRemotePlan)
   }
+
+  it("should generate generate a raw export from remote from multiple partitions and stitch") {
+
+    def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+        localPartitionStart * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
+        TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app"))) twoPartitions(timeRange)
+        else Nil
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
+
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = RawSeries(rangeSelector =  IntervalSelector(startSeconds, endSeconds),
+                         filters =  Seq(ColumnFilter("job", Equals("job")), ColumnFilter("__name__", Equals("test"))),
+                         columns =  Nil,
+                         supportsRemoteDataCall = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    print(execPlan.toString)
+  }
+
 
 }

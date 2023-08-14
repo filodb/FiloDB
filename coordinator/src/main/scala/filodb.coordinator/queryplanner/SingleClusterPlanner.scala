@@ -14,7 +14,6 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
@@ -83,6 +82,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
+
 
   val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
     .withTag("cluster", clusterName)
@@ -262,16 +262,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
   // scalastyle:off method.length
-
-  private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
-    rangeSelector match {
-      case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
-      case AllChunksSelector          => AllChunkScan
-      case WriteBufferSelector        => WriteBufferChunkScan
-      case InMemoryChunksSelector     => InMemoryChunkScan
-      case x @ _                      => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
-    }
-  }
 
   /**
     * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,

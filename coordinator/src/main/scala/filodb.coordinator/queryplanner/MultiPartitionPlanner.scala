@@ -112,20 +112,28 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // stitching across time, we need to to pass proper parameters to getPartitions() call
     val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
-
-    if (isSinglePartition(partitions)) {
-
-      val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
+    if(forceInProcess) {
+      // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
+      // raw series is doing a remote call to get all the data.
+      logicalPlan match {
+        case lp: RawSeries    =>
+           assert(lp.supportsRemoteDataCall, "RawSeries with forceInProcess set to true only supports remote data call")
+           ???
+        case _ : LogicalPlan  => super.walkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
+      }
+    } else {
+      if (isSinglePartition(partitions)) {
+        val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
           case Some(pa: PartitionAssignment)
-                                         => (pa.partitionName, params.startSecs * 1000L,
-                                                params.endSecs * 1000L, pa.grpcEndPoint)
-          case None                      => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
+          => (pa.partitionName, params.startSecs * 1000L,
+            params.endSecs * 1000L, pa.grpcEndPoint)
+          case None => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
         }
 
         // If the plan is on a single partition, then depending on partition name we either delegate to local or
         // remote planner
         val execPlan = if (partitionName.equals(localPartitionName)) {
-            localPartitionPlanner.materialize(logicalPlan, qContext)
+          localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
           val remoteContext = logicalPlan match {
             case tls: TopLevelSubquery =>
@@ -155,7 +163,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           }
         }
         PlanResult(Seq(execPlan))
-    } else walkMultiPartitionPlan(logicalPlan, qContext)
+      } else walkMultiPartitionPlan(logicalPlan, qContext)
+    }
   }
   // scalastyle:on method.length
 
@@ -482,6 +491,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize if any
    *   of the plan's BinaryJoins contain an offset.
    */
+  //scalastyle:off method.length
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
     validateSplitLeafPlan(logicalPlan)
@@ -489,13 +499,65 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // get a mapping of assignments to time-ranges to query
     val assignmentRanges = {
       // "distinct" in case this is a BinaryJoin
-      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
-      val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val lookbackMs = getLookBackMillis(logicalPlan).max
       val offsetMs = getOffsetMillis(logicalPlan).max
+      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
+      val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
       getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
+    }
+    require(!assignmentRanges.isEmpty, s"Assignment ranges is not expected to be empty for query ${qParams.promQl}")
+    val (_, execPlans) = assignmentRanges.foldLeft(
+                          (None: Option[(PartitionAssignment, TimeRange)], Nil: List[ExecPlan]))
+    {
+      case (acc, next) => acc match {
+        case (Some((prevAssignment, prevTimeRange)), ep : Seq[ExecPlan])      =>
+            val (currentAssignment, currentTimeRange) = next
+            val currentPartRange = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
+            endSecs = currentTimeRange.endMs / 1000)
+
+
+          // TODO: ALl this will be protected by the flag whether or not we want to enable stitching
+
+            //  We need to perform raw data export from two partitions, the partition on the left and partition
+            //  on the right, the missing data requires to get data
+            //
+            //
+            // We will always need the offsetMs + lookbackMillis of raw data from potentially both left and right
+            // partitions. If the end time range of previous query is same as the previous assignment end time range,
+            // no data from the partition is needed, similarly when the start date of the right partition less then
+            // the start time of the query in right partition, we need raw data from left partition.
+          // TODO: Have configs to not perform raw exports if the export is beyond a certain value, for example
+          //  foo{}[10d] or foo[2d] offset 8d  both will export 10 days of raw data which might cause heap pressure and
+          //  OOMs. The max cross partition raw export config can control such queries from bring the process down but
+          //  simpler queries with few minutes or even hour or two of lookback/offset will continue to work seamlessly
+          //  with no data gaps
+          // Period to perform raw export offsetMs + lookbackMs
+          // If previous end is < previous partition's end time, we need data from
+          if (prevTimeRange.endMs < prevAssignment.timeRange.endMs) {
+            // Walk the plan to make all RawSeries support remote and materialize getting the data from next partition
+
+          }
+
+          // If current start is > partitions's start time, export raw data from previous partition
+          if (currentTimeRange.startMs > currentAssignment.timeRange.startMs) {
+            // Walk the plan to make all RawSeries support remote and materialize with
+          }
+
+
+          val newParams = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
+            endSecs = currentTimeRange.endMs / 1000)
+          val newContext = qContext.copy(origQueryParams = newParams)
+
+            (Some(next), materializeForPartition(logicalPlan, currentAssignment, newContext) :: ep)
+
+        case (None, ep: List[ExecPlan])                                         =>
+          val (assignment, range) = next
+          val newParams = qParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000)
+          val newContext = qContext.copy(origQueryParams = newParams)
+          (Some(next), materializeForPartition(logicalPlan, assignment, newContext) :: ep)
+      }
     }
     // materialize a plan for each range/assignment pair
     val plans = assignmentRanges.map { case (part, range) =>
@@ -505,18 +567,18 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       materializeForPartition(logicalPlan, part, newContext)
     }
     // stitch if necessary
-    val resPlan = if (plans.size == 1) {
-      plans.head
+    val resPlan = if (execPlans.size == 1) {
+      execPlans.head
     } else {
       // returns NaNs for missing timestamps
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), plans)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans.reverse)
     }
     PlanResult(Seq(resPlan))
   }
-
+  //scalastyle:on method.length
   /**
    * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
    */

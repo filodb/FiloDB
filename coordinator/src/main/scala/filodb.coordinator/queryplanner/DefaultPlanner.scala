@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
+import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
@@ -32,7 +33,17 @@ trait  DefaultPlanner {
       vectors
     }
 
-    def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
+    def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
+      rangeSelector match {
+        case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
+        case AllChunksSelector => AllChunkScan
+        case WriteBufferSelector => WriteBufferChunkScan
+        case InMemoryChunksSelector => InMemoryChunkScan
+        case x@_ => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
+      }
+    }
+
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
 
 
     def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
@@ -510,4 +521,49 @@ object PlannerUtil extends StrictLogging {
     childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
    }
   }
+
+  def rewritePlanWithRemoteRawExport(lp: LogicalPlan): LogicalPlan =
+    lp match {
+      case lp: ApplyInstantFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplyInstantFunctionRaw =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[RawSeries])
+      case lp: Aggregate =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: BinaryJoin =>
+        lp.copy(lhs = rewritePlanWithRemoteRawExport(lp.lhs).asInstanceOf[PeriodicSeriesPlan],
+          rhs = rewritePlanWithRemoteRawExport(lp.rhs).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarVectorBinaryOperation =>
+        lp.copy(vector = rewritePlanWithRemoteRawExport(lp.vector).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplyMiscellaneousFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplySortFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarVaryingDoublePlan =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarTimeBasedPlan => lp
+      case lp: VectorPlan =>
+        lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars).asInstanceOf[ScalarPlan])
+      case lp: ScalarFixedDoublePlan => lp
+      case lp: ApplyAbsentFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplyLimitFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarBinaryOperation => lp
+      case lp: SubqueryWithWindowing =>
+        lp.copy(innerPeriodicSeries =
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries).asInstanceOf[PeriodicSeriesPlan])
+      case lp: TopLevelSubquery =>
+        lp.copy(innerPeriodicSeries =
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries).asInstanceOf[PeriodicSeriesPlan])
+      case lp: RawSeries =>
+        lp.copy(supportsRemoteDataCall = true)
+      case lp: RawChunkMeta => lp
+      case lp: PeriodicSeries =>
+        lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries).asInstanceOf[RawSeriesLikePlan])
+      case lp: PeriodicSeriesWithWindowing =>
+        lp.copy(series = rewritePlanWithRemoteRawExport(lp.series).asInstanceOf[RawSeriesLikePlan])
+      case lp: MetadataQueryPlan => lp
+      case lp: TsCardinalities => lp
+    }
 }
