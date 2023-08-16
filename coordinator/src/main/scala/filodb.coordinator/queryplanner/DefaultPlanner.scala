@@ -6,8 +6,11 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
+import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
+import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
@@ -96,13 +99,70 @@ trait  DefaultPlanner {
         case lp: ScalarBinaryOperation       => this.materializeScalarBinaryOperation(qContext, lp, forceInProcess)
         case lp: SubqueryWithWindowing       => this.materializeSubqueryWithWindowing(qContext, lp, forceInProcess)
         case lp: TopLevelSubquery            => this.materializeTopLevelSubquery(qContext, lp, forceInProcess)
+        case lp: PeriodicSeries              => this.materializePeriodicSeries(qContext, lp, forceInProcess)
         case _: RawSeries                   |
              _: RawChunkMeta                |
-             _: PeriodicSeries              |
              _: PeriodicSeriesWithWindowing |
              _: MetadataQueryPlan           |
              _: TsCardinalities              => throw new IllegalArgumentException("Unsupported operation")
     }
+
+  private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]):
+              (Option[String], Option[String], Either[PeriodicSeries, PeriodicSeriesWithWindowing])= {
+    val rawSeries = lp match {
+      case Right(value) => value.series
+      case Left(value) => value.rawSeries
+    }
+
+    rawSeries match {
+      case rawSeriesLp: RawSeries =>
+
+        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+          map(_.filter.valuesStrings.head.toString)
+        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
+
+        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
+        else {
+          val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+            filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+            Equals(nameFilter.get.replace("_bucket", "")))
+          val newLp =
+            if (lp.isLeft)
+              Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+            else
+              Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+          (nameFilter, leFilter, newLp)
+        }
+      case _ => (None, None, lp)
+    }
+  }
+
+  def materializePeriodicSeries(qContext: QueryContext,
+                                lp: PeriodicSeries,
+                                forceInProcess: Boolean): PlanResult = {
+
+    // Convert to FiloDB histogram by removing le label and bucket prefix
+    // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
+    // with _sum/_count as suffix
+    val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
+    if (queryConfig.translatePromToFilodbHistogram) {
+      val result = removeBucket(Left(lp))
+      (result._1, result._2, result._3.left.get)
+
+    } else (None, None, lp)
+
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
+      None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
+
+    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
+        lp.endMs / 1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
+    }
+    rawSeries
+  }
 
     def materializeApplyInstantFunction(qContext: QueryContext,
                                         lp: ApplyInstantFunction,

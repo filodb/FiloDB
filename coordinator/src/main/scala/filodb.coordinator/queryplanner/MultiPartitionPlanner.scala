@@ -110,7 +110,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // and not well tested. The logic below would not work well for any kind of subquery since their actual
     // start and ends are different from the start/end parameter of the query context. If we are to implement
     // stitching across time, we need to to pass proper parameters to getPartitions() call
-    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val paramToCheckPartitions = qContext.origQueryParams.asInsta'nceOf[PromQlQueryParams]
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
     if(forceInProcess) {
       // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
@@ -119,7 +119,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case lp: RawSeries    =>
            assert(lp.supportsRemoteDataCall, "RawSeries with forceInProcess set to true only supports remote data call")
            ???
-        case _ : LogicalPlan  => super.walkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
+        case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
       if (isSinglePartition(partitions)) {
@@ -507,6 +507,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
     }
+    walkLogicalPlanTree(logicalPlan, qContext, true)
     require(!assignmentRanges.isEmpty, s"Assignment ranges is not expected to be empty for query ${qParams.promQl}")
     val (_, execPlans) = assignmentRanges.foldLeft(
                           (None: Option[(PartitionAssignment, TimeRange)], Nil: List[ExecPlan]))
