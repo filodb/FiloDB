@@ -109,7 +109,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     val taskOfResults = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
-        val it = aggMap.toSeq.sortBy(-_._2.total).map{ case (group, counts) =>
+        val it = aggMap.toSeq.sortBy(-_._2.shortTerm).map{ case (group, counts) =>
           CardRowReader(group, counts)
         }.iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
@@ -462,9 +462,21 @@ final case object TsCardExec {
 
   val PREFIX_DELIM = ","
 
+  /**
+   * This is the V1 schema version of QueryResult for TSCardinalities query
+   */
+  val RESULT_SCHEMA_V1 = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
+                                          ColumnInfo("active", ColumnType.IntColumn),
+                                          ColumnInfo("total", ColumnType.IntColumn)), 1)
+
+  /**
+   * V2 schema version of QueryResult for TSCardinalities query. One more additional column `longterm` is added
+   * to represent the cardinality count of downsample clusters
+   */
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.IntColumn),
-                                       ColumnInfo("total", ColumnType.IntColumn)), 1)
+                                       ColumnInfo("shortTerm", ColumnType.IntColumn),
+                                       ColumnInfo("longTerm", ColumnType.IntColumn)), 1)
 
   /**
    * Convert a shard key prefix to a row's group name.
@@ -474,13 +486,28 @@ final case object TsCardExec {
     prefix.mkString(PREFIX_DELIM).utf8
   }
 
-  case class CardCounts(active: Int, total: Int) {
-    if (total < active) {
-      qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")
+  /**
+   * @param prefix ShardKeyPrefix from the Cardinality Record
+   * @param datasetName FiloDB dataset name
+   * @return concatenation of ShardKeyPrefix and filodb dataset
+   */
+  def prefixToGroupWithDataset(prefix: Seq[String], datasetName: String):ZeroCopyUTF8String = {
+    s"${prefix.mkString(PREFIX_DELIM)}$PREFIX_DELIM$datasetName".utf8
+  }
+
+  /**
+   * @param active Actively (1 hourt) Ingesting Cardinality Count
+   * @param shortTerm This is the 7 day running Cardinality Count
+   * @param longTerm upto 6 month running Cardinality Count
+   */
+  case class CardCounts(active: Int, shortTerm: Int, longTerm: Int = 0) {
+    if (shortTerm < active) {
+      qLogger.warn(s"CardCounts created with total < active; shortTerm: $shortTerm, active: $active")
     }
     def add(other: CardCounts): CardCounts = {
       CardCounts(active + other.active,
-                 total + other.total)
+                 shortTerm + other.shortTerm,
+                 longTerm + other.longTerm)
     }
   }
 
@@ -489,7 +516,8 @@ final case object TsCardExec {
     override def getBoolean(columnNo: Int): Boolean = ???
     override def getInt(columnNo: Int): Int = columnNo match {
       case 1 => counts.active
-      case 2 => counts.total
+      case 2 => counts.shortTerm
+      case 3 => counts.longTerm
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
     override def getLong(columnNo: Int): Long = ???
@@ -514,8 +542,7 @@ final case object TsCardExec {
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
-      val counts = CardCounts(rr.getInt(1),
-                              rr.getInt(2))
+      val counts = CardCounts(rr.getInt(1), rr.getInt(2), rr.getInt(3))
       RowData(group, counts)
     }
   }
@@ -530,12 +557,16 @@ final case class TsCardExec(queryContext: QueryContext,
                             dataset: DatasetRef,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
-                            numGroupByFields: Int) extends LeafExecPlan with StrictLogging {
+                            numGroupByFields: Int,
+                            clusterName: String) extends LeafExecPlan with StrictLogging {
   require(numGroupByFields >= 1,
     "numGroupByFields must be positive")
   require(numGroupByFields >= shardKeyPrefix.size,
     s"numGroupByFields ($numGroupByFields) must indicate at least as many " +
     s"fields as shardKeyPrefix.size (${shardKeyPrefix.size})")
+
+  // Making the passed cluster name to lowercase to avoid case complexities for string comparisions
+  val clusterNameLowercase = clusterName.toLowerCase()
 
   override def enforceSampleLimit: Boolean = false
 
@@ -547,15 +578,27 @@ final case class TsCardExec(queryContext: QueryContext,
 
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-
     val rvs = source match {
       case tsMemStore: TimeSeriesStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
-            CardRowReader(prefixToGroup(card.prefix),
-              CardCounts(card.value.activeTsCount, card.value.tsCount))
+            val groupKey = prefixToGroupWithDataset(card.prefix, dataset.dataset)
+
+            // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
+            // user perspective, the cardinality data in downsample is a longterm data. Hence, we are forking the
+            // data path based on the cluster the data is being served from
+            if (clusterNameLowercase.contains("downsample")) {
+              CardRowReader(
+                groupKey,
+                CardCounts(0, 0, card.value.tsCount))
+            }
+            else {
+              CardRowReader(
+                groupKey,
+                CardCounts(card.value.activeTsCount, card.value.tsCount))
+            }
           }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }

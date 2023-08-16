@@ -247,7 +247,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.toArray shouldEqual jobQueryResult3
   }
 
-  it ("timeseries cardinality remote exec") {
+  it ("timeseries cardinality version 1 remote exec") {
     import TsCardExec._
     import TsCardinalities._
 
@@ -282,6 +282,54 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
           val prefix = SHARD_KEY_LABELS.map(s.group(_))
           val counts = CardCounts(s.cardinality("active"), s.cardinality("total"))
           RowData(prefixToGroup(prefix), counts)
+        }.toSet
+        rows shouldEqual expRows
+    }
+  }
+
+  it("timeseries cardinality version 2 remote exec") {
+    import TsCardExec._
+    import TsCardinalities._
+
+    val samples = Seq(
+      TsCardinalitiesSamplV2(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "baz"),
+        Map("active" -> 123, "shortTerm" -> 234, "longTerm" -> 500), "raw", "prometheus"),
+      TsCardinalitiesSamplV2(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "bat"),
+        Map("active" -> 345, "shortTerm" -> 456, "longTerm" -> 1000), "aggregated", "prometheus_preagg"),
+      TsCardinalitiesSamplV2(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "bak"),
+        Map("active" -> 567, "shortTerm" -> 678, "longTerm" -> 0), "recordingrules", "prometheus_rules_1m"),
+    )
+
+    val testingBackendTsCard: SttpBackend[Future, Nothing] = SttpBackendStub.asynchronousFuture
+      .whenRequestMatches(_.uri.path.startsWith(List("api", "v2", "metering", "cardinality", "timeseries"))
+      )
+      .thenRespondWrapped(Future {
+        Response(Right(Right(MetadataSuccessResponse(samples, "success", Option.empty, Option.empty))),
+          StatusCodes.PartialContent, "", Nil, Nil)
+      })
+
+    val exec: MetadataRemoteExec = MetadataRemoteExec(
+      "http://localhost:31007/api/v2/metering/cardinality/timeseries", 10000L,
+      Map("match[]" -> """{_ws_="foo", _ns_="bar"}""", "numGroupByFields" -> "3", "verbose" -> "true",
+      "datasets" -> "longtime-prometheus,longtime-prometheus_preagg,recordingrules-prometheus_rules_1m"),
+      QueryContext(origQueryParams = PromQlQueryParams("test", 123L, 234L, 15L,
+        Option("http://localhost:31007/api/v2/metering/cardinality/timeseries"))),
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(),
+        testingBackendTsCard), queryConfig)
+
+    val resp = exec.execute(memStore, querySession).runToFuture.futureValue
+    val result = (resp: @unchecked) match {
+      case QueryResult(id, _, response, _, _, _, _) =>
+        // should only contain a single RV where each row describes a single group's cardinalities
+        response.size shouldEqual 1
+        val rows = response.head.rows().map { rr =>
+          RowData.fromRowReader(rr)
+        }.toSet
+        val expRows = samples.map { s =>
+          // order the shard keys according to precedence
+          val prefix = SHARD_KEY_LABELS.map(s.group(_))
+          val counts = CardCounts(s.cardinality("active"), s.cardinality("shortTerm"), s.cardinality("longTerm"))
+          RowData(prefixToGroupWithDataset(prefix, s._type), counts)
         }.toSet
         rows shouldEqual expRows
     }

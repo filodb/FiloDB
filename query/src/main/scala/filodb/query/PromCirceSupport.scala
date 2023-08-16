@@ -21,6 +21,8 @@ object PromCirceSupport {
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
     case t @ TsCardinalitiesSampl(group, cardinality) =>
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
+    case a @ TsCardinalitiesSamplV2(group, cardinality, dataset, _type) =>
+        Json.fromValues(Seq(group.asJson, cardinality.asJson, dataset.asJson, _type.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -57,10 +59,22 @@ object PromCirceSupport {
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
         } else if (c.downField("group").focus.nonEmpty) {
-          for {
-            group <- c.get[Map[String, String]]("group")
-            card <- c.get[Map[String, Int]]("cardinality")
-          } yield TsCardinalitiesSampl(group, card)
+            // V2 Cardinality API also has a dataset field. So we are using it to distinguish
+            // between the TsCardinalitiesSamplV2 vs TsCardinalitiesSampl response
+            if (c.downField("dataset").focus.nonEmpty) {
+              for {
+                group <- c.get[Map[String, String]]("group")
+                card <- c.get[Map[String, Int]]("cardinality")
+                dataset <- c.get[String]("dataset")
+                _type <- c.get[String]("_type")
+              } yield TsCardinalitiesSamplV2(group, card, dataset, _type)
+            }
+            else {
+              for {
+                group <- c.get[Map[String, String]]("group")
+                card <- c.get[Map[String, Int]]("cardinality")
+              } yield TsCardinalitiesSampl(group, card)
+            }
         } else {
           throw new IllegalArgumentException("could not decode any expected cardinality-related field")
         }
