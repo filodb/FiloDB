@@ -2,7 +2,6 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
-import filodb.query.exec.TsCardExec
 
 //scalastyle:off number.of.types
 //scalastyle:off file.size.limit
@@ -185,7 +184,8 @@ object TsCardinalities {
 case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
                            version: Int = 1,
-                           datasets: Seq[String] = Seq()) extends LogicalPlan {
+                           datasets: Seq[String] = Seq(),
+                           userDatasets: String = "") extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
@@ -212,7 +212,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
                        .mkString(",") + "}"),
         "numGroupByFields" -> numGroupByFields.toString,
         "verbose" -> "true", // Using this plan to determine if we need to pass additional values in groupKey or not
-        "datasets" -> datasets.mkString(TsCardExec.PREFIX_DELIM)
+        "datasets" -> userDatasets
     )
   }
 }
