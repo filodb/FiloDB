@@ -582,48 +582,63 @@ object PlannerUtil extends StrictLogging {
    }
   }
 
-  def rewritePlanWithRemoteRawExport(lp: LogicalPlan): LogicalPlan =
+  //scalastyle:off method.length
+  def rewritePlanWithRemoteRawExport(lp: LogicalPlan, additionalLookback: Option[Long] = None): LogicalPlan =
     lp match {
       case lp: ApplyInstantFunction =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplyInstantFunctionRaw =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[RawSeries])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback).asInstanceOf[RawSeries])
       case lp: Aggregate =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: BinaryJoin =>
-        lp.copy(lhs = rewritePlanWithRemoteRawExport(lp.lhs).asInstanceOf[PeriodicSeriesPlan],
-          rhs = rewritePlanWithRemoteRawExport(lp.rhs).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(lhs = rewritePlanWithRemoteRawExport(lp.lhs, additionalLookback).asInstanceOf[PeriodicSeriesPlan],
+          rhs = rewritePlanWithRemoteRawExport(lp.rhs, additionalLookback).asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarVectorBinaryOperation =>
-        lp.copy(vector = rewritePlanWithRemoteRawExport(lp.vector).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vector = rewritePlanWithRemoteRawExport(lp.vector, additionalLookback).asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplyMiscellaneousFunction =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplySortFunction =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarVaryingDoublePlan =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarTimeBasedPlan => lp
       case lp: VectorPlan =>
-        lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars).asInstanceOf[ScalarPlan])
+        lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars, additionalLookback)
+          .asInstanceOf[ScalarPlan])
       case lp: ScalarFixedDoublePlan => lp
       case lp: ApplyAbsentFunction =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplyLimitFunction =>
-        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors).asInstanceOf[PeriodicSeriesPlan])
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, additionalLookback)
+          .asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarBinaryOperation => lp
       case lp: SubqueryWithWindowing =>
         lp.copy(innerPeriodicSeries =
-          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries).asInstanceOf[PeriodicSeriesPlan])
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, additionalLookback).asInstanceOf[PeriodicSeriesPlan])
       case lp: TopLevelSubquery =>
         lp.copy(innerPeriodicSeries =
-          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries).asInstanceOf[PeriodicSeriesPlan])
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, additionalLookback).asInstanceOf[PeriodicSeriesPlan])
       case lp: RawSeries =>
-        lp.copy(supportsRemoteDataCall = true)
+        // IMPORTANT: When we export raw data over remote data call, offset does not mean anything, instead
+        // do a raw lookback of original lookback + offset and set offset to 0
+        val newLookback = lp.lookbackMs.getOrElse(0L) + lp.offsetMs.getOrElse(0L) + additionalLookback.getOrElse(0L)
+        lp.copy(supportsRemoteDataCall = true,
+          lookbackMs = if (newLookback == 0) None else Some(newLookback), offsetMs = None)
       case lp: RawChunkMeta => lp
       case lp: PeriodicSeries =>
-        lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries).asInstanceOf[RawSeriesLikePlan])
+        lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries, additionalLookback)
+          .asInstanceOf[RawSeriesLikePlan])
       case lp: PeriodicSeriesWithWindowing =>
-        lp.copy(series = rewritePlanWithRemoteRawExport(lp.series).asInstanceOf[RawSeriesLikePlan])
+        lp.copy(series = rewritePlanWithRemoteRawExport(lp.series, additionalLookback).asInstanceOf[RawSeriesLikePlan])
       case lp: MetadataQueryPlan => lp
       case lp: TsCardinalities => lp
     }
+    //scalastyle:on method.length
 }

@@ -4,6 +4,7 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.concurrent.{Map => ConcurrentMap}
+import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -110,7 +111,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // and not well tested. The logic below would not work well for any kind of subquery since their actual
     // start and ends are different from the start/end parameter of the query context. If we are to implement
     // stitching across time, we need to to pass proper parameters to getPartitions() call
-    val paramToCheckPartitions = qContext.origQueryParams.asInsta'nceOf[PromQlQueryParams]
+    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
     if(forceInProcess) {
       // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
@@ -494,6 +495,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   //scalastyle:off method.length
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
+    // TODO: Reassess this validate, we should also support binary joins in split leaf as long as they are within
+    //  the limits of max range of data exported
     validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
@@ -507,13 +510,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
     }
-    walkLogicalPlanTree(logicalPlan, qContext, true)
+    //walkLogicalPlanTree(logicalPlan, qContext, true)
     require(!assignmentRanges.isEmpty, s"Assignment ranges is not expected to be empty for query ${qParams.promQl}")
+    // materialize a plan for each range/assignment pair
     val (_, execPlans) = assignmentRanges.foldLeft(
-                          (None: Option[(PartitionAssignment, TimeRange)], Nil: List[ExecPlan]))
+                          (None: Option[(PartitionAssignment, TimeRange)], ListBuffer.empty[ExecPlan]))
     {
       case (acc, next) => acc match {
-        case (Some((prevAssignment, prevTimeRange)), ep : Seq[ExecPlan])      =>
+        case (Some((prevAssignment, prevTimeRange)), ep : ListBuffer[ExecPlan])      =>
             val (currentAssignment, currentTimeRange) = next
             val currentPartRange = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
             endSecs = currentTimeRange.endMs / 1000)
@@ -550,23 +554,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val newParams = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
             endSecs = currentTimeRange.endMs / 1000)
           val newContext = qContext.copy(origQueryParams = newParams)
+          ep += materializeForPartition(logicalPlan, currentAssignment, newContext)
+          (Some(next), ep)
 
-            (Some(next), materializeForPartition(logicalPlan, currentAssignment, newContext) :: ep)
-
-        case (None, ep: List[ExecPlan])                                         =>
+        case (None, ep: ListBuffer[ExecPlan])                                         =>
           val (assignment, range) = next
           val newParams = qParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000)
           val newContext = qContext.copy(origQueryParams = newParams)
-          (Some(next), materializeForPartition(logicalPlan, assignment, newContext) :: ep)
+          ep += materializeForPartition(logicalPlan, assignment, newContext)
+          (Some(next), ep)
       }
     }
-    // materialize a plan for each range/assignment pair
-    val plans = assignmentRanges.map { case (part, range) =>
-      val newParams = qParams.copy(startSecs = range.startMs / 1000,
-                                   endSecs = range.endMs / 1000)
-      val newContext = qContext.copy(origQueryParams = newParams)
-      materializeForPartition(logicalPlan, part, newContext)
-    }
+
+
     // stitch if necessary
     val resPlan = if (execPlans.size == 1) {
       execPlans.head
@@ -575,7 +575,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans.reverse)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans)
     }
     PlanResult(Seq(resPlan))
   }
