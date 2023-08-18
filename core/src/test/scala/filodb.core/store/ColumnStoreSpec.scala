@@ -39,8 +39,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
-    colStore.initialize(dataset.ref, 4).futureValue
-    colStore.initialize(GdeltTestData.dataset2.ref, 4).futureValue
+    colStore.initialize(dataset.ref, 4, ConfigFactory.empty).futureValue
+    colStore.initialize(GdeltTestData.dataset2.ref, 4, ConfigFactory.empty).futureValue
   }
 
   before {
