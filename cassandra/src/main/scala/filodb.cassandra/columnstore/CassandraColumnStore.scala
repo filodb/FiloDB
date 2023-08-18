@@ -4,13 +4,14 @@ import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
@@ -81,12 +82,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   val readChunksBatchLatency = Kamon.histogram("cassandra-per-batch-chunk-read-latency",
                             MeasurementUnit.time.milliseconds).withoutTags()
 
-  def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
+  def initialize(dataset: DatasetRef, numShards: Int, resources: Config): Future[Response] = {
+    // Initialize clusterConnector with dataset specific keyspaces if provided
+    initClusterConnector(dataset, resources)
     // Note the next two lines of code do not create the tables, just trigger the creation of proxy class
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
     if (createTablesEnabled) {
-      clusterConnector.createKeyspace(chunkTable.keyspace)
+      createKeyspace(dataset, chunkTable.keyspace)
       val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
       // Important: make sure nodes are in agreement before any schema changes
       clusterMeta.checkSchemaAgreement()
@@ -457,9 +460,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
   // scalastyle:on
 
-  def shutdown(): Unit = {
-    clusterConnector.shutdown()
-  }
+  def shutdown(): Unit = shutdownConnector
 
   private def clusterMeta: Metadata = session.getCluster.getMetadata
 
@@ -469,7 +470,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    * @return each split will have token_start, token_end, replicas filled in
    */
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = numTokenRangeSplitsForScans): Seq[ScanSplit] = {
-    val keyspace = clusterConnector.keyspace
+    val keyspace = getKeyspace(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
     val tokenRanges = unwrapTokenRanges(clusterMeta.getTokenRanges.asScala.toSeq)
@@ -651,14 +652,27 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val partitionKeysTableCache = concurrentCache[DatasetRef,
                                   ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
 
-  protected val clusterConnector = new FiloCassandraConnector {
-    def config: Config = cassandraConfig
+  private val clusterConnectors: mutable.Map[String, FiloCassandraConnector] = mutable.Map.empty
+
+  private def getClusterConnector(dataset: DatasetRef): FiloCassandraConnector =
+    clusterConnectors.getOrElseUpdate(dataset.dataset, newClusterConnector(ConfigFactory.empty))
+
+  protected def initClusterConnector(dataset: DatasetRef, resources: Config): Unit =
+    clusterConnectors(dataset.dataset) = newClusterConnector(resources)
+
+  protected def shutdownConnector = clusterConnectors.headOption.map(_._2.shutdown())
+
+  private def newClusterConnector(resources: Config) = new FiloCassandraConnector {
+    def config: Config = if (resources.hasPath("cassandra"))
+                            resources.getConfig("cassandra").withFallback(cassandraConfig)
+                         else
+                            cassandraConfig
     def session: Session = CassandraChunkSource.this.session
     def ec: ExecutionContext = readEc
 
     val keyspace: String = if (!downsampledData) config.getString("keyspace")
                            else config.getString("downsample-keyspace")
-}
+  }
 
   /**
     * Read chunks from persistent store. Note the following constraints under which query is optimized:
@@ -701,21 +715,24 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreateChunkTable(dataset: DatasetRef): TimeSeriesChunksTable = {
+
     chunkTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel, readConsistencyLevel)(readEc) })
+      new TimeSeriesChunksTable(dataset, getClusterConnector(dataset),
+        ingestionConsistencyLevel, readConsistencyLevel)(readEc) })
   }
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
                         { dataset: DatasetRef =>
-                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel,
+                          new IngestionTimeIndexTable(dataset,
+                            getClusterConnector(dataset), ingestionConsistencyLevel,
                             readConsistencyLevel)(readEc) })
 }
 
   def getOrCreatePartitionKeysV2Table(dataset: DatasetRef): PartitionKeysV2Table = {
     require(partKeysV2TableEnabled) // to make sure we don't trigger table creation unintentionally
     partKeysV2TableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new PartitionKeysV2Table(dataset, clusterConnector, ingestionConsistencyLevel,
+      new PartitionKeysV2Table(dataset, getClusterConnector(dataset), ingestionConsistencyLevel,
         readConsistencyLevel)(readEc)
     })
   }
@@ -723,7 +740,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
-        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel,
+        new PartitionKeysByUpdateTimeTable(dataset, getClusterConnector(dataset), ingestionConsistencyLevel,
           readConsistencyLevel)(readEc) })
   }
 
@@ -733,9 +750,15 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       concurrentCache[Int, PartitionKeysTable](tableCacheSize)
     })
     map.getOrElseUpdate(shard, { shard: Int =>
-      new PartitionKeysTable(dataset, shard, clusterConnector, ingestionConsistencyLevel, readConsistencyLevel)(readEc)
+      new PartitionKeysTable(dataset, shard, getClusterConnector(dataset),
+        ingestionConsistencyLevel, readConsistencyLevel)(readEc)
     })
   }
+
+  def getKeyspace(dataset: DatasetRef): String = getClusterConnector(dataset).keyspace
+
+  def createKeyspace(dataset: DatasetRef, keyspace: String): Unit =
+    getClusterConnector(dataset).createKeyspace(keyspace)
 
   def reset(): Unit = {}
 
