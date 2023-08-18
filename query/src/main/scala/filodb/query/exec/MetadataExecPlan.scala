@@ -558,7 +558,8 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             numGroupByFields: Int,
-                            clusterName: String) extends LeafExecPlan with StrictLogging {
+                            clusterName: String,
+                            version: Int) extends LeafExecPlan with StrictLogging {
   require(numGroupByFields >= 1,
     "numGroupByFields must be positive")
   require(numGroupByFields >= shardKeyPrefix.size,
@@ -584,8 +585,14 @@ final case class TsCardExec(queryContext: QueryContext,
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
-            val groupKey = prefixToGroupWithDataset(card.prefix, dataset.dataset)
 
+            // v1 and v2 cardinality have different schemas and required group key. Hence we are segregating
+            // w.r.t to the version
+            val groupKey =
+              version match {
+                case 1 => prefixToGroup(card.prefix)
+                case _ => prefixToGroupWithDataset(card.prefix, dataset.dataset)
+              }
             // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
             // user perspective, the cardinality data in downsample is a longterm data. Hence, we are forking the
             // data path based on the cluster the data is being served from
@@ -605,7 +612,11 @@ final case class TsCardExec(queryContext: QueryContext,
       case other =>
         Observable.empty
     }
-    ExecResult(rvs, Task.eval(RESULT_SCHEMA))
+    // Sending V1 SCHEMA for v1 queries
+    version match {
+      case 1 => ExecResult(rvs, Task.eval(RESULT_SCHEMA_V1))
+      case _ => ExecResult(rvs, Task.eval(RESULT_SCHEMA))
+    }
   }
   // scalastyle:on method.length
 
