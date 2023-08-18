@@ -619,7 +619,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp, qContext)
         else {
-          createMetadataRemoteExec(qContext, p, lp.queryParams())
+          val newQueryContext = qContext.copy(origQueryParams = queryParams.copy(verbose = true))
+          createMetadataRemoteExec(newQueryContext, p, lp.queryParams())
         }
       }
       if (execPlans.size == 1) {

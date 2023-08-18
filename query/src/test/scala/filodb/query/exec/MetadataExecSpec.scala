@@ -406,12 +406,12 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
       val leavesRaw = (0 until shardPartKeyLabelValues.size).map{ ishard =>
         new TsCardExec(QueryContext(), executeDispatcher,timeseriesDatasetMultipleShardKeys.ref,
-          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "raw")
+          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "raw", 2)
       }.toSeq
       // UPDATE: Simulating the call to downsample cluster to get longterm metrics as well
       val leavesDownsample = (0 until shardPartKeyLabelValues.size).map { ishard =>
         new TsCardExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
-          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "downsample")
+          ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "downsample", 2)
       }.toSeq
 
       val allLeaves = leavesRaw ++ leavesDownsample
