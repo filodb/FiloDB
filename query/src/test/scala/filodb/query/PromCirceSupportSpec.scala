@@ -205,6 +205,98 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
   }
 
+  it("should parse TsCardinalitiesSamplV2") {
+    val expected = Seq(
+      TsCardinalitiesSamplV2(
+        Map("_ws_" -> "demo", "_ns_" -> "App-0", "_metric_" -> "heap_usage"),
+        Map("active" -> 2, "shortTerm" -> 3, "longTerm" -> 5),
+        "raw",
+        "prometheus"),
+      TsCardinalitiesSamplV2(
+        Map("_ws_" -> "demo", "_ns_" -> "App-1"),
+        Map("active" -> 6, "shortTerm" -> 8, "longTerm" -> 0),
+        "recordingrules",
+        "prometheus_rules_1m"),
+      TsCardinalitiesSamplV2(
+        Map("_ws_" -> "demo", "_ns_" -> "App-2"),
+        Map("active" -> 14, "shortTerm" -> 28, "longTerm" -> 0),
+        "recordingrules",
+        "prometheus_rules_longterm"),
+      TsCardinalitiesSamplV2(
+        Map("_ws_" -> "demo", "_ns_" -> "App-3", "_metric_" -> "heap_usage:::agg"),
+        Map("active" -> 11, "shortTerm" -> 22, "longTerm" -> 33),
+        "aggregated",
+        "prometheus_preagg")
+    )
+    val inputString =
+      """{
+        |    "status": "success",
+        |    "data": [
+        |        {
+        |            "_type": "prometheus",
+        |            "dataset": "raw",
+        |            "cardinality": {
+        |                "active": 2,
+        |                "longTerm": 5,
+        |                "shortTerm": 3
+        |            },
+        |            "group": {
+        |                "_ns_": "App-0",
+        |                "_ws_": "demo",
+        |                "_metric_": "heap_usage"
+        |            }
+        |        },
+        |        {
+        |            "_type": "prometheus_rules_1m",
+        |            "dataset": "recordingrules",
+        |            "cardinality": {
+        |                "active": 6,
+        |                "longTerm": 0,
+        |                "shortTerm": 8
+        |            },
+        |            "group": {
+        |                "_ns_": "App-1",
+        |                "_ws_": "demo"
+        |            }
+        |        },
+        |        {
+        |            "_type": "prometheus_rules_longterm",
+        |            "dataset": "recordingrules",
+        |            "cardinality": {
+        |                "active": 14,
+        |                "longTerm": 0,
+        |                "shortTerm": 28
+        |            },
+        |            "group": {
+        |                "_ns_": "App-2",
+        |                "_ws_": "demo"
+        |            }
+        |        },
+        |        {
+        |            "_type": "prometheus_preagg",
+        |            "dataset": "aggregated",
+        |            "cardinality": {
+        |                "active": 11,
+        |                "longTerm": 33,
+        |                "shortTerm": 22
+        |            },
+        |            "group": {
+        |                "_ns_": "App-3",
+        |                "_ws_": "demo",
+        |                "_metric_": "heap_usage:::agg"
+        |            }
+        |        }
+        |    ],
+        |    "errorType": null,
+        |    "error": null
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
   it("should parse aggregateResponse") {
     val input = """[{
                   |	"status": "success",

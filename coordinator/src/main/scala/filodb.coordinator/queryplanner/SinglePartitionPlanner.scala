@@ -11,15 +11,10 @@ import filodb.query.exec._
   * distributed across multiple clusters.
   *
   * @param planners map of clusters names in the local partition to their Planner objects
-  * @param defaultPlanner TsCardinalities queries are routed here.
-  *   Note: this is a temporary fix only to support TsCardinalities queries.
-  *     These must be routed to planners according to the data they govern, and
-  *     this information isn't accessible without this parameter.
   * @param plannerSelector a function that selects the planner name given the metric name
   * @param dataset a function that selects the planner name given the metric name
   */
 class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
-                             defaultPlanner: String,  // TODO: remove this-- see above.
                              plannerSelector: String => String,
                              val dataset: Dataset,
                              val queryConfig: QueryConfig)
@@ -74,9 +69,9 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   }
 
   private def materializeTsCardinalities(logicalPlan: TsCardinalities, qContext: QueryContext): PlanResult = {
-    // Delegate to defaultPlanner
-    planners.get(defaultPlanner).map(p => PlanResult(Seq(p.materialize(logicalPlan, qContext))))
-    .getOrElse(PlanResult(Seq()))
+    val execPlans = logicalPlan.datasets.map(d => planners.get(d))
+      .map(x => x.get.materialize(logicalPlan, qContext))
+    PlanResult(Seq(TsCardReduceExec(qContext, inProcessPlanDispatcher, execPlans)))
   }
 
 
