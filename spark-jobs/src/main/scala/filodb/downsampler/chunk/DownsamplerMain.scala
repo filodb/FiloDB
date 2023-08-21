@@ -133,6 +133,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         val rawDataSource = batchDownsampler.rawCassandraColStore
+        rawDataSource.initialize(batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources)
         val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
           datasetRef = batchDownsampler.rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,

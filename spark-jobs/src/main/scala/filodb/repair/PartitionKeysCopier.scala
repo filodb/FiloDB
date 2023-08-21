@@ -102,6 +102,16 @@ class PartitionKeysCopier(conf: SparkConf) {
     targetConfig, readSched, targetSession, isDownsampleCopy
   )(writeSched)
 
+  def getDatasetCassConfig(datasetConfig: Config): Config = {
+    if (datasetConfig.hasPath("cassandra"))
+      datasetConfig.getConfig("cassandra")
+    else
+      ConfigFactory.empty
+  }
+
+  sourceCassandraColStore.initialize(datasetRef, -1, getDatasetCassConfig(sourceDatasetConfig))
+  targetCassandraColStore.initialize(datasetRef, -1, getDatasetCassConfig(targetDatasetConfig))
+
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   private[repair] val noCopy = conf.getBoolean("spark.filodb.partitionkeys.copier.noCopy", false)
   private[repair] val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")

@@ -657,8 +657,10 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   private def getClusterConnector(dataset: DatasetRef): FiloCassandraConnector =
     clusterConnectors.getOrElseUpdate(dataset.dataset, newClusterConnector(ConfigFactory.empty))
 
-  protected def initClusterConnector(dataset: DatasetRef, resources: Config): Unit =
-    clusterConnectors(dataset.dataset) = newClusterConnector(resources)
+  protected def initClusterConnector(dataset: DatasetRef, resources: Config): Unit = {
+    if (!clusterConnectors.contains(dataset.dataset))
+      clusterConnectors(dataset.dataset) = newClusterConnector(resources)
+  }
 
   protected def shutdownConnector = clusterConnectors.headOption.map(_._2.shutdown())
 
