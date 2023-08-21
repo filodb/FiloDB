@@ -1769,15 +1769,18 @@ class TimeSeriesShard(val ref: DatasetRef,
                                    startTime: Long,
                                    querySession: QuerySession,
                                    limit: Int): Iterator[ZeroCopyUTF8String] = {
-    if (indexFacetingEnabledAllLabels ||
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    val startNs = Utils.currentThreadCpuTimeNanos
+    val res = if (indexFacetingEnabledAllLabels ||
       (indexFacetingEnabledShardKeyLabels && schemas.part.options.shardKeyColumns.contains(label))) {
       partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
     } else {
-      val metricShardKeys = schemas.part.options.shardKeyColumns
-      val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
       SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
         label, querySession, metricGroupBy, limit)
     }
+    querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(startNs - Utils.currentThreadCpuTimeNanos)
+    res
   }
 
   /**
@@ -1934,9 +1937,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
+        val startNs = Utils.currentThreadCpuTimeNanos
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
         querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
+        querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory

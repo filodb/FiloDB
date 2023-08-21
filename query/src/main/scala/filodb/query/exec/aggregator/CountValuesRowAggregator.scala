@@ -2,6 +2,7 @@ package filodb.query.exec.aggregator
 
 import scala.collection.mutable
 
+import filodb.core.Utils
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -83,36 +84,42 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
 
   def present(aggRangeVector: RangeVector, limit: Int,
               rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = {
-    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-      ColumnInfo("value", ColumnType.DoubleColumn))
-    val recSchema = SerializedRangeVector.toSchema(colSchema)
-    val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
+    val startNs = Utils.currentThreadCpuTimeNanos
     try {
-      FiloSchedulers.assertThreadName(QuerySchedName)
-      // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
-      ChunkMap.validateNoSharedLocks(s"CountValues-$label")
-      aggRangeVector.rows.take(limit).foreach { row =>
-        val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
-          row.getBlobNumBytes(1), row.getBlobOffset(1))
-        rowMap.foreach { (k, v) =>
-          val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
-            (label.utf8 -> k.toString.utf8))
-          val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
-          builder.startNewRecord(recSchema)
-          builder.addLong(row.getLong(0))
-          builder.addDouble(v)
-          builder.endRecord()
+      val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn))
+      val recSchema = SerializedRangeVector.toSchema(colSchema)
+      val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
+      try {
+        FiloSchedulers.assertThreadName(QuerySchedName)
+        // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
+        ChunkMap.validateNoSharedLocks(s"CountValues-$label")
+        aggRangeVector.rows.take(limit).foreach { row =>
+          val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
+            row.getBlobNumBytes(1), row.getBlobOffset(1))
+          rowMap.foreach { (k, v) =>
+            val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
+              (label.utf8 -> k.toString.utf8))
+            val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
+            builder.startNewRecord(recSchema)
+            builder.addLong(row.getLong(0))
+            builder.addDouble(v)
+            builder.endRecord()
+          }
         }
+      } finally {
+        aggRangeVector.rows.close()
+        ChunkMap.releaseAllSharedLocks()
       }
+      resRvs.map { case (key, builder) =>
+        val numRows = builder.allContainers.map(_.countRecords()).sum
+        val srv = new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0, None)
+        queryStats.getResultBytesCounter(Nil).getAndAdd(srv.estimatedSerializedBytes)
+        srv
+      }.toSeq
+    } finally {
+      queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentThreadCpuTimeNanos - startNs)
     }
-    finally {
-      aggRangeVector.rows.close()
-      ChunkMap.releaseAllSharedLocks()
-    }
-    resRvs.map { case (key, builder) =>
-      val numRows = builder.allContainers.map(_.countRecords()).sum
-      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0, None)
-    }.toSeq
   }
 
   def reductionSchema(source: ResultSchema): ResultSchema = {
