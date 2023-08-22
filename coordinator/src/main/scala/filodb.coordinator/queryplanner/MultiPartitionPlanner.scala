@@ -11,6 +11,7 @@ import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
+import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RvRange}
 import filodb.grpc.GrpcCommonUtils
@@ -106,14 +107,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
-    val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
     // and not well tested. The logic below would not work well for any kind of subquery since their actual
     // start and ends are different from the start/end parameter of the query context. If we are to implement
     // stitching across time, we need to to pass proper parameters to getPartitions() call
-    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
-    if(forceInProcess) {
+    if (forceInProcess) {
       // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
       // raw series is doing a remote call to get all the data.
       logicalPlan match {
@@ -123,6 +121,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
+      val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
       if (isSinglePartition(partitions)) {
         val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
           case Some(pa: PartitionAssignment)
@@ -500,10 +501,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
+    val lookbackMs = getLookBackMillis(logicalPlan).max
+    val offsetMs = getOffsetMillis(logicalPlan).max
     val assignmentRanges = {
       // "distinct" in case this is a BinaryJoin
-      val lookbackMs = getLookBackMillis(logicalPlan).max
-      val offsetMs = getOffsetMillis(logicalPlan).max
       val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
       val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
@@ -538,8 +539,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           //  OOMs. The max cross partition raw export config can control such queries from bring the process down but
           //  simpler queries with few minutes or even hour or two of lookback/offset will continue to work seamlessly
           //  with no data gaps
+
+          // IMPORTANT: The raw export assumes the data needs to come from just previous partition. Inthrory there can
+          // be multiple time splits and the raw export will then need to span previous n partitions and stitch the data
+          // together. However, for simplicity we will restrict this raw export to just previous partition. If the,
+          // start of raw export exceeds the previous partition assignment's start, we simply keep the gap, which is
+          // the default behavior.
           // Period to perform raw export offsetMs + lookbackMs
-          // If previous end is < previous partition's end time, we need data from
+          // If previous end is < previous partition's end time, we need data from this partition
           if (prevTimeRange.endMs < prevAssignment.timeRange.endMs) {
             // Walk the plan to make all RawSeries support remote and materialize getting the data from next partition
 
@@ -547,7 +554,25 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
           // If current start is > partitions's start time, export raw data from previous partition
           if (currentTimeRange.startMs > currentAssignment.timeRange.startMs) {
-            // Walk the plan to make all RawSeries support remote and materialize with
+            // Walk the plan to make all RawSeries support remote export fetching the data from previous partition
+            // When we rewrite the RawSeries's rangeSelector, we will make the start and end time same as the end of the
+            // previous partition's end time and then do a raw query for the duration of the
+            //  (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + offset + lookback.
+            // TODO: also use totalExpectedRawExport to block raw export if it exceeds the max permitted raw export
+            val totalExpectedRawExport =
+            (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + lookbackMs + offsetMs
+            // Only if the raw export is completely within the previous partition's timerange
+            if(prevAssignment.timeRange.endMs - totalExpectedRawExport >= prevAssignment.timeRange.startMs) {
+              val newParams = qParams.copy(startSecs = currentAssignment.timeRange.startMs / 1000,
+                endSecs = currentTimeRange.startMs / 1000 - 1)
+              val newContext = qContext.copy(origQueryParams = newParams)
+
+              val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
+                IntervalSelector(prevAssignment.timeRange.endMs, prevAssignment.timeRange.endMs),
+                additionalLookback = currentTimeRange.startMs - currentAssignment.timeRange.startMs + 1000)
+
+              ep ++= walkLogicalPlanTree(newLp, newContext, true).plans
+            }
           }
 
 
