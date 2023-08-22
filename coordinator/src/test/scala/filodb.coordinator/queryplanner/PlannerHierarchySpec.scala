@@ -2121,6 +2121,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         val splitMs = 1000 * splitSec
         List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs)),
              PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs)))
+          .filter(x => x.timeRange.startMs <= x.timeRange.endMs)
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],

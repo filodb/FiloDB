@@ -117,7 +117,18 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       logicalPlan match {
         case lp: RawSeries    =>
            assert(lp.supportsRemoteDataCall, "RawSeries with forceInProcess set to true only supports remote data call")
-           ???
+           // materialize the raw query for the partition by rewriting the prom parameters
+            val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+            val rs = lp.rangeSelector.asInstanceOf[IntervalSelector]
+            val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp),
+              startSecs = rs.from / 1000,
+              endSecs = rs.to / 1000,
+              stepSecs = 0
+            )
+            val newContext = qContext.copy(origQueryParams = newPromQlParams)
+            val partition = getPartitions(lp, newPromQlParams)
+            assert(partition.size == 1, "Raw series export is expected to be running in just one partition")
+            PlanResult(Seq(materializeForPartition(lp, partition.head, newContext)))
         case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
