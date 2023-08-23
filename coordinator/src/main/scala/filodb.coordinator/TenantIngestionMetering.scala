@@ -65,7 +65,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
     dsIterProducer().foreach { dsRef =>
       val fut = Client.asyncAsk(
         coordActorProducer(),
-        LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields)),
+        LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields, 2, overrideClusterName = CLUSTER_TYPE)),
         ASK_TIMEOUT)
       fut.onComplete {
         case Success(QueryResult(_, _, rv, _, _, _, _)) =>
