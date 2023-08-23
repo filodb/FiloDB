@@ -185,7 +185,8 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
                            version: Int = 1,
                            datasets: Seq[String] = Seq(),
-                           userDatasets: String = "") extends LogicalPlan {
+                           userDatasets: String = "",
+                           overrideClusterName: String = "") extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
