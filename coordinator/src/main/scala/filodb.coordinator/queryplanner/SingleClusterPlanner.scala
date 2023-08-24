@@ -830,9 +830,15 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeTsCardinalities(qContext: QueryContext,
                                          lp: TsCardinalities,
                                          forceInProcess: Boolean): PlanResult = {
+    // If no clusterName is passed in the logical plan, we use the passed clusterName in the SingleClusterPlanner
+    // We are using the passed cluster name in logical plan for tenant metering apis
+    val clusterNameToPass = lp.overrideClusterName match {
+      case "" => clusterName
+      case _ => lp.overrideClusterName
+    }
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterName,
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass,
         lp.version)
     }
     PlanResult(metaExec)
