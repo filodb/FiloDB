@@ -18,7 +18,6 @@ import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
-import filodb.query.exec.InternalRangeFunction.Last
 
 // scalastyle:off file.size.limit
 
@@ -553,41 +552,6 @@ class SingleClusterPlanner(val dataset: Dataset,
         materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
       }
     }
-  }
-
-  private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
-                                                     lp: PeriodicSeriesWithWindowing,
-                                                     forceInProcess: Boolean): PlanResult = {
-    val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
-       removeBucket(Right(lp))._3.right.get
-    } else lp
-
-    val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
-    val rawSource = logicalPlanWithoutBucket.series.isRaw
-
-    /* Last function is used to get the latest value in the window for absent_over_time
-    If no data is present AbsentFunctionMapper will return range vector with value 1 */
-
-    val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
-                      else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
-
-    val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
-    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
-      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
-      logicalPlanWithoutBucket.stepMultipleNotationUsed,
-      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
-    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
-      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
-                                AggregateClause.byOpt(Seq("job")))
-      // Add sum to aggregate all child responses
-      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
-      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
-      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
-        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
-          logicalPlanWithoutBucket.endMs / 1000), qContext)
-    } else series
   }
 
   /**

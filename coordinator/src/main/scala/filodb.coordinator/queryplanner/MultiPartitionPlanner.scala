@@ -570,6 +570,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             // previous partition's end time and then do a raw query for the duration of the
             //  (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + offset + lookback.
             // TODO: also use totalExpectedRawExport to block raw export if it exceeds the max permitted raw export
+
+            //           Partition split   end time for queries in partition 1
+            //                      V(p)  V(t1)
+            //  |----o----------------|---x------x-----------------------------o-------|
+            //       ^(s)                        ^(t2)                         ^(e)
+            //    Query start time     Start time in new partition          Query end time
+            //
+            // Given we have offset of 10 mins, the query range from partition P1 (left of the partition split point)
+            // is [s, p + 10m]. The offset looks at data 10 mins back, so we can extent the time range in p1 to 10 mins
+            // after the split point p
+            // We want to now provide results for time range t1 - t2, which is missing
+            // Lets assume the query is sum(rate(foo{}[5m] offset 10m))
+            // Given the offset is 10m, lookback is 5m, we would need raw data in the range
+            // [t1 - 5m - 10m, t2], this range for raw queries span two partitions
+            // we need to export foo[]
             val totalExpectedRawExport =
             (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + lookbackMs + offsetMs
             // Only if the raw export is completely within the previous partition's timerange
