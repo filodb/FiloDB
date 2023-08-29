@@ -258,7 +258,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // Sort each key into the same order as nonMetricShardKeys, then group keys with the same prefix.
     // A plan will be created for each group; this prevents the scenario mentioned in the javadoc.
     val partitionToKeyGroups = partitionsToKeys.map{ case (partition, keys) =>
-      val sortedPrefixes = keys.map(key => key.sortBy(filter => nonMetricShardKeyColToIndex(filter.column)))
+      val sortedPrefixes = keys
+        .map(key => key.sortBy(filter => nonMetricShardKeyColToIndex.getOrElse(filter.column, 0)))
         .groupBy(_.dropRight(1))
         .values
       (partition, sortedPrefixes)
