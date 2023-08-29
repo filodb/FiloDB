@@ -41,6 +41,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val datasetMetricColumn = dataset.options.metricColumn
 
+  private val nonMetricShardKeyColToIndex = dataset.options.shardKeyColumns
+    .filterNot(_ == dataset.options.metricColumn)
+    .zipWithIndex
+    .toMap
+
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
     qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
@@ -72,7 +77,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
     val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
     if (pushdownKeys.isDefined) {
-      val plans = generateExecForEachKey(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
       Some(PlanResult(plans))
     } else None
@@ -157,7 +162,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     if (partitions.isEmpty) {
       return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
     } else if (sameFilters && isSinglePartition(partitions)) {
-      val plans = generateExecForEachKey(logicalPlan, getShardKeys(logicalPlan), qContext)
+      val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
       return PlanResult(plans)
     }
     logicalPlan match {
@@ -180,7 +185,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    generateExecForEachKey(logicalPlan, shardKeyMatches, qContext)
+    generateExec(logicalPlan, shardKeyMatches, qContext)
   }
 
   /**
@@ -209,12 +214,34 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
-  private def generateExecForEachKey(logicalPlan: LogicalPlan,
-                                     keys: Seq[Seq[ColumnFilter]],
-                                     qContext: QueryContext): Seq[ExecPlan] = {
+  // scalastyle:off method.length
+  /**
+   * Group shard keys by partition and generate an ExecPlan for each.
+   * Plans will match shard-keys by pipe-separated regex filters. For example, Suppose the following keys are provided:
+   *     keys = {{a=1, b=1}, {a=1, b=2}, {a=2, b=3}}
+   *   These will be grouped according to the partitions they occupy:
+   *     part1 -> {{a=1, b=1}, {a=1, b=2}}
+   *     part2 -> {{a=2, b=3}}
+   *   Then a plan will be generated for each partition:
+   *     plan1 -> {a=1, b=~"1|2"}
+   *     plan2 -> {a=2, b=3}
+   * Additional plans are materialized per partition when multiple regex filters would otherwise be required.
+   *   This prevents scenarios such as:
+   *     keys = {{a=1, b=2}, {a=3, b=4}, {a=5, b=6}}
+   *   These will be grouped according to the partitions they occupy:
+   *     part1 -> {{a=1, b=2}, {a=3, b=4}}
+   *     part2 -> {{a=5, b=6}}
+   *   Then a plan will be generated for each partition:
+   *     plan1 -> {a=~"1|3", b=~"2|4"}
+   *     plan2 -> {a=5, b=6}
+   *   This might erroneously read {a=1, b=4}, which was not included in the original key set.
+   */
+  private def generateExecForEachPartition(logicalPlan: LogicalPlan,
+                                           keys: Seq[Seq[ColumnFilter]],
+                                           qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
-    // maps individual partitions to the sequence of shard-keys they contain.
+    // maps individual partitions to the set of shard-keys they contain.
     val partitionsToKeys = new mutable.HashMap[String, mutable.Buffer[Seq[ColumnFilter]]]()
     keys.foreach { key =>
       val newLogicalPlan = logicalPlan.replaceFilters(key)
@@ -228,32 +255,94 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         .foreach(part => partitionsToKeys.getOrElseUpdate(part, new mutable.ArrayBuffer).append(key))
     }
 
-    val skipAggregatePresentValue = partitionsToKeys.size > 1
-    partitionsToKeys.map{ case (part, keys) =>
-      // Create a map of key->values, then create a ColumnFilter for each key.
-      val keyToValues = new mutable.HashMap[String, mutable.Set[String]]()
-      keys.flatten.foreach{ filter =>
-        // Find the key's list of values in the map (or create it), then add the filter's values.
-        val values = keyToValues.getOrElseUpdate(filter.column, new mutable.HashSet[String]())
-        filter.filter.valuesStrings.map(_.toString).foreach(values.add)
-      }
-      val newFilters = keyToValues.map{case (key, values) =>
-        val filter = if (values.size == 1) {
-          Filter.Equals(values.head)
-        } else {
-          // Concatenate values with "|" for multi-valued keys.
-          Filter.EqualsRegex(values.toSeq.sorted.mkString("|"))
+    // Sort each key into the same order as nonMetricShardKeys, then group keys with the same prefix.
+    // A plan will be created for each group; this prevents the scenario mentioned in the javadoc.
+    val partitionToKeyGroups = partitionsToKeys.map{ case (partition, keys) =>
+      val sortedPrefixes = keys.map(key => key.sortBy(filter => nonMetricShardKeyColToIndex(filter.column)))
+        .groupBy(_.dropRight(1))
+        .values
+      (partition, sortedPrefixes)
+    }
+
+    // Skip the aggregate presentation if there are more than one plans to materialize.
+    val skipAggregatePresentValue = partitionToKeyGroups.size > 1 ||
+                                    partitionToKeyGroups.values.headOption.map(_.size).getOrElse(0) > 1
+
+    // Create one plan per key group (i.e. one per partition,prefix pair).
+    partitionToKeyGroups.flatMap{ case (partition, keyGroups) =>
+      keyGroups.map{ keys =>
+        // Create a map of key->values, then create a ColumnFilter for each key.
+        val keyToValues = new mutable.HashMap[String, mutable.Set[String]]()
+        keys.flatten.foreach { filter =>
+          // Find the key's list of values in the map (or create it), then add the filter's values.
+          val values = keyToValues.getOrElseUpdate(filter.column, new mutable.HashSet[String]())
+          filter.filter.valuesStrings.map(_.toString).foreach(values.add)
         }
-        ColumnFilter(key, filter)
-      }.toSeq
-      // Update the LogicalPlan with the new partition-specific filters, then materialize.
-      val newLogicalPlan = logicalPlan.replaceFilters(newFilters)
-      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+        val newFilters = keyToValues.map { case (key, values) =>
+          val filter = if (values.size == 1) {
+            Filter.Equals(values.head)
+          } else {
+            // Concatenate values with "|" for multi-valued keys.
+            Filter.EqualsRegex(values.toSeq.sorted.mkString("|"))
+          }
+          ColumnFilter(key, filter)
+        }.toSeq
+        // Update the LogicalPlan with the new partition-specific filters, then materialize.
+        val newLogicalPlan = logicalPlan.replaceFilters(newFilters)
+        val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
+          copy(skipAggregatePresent = skipAggregatePresentValue))
+        queryPlanner.materialize(newLogicalPlan, newQueryContext)
+      }
+    }.toSeq
+  }
+  // scalastyle:on method.length
+
+  // FIXME: This will eventually be replaced with generateExecForEachPartition.
+  @Deprecated
+  private def generateExecForEachKey(logicalPlan: LogicalPlan,
+                                     keys: Seq[Seq[ColumnFilter]],
+                                     qContext: QueryContext): Seq[ExecPlan] = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val skipAggregatePresentValue = keys.length > 1
+    keys.map { result =>
+      val newLogicalPlan = logicalPlan.replaceFilters(result)
+      // Querycontext should just have the part of query which has regex
+      // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
+      // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+      val newQueryParams = logicalPlan match {
+        case tls: TopLevelSubquery => {
+          val instantTime = queryParams.startSecs
+          queryParams.copy(
+            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
+            startSecs = instantTime,
+            endSecs = instantTime
+          )
+        }
+        case psp: PeriodicSeriesPlan => {
+          queryParams.copy(
+            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
+            startSecs = psp.startMs / 1000,
+            endSecs = psp.endMs / 1000,
+            stepSecs = psp.stepMs / 1000
+          )
+        }
+        case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+      }
       val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
         copy(skipAggregatePresent = skipAggregatePresentValue))
       queryPlanner.materialize(newLogicalPlan, newQueryContext)
-    }.toSeq
+    }
   }
+
+  private def generateExec(logicalPlan: LogicalPlan,
+                           keys: Seq[Seq[ColumnFilter]],
+                           qContext: QueryContext): Seq[ExecPlan] =
+    if (qContext.plannerParams.reduceShardKeyRegexFanout) {
+      generateExecForEachPartition(logicalPlan, keys, qContext)
+    } else {
+      generateExecForEachKey(logicalPlan, keys, qContext)
+    }
 
   /**
    * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
