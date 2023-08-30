@@ -47,8 +47,11 @@ import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
-  final val PART_ID_NUMERIC = "__partIdNumeric__"
-  final val PART_ID_STRING = "__partIdString__"
+  // NOTE: these partId fields need to be separate because Lucene 9.7.0 enforces consistent types for document
+  //   field values (i.e. a field cannot have both numeric and string values). Additional details can be found
+  //   here: https://github.com/apache/lucene/pull/11
+  final val PART_ID_DV = "__partIdDv__"
+  final val PART_ID_FIELD = "__partIdField__"
   final val START_TIME = "__startTime__"
   final val END_TIME = "__endTime__"
   final val PART_KEY = "__partKey__"
@@ -56,7 +59,7 @@ object PartKeyLuceneIndex {
   final val FACET_FIELD_PREFIX = "$facet_"
   final val LABEL_LIST_FACET = FACET_FIELD_PREFIX + LABEL_LIST
 
-  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID_STRING, PART_ID_NUMERIC)
+  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID_FIELD, PART_ID_DV)
 
   val MAX_STR_INTERN_ENTRIES = 10000
   val MAX_TERMS_TO_ITERATE = 10000
@@ -281,8 +284,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     var facetsConfig: FacetsConfig = _
 
     val document = new Document()
-    private[memstore] val partIdField = new StringField(PART_ID_STRING, "0", Store.NO)
-    private val partIdDv = new NumericDocValuesField(PART_ID_NUMERIC, 0)
+    private[memstore] val partIdField = new StringField(PART_ID_FIELD, "0", Store.NO)
+    private val partIdDv = new NumericDocValuesField(PART_ID_DV, 0)
     private val partKeyDv = new BinaryDocValuesField(PART_KEY, new BytesRef())
     private val startTimeField = new LongPoint(START_TIME, 0L)
     private val startTimeDv = new NumericDocValuesField(START_TIME, 0L)
@@ -330,6 +333,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         partIdDv.setLongValue(partId)
         document.add(partIdDv)
       }
+
+      /*
+       * As of this writing, this documentId will be set as one of two values:
+       *   - In TimeSeriesShard: the string representation of a partId (e.g. "42")
+       *   - In DownsampledTimeSeriesShard: the base64-encoded sha256 of the document ID. This is used to support
+       *     persistence of the downsample index; ephemeral partIds cannot be used.
+       */
       partIdField.setStringValue(documentId)
 
       startTimeField.setLongValue(startTime)
@@ -470,7 +480,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       cforRange { 0 until partIds.length } { i =>
         terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
       }
-      indexWriter.deleteDocuments(new TermInSetQuery(PART_ID_STRING, terms))
+      indexWriter.deleteDocuments(new TermInSetQuery(PART_ID_FIELD, terms))
     }
   }
 
@@ -648,7 +658,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
     val docToAdd = doc.facetsConfig.build(doc.document)
-    val term = new Term(PART_ID_STRING, documentId)
+    val term = new Term(PART_ID_FIELD, documentId)
     indexWriter.updateDocument(term, docToAdd)
   }
 
@@ -713,7 +723,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_STRING, partId.toString)), collector) )
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector) )
     Option(collector.singleResult)
   }
 
@@ -722,7 +732,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def startTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_STRING, partId.toString)), collector))
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -740,7 +750,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene
-    withNewSearcher(s => s.search(new TermInSetQuery(PART_ID_STRING, terms), collector))
+    withNewSearcher(s => s.search(new TermInSetQuery(PART_ID_FIELD, terms), collector))
     span.tag(s"num-partitions-to-page", terms.size())
     val latency = System.nanoTime - startExecute
     span.mark(s"index-startTimes-for-odp-lookup-latency=${latency}ns")
@@ -755,7 +765,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def endTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_STRING, partId.toString)), collector))
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -806,7 +816,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.debug(s"Updating document ${partKeyString(documentId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val docToAdd = doc.facetsConfig.build(doc.document)
-    indexWriter.updateDocument(new Term(PART_ID_STRING, partId.toString), docToAdd)
+    indexWriter.updateDocument(new Term(PART_ID_FIELD, partId.toString), docToAdd)
   }
 
   /**
@@ -1090,7 +1100,7 @@ class SinglePartIdCollector extends SimpleCollector {
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_NUMERIC)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
   }
 
   // gets called for each matching document in current segment
@@ -1128,7 +1138,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
   def getLeafCollector(context: LeafReaderContext): LeafCollector = {
     logger.trace("New segment inspected:" + context.id)
     endTimeDv = DocValues.getNumeric(context.reader, END_TIME)
-    partIdDv = DocValues.getNumeric(context.reader, PART_ID_NUMERIC)
+    partIdDv = DocValues.getNumeric(context.reader, PART_ID_DV)
 
     new LeafCollector() {
       override def setScorer(scorer: Scorable): Unit = {}
@@ -1177,7 +1187,7 @@ class PartIdCollector extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_NUMERIC)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1198,7 +1208,7 @@ class PartIdStartTimeCollector extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_NUMERIC)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
     startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
   }
 
@@ -1247,7 +1257,7 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_NUMERIC)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
     partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
   }
 
