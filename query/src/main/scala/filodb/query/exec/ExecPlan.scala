@@ -435,6 +435,7 @@ trait ExecPlan extends QueryCommand {
         }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
+        qLogger.info(s"ppppppppppp exception ${ex}")
         QueryError(queryContext.queryId, querySession.queryStats, ex)
       }
     }
@@ -452,12 +453,14 @@ trait ExecPlan extends QueryCommand {
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
+              qLogger.info(s"svr ${srv} eeeeeeeeeee")
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
               srv
           }
           .map { srv =>
+              qLogger.info(s"$srv, ttttt srv.numRowsSerialized ${srv.numRowsSerialized}")
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               numResultSamples += srv.numRowsSerialized
               checkSamplesLimit(numResultSamples, querySession.warnings)
@@ -484,6 +487,11 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
             qLogger.debug(s"Finished query execution pipeline with ${r.size} RVs for $this")
+            if (resultSchema.isEmpty) {
+              qLogger.warn(s"result $r has empty schema")
+            }
+            qLogger.warn(s"hhhhhhhhhhhhhhhhh result $r $resultSchema")
+
             QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats, querySession.warnings,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
@@ -493,6 +501,7 @@ trait ExecPlan extends QueryCommand {
                     qResult <- step2(res) }
               yield { qResult }
     val ret = qresp.onErrorRecover { case NonFatal(ex) =>
+      qLogger.info(s"ffffffffff ${ex}")
       QueryError(queryContext.queryId, querySession.queryStats, ex)
     }
     qLogger.debug(s"Constructed monix query execution pipeline for $this")
@@ -682,6 +691,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
           .onErrorHandle { ex: Throwable =>
+            qLogger.info(s"e00000000000 ex ${ex}")
             QueryError(queryContext.queryId, qSession.queryStats, ex)
           }
     }

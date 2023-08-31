@@ -173,7 +173,8 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig)
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
     val url = uri"$httpEndpoint"
-    logger.debug("promQlExec url={}  traceInfo={}", url, traceInfo)
+    asJson[SuccessResponse]
+    logger.info("nnnnnnnnnnnn promQlExec url={}  traceInfo={}", url, traceInfo)
     sttp
       .headers(traceInfo)
       .body(urlParams)

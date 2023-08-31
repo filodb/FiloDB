@@ -135,6 +135,8 @@ trait RangeVector {
   // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None
 
+  def isScalar: Boolean = false
+
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 
@@ -199,6 +201,9 @@ sealed trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
+  override val isScalar: Boolean = {
+    outputRange.get.stepMs <= 0 || rangeParams.startSecs == rangeParams.endSecs
+  }
   val numRowsSerialized : Int = 1
 
   override def rows(): RangeVectorCursor = {

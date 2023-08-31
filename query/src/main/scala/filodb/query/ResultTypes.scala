@@ -18,7 +18,7 @@ sealed trait QueryResponse extends NodeResponse with java.io.Serializable {
 final case class QueryError(id: String,
                             queryStats: QueryStats,
                             t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
-  override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
+  override def toString: String = s"cccccccc QueryError id=$id ${t.getClass.getName} ${t}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }
 
@@ -60,7 +60,7 @@ final case class QueryResult(id: String,
   def resultType: QueryResultType = {
     result match {
       case Nil => QueryResultType.RangeVectors
-      case Seq(one)  if one.key.labelValues.isEmpty && one.numRows.contains(1) => QueryResultType.Scalar
+      case Seq(one)  if one.key.labelValues.isEmpty && one.isScalar => QueryResultType.Scalar
       case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
                                       else QueryResultType.RangeVectors
     }

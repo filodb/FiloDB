@@ -21,6 +21,7 @@ import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, TsdbQuer
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import filodb.query.Query.qLogger
 import filodb.query.exec.ExecPlan
 
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
@@ -71,6 +72,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         { (query, time, explainOnly, verbose, spread, histMap, step, partialResults) =>
           val stepLong = step.map(_.toLong).getOrElse(0L)
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
+          qLogger.info(s"ggggggggggggg logicalPlan $logicalPlan")
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong),
             histMap.getOrElse(false), partialResults.getOrElse(queryConfig.allowPartialResultsRangeQuery))

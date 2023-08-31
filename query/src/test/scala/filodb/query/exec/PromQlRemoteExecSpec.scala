@@ -12,7 +12,7 @@ import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
-import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, StreamQueryResponse, SuccessResponse}
+import filodb.query.{HistSampl, MetadataMapSampl, MetadataSuccessResponse, NonScalarData, QueryResponse, QueryResult, Sampl, StreamQueryResponse, SuccessResponse}
 
 
 class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -41,7 +41,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val result = query.Result (Map("instance" -> "inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))),
       None)
     val res = exec.toQueryResponse(
-      SuccessResponse(Data("vector", Seq(result)), queryStats = None, queryWarnings = None),
+      SuccessResponse(NonScalarData("vector", Seq(result)), queryStats = None, queryWarnings = None),
       "id", Kamon.currentSpan()
     )
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -56,7 +56,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val result = query.Result (Map("instance" -> "inst1"), None, Some(Sampl(1000, 1)))
     val res = exec.toQueryResponse(
-      SuccessResponse(Data("vector", Seq(result)), queryStats = None, queryWarnings = None),
+      SuccessResponse(NonScalarData("vector", Seq(result)), queryStats = None, queryWarnings = None),
       "id", Kamon.currentSpan()
     )
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -97,7 +97,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val result = query.Result (Map("instance" -> "inst1"), None, Some(HistSampl(1000, Map("1" -> 2, "+Inf" -> 3))))
     val res = exec.toQueryResponse(
-      SuccessResponse(Data("vector", Seq(result)), queryStats = None, queryWarnings = None),
+      SuccessResponse(NonScalarData("vector", Seq(result)), queryStats = None, queryWarnings = None),
       "id", Kamon.currentSpan()
     )
     res.isInstanceOf[QueryResult] shouldEqual true

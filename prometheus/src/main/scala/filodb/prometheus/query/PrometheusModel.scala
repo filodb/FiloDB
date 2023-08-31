@@ -1,7 +1,6 @@
 package filodb.prometheus.query
 
 import remote.RemoteStorage._
-
 import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
 import filodb.core.metadata.Column.ColumnType
@@ -10,6 +9,7 @@ import filodb.core.query.{Result => _, _}
 import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
+import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
@@ -92,13 +92,20 @@ object PrometheusModel {
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
-    SuccessResponse(
-      Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
+    qLogger.info(s"dddddddddddd ${qr} qr.resultType ${qr.resultType}, result ${qr.result}")
+    val response = SuccessResponse(
+      if (qr.resultType != QueryResultType.Scalar) {
+        NonScalarData(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined))
+      } else {
+        ScalarData(toPromResultType(qr.resultType), results.head.value.get)
+      },
       "success",
       Some(qr.mayBePartial), qr.partialResultReason,
       Some(toQueryStatistics(qr.queryStats)),
       Some(toQueryWarningsResponse(qr.warnings))
     )
+    qLogger.info(s"mmmmmmmmm ${response}")
+    response
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -221,6 +228,7 @@ object PrometheusModel {
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
+    qLogger.info(s"$qe ((((((((())")
     ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage, "error", Some(toQueryStatistics(qe.queryStats)))
   }
 

@@ -29,8 +29,18 @@ final case class QueryWarningsResponse(
   rawScannedBytes: Long = 0
 )
 
-final case class Data(resultType: String, result: Seq[Result])
+sealed trait Data {
+  def resultType: String
+  def result: Seq[Result]
+}
+final case class NonScalarData(resultType: String, result: Seq[Result]) extends Data {
+}
 
+final case class ScalarData(resultType: String, dataSampl: DataSampl) extends Data {
+  def result : Seq[Result] = {
+    Seq(Result(Map(), None, Some(dataSampl), None))
+  }
+}
 final case class MetadataSuccessResponse(data: Seq[MetadataSampl],
                                          status: String = "success",
                                          partial: Option[Boolean]= None,

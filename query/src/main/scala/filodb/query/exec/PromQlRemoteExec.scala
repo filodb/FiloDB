@@ -12,6 +12,7 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, MutableHistogram}
 import filodb.query._
 import filodb.query.AggregationOperator.Avg
+import filodb.query.Query.qLogger
 
 case class PromQlRemoteExec(queryEndpoint: String,
                             requestTimeoutMs: Long,
@@ -52,6 +53,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     remoteExecHttpClient.httpPost(queryEndpoint, requestTimeoutMs,
       queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
+        qLogger.info(s"4444444444 $response")
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
         if (response.body.isLeft) {

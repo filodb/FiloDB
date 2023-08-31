@@ -1,6 +1,7 @@
 package filodb.query
 
 import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
+import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax._
 
 import filodb.query.AggregationOperator.Avg
@@ -165,4 +166,57 @@ object PromCirceSupport {
       }
     }
   }
+
+
+  implicit val aggregateResponseEncoder: Encoder[AggregateResponse] = deriveEncoder[AggregateResponse]
+  implicit val aggregateSamplEncoder: Encoder[AggregateSampl] = deriveEncoder[AggregateSampl]
+  implicit val resultEncoder: Encoder[Result] = deriveEncoder[Result]
+  implicit val scalaEncoder: Encoder[ScalarData] = deriveEncoder[ScalarData]
+  implicit val nonScalaEncoder: Encoder[NonScalarData] = deriveEncoder[NonScalarData]
+
+  implicit val dataEncoder: Encoder[Data] = Encoder.instance {
+    data => data.resultType match {
+      case "scalar" =>
+        Json.obj(
+          ("resultType", Json.fromString(data.resultType)),
+          ("result", data.asInstanceOf[ScalarData].dataSampl.asJson)
+        )
+      case _ =>
+        Json.obj(
+          ("resultType", Json.fromString(data.resultType)),
+          ("result", data.asInstanceOf[NonScalarData].result.asJson)
+        )
+    }
+//    data =>
+//      Json.obj(
+//        ("resultType", Json.fromString(data.resultType)),
+//        ("result", data.asInstanceOf[NonScalarData].asJson)
+//      )
+  }
+
+  implicit val queryStatisticsEncoder: Encoder[QueryStatistics] = deriveEncoder[QueryStatistics]
+  implicit val queryWarningsResponseEncoder: Encoder[QueryWarningsResponse] = deriveEncoder[QueryWarningsResponse]
+
+  implicit val successResponseEncoder: Encoder[SuccessResponse] = deriveEncoder[SuccessResponse]
+
+//  implicit val aggregateResponseDecoder: Decoder[AggregateResponse] = deriveDecoder[AggregateResponse]
+//  implicit val aggregateResponseDecoderateSamplDecoder: Decoder[AggregateSampl] = deriveDecoder[AggregateSampl]
+  implicit val resultDecoder: Decoder[Result]= deriveDecoder[Result]
+
+
+  implicit val queryWarningsDesponseEncoder: Decoder[QueryWarningsResponse] = deriveDecoder[QueryWarningsResponse]
+  implicit val successResponseDecoder: Decoder[SuccessResponse] = deriveDecoder[SuccessResponse]
+
+  implicit val dataDecoder: Decoder[Data] = (c: HCursor) => {
+    for {
+      resultType <- c.downField("resultType").as[String]
+      data <- resultType match {
+        case "scalar" => c.downField("result").as[DataSampl].map(s => ScalarData(resultType, s))
+        case _ => c.downField("result").as[Seq[Result]].map(s => NonScalarData(resultType,s))
+      }
+    } yield {
+      data
+    }
+  }
+
 }
