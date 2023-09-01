@@ -11,7 +11,6 @@ import monix.reactive.Observable
 import filodb.core.Utils
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
-import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 
@@ -35,17 +34,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
                                  lhs: Seq[ExecPlan],
                                  rhs: Seq[ExecPlan],
                                  binaryOp: BinaryOperator,
-                                 on: Seq[String],
+                                 on: Option[Seq[String]],
                                  ignoring: Seq[String],
                                  metricColumn: String,
-                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
-  require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains(metricColumn), "On cannot contain metric name")
-
-  private val onLabels = on.map(Utf8Str(_)).toSet
-  private val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
-  // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
-  // doing matching based on ignoringLabels even if it is empty
+                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLike {
 
   def children: Seq[ExecPlan] = lhs ++ rhs
 
@@ -95,10 +87,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     Observable.fromTask(taskOfResults).flatten
   }
 
-  private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
-    else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
-  }
+
 
   /***
     * Returns true when range vector does not have any values
@@ -107,6 +96,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
     if (schema.isHistogram) rv.rows().forall(_.getHistogram(1).numBuckets == 0)
     else rv.rows().forall(_.getDouble(1).isNaN)
   }
+
+  // TODO: Note that these SetOperations don't work well with histograms
+  //  Check behavior in prometheus and accordingly implement
 
   /***
    * Add LHS range vector in result which have matching join keys in RHS.
@@ -187,6 +179,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
   // scalastyle:on method.length
 
 
+  //scalastyle:off method.length
   /***
    * Add all LHS range vector in result. From RHS only only add the range vectors which have join key not
    * present in result
@@ -194,52 +187,52 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
-    val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
-    val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val lhsResult = groupAndStitchRangeVectors(lhsRvs)
 
-    // Add everything from left hand side range vector
-    lhsRvs.foreach { rv =>
+    val rhsResult = groupAndStitchRangeVectors(rhsRvs)
+
+    println(lhsResult.size + ": " + rhsResult.size)
+    // All lhsResults should be considered
+    // All rhsResults whose joinKey is not present in lhsResults should be considered
+    // While iterating all lhs rangevectors for a time instant where none of the lhs range vectors are having a value
+    // all RHS range vectors for that time instant having a matching join key will have a value in o/p
+
+    //lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
+    ???
+  }
+  //scalastyle:on method.length
+
+  /**
+   * Takes a List of rangevectors and groups them in Map grouped by the join key, if the Range vector with same labels
+   * is encountered multiple times (possibly diuring spread change), the two range vectors will be deduplicated by
+   * stitching
+   *
+   * @param rangeVectors List of range vectors
+   * @return Map grouped by the joinKey and the value is a list of range vectors sharing the same join key
+   */
+  private def groupAndStitchRangeVectors(rangeVectors: List[RangeVector]):
+    mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]] = {
+    val results = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    rangeVectors.foreach { rv =>
       val jk = joinKeys(rv.key)
-       if (lhsResult.contains(jk)) {
-        val resVal = lhsResult(jk)
-         // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
-         // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
+      if (results.contains(jk)) {
+        val resVal = results(jk)
+        // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+        // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
           val stitched = StitchRvsExec.stitch(rv, resVal(index), outputRvRange)
           resVal.update(index, stitched)
         } else {
-          lhsResult(jk).append(rv)
+          results(jk).append(rv)
         }
       } else {
-         val lhsList = ArrayBuffer[RangeVector]()
-         lhsList.append(rv)
-         lhsResult.put(jk, lhsList)
+        val list = ArrayBuffer[RangeVector]()
+        list.append(rv)
+        results.put(jk, list)
       }
     }
-    // Add range vectors from right hand side which are not present on lhs
-    rhsRvs.foreach { rhs =>
-      val jk = joinKeys(rhs.key)
-      if (!lhsResult.contains(jk)) {
-        if (rhsResult.contains(jk)) {
-          val resVal = rhsResult(jk)
-          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
-          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
-          val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
-          if (index >= 0) {
-            val stitched = StitchRvsExec.stitch(rhs, resVal(index), outputRvRange)
-            resVal.update(index, stitched)
-          } else {
-            resVal.append(rhs)
-          }
-        } else {
-          val rhsList = rhsResult.getOrElse(jk, ArrayBuffer())
-          rhsList.append(rhs)
-          rhsResult.put(jk, rhsList)
-        }
-      }
-    }
-    lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
+    results
   }
 
   /***

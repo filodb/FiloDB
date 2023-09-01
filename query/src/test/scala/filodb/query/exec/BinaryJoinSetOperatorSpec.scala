@@ -290,7 +290,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -325,7 +325,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -362,7 +362,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Seq("instance", "job"), Nil, "__name__", None)
+      Some(Seq("instance", "job")), Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -399,7 +399,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Seq("instance"), Nil, "__name__", None)
+      Some(Seq("instance")), Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -435,7 +435,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Seq("group"), "__name__", None)
+      None, Seq("group"), "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -470,7 +470,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Seq("group", "job"), "__name__", None)
+      None, Seq("group", "job"), "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -505,7 +505,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Seq("dummy"), Nil, "__name__", None)
+      Some(Seq("dummy")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -522,7 +522,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
   it("should not return LHS when op=LAND and LHS has no labels and RHS is empty") {
     val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher, Array(dummyPlan),
-                       new Array[ExecPlan](1), BinaryOperator.LAND, Nil, Nil, "__name__", None)
+                       new Array[ExecPlan](1), BinaryOperator.LAND, None, Nil, "__name__", None)
     val rvEmptyLabels = sampleHttpRequests
       // remove the labels from the key
       .map(rv => IteratorBackedRangeVector(new CustomRangeVectorKey(Map()), rv.rows(), rv.outputRange))
@@ -542,7 +542,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Seq("group", "instance", "job"), "__name__", None)
+      None, Seq("group", "instance", "job"), "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -564,7 +564,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -592,7 +592,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -652,7 +652,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -667,7 +667,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Seq("instance"), Nil, "__name__", None)
+      Some(Seq("instance")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -723,7 +723,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -738,7 +738,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Nil, Seq("l", "group", "job"), "__name__", None)
+      None, Seq("l", "group", "job"), "__name__", None)
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -793,7 +793,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -826,7 +826,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Seq("job"), Nil, "__name__", None)
+      Some(Seq("job")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -857,7 +857,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Seq("job", "instance"), Nil, "__name__", None)
+      Some(Seq("job", "instance")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -892,7 +892,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Seq("job"), Nil, "__name__", None)
+      Some(Seq("job")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -924,7 +924,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Seq("job", "instance"), Nil, "__name__", None)
+      Some(Seq("job", "instance")), Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -958,7 +958,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -987,7 +987,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -1013,7 +1013,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     // scalastyle:off
     val lhs = QueryResult("someId", tvSchema, sampleMultipleRows.map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -1047,7 +1047,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
      BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val lhsRv = new RangeVector {
@@ -1097,7 +1097,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LOR,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val rhsRv = new RangeVector {
@@ -1146,7 +1146,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val lhsRv = new RangeVector {
@@ -1194,7 +1194,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val rhsRv = new RangeVector {
@@ -1241,7 +1241,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LUnless,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val rhsRv = new RangeVector {
@@ -1288,7 +1288,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LUnless,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
     import NoCloseCursor._
     val lhsRv = new RangeVector {
@@ -1381,7 +1381,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.LAND,
-      Nil, Nil, "__name__", None)
+      None, Nil, "__name__", None)
 
 
     val lhs = QueryResult("someId", tvSchema, (lhs2 ++ lhs1).map(rv => SerializedRangeVector(rv, schema, queryStats)))
@@ -1421,20 +1421,20 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
 
   it("should return true when isEmpty called on emptyRV") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Nil, "_metric_", None)
     val emptyRv = KeyedTupleRangeVector(Map.empty, Seq.empty)
     exec.isEmpty(emptyRv, resultSchema) shouldEqual true
   }
 
 
   it("should return true when isEmpty called on rv with all NaNs") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Nil, "_metric_", None)
     val emptyRv = KeyedTupleRangeVector(Map.empty, Seq((0, Double.NaN), (10, Double.NaN), (20, Double.NaN)))
     exec.isEmpty(emptyRv, resultSchema) shouldEqual true
   }
 
   it("should return false when isEmpty called on rv with at least one non NaN") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Nil, "_metric_", None)
     val emptyRv = KeyedTupleRangeVector(Map.empty, Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN)))
     exec.isEmpty(emptyRv, resultSchema) shouldEqual false
   }
@@ -1444,7 +1444,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
   it("should perform A - B when no on is given correctly") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Nil, "_metric_", None)
     val lhsRv = rangeVectors(List(
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN))),
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((0, 1.0), (10, 2.0), (20, 3.0))),
@@ -1469,7 +1469,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
   it("should perform A - B correctly when on is given") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Seq("onLabel"), Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Some(Seq("onLabel")), Nil, "_metric_", None)
 
 
     val lhsRv = rangeVectors(List(
@@ -1498,7 +1498,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
 
   it("should perform A - B correctly only  ignoring is provided") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Seq("label1", "label2"), "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Seq("label1", "label2"), "_metric_", None)
     // This is same as using only onLabel for joining
 
 
@@ -1526,7 +1526,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
   it("should perform A AND B when no on is provided") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, Nil, Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, None, Nil, "_metric_", None)
 
     val lhsRv = rangeVectors(List(
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN))),
@@ -1547,7 +1547,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
   it("should perform A AND B when on is provided") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, Seq("onLabel"), Nil, "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, Some(Seq("onLabel")), Nil, "_metric_", None)
 
     val lhsRv = rangeVectors(List(
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((10, Double.NaN), (20, 1.0), (30, 2.0))),
@@ -1581,7 +1581,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
   it("should perform A AND B when ignoring is provided") {
-    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, Nil, Seq("label1", "label2"), "_metric_", None)
+    val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LAND, None, Seq("label1", "label2"), "_metric_", None)
     // This is equivalent to providing on for onLabel
 
     val lhsRv = rangeVectors(List(
@@ -1613,6 +1613,124 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       case Some(matched)       => assertListEquals(matched , List((10, Double.NaN), (20, 2.0), (30, 3.0)))
       case None                => fail("Expected to find a matching RV for key Map(label1 -> value1, onLabel -> onValue1)")
     }
+  }
+
+
+  it("should fill in the missing data on left with the data on RHS fior a range query with OR") {
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 2.0),
+        new TransientRow(4900, 2.0),
+        new TransientRow(5000, 2.0),
+        new TransientRow(5100, 2.0),
+        new TransientRow(5200, 2.0),
+        new TransientRow(5300, 2.0),
+        new TransientRow(5400, 2.0),
+        new TransientRow(5500, 2.0),
+        new TransientRow(5600, 2.0),
+        new TransientRow(5700, Double.NaN),
+        new TransientRow(5800, Double.NaN),
+        new TransientRow(5900, Double.NaN),
+        new TransientRow(6000, Double.NaN),
+        new TransientRow(6100, 2.0),
+        new TransientRow(6200, 2.0),
+        new TransientRow(6300, 2.0),
+        new TransientRow(6400, Double.NaN),
+        new TransientRow(6500, Double.NaN),
+        new TransientRow(6600, Double.NaN),
+        new TransientRow(6700, Double.NaN),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 0.0),
+        new TransientRow(4900, 0.0),
+        new TransientRow(5000, 0.0),
+        new TransientRow(5100, 0.0),
+        new TransientRow(5200, 0.0),
+        new TransientRow(5300, 0.0),
+        new TransientRow(5400, 0.0),
+        new TransientRow(5500, 0.0),
+        new TransientRow(5600, 0.0),
+        new TransientRow(5700, 0.0),
+        new TransientRow(5800, 0.0),
+        new TransientRow(5900, 0.0),
+        new TransientRow(6000, 0.0),
+        new TransientRow(6100, 0.0),
+        new TransientRow(6200, 0.0),
+        new TransientRow(6300, 0.0),
+        new TransientRow(6400, 0.0),
+        new TransientRow(6500, 0.0),
+        new TransientRow(6600, 0.0),
+        new TransientRow(6700, 0.0)
+      ).iterator
+
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val expected = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 2.0),
+        new TransientRow(4900, 2.0),
+        new TransientRow(5000, 2.0),
+        new TransientRow(5100, 2.0),
+        new TransientRow(5200, 2.0),
+        new TransientRow(5300, 2.0),
+        new TransientRow(5400, 2.0),
+        new TransientRow(5500, 2.0),
+        new TransientRow(5600, 2.0),
+        new TransientRow(5700, 0.0),
+        new TransientRow(5800, 0.0),
+        new TransientRow(5900, 0.0),
+        new TransientRow(6000, 0.0),
+        new TransientRow(6100, 2.0),
+        new TransientRow(6200, 2.0),
+        new TransientRow(6300, 2.0),
+        new TransientRow(6400, 0.0),
+        new TransientRow(6500, 0.0),
+        new TransientRow(6600, 0.0),
+        new TransientRow(6700, 0.0),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
+      dummyPlan :: Nil,
+      dummyPlan :: Nil,
+      BinaryOperator.LOR,
+      None,
+      Nil,
+      "__name__",
+      None)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    // scalastyle:on
+
+    val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
+      .toListL.runToFuture.futureValue
+    result1.tail shouldEqual Nil
+    val res = result1.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList
+    println(res)
+    res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
   }
 
   def assertListEquals(l1: List[(Long, Double)], l2: List[(Long, Double)]): Boolean =
