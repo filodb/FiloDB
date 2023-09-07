@@ -65,7 +65,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -78,7 +78,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 200)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -91,7 +91,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 300)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -104,7 +104,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 400)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -117,7 +117,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 500)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -130,7 +130,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 600)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -143,7 +143,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 700)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -156,7 +156,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 800)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     }
   )
   val sampleNoKey: Array[RangeVector] = Array(
@@ -166,7 +166,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     }
   )
 
@@ -180,7 +180,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -191,7 +191,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 200)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     }
   )
 
@@ -208,7 +208,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100),
         new TransientRow(2L, Double.NaN)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 1, 2))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -221,7 +221,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, Double.NaN)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     })
 
   val sampleAllNaN : Array[RangeVector] = Array(
@@ -236,7 +236,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, Double.NaN)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 0, 1))
     })
 
   val sampleMultipleRows: Array[RangeVector] = Array(
@@ -252,7 +252,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100),
         new TransientRow(2L, 300)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 1, 2))
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -266,7 +266,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 200),
         new TransientRow(2L, 400)).iterator
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(1, 1, 2))
     })
 
   val sampleCanary = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
@@ -592,7 +592,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      None, Nil, "__name__", None)
+      None, Nil, "__name__", Some(RvRange(1, 0, 1)))
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -602,8 +602,13 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
+      .map {
+        // Since some are not SerializedRangeVectors consuming them once will not give us the
+        // results again, so we convert them to SRVs
+        case rv: SerializedRangeVector   => rv
+        case rv: RangeVector              =>  SerializedRangeVector.apply(rv, tvSchema.columns, QueryStats())
+      }.filterNot(_.rows.forall(_.getDouble(1).isNaN))
 
-    val expectedResult = (canaryPlusOne.toArray ++ sampleInstance1).distinct
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
@@ -634,14 +639,13 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
       )
-
     )
-
     val expectedValues = List(301.0, 401.0, 701.0, 801.0, 200.0, 600.0)
 
     result.size shouldEqual 6
     result.flatMap(_.key.labelValues.values.toSet).sorted sameElements expectedLabels.flatMap(_.toSet).sorted
-    expectedValues.toSet.diff(result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet).isEmpty shouldEqual true
+    val actualValues = result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet
+    expectedValues.toSet.diff(actualValues).isEmpty shouldEqual true
   }
 
   it("should excludes everything that has instance=0/1 but includes entries without " +

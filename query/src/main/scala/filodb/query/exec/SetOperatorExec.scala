@@ -118,6 +118,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it contains no rows
+      // TODO: isEmpty is expensive and iterates all the rows, we need a performant implementation, we may very well not
+      //  keep this check and it will do less iterations in case where we dont have several empty Range vectors
       if (!isEmpty(rv, rhsSchema)) {
         // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
         // Each of these range vectors would contain data for different time ranges
@@ -126,6 +128,13 @@ final case class SetOperatorExec(queryContext: QueryContext,
           if (resVal.key.labelValues == rv.key.labelValues) {
             rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal, outputRvRange) )
           } else {
+            // TODO: Is it ok to overwrite the rhs of multiple RVs match the joinKey
+            //  Consider the case where two Range vectors match the join key and one of them has a non NaN value while
+            //  while other one has a NaN value for a given time step and the one with a non NaN value is the final RV
+            //  in the map. When we run this logic
+            //    val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1) the rhs is not NaN and
+            //  assuming LHS is non NaN too, we will have a result for that given timestep but one of trhe matching RHS
+            //  timeseries for that time is NaN. Test this case with prometheus and revisit
             rhsMap.put(jk, rv)
           }
         } else rhsMap.put(jk, rv)
@@ -187,6 +196,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
+//    val uniqueRvRange = lhsRvs.map(_.outputRange).toSet ++ rhsRvs.map(_.outputRange).toSet
+//    assert(uniqueRvRange.size == 1, "Expected to see same outputRange for all range vectors on left and right ")
     val lhsResult = groupAndStitchRangeVectors(lhsRvs)
 
     val rhsResult = groupAndStitchRangeVectors(rhsRvs)
@@ -198,7 +209,107 @@ final case class SetOperatorExec(queryContext: QueryContext,
     // all RHS range vectors for that time instant having a matching join key will have a value in o/p
 
     //lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
-    ???
+
+    // Create a Map of join key as key and value is a two tuple where _1 is all LHS Rvs for the join key and _2
+    // are all RHS Rvs for that same join key
+    val lRvs = lhsResult.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], (Seq[RangeVector], Seq[RangeVector])]) {
+      case (acc, (jk, rvs)) => acc + (jk -> ((rvs, Seq.empty[RangeVector])))
+    }
+
+    val joinedRvs = rhsResult.foldLeft(lRvs) {
+      case (acc, (jk, rvs))  =>
+        val newVal = acc.get(jk).map {
+            // RHS will be Nil
+          case (lhs, rhs) => (lhs, rvs)
+        }.getOrElse((Nil, rvs))
+        acc + (jk -> newVal)
+    }
+
+    case class OrSetOpIteratorWrapper(lhs: Seq[RangeVector], rhs: Seq[RangeVector]) {
+      // Has a side effect where LHS are consumed first and a bit is set to indicate the time instant where there
+      // is at least one non Nan value. the rhs values are then iterated over and emitted only where the given timestep
+      // has no value in any of the LHS timeseries
+      assert(outputRvRange.isDefined, "Expected to see a non null outputRvRange")
+      val (start, end, step) = (outputRvRange.get.startMs, outputRvRange.get.endMs, outputRvRange.get.stepMs)
+      // 64 bits in one word (long), 1 bit per step
+      assert(start == end || step > 0, "Expected to see a non 0 step size when start and end are not same")
+      val wordsRequired = if (start == end) 1 else ((((end - start) / step) >> 6) + 1).toInt
+      val bitSet = new mutable.BitSet(wordsRequired)
+      def joined(): Seq[RangeVector] = (lhs.map(x => {
+        var idx = 0
+        val rows = x.rows()
+        val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
+          val cur = new TransientRow()
+
+          override def hasNext: Boolean = rows.hasNext
+
+          override def next(): RowReader = {
+            val reader = rows.next()
+            // TODO: What is the expected behavior for Histograms?
+            val value = reader.getDouble(1)
+            val res = if (value.isNaN) {
+                Double.NaN
+            } else {
+                 bitSet += idx
+                 value
+            }
+            idx += 1
+            cur.setValues(reader.getLong(0), res)
+            cur
+          }
+
+          override def close(): Unit = {
+            rows.close()
+          }
+        }
+        IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+      })
+        ++
+      rhs.map( x => {
+          var idx = 0
+          val rows = x.rows()
+          val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
+            val cur = new TransientRow()
+
+            override def hasNext: Boolean = rows.hasNext
+
+            override def next(): RowReader = {
+              val reader = rows.next()
+              // TODO: What is the expected behavior for Histograms?
+              val res = if (bitSet.contains(idx)) {
+                Double.NaN
+              } else {
+                reader.getDouble(1)
+              }
+              idx += 1
+              cur.setValues(reader.getLong(0), res)
+              cur
+            }
+
+            override def close(): Unit = {
+              rows.close()
+            }
+          }
+          IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+
+        }
+      ))
+    }
+
+
+    joinedRvs.values.flatMap {
+      // Case where only lhs rvs are present but no matching Rvs on rhs, just return the lhs
+      case (lhs, Nil)  => lhs
+      // Case where only rhs rvs are present but no matching Rvs on lhs, just return the rhs
+      case (Nil, rhs)  => rhs
+      // More involved case where the there will be a value for a time instant for rhs ONLY IF ALL rvs on lhs have no
+      // value defined for that time instant
+      case (lhs, rhs)  =>
+        val joined = OrSetOpIteratorWrapper(lhs, rhs).joined()
+        // println("lhs: " +  lhs + "rhs: " + rhs + "joined: " + joined)
+        joined
+        ///???
+    }.toIterator
   }
   //scalastyle:on method.length
 
