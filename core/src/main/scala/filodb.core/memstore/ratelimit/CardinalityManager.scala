@@ -141,9 +141,6 @@ class CardinalityManager(datasetRef: DatasetRef,
 
   /**
    * Triggers cardinalityCount if metering is enabled and the required criteria matches.
-   * It creates a new instance of CardinalityTracker and uses the PartKeyLuceneIndex to calculate cardinality count
-   * and store data in a local CardinalityStore. We then close the previous instance of CardinalityTracker and switch
-   * it with the new one we created in this call.
    * @param indexRefreshCount The number of time the indexRefresh has already happened. This is used in the logic of
    *                          shouldTriggerCardinalityCount
    */
@@ -152,7 +149,7 @@ class CardinalityManager(datasetRef: DatasetRef,
       try {
         if (shouldTriggerCardinalityCount(shardNum, numShardsPerNode, indexRefreshCount)) {
           isCardTriggered = true
-          createNewCardinalityStoreAndCalculate(indexRefreshCount)
+          createNewCardinalityTrackerAndCalculate(indexRefreshCount)
           isCardTriggered = false
         }
         else {
@@ -171,7 +168,15 @@ class CardinalityManager(datasetRef: DatasetRef,
     }
   }
 
-  private def createNewCardinalityStoreAndCalculate(indexRefreshCount: Int): Unit = {
+  /**
+   * Creates a new instance of CardinalityTracker and uses the PartKeyLuceneIndex to calculate cardinality count
+   * and store data in a local CardinalityStore. We then close the previous instance of CardinalityTracker and switch
+   * it with the new one we created in this call.
+   *
+   * @param indexRefreshCount The number of time the indexRefresh has already happened. This is used in the logic of
+   *                          shouldTriggerCardinalityCount
+   */
+  private def createNewCardinalityTrackerAndCalculate(indexRefreshCount: Int): Unit = {
     val newCardTracker = getNewCardTracker()
     var cardCalculationComplete = false
     val startTimeMs = System.currentTimeMillis()
