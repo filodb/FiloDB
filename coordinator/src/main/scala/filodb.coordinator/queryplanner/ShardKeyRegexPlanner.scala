@@ -406,7 +406,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // locally and then run count on the results. The following implementation checks for descendant aggregates, if
     // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
     // using the wrapped planner
-    val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
+    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
       val childPlan = materialize(aggregate.vectors, queryContext)
       // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher

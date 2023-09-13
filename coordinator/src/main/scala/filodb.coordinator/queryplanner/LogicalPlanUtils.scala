@@ -29,17 +29,17 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
-   * Given a LogicalPlan check if any descendent of plan is an aggregate operation
+   * Given a LogicalPlan check if any descendent of plan is either an aggregate or join operation
    * @param lp the LogicalPlan instance
-   * @return true if a descendent is an aggregate else false
+   * @return true if a descendent is an aggregate or join else false
    */
-  def hasDescendantAggregate(lp: LogicalPlan): Boolean = lp match {
+  def hasDescendantAggregateOrJoin(lp: LogicalPlan): Boolean = lp match {
     case _: Aggregate                 => true
     // consider this BinaryJoin example foo + on(h) + bar.
     // partition1 has foo{h=1}, bar{h1=2} and partition2 has foo{h=2}, bar{h1=1}
     // the binary join cannot happen on a partition locally. InProcessPlanDispatcher is required.
     case _: BinaryJoin               => true
-    case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregate(_))
+    case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregateOrJoin(_))
     case _                            => false
   }
   /**
