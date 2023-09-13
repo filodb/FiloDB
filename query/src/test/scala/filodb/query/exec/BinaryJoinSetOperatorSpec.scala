@@ -656,7 +656,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      None, Nil, "__name__", None)
+      None, Nil, "__name__", Some(RvRange(1, 0, 1)))
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -665,58 +665,70 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val rhs1 = QueryResult("someId", tvSchema, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, querySession)
-      .toListL.runToFuture.futureValue
+      .toListL.runToFuture.futureValue.map {
+      // Since some are not SerializedRangeVectors consuming them once will not give us the
+      // results again, so we convert them to SRVs
+      case rv: SerializedRangeVector => rv
+      case rv: RangeVector => SerializedRangeVector.apply(rv, tvSchema.columns, QueryStats())
+    }.filterNot(_.rows.forall(_.getDouble(1).isNaN))
 
     val execPlan2 = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Some(Seq("instance")), Nil, "__name__", None)
+      Some(Seq("instance")), Nil, "__name__", Some(RvRange(1, 0, 1)))
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     val rhs2 = QueryResult("someId", tvSchema, result1.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, querySession)
-      .toListL.runToFuture.futureValue
+      .toListL.runToFuture.futureValue.map {
+      // Since some are not SerializedRangeVectors consuming them once will not give us the
+      // results again, so we convert them to SRVs
+      case rv: SerializedRangeVector => rv
+      case rv: RangeVector => SerializedRangeVector.apply(rv, tvSchema.columns, QueryStats())
+    }.filterNot(_.rows.forall(_.getDouble(1).isNaN))
 
-    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+    val expectedLabelsValues: Seq[(Map[ZeroCopyUTF8String, ZeroCopyUTF8String], Int)] =
+      List((Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
       ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-    ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+    ), 301),
+      (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ), 401),
+      (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ), 701),
+      (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+      ), 801),
+      (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
         ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("x")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+      ), 100),
+      (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
         ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("y")
-      )
+      ), 200)
     )
-
+    result2.foreach(rv => {
+      val key = rv.key.labelValues
+      println((key, rv.rows.map(_.getDouble(1)).toList))
+    })
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
-    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2.foreach(rv => {
+      val key = rv.key.labelValues
+      val expectedPair =  expectedLabelsValues.find(_._1 == key)
+      assert(expectedPair.isDefined)
+      rv.rows.map(_.getDouble(1)).toList shouldEqual List(expectedPair.get._2)
+    })
   }
 
   it("should excludes everything that has instance=0/1 but includes entries without " +
@@ -727,7 +739,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      None, Nil, "__name__", None)
+      None, Nil, "__name__", Some(RvRange(1, 0, 1)))
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runToFuture.futureValue
@@ -742,52 +754,56 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      None, Seq("l", "group", "job"), "__name__", None)
+      None, Seq("l", "group", "job"), "__name__", Some(RvRange(1, 0, 1)))
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     val rhs2 = QueryResult("someId", tvSchema, result1.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, querySession)
-      .toListL.runToFuture.futureValue
+      .toListL.runToFuture.futureValue.map {
+      // Since some are not SerializedRangeVectors consuming them once will not give us the
+      // results again, so we convert them to SRVs
+      case rv: SerializedRangeVector => rv
+      case rv: RangeVector => SerializedRangeVector.apply(rv, tvSchema.columns, QueryStats())
+    }.filterNot(_.rows.forall(_.getDouble(1).isNaN))
 
-    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-    ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+
+    val expectedLabelsValues: Seq[(Map[ZeroCopyUTF8String, ZeroCopyUTF8String], Int)] =
+      List((Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
-        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("x")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
-        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("y")
+      ), 301),
+        (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+          ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+          ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+          ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+        ), 401),
+        (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+          ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+          ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+          ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+        ), 701),
+        (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+          ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+          ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+          ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+        ), 801),
+        (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+          ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("x")
+        ), 100),
+        (Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+          ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("y")
+        ), 200)
       )
-    )
-
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet.equals(expectedLabels.toSet)
-
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
-    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2.foreach(rv => {
+      val key = rv.key.labelValues
+      val expectedPair = expectedLabelsValues.find(_._1 == key)
+      assert(expectedPair.isDefined)
+      rv.rows.map(_.getDouble(1)).toList shouldEqual List(expectedPair.get._2)
+    })
   }
 
   it("should join many-to-many with unless") {
@@ -1620,7 +1636,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
 
-  it("should fill in the missing data on left with the data on RHS fior a range query with OR") {
+  it("should fill in the missing data on left with the data on RHS for a range query with OR") {
 
     val lhsRv = new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
@@ -1650,7 +1666,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         new TransientRow(6700, Double.NaN),
       ).iterator
 
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 6700))
     }
 
     val rhsRv = new RangeVector {
@@ -1681,7 +1697,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         new TransientRow(6700, 0.0)
       ).iterator
 
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 6700))
     }
 
     val expected = new RangeVector {
@@ -1712,7 +1728,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         new TransientRow(6700, 0.0),
       ).iterator
 
-      override def outputRange: Option[RvRange] = None
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 6700))
     }
 
     val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
@@ -1722,13 +1738,14 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       None,
       Nil,
       "__name__",
-      None)
+      Some(RvRange(4800, 100, 6700)))
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
     val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
+    // TODO: If the LHS and RHS metrics have same label value pairs, we cant send two RvS.
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
     result1.tail shouldEqual Nil

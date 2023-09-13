@@ -196,13 +196,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
-//    val uniqueRvRange = lhsRvs.map(_.outputRange).toSet ++ rhsRvs.map(_.outputRange).toSet
-//    assert(uniqueRvRange.size == 1, "Expected to see same outputRange for all range vectors on left and right ")
     val lhsResult = groupAndStitchRangeVectors(lhsRvs)
-
     val rhsResult = groupAndStitchRangeVectors(rhsRvs)
-
-    println(lhsResult.size + ": " + rhsResult.size)
     // All lhsResults should be considered
     // All rhsResults whose joinKey is not present in lhsResults should be considered
     // While iterating all lhs rangevectors for a time instant where none of the lhs range vectors are having a value
@@ -235,37 +230,39 @@ final case class SetOperatorExec(queryContext: QueryContext,
       assert(start == end || step > 0, "Expected to see a non 0 step size when start and end are not same")
       val wordsRequired = if (start == end) 1 else ((((end - start) / step) >> 6) + 1).toInt
       val bitSet = new mutable.BitSet(wordsRequired)
-      def joined(): Seq[RangeVector] = (lhs.map(x => {
-        var idx = 0
-        val rows = x.rows()
-        val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
-          val cur = new TransientRow()
 
-          override def hasNext: Boolean = rows.hasNext
+      def joined(): Seq[RangeVector] = {
+        val lhsRvs: Seq[RangeVector] = lhs.map(x => {
+          var idx = 0
+          val rows = x.rows()
+          val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
+            val cur = new TransientRow()
 
-          override def next(): RowReader = {
-            val reader = rows.next()
-            // TODO: What is the expected behavior for Histograms?
-            val value = reader.getDouble(1)
-            val res = if (value.isNaN) {
+            override def hasNext: Boolean = rows.hasNext
+
+            override def next(): RowReader = {
+              val reader = rows.next()
+              // TODO: What is the expected behavior for Histograms?
+              val value = reader.getDouble(1)
+              val res = if (value.isNaN) {
                 Double.NaN
-            } else {
-                 bitSet += idx
-                 value
+              } else {
+                bitSet += idx
+                value
+              }
+              idx += 1
+              cur.setValues(reader.getLong(0), res)
+              cur
             }
-            idx += 1
-            cur.setValues(reader.getLong(0), res)
-            cur
-          }
 
-          override def close(): Unit = {
-            rows.close()
+            override def close(): Unit = {
+              rows.close()
+            }
           }
-        }
-        IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
-      })
-        ++
-      rhs.map( x => {
+          IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+        })
+
+        val rhsRvs: Seq[RangeVector] = rhs.map(x => {
           var idx = 0
           val rows = x.rows()
           val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
@@ -291,9 +288,28 @@ final case class SetOperatorExec(queryContext: QueryContext,
             }
           }
           IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+        })
+        // This order is important, when lhs Rvs are executed they set a bitmap which is used when iterating RHS
+        // DONOT flip this order
+        val mergedRvs = lhsRvs ++ rhsRvs
 
+        // Dedupe the LHS and RHS rvs by keys, if same key is found for multiple RVs, stitch them
+        // For e.g sum(foo{}) OR sum(bar{}), both have empty RV Key, we want them to return one RV
+        // instead of two both with empty RV Keys
+        val mergedGroupedRvs = mergedRvs.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], List[RangeVector]]){
+          case (acc, rv)  =>
+          val key = rv.key.labelValues
+          val groupedRvs = acc.get(key).map(rv :: _).getOrElse(List(rv))
+          acc + (key -> groupedRvs)
         }
-      ))
+
+        mergedGroupedRvs.map {
+          case (_, rv :: Nil)   => rv
+          case (key, rvs)       => IteratorBackedRangeVector(CustomRangeVectorKey(key),
+                                        StitchRvsExec.merge(rvs.reverse.map(_.rows()), outputRvRange),
+                                        outputRvRange)
+        }
+      }.toSeq
     }
 
 
@@ -305,10 +321,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
       // More involved case where the there will be a value for a time instant for rhs ONLY IF ALL rvs on lhs have no
       // value defined for that time instant
       case (lhs, rhs)  =>
-        val joined = OrSetOpIteratorWrapper(lhs, rhs).joined()
-        // println("lhs: " +  lhs + "rhs: " + rhs + "joined: " + joined)
-        joined
-        ///???
+        OrSetOpIteratorWrapper(lhs, rhs).joined()
     }.toIterator
   }
   //scalastyle:on method.length
