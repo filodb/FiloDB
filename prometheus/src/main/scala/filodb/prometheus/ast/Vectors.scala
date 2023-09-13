@@ -243,7 +243,7 @@ sealed trait Vector extends Expression {
                                 ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
-          if (QueryUtils.containsUnescapedNonPipeRegexChars(labelValue)) {
+          if (!QueryUtils.isPipeOnlyRegex(labelValue)) {
             require(labelValue.length <= Parser.REGEX_MAX_LEN,
               s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
                 s"when non-`|` special characters are used.")

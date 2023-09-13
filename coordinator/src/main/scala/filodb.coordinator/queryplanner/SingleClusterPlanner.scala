@@ -269,7 +269,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
             Seq(filtVal)
           case Some(ColumnFilter(_, Filter.EqualsRegex(filtVal: String)))
-            if !QueryUtils.containsUnescapedNonPipeRegexChars(filtVal) => filtVal.split('|').toSeq
+            if QueryUtils.isPipeOnlyRegex(filtVal) => filtVal.split('|').toSeq
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")
@@ -837,7 +837,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             case Some(ColumnFilter(_, Filter.Equals(_: String))) => true
             case Some(ColumnFilter(_, Filter.EqualsRegex(value: String))) =>
               // Make sure no regex chars except the pipe, which can be used to concatenate values.
-              !QueryUtils.containsUnescapedNonPipeRegexChars(value)
+              QueryUtils.isPipeOnlyRegex(value)
             case _ => false
           }
         }

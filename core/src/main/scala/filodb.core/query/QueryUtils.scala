@@ -45,7 +45,7 @@ object QueryUtils {
    * Returns true iff the argument string contains no unescaped special regex characters.
    * The pipe character ('|') is excluded from the set of special regex characters.
    */
-  def containsUnescapedNonPipeRegexChars(str: String): Boolean = {
-    getUnescapedSpecialRegexChars(str).diff(Set('|')).nonEmpty
+  def isPipeOnlyRegex(str: String): Boolean = {
+    getUnescapedSpecialRegexChars(str).diff(Set('|')).isEmpty
   }
 }

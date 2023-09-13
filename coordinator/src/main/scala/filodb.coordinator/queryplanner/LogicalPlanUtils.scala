@@ -425,7 +425,7 @@ object LogicalPlanUtils extends StrictLogging {
       val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
       val resolvedFilters = shardKeyFilters.flatMap{ filters =>
         val updFilters = filters.map { filter => filter.filter match {
-          case EqualsRegex(values: String) if !QueryUtils.containsUnescapedNonPipeRegexChars(values) =>
+          case EqualsRegex(values: String) if QueryUtils.isPipeOnlyRegex(values) =>
             values.split('|').map(value => ColumnFilter(filter.column, Equals(value))).toSeq
           case other => Seq(filter)
         }}
