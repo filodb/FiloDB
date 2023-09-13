@@ -53,6 +53,8 @@ object QueryUtils {
    * Splits a string on unescaped pipe characters.
    */
   def splitOnPipes(str: String): Seq[String] = {
+    // match pipes preceded by any count of backslash pairs and either
+    //   some non-backslash character or the beginning of a line.
     str.split("(^|[^\\\\])(\\\\\\\\)*\\|")
   }
 }
