@@ -152,11 +152,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     //   - all plan data lies on one partition
     //   - all RawSeries filters are identical
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val filterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
+    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
       .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
-    val headFilters = filterGroups.headOption.map(_.toSet)
+    val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
     // Note: unchecked .get is OK here since it will only be called for each tail element.
-    val sameFilters = filterGroups.tail.forall(_.toSet == headFilters.get)
+    val sameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
     val partitions = getShardKeys(logicalPlan)
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
     if (partitions.isEmpty) {
@@ -257,20 +257,22 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
     // Sort each key into the same order as nonMetricShardKeys, then group keys with the same prefix.
     // A plan will be created for each group; this prevents the scenario mentioned in the javadoc.
+    // NOTE: this solution is not optimal in all cases, but it does guarantee groupings are valid.
     val partitionToKeyGroups = partitionsToKeys.map{ case (partition, keys) =>
-      val sortedPrefixes = keys
+      val prefixGroups = keys
         .map(key => key.sortBy(filter => nonMetricShardKeyColToIndex.getOrElse(filter.column, 0)))
         .groupBy(_.dropRight(1))
         .values
-      (partition, sortedPrefixes)
+      (partition, prefixGroups)
     }
 
     // Skip the aggregate presentation if there are more than one plans to materialize.
     val skipAggregatePresentValue = partitionToKeyGroups.size > 1 ||
                                     partitionToKeyGroups.values.headOption.map(_.size).getOrElse(0) > 1
 
-    // Create one plan per key group (i.e. one per partition,prefix pair).
+    // Create one plan per key group.
     partitionToKeyGroups.flatMap{ case (partition, keyGroups) =>
+      // NOTE: partition is intentionally unused; the inner planner will again determine which partitions own the data.
       keyGroups.map{ keys =>
         // Create a map of key->values, then create a ColumnFilter for each key.
         val keyToValues = new mutable.HashMap[String, mutable.Set[String]]()

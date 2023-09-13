@@ -421,17 +421,19 @@ object LogicalPlanUtils extends StrictLogging {
     val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
       .filter(_.isInstanceOf[RawSeries])
       .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
-      val shardKeyFilters = getShardKeyFilters(rs)
-      val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
-      val resolvedFilters = shardKeyFilters.flatMap{ filters =>
-        val updFilters = filters.map { filter => filter.filter match {
-          case EqualsRegex(values: String) if QueryUtils.isPipeOnlyRegex(values) =>
-            values.split('|').map(value => ColumnFilter(filter.column, Equals(value))).toSeq
-          case other => Seq(filter)
-        }}
-        QueryUtils.combinations(updFilters)
+        val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+        val rawShardKeyFilters = getShardKeyFilters(rs)
+        val shardKeyFilters = rawShardKeyFilters.flatMap{ filters =>
+          val resolvedFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
+            filter.filter match {
+              // Take care of pipe-joined values here -- create one Equals filter per value.
+              case EqualsRegex(values: String) if QueryUtils.isPipeOnlyRegex(values) =>
+                values.split('|').map(value => ColumnFilter(filter.column, Equals(value))).toSeq
+              case _ => Seq(filter)
+            }}
+          QueryUtils.combinations(resolvedFilters)
       }
-      resolvedFilters.map{ shardKey =>
+      shardKeyFilters.map{ shardKey =>
         val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
       }

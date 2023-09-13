@@ -52,8 +52,8 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
         // Get all possible value combos, then create a key->value map for each combo.
         // Ordering the pairs first since the output of combinations() is also ordered.
         val orderedPairs = keyValuesPairs.toSeq
-        val keys = orderedPairs.map(_._1)
-        val values = orderedPairs.map(_._2)
+        val keys: Seq[String] = orderedPairs.map(_._1)
+        val values: Seq[Seq[String]] = orderedPairs.map(_._2)
         QueryUtils.combinations(values).map(keys.zip(_).toMap)
       }
 

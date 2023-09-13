@@ -262,7 +262,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       s"Dataset $dsRef does not have shard columns defined, and shard overrides were not mentioned")
 
     qContext.plannerParams.shardOverrides.getOrElse {
-      val shardColToValues = shardColumns.map { shardCol =>
+      val shardColToValues: Seq[(String, Seq[String])] = shardColumns.map { shardCol =>
         // To compute the shard hash, filters must match all shard columns either by equality or EqualsRegex,
         //   where any match by EqualsRegex can use at most the '|' regex character.
         val values = filters.find(f => f.column == shardCol) match {
@@ -282,16 +282,21 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
 
       // Get all (ordered) combinations of values, then create (key,value) pairs for each.
-      val shardValues = QueryUtils.combinations(shardColToValues.map(_._2)).map(shardColToValues.map(_._1).zip(_))
+      val shardKeyValuePairs: Seq[Seq[(String, String)]] = {
+        val keys = shardColToValues.map(_._1)
+        val valueGroups = shardColToValues.map(_._2)
+        QueryUtils.combinations(valueGroups).map(keys.zip(_))
+      }
+
       // For each set of pairs, create a set of Equals filters and compute the shards for each.
-      shardValues.flatMap{ vals =>
-        val valMap = vals.toMap
+      shardKeyValuePairs.flatMap{ kvPairs =>
+        val kvMap = kvPairs.toMap
         val updFilters = filters.map{ filt =>
-            valMap.get(filt.column)
+            kvMap.get(filt.column)
               .map(value => ColumnFilter(filt.column, Filter.Equals(value)))
               .getOrElse(filt)
           }
-        shardsFromValues(vals, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
+        shardsFromValues(kvPairs, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
       }.distinct
     }
   }
@@ -401,7 +406,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       canGetShardsFromFilters(leaf.renamedFilters, qContext)
     }) return None
 
-    Some(leafInfos.flatMap{ leaf =>
+    val shards = leafInfos.flatMap { leaf =>
       val useTargetSchema = (filters: Seq[ColumnFilter]) => {
         val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(filters)
         val tsChangeExists = isTargetSchemaChanging(targetSchemaChanges, leaf.startMs, leaf.endMs)
@@ -410,7 +415,9 @@ class SingleClusterPlanner(val dataset: Dataset,
         !tsChangeExists && allTSLabelsPresent
       }
       shardsFromFilters(leaf.renamedFilters, qContext, leaf.startMs, leaf.endMs, useTargetSchema)
-    }.toSet)
+    }.toSet
+
+    Some(shards)
   }
   // scalastyle:on method.length
 
