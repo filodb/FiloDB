@@ -41,7 +41,7 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
             case Equals(value) => Seq(value.toString)
             // Split '|'-joined values if pipes are the only regex chars used.
             case EqualsRegex(value: String) if QueryUtils.isPipeOnlyRegex(value) =>
-              value.split('|').toSeq
+              QueryUtils.splitOnPipes(value)
             case _ => throw new IllegalArgumentException(
               s"""shard keys must be filtered by equality or "|"-only regex. filter=${filter}""")
           }

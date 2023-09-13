@@ -48,4 +48,11 @@ object QueryUtils {
   def isPipeOnlyRegex(str: String): Boolean = {
     getUnescapedSpecialRegexChars(str).diff(Set('|')).isEmpty
   }
+
+  /**
+   * Splits a string on unescaped pipe characters.
+   */
+  def splitOnPipes(str: String): Seq[String] = {
+    str.split("(^|[^\\\\])(\\\\\\\\)*\\|")
+  }
 }

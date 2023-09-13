@@ -269,7 +269,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
             Seq(filtVal)
           case Some(ColumnFilter(_, Filter.EqualsRegex(filtVal: String)))
-            if QueryUtils.isPipeOnlyRegex(filtVal) => filtVal.split('|').toSeq
+            if QueryUtils.isPipeOnlyRegex(filtVal) => QueryUtils.splitOnPipes(filtVal)
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")

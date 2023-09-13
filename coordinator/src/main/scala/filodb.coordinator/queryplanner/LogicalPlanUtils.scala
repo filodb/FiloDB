@@ -428,7 +428,7 @@ object LogicalPlanUtils extends StrictLogging {
             filter.filter match {
               // Take care of pipe-joined values here -- create one Equals filter per value.
               case EqualsRegex(values: String) if QueryUtils.isPipeOnlyRegex(values) =>
-                values.split('|').map(value => ColumnFilter(filter.column, Equals(value))).toSeq
+                QueryUtils.splitOnPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
               case _ => Seq(filter)
             }}
           QueryUtils.combinations(resolvedFilters)
