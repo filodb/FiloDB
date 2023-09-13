@@ -3,8 +3,10 @@ package filodb.query.exec.rangefn
 import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
+import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.vectors.LongVectorDataReader
 
 object RateFunctions {
 
@@ -303,6 +305,89 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
 }
 
+abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[TransientHistRow]{
+  var numSamples = 0
+  var previousToLastSampleTime = Long.MaxValue
+  var previousToLastSampleValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+  var lastSampleTime = 0L
+  var lastSampleValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+
+  def isCounter: Boolean
+
+  def isRate: Boolean
+
+  override def reset(): Unit = {
+    previousToLastSampleTime = Long.MaxValue
+    previousToLastSampleValue = bv.HistogramWithBuckets.empty
+    lastSampleTime = 0L
+    lastSampleValue = bv.HistogramWithBuckets.empty
+    super.reset()
+  }
+
+  override def calculateStartAndEndRowNum(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                                 tsReader: bv.LongVectorDataReader, startTime: Long, endTime: Long,
+                                 info: ChunkSetInfoReader): (Int, Int) = {
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    // In Irate, we use the last two samples
+    (endRowNum-1, endRowNum)
+  }
+
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
+                    previousToEndRowNum: Int, endRowNum: Int,
+                    previousToEndTime: Long, endTime: Long): Unit = reader match {
+    case histReader: bv.CounterHistogramReader =>
+
+      // For IRate, we need the last 2 samples in the given window
+      // Hence, we are using the endtime to see if there is any newer sample
+      if (endTime > lastSampleTime) {
+
+        // lowest rowNum possible in chunk is 0
+        if (previousToEndRowNum >= 0){
+          previousToLastSampleTime = previousToEndTime
+          previousToLastSampleValue = histReader.correctedValue(previousToEndRowNum, correctionMeta)
+        }
+
+        lastSampleTime = endTime
+        lastSampleValue = histReader.correctedValue(endRowNum, correctionMeta)
+      }
+    case other: CounterVectorReader =>
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
+
+    // previousToLastSampleTime is set to Long.Max and lastSampleTime = 0, by default. Following check
+    // helps to determine if we have at least two samples to calculate Irate
+    if (lastSampleTime > previousToLastSampleTime) {
+
+      // TODO: handle case where schemas are different and we need to interpolate schemas
+      if (previousToLastSampleValue.buckets == lastSampleValue.buckets) {
+        val rateArray = new Array[Double](previousToLastSampleValue.numBuckets)
+        cforRange {
+          0 until rateArray.size
+        } { b =>
+          rateArray(b) = RateFunctions.extrapolatedRate(
+            previousToLastSampleTime, lastSampleTime, 2,
+            previousToLastSampleTime, previousToLastSampleValue.bucketValue(b),
+            lastSampleTime, lastSampleValue.bucketValue(b),
+            isCounter, isRate)
+        }
+        sampleToEmit.setValues(windowEnd, bv.MutableHistogram(previousToLastSampleValue.buckets, rateArray))
+      } else {
+        sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+      }
+    } else {
+      sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+    }
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
+}
+
+class HistIRateFunction extends HistogramIRateFunctionBase {
+  def isCounter: Boolean = true
+  def isRate: Boolean    = true
+}
+
 class HistRateFunction extends HistogramRateFunctionBase {
   def isCounter: Boolean = true
   def isRate: Boolean    = true
@@ -378,3 +463,75 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
 }
 
+class IRateOverDeltaChunkedFunctionH(var lastSampleValue: bv.HistogramWithBuckets = bv.Histogram.empty,
+                                     var previousToLastSampleValue: bv.HistogramWithBuckets = bv.Histogram.empty,
+                                     var previousToLastSampleTime: Long = Long.MaxValue,
+                                     var lastSampleTime: Long = 0L)
+  extends ChunkedRangeFunction[TransientHistRow] {
+
+  override def reset(): Unit = {
+    previousToLastSampleTime = Long.MaxValue
+    previousToLastSampleValue = bv.HistogramWithBuckets.empty
+    lastSampleTime = 0L
+    lastSampleValue = bv.HistogramWithBuckets.empty
+    super.reset()
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
+
+    if (lastSampleTime > previousToLastSampleTime){
+      val irateArray = new Array[Double](lastSampleValue.numBuckets)
+      cforRange {
+        0 until irateArray.size
+      } { b =>
+        val sumOfLastTwoSamples = (lastSampleValue.bucketValue(b) + previousToLastSampleValue.bucketValue(b))
+        irateArray(b) = sumOfLastTwoSamples / (lastSampleTime - previousToLastSampleTime) * 1000
+      }
+      sampleToEmit.setValues(windowEnd, bv.MutableHistogram(lastSampleValue.buckets, irateArray))
+    }
+    else{
+      sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+    }
+  }
+
+  // scalastyle:off parameter.number
+  override def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: LongVectorDataReader,
+                         valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                         startTime: BinaryVectorPtr, endTime: BinaryVectorPtr,
+                         info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    val previousToEndRowNum = endRowNum - 1
+
+    // At least one sample is present
+    if (endRowNum >= 0) {
+      addTimeChunks(valueVectorAcc, valueVector, valueReader, previousToEndRowNum, endRowNum,
+        tsReader(tsVectorAcc, tsVector, previousToEndRowNum), tsReader(tsVectorAcc, tsVector, endRowNum))
+    }
+  }
+
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: VectorDataReader,
+                    previousToEndRowNum: Int, endRowNum: Int,
+                    previousToEndTime: Long, endTime: Long): Unit = {
+
+    // we are tracking the last two sample's histogram buckets for irate
+    if (endTime > lastSampleTime){
+      // track sample's time value to calculate the irate between these two times
+      lastSampleTime = endTime
+      lastSampleValue = reader.asHistReader.apply(endRowNum)
+
+      if (previousToEndRowNum >= 0){
+        previousToLastSampleTime = previousToEndTime
+        previousToLastSampleValue = reader.asHistReader.apply(previousToEndRowNum)
+      }
+    }
+  }
+
+    /**
+     * Return the computed result in the sampleToEmit
+     *
+     * @param endTimestamp the ending timestamp of the current window
+     */
+    def apply(endTimestamp: BinaryVectorPtr, sampleToEmit: TransientHistRow): Unit = ???
+
+}
