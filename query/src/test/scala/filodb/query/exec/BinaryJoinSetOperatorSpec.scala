@@ -1754,6 +1754,60 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
   }
 
+
+  it("OR of two TS with no on clause should return both") {
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("l1".utf8 -> "v1".utf8))
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 2.0),
+        new TransientRow(4900, 2.0),
+        new TransientRow(5000, 2.0),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 5000))
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("l2".utf8 -> "v2".utf8))
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 0.0),
+        new TransientRow(4900, 0.0),
+        new TransientRow(5000, 0.0),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 5000))
+    }
+
+    val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
+      dummyPlan :: Nil,
+      dummyPlan :: Nil,
+      BinaryOperator.LOR,
+      None,
+      Nil,
+      "__name__",
+      Some(RvRange(4800, 100, 6700)))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    // scalastyle:on
+
+    // TODO: If the LHS and RHS metrics have same label value pairs, we cant send two RvS.
+    val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
+      .toListL.runToFuture.futureValue
+    result1.tail shouldEqual Nil
+    val res = result1.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList
+    println(res)
+    //res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
+  }
+
   def assertListEquals(l1: List[(Long, Double)], l2: List[(Long, Double)]): Boolean =
     l1.length == l2.length && (l1 zip l1).forall{
       case ((t1, Double.NaN), (t2, Double.NaN))    =>  t1 == t2
