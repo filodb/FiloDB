@@ -1745,23 +1745,18 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
-    // TODO: If the LHS and RHS metrics have same label value pairs, we cant send two RvS.
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
     result1.tail shouldEqual Nil
     val res = result1.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList
-    println(res)
     res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
   }
 
 
   it("OR of two TS with no on clause should return both") {
-
     val lhsRv = new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(Map("l1".utf8 -> "v1".utf8))
-
       import NoCloseCursor._
-
       val rows: RangeVectorCursor = Seq(
         new TransientRow(4800, 2.0),
         new TransientRow(4900, 2.0),
@@ -1799,13 +1794,98 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
-    // TODO: If the LHS and RHS metrics have same label value pairs, we cant send two RvS.
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
-    result1.tail shouldEqual Nil
-    val res = result1.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList
-    println(res)
-    //res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
+    result1.size shouldEqual 2
+    // We are expecting to see both RVs returned
+    result1.foreach(rv => {
+      if(rv.key.labelValues == Map("l2".utf8 -> "v2".utf8)) {
+          rv.rows().map(_.getDouble(1)).toSet shouldEqual Set(0)
+      } else {
+          rv.rows().map(_.getDouble(1)).toSet shouldEqual Set(2.0)
+      }
+    })
+  }
+
+  it("RHS of OR of TS with on() must return NaN values for time steps where 'ANY' LHS has non NaN values") {
+    val lhsRv1 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("l1".utf8 -> "v1".utf8))
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 2.0),
+        new TransientRow(4900, Double.NaN),
+        new TransientRow(5000, Double.NaN),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 5000))
+    }
+
+    val lhsRv2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("l1".utf8 -> "v2".utf8))
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, Double.NaN),
+        new TransientRow(4900, 2.0),
+        new TransientRow(5000, Double.NaN),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 5000))
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("l2".utf8 -> "v2".utf8))
+
+      import NoCloseCursor._
+
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, 0.0),
+        new TransientRow(4900, 0.0),
+        new TransientRow(5000, 0.0),
+      ).iterator
+
+      override def outputRange: Option[RvRange] = Some(RvRange(4800, 100, 5000))
+    }
+
+    val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
+      dummyPlan :: Nil,
+      dummyPlan :: Nil,
+      BinaryOperator.LOR,
+      Some(List()),
+      Nil,
+      "__name__",
+      Some(RvRange(4800, 100, 6700)))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhsRv1, lhsRv2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    // scalastyle:on
+
+    val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
+      .toListL.runToFuture.futureValue
+    result1.size shouldEqual 3
+    // We are expecting to see both RVs returned
+    result1.foreach(rv => {
+      if (rv.key.labelValues == Map("l1".utf8 -> "v1".utf8)) {
+        val (v1::v2::v3::_) = rv.rows().map(_.getDouble(1)).toList
+        v1 shouldEqual 2.0
+        v2.isNaN shouldEqual true
+        v3.isNaN shouldEqual true
+      } else if (rv.key.labelValues == Map("l1".utf8 -> "v2".utf8)) {
+        val (v1 :: v2 :: v3 :: _) = rv.rows().map(_.getDouble(1)).toList
+        v1.isNaN shouldEqual true
+        v2 shouldEqual 2.0
+        v3.isNaN shouldEqual true
+      } else {
+        val (v1 :: v2 :: v3 :: _) = rv.rows().map(_.getDouble(1)).toList
+        v1.isNaN shouldEqual true
+        v2.isNaN shouldEqual true
+        v3 shouldEqual 0.0
+      }
+    })
   }
 
   def assertListEquals(l1: List[(Long, Double)], l2: List[(Long, Double)]): Boolean =
