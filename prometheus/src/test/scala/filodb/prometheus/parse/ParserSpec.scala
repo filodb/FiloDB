@@ -1,12 +1,12 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams, VectorSpec}
+import filodb.prometheus.ast.{AtEnd, AtStart, AtTimestamp, AtUnix, PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams, VectorSpec}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.TimeUnit.{MINUTES, SECONDS, HOURS, DAYS}
+import java.util.concurrent.TimeUnit.{DAYS, HOURS, MINUTES, SECONDS}
 import scala.concurrent.duration.Duration
 
 //noinspection ScalaStyle
@@ -235,6 +235,22 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("foo[5m25s] OFFSET 1h30m")
     parseSuccessfully("foo[1h5m25s] OFFSET 1h30m20s")
 
+    parseSuccessfully("foo @1000")
+    parseSuccessfully("foo @start()")
+    parseSuccessfully("foo @end()")
+
+    parseSuccessfully("foo[5m] @1000")
+    parseSuccessfully("foo[5m25s] @start()")
+    parseSuccessfully("foo[1h5m25s] @end()")
+
+    parseSuccessfully("foo[5m] @1000 OFFSET 1h30m20s")
+    parseSuccessfully("foo[5m25s] @start() OFFSET 1h30m")
+    parseSuccessfully("foo[1h5m25s] @end() OFFSET 1h30m")
+
+    parseSuccessfully("rate(foo[5m] @1000 OFFSET 1h30m20s)")
+    parseSuccessfully("rate(foo[5m25s] @start() OFFSET 1h30m)")
+    parseSuccessfully("rate(foo[1h5m25s] @end() OFFSET 1h30m)")
+
     parseError("foo[5mm]")
     parseError("foo[0m]")
     parseError("foo[1i5m]")
@@ -253,6 +269,10 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("some_metric OFFSET 1m[5m]")
     parseError("some_metric LIMIT 1m[5m]")
     parseError("(foo + bar)[5m]")
+
+//    parseError("rate(foo[5m]) @1000")
+//    parseError("rate(foo[5m25s]) @start()")
+//    parseError("rate(foo[1h5m25s]) @end()")
 
     parseSuccessfully("sum by (foo)(some_metric)")
     parseSuccessfully("avg by (foo)(some_metric)")
@@ -500,6 +520,13 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s]) limit 5")
     parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m) limit 2")
     parseSubquery("avg_over_time(rate(demo_cpu_usage_seconds_total[1m])[2m:10s])")
+
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] @1000)")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] @1000) limit 2")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m @1000)")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m @1000) limit 2")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] @1000 offset 5m)")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] @1000 offset 5m) limit 2")
 
     parseSubquery("foo[5m:1m]")
     parseSubquery("foo[5m:]")
@@ -829,7 +856,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("should correctly parse durations with multiple units") {
-    case class Spec(query: String, windowDuration: Duration, offsetDuration: Duration)
+    case class Spec(query: String, windowDuration: Duration, offsetDuration: Duration,
+                    atTimestamp: Option[AtTimestamp] = None)
     val specs = Seq(
       Spec(
         """foo{label="bar"}[1m30s] offset 2h15m""",
@@ -837,27 +865,43 @@ class ParserSpec extends AnyFunSpec with Matchers {
             Duration(2, HOURS) + Duration(15, MINUTES)
       ),
       Spec(
-        """foo{label="bar"}[3d2h25m10s] offset 2d12h15m30s""",
+        """foo{label="bar"}[3d2h25m10s] @600 offset 2d12h15m30s""",
             Duration(3, DAYS) + Duration(2, HOURS) + Duration(25, MINUTES) + Duration(10, SECONDS),
             Duration(2, DAYS) + Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS),
+            Some(AtUnix(600))
       ),
       Spec(
-        """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s""",
+        """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s @1000""",
             Duration(3, DAYS) + Duration(25, MINUTES),
             Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS),
+            Some(AtUnix(1000))
+      ),
+      Spec(
+        """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s @start()""",
+            Duration(3, DAYS) + Duration(25, MINUTES),
+            Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS),
+            Some(AtStart())
+      ),
+      Spec(
+        """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s @end()""",
+            Duration(3, DAYS) + Duration(25, MINUTES),
+            Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS),
+            Some(AtEnd())
       )
     )
     specs.foreach{ spec =>
       Parser.parseQuery(spec.query) match {
-        case RangeExpression(_, _, window, offset) =>
+        case RangeExpression(_, _, window, offset, atTimestamp) =>
           window.millis(0) shouldEqual spec.windowDuration.toMillis
           offset.get.millis(0) shouldEqual spec.offsetDuration.toMillis
+          atTimestamp shouldEqual spec.atTimestamp
       }
     }
   }
 
   it("should correctly parse subquery durations with multiple units") {
-    case class Spec(query: String, windowDuration: Duration, stepDuration: Duration, offsetDuration: Duration)
+    case class Spec(query: String, windowDuration: Duration, stepDuration: Duration,
+                    offsetDuration: Duration, atTimestamp: Option[AtTimestamp] = None)
     val specs = Seq(
       Spec(
         """foo{label="bar"}[3d2h25m10s:1d4h30m4s] offset 2d12h15m30s""",
@@ -866,18 +910,20 @@ class ParserSpec extends AnyFunSpec with Matchers {
             Duration(2, DAYS) + Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS)
       ),
       Spec(
-        """foo{label="bar"}[3d0h25m0s:1d0h2m] offset 0d12h15m30s""",
+        """foo{label="bar"}[3d0h25m0s:1d0h2m] offset 0d12h15m30s @1000""",
             Duration(3, DAYS) + Duration(25, MINUTES),
             Duration(1, DAYS) + Duration(2, MINUTES),
-            Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS)
+            Duration(12, HOURS) + Duration(15, MINUTES) + Duration(30, SECONDS),
+            Some(AtUnix(1000))
       )
     )
     specs.foreach{ spec =>
       Parser.parseQuery(spec.query) match {
-        case SubqueryExpression(_, SubqueryClause(window, step), offset, _) =>
+        case SubqueryExpression(_, SubqueryClause(window, step), offset, atTimestamp, _) =>
           window.millis(0) shouldEqual spec.windowDuration.toMillis
           step.map(_.millis(0)).getOrElse(0) shouldEqual spec.stepDuration.toMillis
           offset.get.millis(0) shouldEqual spec.offsetDuration.toMillis
+          atTimestamp shouldEqual spec.atTimestamp
       }
     }
   }

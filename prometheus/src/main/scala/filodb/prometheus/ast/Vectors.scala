@@ -27,6 +27,29 @@ case class Ignoring(labels: Seq[String]) extends JoinMatching
 
 case class On(labels: Seq[String]) extends JoinMatching
 
+sealed trait AtTimestamp {
+  def getTimestampInSec(timeParams: TimeRangeParams): Long
+}
+
+case class AtUnix(time: Long) extends AtTimestamp {
+  override def getTimestampInSec(timeParams: TimeRangeParams): Long = {
+    time
+  }
+}
+
+case class AtStart() extends AtTimestamp {
+  override def getTimestampInSec(timeParams: TimeRangeParams): Long = {
+    timeParams.start
+  }
+}
+
+case class AtEnd() extends AtTimestamp {
+  override def getTimestampInSec(timeParams: TimeRangeParams): Long = {
+    timeParams.end
+  }
+}
+
+case class Modifier(offset: Option[Duration], at: Option[AtTimestamp])
 sealed trait JoinGrouping {
   def labels: Seq[String]
 }
@@ -89,7 +112,8 @@ case class VectorMatch(matching: Option[JoinMatching],
 }
 
 case class SubqueryExpression(
-    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration], limit: Option[Int]
+    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration],
+    atTimestamp: Option[AtTimestamp], limit: Option[Int]
 ) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -278,7 +302,8 @@ case class VectorSpec() extends Vector{
   */
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             offset: Option[Duration]) extends Vector with PeriodicSeries {
+                             offset: Option[Duration],
+                             atTimestamp: Option[AtTimestamp]) extends Vector with PeriodicSeries {
 
   import WindowConstants._
 
@@ -360,7 +385,8 @@ case class InstantExpression(metricName: Option[String],
 case class RangeExpression(metricName: Option[String],
                            labelSelection: Seq[LabelMatch],
                            window: Duration,
-                           offset: Option[Duration]) extends Vector with SimpleSeries {
+                           offset: Option[Duration],
+                           atTimestamp: Option[AtTimestamp]) extends Vector with SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
