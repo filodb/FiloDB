@@ -236,8 +236,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("foo[1h5m25s] OFFSET 1h30m20s")
 
     parseSuccessfully("foo @1000")
+    parseSuccessfully("foo @ 1000")
     parseSuccessfully("foo @start()")
+    parseSuccessfully("foo @ start()")
     parseSuccessfully("foo @end()")
+    parseSuccessfully("foo @ end()")
 
     parseSuccessfully("foo[5m] @1000")
     parseSuccessfully("foo[5m25s] @start()")
