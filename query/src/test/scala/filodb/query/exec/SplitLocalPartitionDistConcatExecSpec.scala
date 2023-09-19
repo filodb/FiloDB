@@ -86,10 +86,10 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(dsRef, schemas, 0, TestData.storeConf)
+    memStore.setup(dsRef, schemas, 0, TestData.storeConf, 1)
     memStore.ingest(dsRef, 0, SomeData(container, 0))
 
-    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
+    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
 
     memStore.refreshIndexForTesting(dsRef)

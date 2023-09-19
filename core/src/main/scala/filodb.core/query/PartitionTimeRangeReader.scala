@@ -47,8 +47,8 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
                s"""${info.debugString} """
            }
           message += "]"
-          logger.error(s"message ${message}")
-          throw new IllegalArgumentException(message)
+          logger.error(s"message $message")
+          throw new IllegalArgumentException("requirement length > 0 failed.")
         }
       }
     }

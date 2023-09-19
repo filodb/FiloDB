@@ -96,7 +96,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
     val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
     try {
-      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
       memStore.refreshIndexForTesting(dataset.ref)
 
@@ -112,7 +112,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
     val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
     try {
-      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
       memStore.refreshIndexForTesting(dataset.ref)
 
@@ -134,7 +134,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
     val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
     try {
-      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
       memStore.refreshIndexForTesting(dataset.ref)
 
@@ -157,7 +157,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
     val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
     try {
-      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
       memStore.refreshIndexForTesting(dataset.ref)
 

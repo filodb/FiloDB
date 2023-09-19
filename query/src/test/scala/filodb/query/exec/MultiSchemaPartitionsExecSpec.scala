@@ -88,16 +88,16 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(dsRef, schemas, 0, TestData.storeConf)
+    memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
     memStore.ingest(dsRef, 0, SomeData(container, 0))
     memStore.ingest(dsRef, 0, MMD.records(MMD.histDataset, histData))
 
     // set up shard, but do not ingest data to simulate an empty shard
-    memStore.setup(dsRef, schemas, 1, TestData.storeConf)
+    memStore.setup(dsRef, schemas, 1, TestData.storeConf, 2)
 
-    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
+    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
-    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf)
+    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
 
     memStore.refreshIndexForTesting(dsRef)
@@ -138,6 +138,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
                                              dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
 
+    querySession.queryStats.clear() // so this can be run as a standalone test
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.result.size shouldEqual 1
@@ -145,6 +146,10 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
+    querySession.queryStats.getResultBytesCounter().get() shouldEqual 297
+    querySession.queryStats.getCpuNanosCounter().get() > 0 shouldEqual true
+    querySession.queryStats.getDataBytesScannedCounter().get() shouldEqual 48
+    querySession.queryStats.getTimeSeriesScannedCounter().get() shouldEqual 1
   }
 
   it("should get empty schema if query returns no results") {

@@ -583,7 +583,6 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
       throw EmptyHistogramException(s"""length = $length memory=${toHexString(acc, histVect.addr)}""")
     }
 
-    require(length > 0)
     val histPtr = locate(index)
 
     // Just return the base histogram if we are at start of section

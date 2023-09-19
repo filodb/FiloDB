@@ -402,7 +402,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         ackTo.foreach(_ ! DatasetExists(dataset.ref))
         Map.empty
       case None =>
-        val resources = DatasetResourceSpec(ingestConfig.numShards, ingestConfig.minNumNodes)
+        val minNumNodes = settings.minNumNodes.getOrElse(ingestConfig.minNumNodes)
+        val resources = DatasetResourceSpec(ingestConfig.numShards, minNumNodes)
         val mapper = new ShardMapper(resources.numShards)
         _shardMappers(dataset.ref) = mapper
         // Access the shardmapper through the HashMap so even if it gets replaced it will update the shard stats

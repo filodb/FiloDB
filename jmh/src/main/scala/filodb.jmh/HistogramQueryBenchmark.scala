@@ -53,7 +53,7 @@ class HistogramQueryBenchmark {
   histSchemaData.take(10 * 180).foreach(histSchemaBuilder.addFromReader(_, histDataset.schema))
 
   val histSchemas = Schemas(histDataset.schema)
-  memStore.setup(histDataset.ref, histSchemas, 0, ingestConf)
+  memStore.setup(histDataset.ref, histSchemas, 0, ingestConf, 1)
   val hShard = memStore.getShardE(histDataset.ref, 0)
   histSchemaBuilder.allContainers.foreach { c => hShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(histDataset.ref) // commit lucene index
@@ -66,7 +66,7 @@ class HistogramQueryBenchmark {
   val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, 4200000)
   promData.take(10*66*180).foreach(promBuilder.addFromReader(_, promDataset.schema))
 
-  memStore.setup(promDataset.ref, promSchemas, 0, ingestConf)
+  memStore.setup(promDataset.ref, promSchemas, 0, ingestConf, 1)
   val pShard = memStore.getShardE(promDataset.ref, 0)
   promBuilder.allContainers.foreach { c => pShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(promDataset.ref) // commit lucene index

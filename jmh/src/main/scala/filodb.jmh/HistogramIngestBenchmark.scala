@@ -68,8 +68,8 @@ class HistogramIngestBenchmark {
   val policy = new FixedMaxPartitionsEvictionPolicy(1000)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 100)
-  memStore.setup(histDataset.ref, Schemas(histDataset.schema), 0, ingestConf)
-  memStore.setup(promDataset.ref, Schemas(promDataset.schema), 0, ingestConf)
+  memStore.setup(histDataset.ref, Schemas(histDataset.schema), 0, ingestConf, 1)
+  memStore.setup(promDataset.ref, Schemas(promDataset.schema), 0, ingestConf, 1)
 
   val hShard = memStore.getShardE(histDataset.ref, 0)
   val pShard = memStore.getShardE(promDataset.ref, 0)

@@ -36,13 +36,13 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   import filodb.core.{MachineMetricsData => MMD}
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf, 1)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
-    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
+    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
-    memStore.setup(MMD.histDataset.ref, Schemas(MMD.histDataset.schema), 0, TestData.storeConf)
+    memStore.setup(MMD.histDataset.ref, Schemas(MMD.histDataset.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
-    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf)
+    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
