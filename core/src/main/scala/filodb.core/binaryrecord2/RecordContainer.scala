@@ -7,7 +7,7 @@ import scala.reflect.ClassTag
 import debox.Buffer
 
 import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge}
-import filodb.memory.format.{RowReader, UnsafeUtils}
+import filodb.memory.format.UnsafeUtils
 
 /**
  * A RecordContainer is a binary, wire-compatible container for BinaryRecords V2.
@@ -72,13 +72,13 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
    * Iterates through each BinaryRecord as a RowReader.  Results in two allocations: the Iterator
    * as well as a BinaryRecordRowReader.
    */
-  final def iterate(schema: RecordSchema): Iterator[RowReader] = new Iterator[RowReader] {
+  final def iterate(schema: RecordSchema): Iterator[BinaryRecordRowReader] = new Iterator[BinaryRecordRowReader] {
     val reader = new BinaryRecordRowReader(schema, base)
     val endOffset = offset + 4 + numBytes
     var curOffset = offset + ContainerHeaderLen
 
     final def hasNext: Boolean = curOffset < endOffset
-    final def next: RowReader = {
+    final def next: BinaryRecordRowReader = {
       val recordLen = BinaryRegionLarge.numBytes(base, curOffset)
       reader.recordOffset = curOffset
       curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes

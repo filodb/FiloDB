@@ -40,11 +40,13 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   }
 
   def shardsForOrdinal(ordinal: Int, numShards: Int): Seq[Int] = {
-    require(ordinal < settings.numNodes, s"Ordinal $ordinal was not expected. Number of nodes is ${settings.numNodes}")
-    val numShardsPerHost = numShards / settings.numNodes
+    require(settings.minNumNodes.isDefined, "Minimum Number of Nodes config not provided")
+    require(ordinal < settings.minNumNodes.get, s"Ordinal $ordinal was not expected. " +
+      s"Number of nodes is ${settings.minNumNodes.get}")
+    val numShardsPerHost = numShards / settings.minNumNodes.get
     // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
     // host-0 to shard [0,1,2,3] and host-1 to shard [4,5,6,7]
-    val numExtraShardsToAssign = numShards % settings.numNodes
+    val numExtraShardsToAssign = numShards % settings.minNumNodes.get
     val (firstShardThisNode, numShardsThisHost) = if (numExtraShardsToAssign != 0) {
       logger.warn("For stateful shard assignment, numShards should be a multiple of nodes per shard, " +
         "using default strategy")
@@ -69,8 +71,9 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   def shardsForLocalhost(numShards: Int): Seq[Int] = shardsForOrdinal(ordinalOfLocalhost, numShards)
 
   lazy private val hostNames = {
+    require(settings.minNumNodes.isDefined, "Minimum Number of Nodes config not provided")
     if (settings.k8sHostFormat.isDefined) {
-      (0 until settings.numNodes).map(i => String.format(settings.k8sHostFormat.get, i.toString))
+      (0 until settings.minNumNodes.get).map(i => String.format(settings.k8sHostFormat.get, i.toString))
     } else if (settings.hostList.isDefined) {
       settings.hostList.get.sorted // sort to make order consistent on all nodes of cluster
     } else throw new IllegalArgumentException("Cluster Discovery mechanism not defined")

@@ -26,6 +26,7 @@ import filodb.memory.NativeMemoryManager
 class OnDemandPagingShard(ref: DatasetRef,
                           schemas: Schemas,
                           storeConfig: StoreConfig,
+                          numShards: Int,
                           quotaSource: QuotaSource,
                           shardNum: Int,
                           bufferMemoryManager: NativeMemoryManager,
@@ -34,7 +35,7 @@ class OnDemandPagingShard(ref: DatasetRef,
                           evictionPolicy: PartitionEvictionPolicy,
                           filodbConfig: Config)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryManager, rawStore,
+TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, bufferMemoryManager, rawStore,
                 metastore, evictionPolicy, filodbConfig)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._

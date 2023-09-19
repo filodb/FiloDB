@@ -85,7 +85,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       tuples.map { t => SeqRowReader(Seq(t._1, t._2, metric, partTagsUTF8)) }
         .foreach(builder.addFromReader(_, Schemas.promCounter))
     }
-    memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), ishard, TestData.storeConf)
+    memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), ishard, TestData.storeConf, 1)
     memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, ishard, SomeData(builder.allContainers.head, 0))
   }
 

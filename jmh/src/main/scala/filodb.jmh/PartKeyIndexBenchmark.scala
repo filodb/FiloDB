@@ -74,7 +74,7 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
             ColumnFilter("_ws_", Filter.Equals("demo")),
-            ColumnFilter("host", Filter.EqualsRegex("H0")),
+            ColumnFilter("host", Filter.Equals("H0")),
             ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
         now,
         now + 1000)
@@ -90,24 +90,8 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
-          ColumnFilter("host", Filter.EqualsRegex("H0")),
+          ColumnFilter("host", Filter.Equals("H0")),
           ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
-        now,
-        now + 1000)
-    }
-  }
-
-  @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
-  @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(8)
-  def partIdsLookupWithSuffixRegexFilters(): Unit = {
-    cforRange ( 0 until 8 ) { i =>
-      partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
-          ColumnFilter("_ws_", Filter.Equals("demo")),
-          ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
-          ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
         now,
         now + 1000)
     }
@@ -123,9 +107,44 @@ class PartKeyIndexBenchmark {
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
+          ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def partIdsLookupWithSuffixRegexFilters(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
           ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
         now,
         now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def partIdsLookupWithEnumRegexFilter(): Unit = {
+    cforRange(0 until 8) { i =>
+      val c = partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-0")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
+          ColumnFilter("instance",
+            Filter.EqualsRegex("Instance-1|Instance-2|Instance-3|Instance-4|Instance-5|Instance-6|Instance-7|Instance-8|Instance-9|Instance-10|" +
+              "Instance-11|Instance-12|Instance-13|Instance-14|Instance-15|Instance-16|Instance-17|Instance-18|Instance-19|Instance-20|" +
+              "Instance-21|Instance-22|Instance-23|Instance-24|Instance-25|Instance-26|Instance-27|Instance-28|Instance-29|Instance-30"))),
+        now,
+        now + 1000).length
     }
   }
 

@@ -624,7 +624,12 @@ trait BinaryRecordRowReaderBase extends RowReader {
 
 final class BinaryRecordRowReader(val schema: RecordSchema,
                                   var recordBase: Any = UnsafeUtils.ZeroPointer,
-                                  var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase
+                                  var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase {
+  def recordLength: Int = {
+    val len = BinaryRegionLarge.numBytes(recordBase, recordOffset)
+    (len + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes
+  }
+}
 
 final class MultiSchemaBRRowReader(var recordBase: Any = UnsafeUtils.ZeroPointer,
                                    var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase {
