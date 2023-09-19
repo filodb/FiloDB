@@ -683,7 +683,11 @@ object PlannerUtil extends StrictLogging {
         lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries, rangeSelector, additionalLookback)
           .asInstanceOf[RawSeriesLikePlan])
       case lp: PeriodicSeriesWithWindowing =>
-        lp.copy(series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookback)
+        val rs = rangeSelector.asInstanceOf[IntervalSelector]
+        lp.copy(
+          startMs = rs.from,
+          endMs = rs.to,
+          series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookback)
           .asInstanceOf[RawSeriesLikePlan])
       case lp: MetadataQueryPlan => lp
       case lp: TsCardinalities => lp

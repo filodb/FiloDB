@@ -1,9 +1,13 @@
 package filodb.core.query
 
-import scala.concurrent.duration.FiniteDuration
+import java.util.concurrent.TimeUnit
+
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
+
+
 
 object QueryConfig {
   val DefaultVectorsLimit = 150
@@ -23,6 +27,10 @@ object QueryConfig {
     val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
     val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
     val numRvsPerResultMessage = queryConfig.getInt("num-rvs-per-result-message")
+    val supportRemoteRawExport = queryConfig.getBoolean("routing.enable-remote-raw-exports")
+    val maxRemoteRawExportTimeRange =
+      FiniteDuration(
+        queryConfig.getDuration("routing.max-time-range-remote-raw-export").toMillis, TimeUnit.MILLISECONDS)
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
@@ -32,7 +40,7 @@ object QueryConfig {
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides)
+      containerOverrides, supportRemoteRawExport, maxRemoteRawExportTimeRange)
   }
 
   import scala.concurrent.duration._
@@ -75,4 +83,6 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        allowPartialResultsMetadataQuery: Boolean = true,
                        grpcPartitionsDenyList: Set[String] = Set.empty,
                        plannerSelector: Option[String] = None,
-                       recordContainerOverrides: Map[String, Int] = Map.empty)
+                       recordContainerOverrides: Map[String, Int] = Map.empty,
+                       supportRemoteRawExport: Boolean = false,
+                       maxRemoteRawExportTimeRange: FiniteDuration = 3 days)

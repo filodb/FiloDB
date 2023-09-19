@@ -115,20 +115,40 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
       // raw series is doing a remote call to get all the data.
       logicalPlan match {
-        case lp: RawSeries    =>
-           assert(lp.supportsRemoteDataCall, "RawSeries with forceInProcess set to true only supports remote data call")
+        case lp: RawSeries    if lp.supportsRemoteDataCall=>
+            //println(lp)
            // materialize the raw query for the partition by rewriting the prom parameters
+            // A Raw series from [x, y] offset o and lookback l is same as doing a raw export as of time instant y
+           // with a lookback of (y - x) + o + l, for each partition this internal spans, we will find the remote/local
+           // partitions and stitch the results
             val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
             val rs = lp.rangeSelector.asInstanceOf[IntervalSelector]
-            val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp),
-              startSecs = rs.from / 1000,
-              endSecs = rs.to / 1000,
-              stepSecs = 0
-            )
-            val newContext = qContext.copy(origQueryParams = newPromQlParams)
-            val partition = getPartitions(lp, newPromQlParams)
-            assert(partition.size == 1, "Raw series export is expected to be running in just one partition")
-            PlanResult(Seq(materializeForPartition(lp, partition.head, newContext)))
+
+            val (rawExportStart, rawExportEnd) =
+              (rs.from - lp.offsetMs.getOrElse(0L) - lp.lookbackMs.getOrElse(0L), rs.to - lp.offsetMs.getOrElse(0L))
+
+            val partition = getPartitions(lp, params)
+            // For each partition, do a raw data export range query
+            val execPlans = partition.map(pa => {
+              val (thisPartitionStartMs, thisPartitionEndMs) =
+                (Math.max(pa.timeRange.startMs, rawExportStart), Math.min(pa.timeRange.endMs, rawExportEnd))
+              val totalOffsetThisPartitionMs = thisPartitionEndMs - thisPartitionStartMs
+              // Add additional 1 second to avoid ms to sec rounding issues
+              val thisPartitionLp = lp.copy(offsetMs = None, lookbackMs = Some(totalOffsetThisPartitionMs + 1000L))
+              val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(thisPartitionLp),
+                  startSecs = thisPartitionEndMs / 1000,
+                  endSecs = thisPartitionEndMs / 1000,
+                  stepSecs = 1
+                )
+              val newContext = qContext.copy(origQueryParams = newPromQlParams)
+              materializeForPartition(thisPartitionLp, pa, newContext)
+            })
+          PlanResult(
+            Seq( if (execPlans.tail == Seq.empty) execPlans.head
+            else
+              StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
+                execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+            ))
         case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
@@ -522,55 +542,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
     }
-    //walkLogicalPlanTree(logicalPlan, qContext, true)
     require(!assignmentRanges.isEmpty, s"Assignment ranges is not expected to be empty for query ${qParams.promQl}")
     // materialize a plan for each range/assignment pair
     val (_, execPlans) = assignmentRanges.foldLeft(
                           (None: Option[(PartitionAssignment, TimeRange)], ListBuffer.empty[ExecPlan]))
     {
       case (acc, next) => acc match {
-        case (Some((prevAssignment, prevTimeRange)), ep : ListBuffer[ExecPlan])      =>
-            val (currentAssignment, currentTimeRange) = next
-            val currentPartRange = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
-            endSecs = currentTimeRange.endMs / 1000)
+        case (Some((_, prevTimeRange)), ep : ListBuffer[ExecPlan])      =>
+          val (currentAssignment, currentTimeRange) = next
+          val (startTime, endTime) = (prevTimeRange.endMs + 1, currentTimeRange.startMs - 1)
 
 
-          // TODO: ALl this will be protected by the flag whether or not we want to enable stitching
-
+          // If we enable stitching the missing part of time range between the previous time range's end time and
+          // current time range's start time, we will perform remote raw data export
+          if (queryConfig.supportRemoteRawExport && startTime < endTime) {
             //  We need to perform raw data export from two partitions, the partition on the left and partition
             //  on the right, the missing data requires to get data
-            //
-            //
-            // We will always need the offsetMs + lookbackMillis of raw data from potentially both left and right
-            // partitions. If the end time range of previous query is same as the previous assignment end time range,
-            // no data from the partition is needed, similarly when the start date of the right partition less then
-            // the start time of the query in right partition, we need raw data from left partition.
-          // TODO: Have configs to not perform raw exports if the export is beyond a certain value, for example
-          //  foo{}[10d] or foo[2d] offset 8d  both will export 10 days of raw data which might cause heap pressure and
-          //  OOMs. The max cross partition raw export config can control such queries from bring the process down but
-          //  simpler queries with few minutes or even hour or two of lookback/offset will continue to work seamlessly
-          //  with no data gaps
 
-          // IMPORTANT: The raw export assumes the data needs to come from just previous partition. Inthrory there can
-          // be multiple time splits and the raw export will then need to span previous n partitions and stitch the data
-          // together. However, for simplicity we will restrict this raw export to just previous partition. If the,
-          // start of raw export exceeds the previous partition assignment's start, we simply keep the gap, which is
-          // the default behavior.
-          // Period to perform raw export offsetMs + lookbackMs
-          // If previous end is < previous partition's end time, we need data from this partition
-          if (prevTimeRange.endMs < prevAssignment.timeRange.endMs) {
-            // Walk the plan to make all RawSeries support remote and materialize getting the data from next partition
-
-          }
-
-          // If current start is > partitions's start time, export raw data from previous partition
-          if (currentTimeRange.startMs > currentAssignment.timeRange.startMs) {
             // Walk the plan to make all RawSeries support remote export fetching the data from previous partition
             // When we rewrite the RawSeries's rangeSelector, we will make the start and end time same as the end of the
             // previous partition's end time and then do a raw query for the duration of the
             //  (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + offset + lookback.
-            // TODO: also use totalExpectedRawExport to block raw export if it exceeds the max permitted raw export
-
             //           Partition split   end time for queries in partition 1
             //                      V(p)  V(t1)
             //  |----o----------------|---x------x-----------------------------o-------|
@@ -585,25 +577,26 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             // Given the offset is 10m, lookback is 5m, we would need raw data in the range
             // [t1 - 5m - 10m, t2], this range for raw queries span two partitions
             // we need to export foo[]
-            val totalExpectedRawExport =
-            (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + lookbackMs + offsetMs
-            // Only if the raw export is completely within the previous partition's timerange
-            if(prevAssignment.timeRange.endMs - totalExpectedRawExport >= prevAssignment.timeRange.startMs) {
-              val newParams = qParams.copy(startSecs = currentAssignment.timeRange.startMs / 1000,
-                endSecs = currentTimeRange.startMs / 1000 - 1)
+
+            // Do not perform raw exports if the export is beyond a certain value for example
+            // foo{}[10d] or foo[2d] offset 8d  both will export 10 days of raw data which might cause heap pressure and
+            // OOMs. The max cross partition raw export config can control such queries from bring the process down but
+            // simpler queries with few minutes or even hour or two of lookback/offset will continue to work seamlessly
+            // with no data gaps
+            val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs
+            if (queryConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
+              // Only if the raw export is completely within the previous partition's timerange
+              val newParams = qParams.copy(startSecs = startTime / 1000, endSecs = endTime / 1000 - 1)
               val newContext = qContext.copy(origQueryParams = newParams)
-
-              val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
-                IntervalSelector(prevAssignment.timeRange.endMs, prevAssignment.timeRange.endMs),
-                additionalLookback = currentTimeRange.startMs - currentAssignment.timeRange.startMs + 1000)
-
+              val newLp = rewritePlanWithRemoteRawExport(logicalPlan, IntervalSelector(startTime, endTime))
               ep ++= walkLogicalPlanTree(newLp, newContext, true).plans
+            }  else {
+              logger.warn(s"Remote raw export is supported but the expected raw export for $totalExpectedRawExport ms" +
+                s" is greater than the max allowed raw export duration ${queryConfig.maxRemoteRawExportTimeRange}")
             }
           }
-
-
           val newParams = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
-            endSecs = currentTimeRange.endMs / 1000)
+              endSecs = currentTimeRange.endMs / 1000)
           val newContext = qContext.copy(origQueryParams = newParams)
           ep += materializeForPartition(logicalPlan, currentAssignment, newContext)
           (Some(next), ep)
