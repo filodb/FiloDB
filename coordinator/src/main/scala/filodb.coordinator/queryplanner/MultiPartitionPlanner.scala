@@ -550,23 +550,24 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case (acc, next) => acc match {
         case (Some((_, prevTimeRange)), ep : ListBuffer[ExecPlan])      =>
           val (currentAssignment, currentTimeRange) = next
-          val (startTime, endTime) = (prevTimeRange.endMs + 1, currentTimeRange.startMs - 1)
+          // Start and end is the next and previous second of the previous and current time range respectively
+          val (startTime, endTime) = (prevTimeRange.endMs + 1000, currentTimeRange.startMs - 1000)
 
 
           // If we enable stitching the missing part of time range between the previous time range's end time and
-          // current time range's start time, we will perform remote raw data export
+          // current time range's start time, we will perform remote/local partition raw data export
           if (queryConfig.supportRemoteRawExport && startTime < endTime) {
-            //  We need to perform raw data export from two partitions, the partition on the left and partition
-            //  on the right, the missing data requires to get data
+            //  We need to perform raw data export from two partitions, for simplicity we will assume the time range
+            //  spans 2 partition, one partition is on the left and one on the right
 
             // Walk the plan to make all RawSeries support remote export fetching the data from previous partition
             // When we rewrite the RawSeries's rangeSelector, we will make the start and end time same as the end of the
             // previous partition's end time and then do a raw query for the duration of the
             //  (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + offset + lookback.
             //           Partition split   end time for queries in partition 1
-            //                      V(p)  V(t1)
-            //  |----o----------------|---x------x-----------------------------o-------|
-            //       ^(s)                        ^(t2)                         ^(e)
+            //                       V(p)  V(t1)
+            //  |----o---------------|-----x------x-----------------------------o-------|
+            //       ^(s)                         ^(t2)                         ^(e)
             //    Query start time     Start time in new partition          Query end time
             //
             // Given we have offset of 10 mins, the query range from partition P1 (left of the partition split point)
@@ -575,14 +576,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             // We want to now provide results for time range t1 - t2, which is missing
             // Lets assume the query is sum(rate(foo{}[5m] offset 10m))
             // Given the offset is 10m, lookback is 5m, we would need raw data in the range
-            // [t1 - 5m - 10m, t2], this range for raw queries span two partitions
-            // we need to export foo[]
+            // [t1 - 5m - 10m, t2], this range for raw queries span two partitions and we will let the RawSeries (the
+            // leaf logical plan) with supportsRemoteDataCall = true figure out if this range can entirely be selected
+            // from partition p1 or p2
+            //
 
             // Do not perform raw exports if the export is beyond a certain value for example
             // foo{}[10d] or foo[2d] offset 8d  both will export 10 days of raw data which might cause heap pressure and
             // OOMs. The max cross partition raw export config can control such queries from bring the process down but
             // simpler queries with few minutes or even hour or two of lookback/offset will continue to work seamlessly
             // with no data gaps
+            // Note that at the moment, while planning, we only can look at whats the max time range we can support.
+            // We still dont hqve capabilities to check the expected number of timeseries scanned or bytes scanned
+            // and adding capabilities to give up a "part" of query execution if the runtime number of bytes of ts
+            // scanned goes high isn't available. To start with the time range scanned as a static configuration will
+            // be good enough and can be enhanced in future as required.
             val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs
             if (queryConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
               // Only if the raw export is completely within the previous partition's timerange
