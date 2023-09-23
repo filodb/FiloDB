@@ -217,10 +217,15 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo{a*\"b\"}")
     parseError("foo{a>=\"b\"}")
 
+    parseSuccessfully("{__name__=\"foo\"}")
+    parseSuccessfully("{_metric_=\"foo\"}")
     parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
     parseError("foo{__name__=\"bar\"}")
+    parseError("foo{__name__=\"foo\"}")
+    parseError("foo{_metric_=\"bar\"}")
+    parseError("foo{_metric_=\"foo\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
     parseSuccessfully("test{a=\"b\"}[5y] LIMIT 3")
@@ -810,6 +815,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
       ("""{__name__="foo"}""" -> Map("__name__" -> "foo")),
       ("""{__name__="foo", bar="baz"}""" -> Map("__name__" -> "foo", "bar" -> "baz")),
       ("""{bar="baz"}""" -> Map("bar" -> "baz")),
+      """{_metric_="foo"}"""  ->  Map("_metric_" -> "foo"),    // not same as """{__name__="foo"}"""
       ("""foo{bar="baz", bog="bah"}""" -> Map("__name__" -> "foo", "bar" -> "baz", "bog" -> "bah")),
     )
 
