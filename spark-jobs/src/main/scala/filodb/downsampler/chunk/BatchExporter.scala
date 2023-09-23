@@ -46,8 +46,8 @@ object BatchExporter {
    */
   def getExportLabelValueString(value: String): String = {
     value
-      // escape all single-quotes and commas if they aren't already escaped
-      .replaceAll("""\\(\,|\')|(\,|\')""", """\\$1$2""")
+      // escape all double-quotes if they aren't already escaped
+      .replaceAll("""\\(\")|(\")""", """\\$1$2""")
   }
 }
 
@@ -220,7 +220,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   private def makeLabelString(labels: collection.Map[String, String]): String = {
     val inner = labels
       .map {case (k, v) => (k, getExportLabelValueString(v))}
-      .map {case (k, v) => s"'$k':'$v'"}
+      .map {case (k, v) => s""""$k":"$v""""}
       .mkString (",")
     s"{$inner}"
   }
