@@ -37,8 +37,9 @@ object IngestionActor {
             source: NodeClusterActor.IngestionSource,
             downsample: DownsampleConfig,
             storeConfig: StoreConfig,
+            numShards: Int,
             statusActor: ActorRef): Props =
-    Props(new IngestionActor(ref, schemas, memStore, source, downsample, storeConfig, statusActor))
+    Props(new IngestionActor(ref, schemas, memStore, source, downsample, storeConfig, numShards, statusActor))
 }
 
 /**
@@ -62,6 +63,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                                            source: NodeClusterActor.IngestionSource,
                                            downsample: DownsampleConfig,
                                            storeConfig: StoreConfig,
+                                           numShards: Int,
                                            statusActor: ActorRef) extends BaseActor {
 
   import IngestionActor._
@@ -170,7 +172,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   // scalastyle:off method.length
   private def startIngestion(shard: Int): Unit = {
-    try tsStore.setup(ref, schemas, shard, storeConfig, downsample) catch {
+    try tsStore.setup(ref, schemas, shard, storeConfig, numShards, downsample) catch {
       case ShardAlreadySetup(ds, s) =>
         logger.warn(s"dataset=$ds shard=$s already setup, skipping....")
         return

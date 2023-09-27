@@ -153,7 +153,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       }
       // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get("default").get,
-        queryWithPlanName(queryContext), dummyQueryStats)
+        planId, dummyQueryStats)
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(
@@ -235,7 +235,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       }
       // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get,
-        queryWithPlanName(queryContext), dummyQueryStats)
+        planId, dummyQueryStats)
     }
 
     // TODO: Handle stitching with verbose flag
@@ -273,7 +273,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       }
       // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get,
-        queryWithPlanName(queryContext), dummyQueryStats)
+        planId, dummyQueryStats)
     }
 
     // TODO: Handle stitching with verbose flag

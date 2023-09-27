@@ -1356,7 +1356,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       settings.filodbConfig)
 
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
 
@@ -1403,7 +1403,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     )
 
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
 
     val recoveredRecords = downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
     recoveredRecords shouldBe 7
@@ -1418,7 +1418,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     )
 
     downsampleTSStore2.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
 
     val recoveredRecords2 = downsampleTSStore2.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
     recoveredRecords2 shouldBe 0
@@ -1453,7 +1453,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       settings.filodbConfig)
 
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
 
@@ -1484,7 +1484,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       settings.filodbConfig)
 
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
 
@@ -1516,7 +1516,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       settings.filodbConfig)
 
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
 
@@ -1546,7 +1546,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
       settings.filodbConfig)
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
-      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+      0, rawDataStoreConfig, 1, settings.rawDatasetIngestionConfig.downsampleConfig)
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))

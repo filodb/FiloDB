@@ -21,8 +21,8 @@ object SumRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: SumHolder, aggRes: RowReader): SumHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
-      if (acc.sum.isNaN) acc.sum = 0
+    if (!java.lang.Double.isNaN(aggRes.getDouble(1))) {
+      if (java.lang.Double.isNaN(acc.sum)) acc.sum = 0
       acc.sum += aggRes.getDouble(1)
     }
     acc
