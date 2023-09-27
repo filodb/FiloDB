@@ -11,7 +11,7 @@ class FiloDbClusterDiscoverySpec extends AkkaSpec {
 
     val config = ConfigFactory.parseString(
       """
-        |filodb.cluster-discovery.num-nodes = 4
+        |filodb.min-num-nodes-in-cluster = 4
         |""".stripMargin)
 
     val settings = new FilodbSettings(config)
@@ -29,7 +29,7 @@ class FiloDbClusterDiscoverySpec extends AkkaSpec {
   "Should allocate the extra n shards to first n nodes" in {
     val config = ConfigFactory.parseString(
       """
-        |filodb.cluster-discovery.num-nodes = 5
+        |filodb.min-num-nodes-in-cluster = 5
         |""".stripMargin)
 
     val settings = new FilodbSettings(config)

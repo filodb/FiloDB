@@ -213,8 +213,8 @@ sealed trait ScalarSingleValue extends ScalarRangeVector {
     else it
   }
 
-  // Negligible bytes sent over-the-wire.
-  override def estimateSerializedRowBytes: Long = 0
+  // Negligible bytes sent over-the-wire. Don't bother calculating accurately.
+  override def estimateSerializedRowBytes: Long = SerializableRangeVector.SizeOfDouble
 }
 
 /**
@@ -399,7 +399,10 @@ final class SerializedRangeVector(val key: RangeVectorKey,
     } else it
   }
 
-  override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
+  override def estimateSerializedRowBytes: Long =
+    containers.toIterator.flatMap(_.iterate(schema))
+      .slice(startRecordNo, startRecordNo + numRowsSerialized)
+      .foldLeft(0)(_ + _.recordLength)
 
   def containersIterator : Iterator[RecordContainer] = containers.toIterator
 
@@ -462,7 +465,7 @@ object SerializedRangeVector extends StrictLogging {
           val nextRow = rows.next()
           // Don't encode empty / NaN data over the wire
           if (!canRemoveEmptyRows(rv.outputRange, schema) ||
-            schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
+            schema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
             numRows += 1
             builder.addFromReader(nextRow, schema, 0)
@@ -487,11 +490,7 @@ object SerializedRangeVector extends StrictLogging {
         case None => builder.allContainers.toList
         case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
       }
-      val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
-      val resultSize = srv.estimatedSerializedBytes
-      SerializedRangeVector.queryResultBytes.record(resultSize)
-      queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-      srv
+      new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
     } finally {
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }

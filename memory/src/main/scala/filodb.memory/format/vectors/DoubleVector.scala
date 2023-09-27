@@ -242,7 +242,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
         val nextDbl = acc.getDouble(addr)
         // There are many possible values of NaN.  Use a function to ignore them reliably.
         if (!java.lang.Double.isNaN(nextDbl)) {
-          if (sum.isNaN) sum = 0d
+          if (java.lang.Double.isNaN(sum)) sum = 0d
           sum += nextDbl
         }
         addr += 8
@@ -323,7 +323,7 @@ extends DoubleVectorDataReader {
     var last = Double.MinValue
     cforRange { 0 until len } { pos =>
       var nextVal = it.next
-      if (nextVal.isNaN) nextVal = 0  // explicit counter reset due to end of time series marker
+      if (java.lang.Double.isNaN(nextVal)) nextVal = 0  // explicit counter reset due to end of time series marker
       if (nextVal < last) {   // reset!
         _correction += last
         _drops += pos
@@ -443,9 +443,9 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data.isNaN || data < last)
+    if (java.lang.Double.isNaN(data) || data < last)
       PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, addr)
-    if (!data.isNaN)
+    if (!java.lang.Double.isNaN(data))
       last = data
     super.addData(data)
   }
@@ -544,7 +544,7 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   final def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
                     prev: Double, ignorePrev: Boolean = false):
   (Double, Double) = {
-    val ignorePrev = if (prev.isNaN) true
+    val ignorePrev = if (java.lang.Double.isNaN(prev)) true
     else false
     val changes = LongBinaryVector(acc, vector).changes(acc, vector, start, end, prev.toLong, ignorePrev)
     (changes._1.toDouble, changes._2.toDouble)

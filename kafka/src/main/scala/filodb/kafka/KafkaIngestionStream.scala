@@ -59,6 +59,7 @@ class KafkaIngestionStream(config: Config,
       if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
 
       blocking {
+        props.put("client.id", s"${props.get("group.id")}.${System.getenv("INSTANCE_ID")}.$shard")
         val consumer = new KafkaConsumer(props)
         consumer.assign(List(topicPartition).asJava)
         offset.foreach { off => consumer.seek(topicPartition, off) }

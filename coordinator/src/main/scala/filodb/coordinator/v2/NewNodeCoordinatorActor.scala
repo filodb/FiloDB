@@ -84,7 +84,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
                 .foreach { downsampleDataset => memStore.store.initialize(downsampleDataset, ingestConfig.numShards) }
 
     setupDataset( dataset,
-                  ingestConfig.storeConfig,
+                  ingestConfig.storeConfig, ingestConfig.numShards,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
                   ingestConfig.downsampleConfig)
     initShards(dataset, ingestConfig)
@@ -121,6 +121,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     */
   private def setupDataset(dataset: Dataset,
                            storeConf: StoreConfig,
+                           numShards: Int,
                            source: IngestionSource,
                            downsample: DownsampleConfig,
                            schemaOverride: Boolean = false): Unit = {
@@ -132,7 +133,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
     if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
     val props = IngestionActor.props(dataset.ref, schemas, memStore,
-                                     source, downsample, storeConf, self)
+                                     source, downsample, storeConf, numShards, self)
     val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
     context.watch(ingester)
     ingestionActors(ref) = ingester

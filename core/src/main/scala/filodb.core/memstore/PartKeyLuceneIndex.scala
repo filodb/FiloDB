@@ -46,7 +46,11 @@ import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
-  final val PART_ID = "__partId__"
+  // NOTE: these partId fields need to be separate because Lucene 9.7.0 enforces consistent types for document
+  //   field values (i.e. a field cannot have both numeric and string values). Additional details can be found
+  //   here: https://github.com/apache/lucene/pull/11
+  final val PART_ID_DV = "__partIdDv__"
+  final val PART_ID_FIELD = "__partIdField__"
   final val START_TIME = "__startTime__"
   final val END_TIME = "__endTime__"
   final val PART_KEY = "__partKey__"
@@ -54,7 +58,7 @@ object PartKeyLuceneIndex {
   final val FACET_FIELD_PREFIX = "$facet_"
   final val LABEL_LIST_FACET = FACET_FIELD_PREFIX + LABEL_LIST
 
-  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
+  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID_FIELD, PART_ID_DV)
 
   val MAX_STR_INTERN_ENTRIES = 10000
   val MAX_TERMS_TO_ITERATE = 10000
@@ -279,8 +283,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     var facetsConfig: FacetsConfig = _
 
     val document = new Document()
-    private[memstore] val partIdField = new StringField(PART_ID, "0", Store.NO)
-    private val partIdDv = new NumericDocValuesField(PART_ID, 0)
+    private[memstore] val partIdField = new StringField(PART_ID_FIELD, "0", Store.NO)
+    private val partIdDv = new NumericDocValuesField(PART_ID_DV, 0)
     private val partKeyDv = new BinaryDocValuesField(PART_KEY, new BytesRef())
     private val startTimeField = new LongPoint(START_TIME, 0L)
     private val startTimeDv = new NumericDocValuesField(START_TIME, 0L)
@@ -328,6 +332,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         partIdDv.setLongValue(partId)
         document.add(partIdDv)
       }
+
+      /*
+       * As of this writing, this documentId will be set as one of two values:
+       *   - In TimeSeriesShard: the string representation of a partId (e.g. "42")
+       *   - In DownsampledTimeSeriesShard: the base64-encoded sha256 of the document ID. This is used to support
+       *     persistence of the downsample index; ephemeral partIds cannot be used.
+       */
       partIdField.setStringValue(documentId)
 
       startTimeField.setLongValue(startTime)
@@ -468,7 +479,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       cforRange { 0 until partIds.length } { i =>
         terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
       }
-      indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
+      indexWriter.deleteDocuments(new TermInSetQuery(PART_ID_FIELD, terms))
     }
   }
 
@@ -646,7 +657,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
     val docToAdd = doc.facetsConfig.build(doc.document)
-    val term = new Term(PART_ID, documentId)
+    val term = new Term(PART_ID_FIELD, documentId)
     indexWriter.updateDocument(term, docToAdd)
   }
 
@@ -711,7 +722,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector) )
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector) )
     Option(collector.singleResult)
   }
 
@@ -720,7 +731,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def startTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector))
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -738,7 +749,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene
-    withNewSearcher(s => s.search(new TermInSetQuery(PART_ID, terms), collector))
+    withNewSearcher(s => s.search(new TermInSetQuery(PART_ID_FIELD, terms), collector))
     span.tag(s"num-partitions-to-page", terms.size())
     val latency = System.nanoTime - startExecute
     span.mark(s"index-startTimes-for-odp-lookup-latency=${latency}ns")
@@ -753,7 +764,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    */
   def endTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
-    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector))
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -776,7 +787,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     withNewSearcher(s => s.search(LongPoint.newExactQuery(END_TIME, Long.MaxValue), coll))
     coll.numHits
   }
-
 
   def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
                                    startTime: Long,
@@ -805,7 +815,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.debug(s"Updating document ${partKeyString(documentId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val docToAdd = doc.facetsConfig.build(doc.document)
-    indexWriter.updateDocument(new Term(PART_ID, partId.toString), docToAdd)
+    indexWriter.updateDocument(new Term(PART_ID_FIELD, partId.toString), docToAdd)
   }
 
   /**
@@ -817,12 +827,41 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
+  val regexChars = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+  val regexCharsMinusPipe = (regexChars.toSet - '|').toArray
+
+  // scalastyle:off method.length
   private def leafFilter(column: String, filter: Filter): Query = {
+
+    def equalsQuery(value: String): Query = {
+      if (value.nonEmpty) new TermQuery(new Term(column, value))
+      else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
+    }
+
     filter match {
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
-        if (regex.nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
+        if (regex == "") {
+          // if label=~"" then match empty string or label not present condition too
+          leafFilter(column, NotEqualsRegex(".+"))
+        } else if (regex.replaceAll("\\.\\*", "") == "") {
+          // if label=~".*" then match all docs since promQL matches .* with absent label too
+          new MatchAllDocsQuery
+        } else if (regex.forall(c => !regexChars.contains(c))) {
+          // if all regex special chars absent, then treat like Equals
+          equalsQuery(regex)
+        } else if (regex.forall(c => !regexCharsMinusPipe.contains(c))) {
+          // if pipe is only regex special char present, then convert to IN query
+          new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
+        } else if (regex.endsWith(".*") && regex.length > 2 &&
+                   regex.dropRight(2).forall(c => !regexChars.contains(c))) {
+          // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
+          new PrefixQuery(new Term(column, regex.dropRight(2)))
+        } else {
+          // regular non-empty regex query
+          new RegexpQuery(new Term(column, regex), RegExp.NONE)
+        }
+
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
         val allDocs = new MatchAllDocsQuery
@@ -830,9 +869,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.add(allDocs, Occur.FILTER)
         booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
+
       case Equals(value) =>
-        if (value.toString.nonEmpty) new TermQuery(new Term(column, value.toString))
-        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
+        equalsQuery(value.toString)
+
       case NotEquals(value) =>
         val str = value.toString
         val term = new Term(column, str)
@@ -849,22 +889,18 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.build()
 
       case In(values) =>
-        if (values.size < 2)
-          throw new IllegalArgumentException("In filter should have atleast 2 values")
-        val booleanQuery = new BooleanQuery.Builder
-        values.foreach { value =>
-          booleanQuery.add(new TermQuery(new Term(column, value.toString)), Occur.SHOULD)
-        }
-        booleanQuery.build()
+        new TermInSetQuery(column, values.toArray.map(t => new BytesRef(t.toString)): _*)
+
       case And(lhs, rhs) =>
         val andQuery = new BooleanQuery.Builder
         andQuery.add(leafFilter(column, lhs), Occur.FILTER)
         andQuery.add(leafFilter(column, rhs), Occur.FILTER)
         andQuery.build()
+
       case _ => throw new UnsupportedOperationException
     }
   }
-
+  //scalastyle:on method.length
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): debox.Buffer[Int] = {
@@ -910,7 +946,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
-    val query: BooleanQuery = colFiltersToQuery(columnFilters, startTime, endTime)
+    val query = colFiltersToQuery(columnFilters, startTime, endTime)
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     withNewSearcher(s => s.search(query, collector))
     val latency = System.nanoTime - startExecute
@@ -927,7 +963,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
-    query
+    new ConstantScoreQuery(query) // disable scoring
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
@@ -1063,7 +1099,7 @@ class SinglePartIdCollector extends SimpleCollector {
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
   }
 
   // gets called for each matching document in current segment
@@ -1101,7 +1137,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
   def getLeafCollector(context: LeafReaderContext): LeafCollector = {
     logger.trace("New segment inspected:" + context.id)
     endTimeDv = DocValues.getNumeric(context.reader, END_TIME)
-    partIdDv = DocValues.getNumeric(context.reader, PART_ID)
+    partIdDv = DocValues.getNumeric(context.reader, PART_ID_DV)
 
     new LeafCollector() {
       override def setScorer(scorer: Scorable): Unit = {}
@@ -1150,7 +1186,7 @@ class PartIdCollector extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1171,7 +1207,7 @@ class PartIdStartTimeCollector extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
     startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
   }
 
@@ -1220,7 +1256,7 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
     partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
   }
 

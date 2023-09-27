@@ -1,13 +1,14 @@
 package filodb.core.downsample
 
+import java.util
+import java.util.concurrent.atomic.AtomicLong
+
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import java.util
-import java.util.concurrent.atomic.AtomicLong
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
@@ -16,12 +17,12 @@ import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.lucene.search.CollectionTerminatedException
 
-import filodb.core.{DatasetRef, Types}
+import filodb.core.{DatasetRef, Types, Utils}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.{CardinalityManager, CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryContext, QueryLimitException, QuerySession, QueryWarnings}
+import filodb.core.query._
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -341,6 +342,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           // Second iteration is for query result evaluation. Loading everything to heap
           // is expensive, but we do it to handle data sizing for metrics that have
           // continuous churn. See capDataScannedPerShardCheck method.
+          val startNs = Utils.currentThreadCpuTimeNanos
           val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
           val _schema = recs.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
@@ -353,9 +355,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
             filters.collectFirst {
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
-            }.getOrElse("unknown")
+            }.getOrElse("multiple")
           }.toList
           querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(recs.length)
+          querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
           val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
 
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
