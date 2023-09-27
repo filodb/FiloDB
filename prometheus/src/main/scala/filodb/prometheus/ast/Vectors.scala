@@ -3,7 +3,7 @@ package filodb.prometheus.ast
 import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
-import filodb.core.query.{ColumnFilter, QueryUtils, RangeParams}
+import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
@@ -241,14 +241,9 @@ sealed trait Vector extends Expression {
         case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
                                          s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
                                 ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
-        case RegexMatch      =>
-          // Relax the length limit only for matchers that contain at most the "|" special character.
-          if (!QueryUtils.isPipeOnlyRegex(labelValue)) {
-            require(labelValue.length <= Parser.REGEX_MAX_LEN,
-              s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
-                s"when non-`|` special characters are used.")
-          }
-          ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
+        case RegexMatch      => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
         case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
       }

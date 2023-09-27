@@ -23,6 +23,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
+
 // scalastyle:off file.size.limit
 
 object SingleClusterPlanner {
@@ -62,6 +63,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                            clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
+                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]] =
+                               PartitionLocationPlanner.equalsOnlyShardKeyMatcher,
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
@@ -96,8 +99,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-   * If TargetSchema exists and all of the target-schema label filters (equals or pipe-only EqualsRegex) are
-   * provided in the query, then return true.
+   * If TargetSchema exists and all of the target-schema label filters are provided in the query, then return true.
    *
    * @param filters Query Column Filters
    * @param targetSchema TargetSchema
@@ -108,10 +110,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     if (targetSchema.isEmpty || targetSchema.get.schema.isEmpty) {
       return false
     }
-    // Make sure each target-schema column is filtered by equality.
+    // Make sure each target-schema column has a filter.
     targetSchema.get.schema
-      .forall( tschemaCol => filters.exists( cf =>
-        cf.column == tschemaCol && cf.filter.isInstanceOf[Equals]))
+      .forall(tschemaCol => filters.exists(cf => {
+        cf.column == tschemaCol &&
+        (shardColumns.contains(tschemaCol) || cf.filter.isInstanceOf[Equals])
+      }))
   }
 
   /**
@@ -251,52 +255,40 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   // scalastyle:off method.length
-  def shardsFromFilters(filters: Seq[ColumnFilter],
+  def shardsFromFilters(rawFilters: Seq[ColumnFilter],
                         qContext: QueryContext,
                         startMs: Long,
                         endMs: Long,
                         useTargetSchemaForShards: Seq[ColumnFilter] => Boolean = _ => false): Seq[Int] = {
 
-
     require(shardColumns.nonEmpty || qContext.plannerParams.shardOverrides.nonEmpty,
       s"Dataset $dsRef does not have shard columns defined, and shard overrides were not mentioned")
 
     qContext.plannerParams.shardOverrides.getOrElse {
-      val shardColToValues: Seq[(String, Seq[String])] = shardColumns.map { shardCol =>
-        // To compute the shard hash, filters must match all shard columns either by equality or EqualsRegex,
-        //   where any match by EqualsRegex can use at most the '|' regex character.
-        val values = filters.find(f => f.column == shardCol) match {
-          case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
-            Seq(filtVal)
-          case Some(ColumnFilter(_, Filter.EqualsRegex(filtVal: String)))
-            if QueryUtils.isPipeOnlyRegex(filtVal) => QueryUtils.splitAtUnescapedPipes(filtVal)
-          case Some(ColumnFilter(_, filter)) =>
-            throw new BadQueryException(s"Found filter for shard column $shardCol but " +
-              s"$filter cannot be used for shard key routing")
-          case _ =>
-            throw new BadQueryException(s"Could not find filter for shard key column " +
-              s"$shardCol, shard key hashing disabled")
-        }
-        val trimmedValues = values.map(value => RecordBuilder.trimShardColumn(dsOptions, shardCol, value))
-        (shardCol, trimmedValues)
+      val hasNonEqualsShardKeyFilter = rawFilters.exists { filter =>
+        shardColumns.contains(filter.column) && !filter.filter.isInstanceOf[Equals]
       }
-
-      // Get all (ordered) combinations of values, then create (key,value) pairs for each.
-      val shardKeyValuePairs: Seq[Seq[(String, String)]] = {
-        val keys = shardColToValues.map(_._1)
-        val valueGroups = shardColToValues.map(_._2)
-        QueryUtils.combinations(valueGroups).map(keys.zip(_))
+      val filterGroups = if (hasNonEqualsShardKeyFilter) {
+        shardKeyMatcher(rawFilters).map(LogicalPlanUtils.upsertFilters(rawFilters, _))
+      } else {
+        Seq(rawFilters)
       }
-
-      // For each set of pairs, create a set of Equals filters and compute the shards for each.
-      shardKeyValuePairs.flatMap{ kvPairs =>
-        val kvMap = kvPairs.toMap
-        val updFilters = filters.map{ filt =>
-            kvMap.get(filt.column)
-              .map(value => ColumnFilter(filt.column, Filter.Equals(value)))
-              .getOrElse(filt)
+      filterGroups.flatMap{ filters =>
+        val shardValues = shardColumns.map { shardCol =>
+          // To compute the shard hash, filters must match all shard columns by equality.
+          val value = filters.find(f => f.column == shardCol) match {
+            case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => filtVal
+            case Some(ColumnFilter(_, filter)) =>
+              throw new BadQueryException(s"Found filter for shard column $shardCol but " +
+                s"$filter cannot be used for shard key routing")
+            case _ =>
+              throw new BadQueryException(s"Could not find filter for shard key column " +
+                s"$shardCol, shard key hashing disabled")
           }
-        shardsFromValues(kvPairs, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
+          RecordBuilder.trimShardColumn(dsOptions, shardCol, value)
+        }
+        val shardPairs = shardColumns.zip(shardValues)
+        shardsFromValues(shardPairs, filters, qContext, startMs, endMs, useTargetSchemaForShards)
       }.distinct
     }
   }
@@ -435,9 +427,10 @@ class SingleClusterPlanner(val dataset: Dataset,
     LogicalPlanUtils.getPushdownKeys(
       plan,
       targetSchemaProvider(qContext),
+      shardKeyMatcher,
       dataset.options.nonMetricShardColumns,
       getRawPushdownShards,
-      rs => LogicalPlan.getRawSeriesFilters(rs))
+      rs => LogicalPlan.getRawSeriesFilters(rs).flatMap(shardKeyMatcher(_)))
   }
 
   /**
@@ -784,9 +777,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       // If a target-schema is defined and is not changing during the query window and all the target-schema labels are
       // provided in query filters (Equals), then find the target shard to route to using ingestionShard helper method.
       val useTschema = !tsChangeExists && allTSLabelsPresent
-      // NOTE: this should probably be "tsChangesExists && useTschema",
-      //   but some tests conditionally check for stitching.
       if (tsChangeExists) {
+        // Record that some tschema changes exist. This will later invoke result stitching.
         tschemaChangesOverTime(0) = true
       }
       useTschema
@@ -832,23 +824,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec)
   }
 
-  // allow metadataQueries to get list of shards from shardKeyFilters only if all shardCols have Equals filter
-  //   or EqualsRegex filter with only the pipe special character.
+  // allow metadataQueries to get list of shards from shardKeyFilters only if
+  //   filters are given for all shard-key columns
   private def canGetShardsFromFilters(renamedFilters: Seq[ColumnFilter],
                                       qContext: QueryContext): Boolean = {
-    if (qContext.plannerParams.shardOverrides.isEmpty && shardColumns.nonEmpty) {
+    qContext.plannerParams.shardOverrides.isEmpty &&
+      shardColumns.nonEmpty &&
       shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet) &&
-        shardColumns.forall { shardCol =>
-          // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
-          renamedFilters.find(f => f.column == shardCol) match {
-            case Some(ColumnFilter(_, Filter.Equals(_: String))) => true
-            case Some(ColumnFilter(_, Filter.EqualsRegex(value: String))) =>
-              // Make sure no regex chars except the pipe, which can be used to concatenate values.
-              QueryUtils.isPipeOnlyRegex(value)
-            case _ => false
-          }
-        }
-    } else false
+      shardColumns.forall { shardCol => renamedFilters.exists(f => f.column == shardCol) }
   }
 
   private def materializeLabelNames(qContext: QueryContext,

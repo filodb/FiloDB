@@ -1,10 +1,22 @@
 package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils.getLookBackMillis
+import filodb.coordinator.queryplanner.PartitionLocationPlanner.equalsOnlyShardKeyMatcher
 import filodb.core.metadata.Dataset
-import filodb.core.query.{PromQlQueryParams, QueryUtils}
-import filodb.core.query.Filter.{Equals, EqualsRegex}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams}
+import filodb.core.query.Filter.Equals
 import filodb.query.LogicalPlan
+
+object PartitionLocationPlanner {
+  // Can be used as a default matcher function.
+  def equalsOnlyShardKeyMatcher(filters: Seq[ColumnFilter]): Seq[Seq[ColumnFilter]] = {
+    filters.foreach{
+      case ColumnFilter(_, Equals(_)) => { /* do nothing */ }
+      case filter => throw new IllegalArgumentException("cannot match regex filters; filter: " + filter)
+    }
+    Seq(filters)
+  }
+}
 
 /**
  * Abstract class for planners that need getPartitions functionality.
@@ -16,9 +28,13 @@ import filodb.query.LogicalPlan
  *   and materialize accordingly, then the SKRP will handle any higher-level concatenation/aggregation/joins
  *   for each of these groups.
  */
-abstract class PartitionLocationPlanner(dataset: Dataset,
-                                        partitionLocationProvider: PartitionLocationProvider)
+abstract class PartitionLocationPlanner(
+      dataset: Dataset,
+      partitionLocationProvider: PartitionLocationProvider,
+      shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]] = equalsOnlyShardKeyMatcher)
   extends QueryPlanner with DefaultPlanner {
+
+  private val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
 
   // scalastyle:off method.length
   /**
@@ -30,31 +46,23 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
 
     //1.  Get a Seq of all Leaf node filters
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
-    val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
     //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
     val routingKeyMap: Seq[Map[String, String]] = leafFilters
       .filter(_.nonEmpty)
       .map(_.filter(col => nonMetricColumnSet.contains(col.column)))
+      .flatMap{ filters =>
+        val hasNonEqualShardKeyFilter = filters.exists(!_.filter.isInstanceOf[Equals])
+        if (hasNonEqualShardKeyFilter) shardKeyMatcher(filters.toSeq) else Seq(filters.toSeq)
+      }
       .map{ filters =>
         filters.map { filter =>
-          val values = filter.filter match {
-            case Equals(value) => Seq(value.toString)
-            // Split '|'-joined values if pipes are the only regex chars used.
-            case EqualsRegex(value: String) if QueryUtils.isPipeOnlyRegex(value) =>
-              QueryUtils.splitAtUnescapedPipes(value)
+          val value = filter.filter match {
+            case Equals(value) => value.toString
             case _ => throw new IllegalArgumentException(
-              s"""shard keys must be filtered by equality or "|"-only regex. filter=${filter}""")
+              s"""shard keys must be filtered by equality. filter=${filter}""")
           }
-          (filter.column, values)
-        }
-      }
-      .flatMap{ keyValuesPairs =>
-        // Get all possible value combos, then create a key->value map for each combo.
-        // Ordering the pairs first since the output of combinations() is also ordered.
-        val orderedPairs = keyValuesPairs.toSeq
-        val keys: Seq[String] = orderedPairs.map(_._1)
-        val values: Seq[Seq[String]] = orderedPairs.map(_._2)
-        QueryUtils.combinations(values).map(keys.zip(_).toMap)
+          (filter.column, value)
+        }.toMap
       }
 
     // 3. Determine the query time range

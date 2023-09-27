@@ -24,6 +24,7 @@ import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
 
+
 import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -40,11 +41,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
+  private def regexPipeShardKeyMatcher(filters: Seq[ColumnFilter]) = {
+    val values = filters.map { filter =>
+      filter.column -> filter.filter.valuesStrings.toList.head.toString.split('|')
+    }
+    val triplets = QueryUtils.combinations(values.map(_._2.toSeq))
+    triplets.map(triplet => values.map(_._1).zip(triplet).map(p => ColumnFilter(p._1, Equals(p._2))))
+  }
+
   private val config = ConfigFactory.load("application_test.conf")
   private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig, "raw")
+    queryConfig, "raw", shardKeyMatcher = regexPipeShardKeyMatcher)
 
   /*
   This is the PromQL
@@ -1210,6 +1219,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       } catch {
         case e: TestFailedException =>
           println(s"Plan validation failed for query: $query")
+          println(execPlan.printTree())
           throw e
       }
     }

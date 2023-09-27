@@ -882,37 +882,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  it ("should correctly enforce filter length limit for EqualsRegex") {
-    val lim = Parser.REGEX_MAX_LEN
-
-    // true -> should not throw an exception; else false
-    val succeedQueryPairs = Seq(
-      (true, s"""foo{job=~"${"a".repeat(lim)}"}"""),
-      (true, s"""foo{job=~"${".".repeat(lim)}"}"""),
-      // May want to enforce this (no regex chars, but length limit exceeded).
-      (true, s"""foo{job=~"${"a".repeat(lim + 1)}"}"""),
-      (true, s"""foo{job=~"${"a".repeat(lim + 1).split("").mkString("|")}"}"""),
-      (true, s"""foo{job=~"${"a|".repeat(10) + "a".repeat(lim)}"}"""),
-      // May want to enforce this (single "|"-joined value exceeds limit).
-      (true, s"""foo{job=~"${"a|".repeat(10) + "a".repeat(lim + 1)}"}"""),
-
-      (false, s"""foo{job=~"${".".repeat(lim + 1)}"}"""),
-      (false, s"""foo{job=~"${".".repeat(lim + 1).split("").mkString("|")}"}"""),
-      (false, s"""foo{job=~"${"a".repeat(lim + 1)}.*"}"""),
-      (false, s"""foo{job=~"${"a".repeat(lim + 1).split("").mkString("|")}.*"}"""),
-    )
-    for ((shouldSucceed, query) <- succeedQueryPairs) {
-      val materialize = () => {
-        Parser.queryToLogicalPlan(query, 1000, 1000)
-      }
-      if (shouldSucceed) {
-        materialize.apply()
-      } else {
-        intercept[IllegalArgumentException] {materialize.apply()}
-      }
-    }
-  }
-
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
     if (!lp.isInstanceOf[BinaryJoin]) {
       info(s"${"  "*level}" + lp.toString)
