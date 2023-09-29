@@ -2,10 +2,13 @@ package filodb.coordinator.queryplanner
 
 
 import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.concurrent.{Map => ConcurrentMap}
 import scala.jdk.CollectionConverters._
+
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RvRange}
