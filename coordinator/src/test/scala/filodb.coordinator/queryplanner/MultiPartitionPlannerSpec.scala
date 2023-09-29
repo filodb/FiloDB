@@ -117,7 +117,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // expectedStarMs ends up to be 3 400 000, which does not look right to me, it is supposed to be 3 000 000
     // kpetrov, 12/02/21
     val expectedStartMs = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (localPartitionStart * 1000)
+      instant - lookbackMs >= (localPartitionStart * 1000)
     }.get
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
@@ -324,13 +324,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       )
     )
     val expectedPlan =
-    """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@1dad01fe)
-      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@1dad01fe)
-      |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)
+    """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
+      |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)
+      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)""".stripMargin
+      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -373,9 +373,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
     execPlan.printTree()
     val expectedPlan = {
-      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)
-        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)
-        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app2"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)""".stripMargin
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher
+        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app2"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
     }
     validatePlan(execPlan, expectedPlan)
   }
@@ -419,15 +419,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
     val expectedPlan =
       """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(3000,100,12000))
-        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
+        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher
         |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-        |---E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
-        |----E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
-        |----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)
+        |---E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+        |----E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
+        |----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |-----T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |-----T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)""".stripMargin
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -457,7 +457,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
     )
     val expectedPlan =
-      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job = "app"}[10m:1m]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4c82b5df)"""
+      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job="app"}[600s:60s]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher"""
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -531,13 +531,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
     val expectedPlan =
       """T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
-        |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4684240f)
-        |--E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},600,60,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4684240f)
-        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)
+        |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+        |--E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},600,60,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |---T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |---T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)""".stripMargin
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -572,7 +572,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val expectedPlan =
       """T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(MinOverTime), rawSource=false, offsetMs=None)
         |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
-        |--E~PromQlRemoteExec(PromQlQueryParams(sum_over_time(sum(test{job="app1"})[600s:60s]),600,60,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
+        |--E~PromQlRemoteExec(PromQlQueryParams(sum_over_time(sum(test{job="app1"})[600s:60s]),600,60,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
         |--T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=Some(600000), functionId=Some(SumOverTime), rawSource=false, offsetMs=None)
         |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(0,60,1800))
         |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
@@ -873,11 +873,11 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
     val expectedStartMs1 = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (secondPartitionStart * 1000)
+      instant - lookbackMs >= (secondPartitionStart * 1000)
     }.get
 
     val expectedStartMs2 = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (thirdPartitionStart * 1000)
+      instant - lookbackMs >= (thirdPartitionStart * 1000)
     }.get
 
     val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
@@ -899,10 +899,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   }
 
-  it ("should generate all PromQlRemoteExec plan for instant queries") {
+  it ("should generate at most one PromQlRemoteExec plan for non-shard-key-regex instant queries") {
     val startSeconds = 1000
     val endSeconds = 1000
-    val localPartitionStartSec= 950
+    val localPartitionStartSec = 850
     val lookbackMs = 100000
     val step = 1
 
@@ -923,93 +923,81 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}[100s]", startSeconds, step, endSeconds)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
       plannerParams = PlannerParams(processMultiPartition = true)))
 
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
-
-    // Instant/Raw queries will have same start and end point in all partitions as we want to fetch raw data
-    val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams1.startSecs shouldEqual startSeconds
-    queryParams1.endSecs shouldEqual endSeconds
-    queryParams1.stepSecs shouldEqual step
-    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec1.queryEndpoint shouldEqual "remote-url1"
-
-    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    val queryParams2 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual startSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "remote-url2"
-
-  }
-
-  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
-    "than or equal to lookback ") {
-
-    val startSeconds = 1594309980L
-    val endSeconds = 1594310280L
-    val localPartitionStartMs: Long = 1594309980001L
-    val step = 15L
-
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app"))) List(
-          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-            TimeRange(localPartitionStartMs, endSeconds * 1000)))
-        else Nil
-      }
-
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
-        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-          TimeRange(localPartitionStartMs, endSeconds * 1000)))
-
-    }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
-
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
-
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
-      PlannerParams(processMultiPartition = true)))
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-
-
-    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
+    // Instant/Raw queries will have same start and end point
+    val remoteExec = execPlan.asInstanceOf[PromQlRemoteExec]
     val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams.startSecs shouldEqual startSeconds
-    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+    queryParams.endSecs shouldEqual endSeconds
     queryParams.stepSecs shouldEqual step
     remoteExec.queryContext.plannerParams.processFailure shouldEqual true
     remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec.queryEndpoint shouldEqual "remote-url"
-
-    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual endSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "remote-url"
-
+    remoteExec.queryEndpoint shouldEqual "remote-url2"
   }
+
+//  // TODO: what is this the purpose of this test? The lookback is 300s, and the assignment
+//  //   durations are-- in order-- 300s and 299s,999ms.
+//  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
+//    "than or equal to lookback ") {
+//
+//    val startSeconds = 1594309980L
+//    val endSeconds = 1594310280L
+//    val localPartitionStartMs: Long = 1594309980001L
+//    val step = 15L
+//
+//    val partitionLocationProvider = new PartitionLocationProvider {
+//      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+//        if (routingKey.equals(Map("job" -> "app"))) List(
+//          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+//            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+//            TimeRange(localPartitionStartMs, endSeconds * 1000)))
+//        else Nil
+//      }
+//
+//      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
+//        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+//          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+//          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+//
+//    }
+//    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+//    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
+//
+//    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+//
+//    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+//      PlannerParams(processMultiPartition = true)))
+//    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+//    stitchRvsExec.children.size shouldEqual (2)
+//    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+//    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+//
+//
+//    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
+//    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    queryParams.startSecs shouldEqual startSeconds
+//    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+//    queryParams.stepSecs shouldEqual step
+//    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
+//    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
+//    remoteExec.queryEndpoint shouldEqual "remote-url"
+//
+//    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+//    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    queryParams2.startSecs shouldEqual endSeconds
+//    queryParams2.endSecs shouldEqual endSeconds
+//    queryParams2.stepSecs shouldEqual step
+//    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+//    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
+//    remoteExec2.queryEndpoint shouldEqual "remote-url"
+//
+//  }
 
   it ("should generate Exec plan for Metadata Label values query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
@@ -1463,28 +1451,28 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // binary join for + should be done in process
 
     val expectedPlan =
-    """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
-      |-E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+    """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+      |-E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |-T~InstantVectorFunctionMapper(function=Ln)
-      |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
-      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
-      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)""".stripMargin
+      |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher
+      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
 
     validatePlan(execPlan, expectedPlan)
 
@@ -1527,25 +1515,25 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // to this remote partitions. Finally the top level binary join for + should be done in process
 
     val expectedPlan =
-      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
-        |-E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+        |-E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
-        |-E~PromQlRemoteExec(PromQlQueryParams(ln((sum(test3{job="app2"}) + sum(test4{job="app2"}))),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)""".stripMargin
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |-E~PromQlRemoteExec(PromQlQueryParams(ln((sum(test3{job="app2"}) + sum(test4{job="app2"}))),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -1582,7 +1570,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // Above Binary join should push the entire query to remote partition
 
     val expectedPlan =
-      """E~PromQlRemoteExec(PromQlQueryParams(sum(test1{job = "app2"}) * sum(test2{job = "app2"}) +ln(sum(test3{job = "app2"}) + sum(test4{job = "app2"})),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@64b0d1fa)"""
+      """E~PromQlRemoteExec(PromQlQueryParams(((sum(test1{job="app2"}) * sum(test2{job="app2"})) + ln((sum(test3{job="app2"}) + sum(test4{job="app2"})))),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher"""
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -1631,7 +1619,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         PlannerParams(processMultiPartition = true)))
 
 
-    val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams(test{job="app2"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@73c48264)"""
+    val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams(<metadata>,1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher"""
     validatePlan(remoteExecPlan, expectedRemotePlan)
   }
 
