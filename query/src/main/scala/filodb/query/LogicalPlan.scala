@@ -254,7 +254,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           startMs: Long,
                           stepMs: Long,
                           endMs: Long,
-                          offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offsetMs: Option[Long] = None,
+                          atMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
@@ -311,7 +312,8 @@ case class SubqueryWithWindowing(
   functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
   subqueryStepMs: Long, //1m
-  offsetMs: Option[Long]
+  offsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -349,7 +351,8 @@ case class TopLevelSubquery(
   stepMs: Long,
   endMs: Long,
   orginalLookbackMs: Long,
-  originalOffsetMs: Option[Long]
+  originalOffsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -379,6 +382,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None,
+                                       atMs: Option[Long] = None,
                                        columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)

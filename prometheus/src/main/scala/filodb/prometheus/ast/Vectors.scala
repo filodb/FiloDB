@@ -147,7 +147,8 @@ case class SubqueryExpression(
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offset.map(duration => duration.millis(1L))
+      offset.map(duration => duration.millis(1L)),
+      atTimestamp.map(_.getTimestampInSec(timeParams) * 1000)
     )
 
   }
@@ -314,13 +315,18 @@ case class InstantExpression(metricName: Option[String],
   lazy val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    val realTimeParams = atTimestamp.map(_.getTimestampInSec(timeParams))
+      .map(time => TimeStepParams(time, timeParams.step, time))
+      .getOrElse(timeParams)
+
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
     val ps = PeriodicSeries(
-      RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+      RawSeries(Base.timeParamToSelector(realTimeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
         offset.map(_.millis(timeParams.step * 1000))),
       timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-      offset.map(_.millis(timeParams.step * 1000))
+      offset.map(_.millis(timeParams.step * 1000)),
+      atTimestamp.map(_.getTimestampInSec(timeParams) * 1000)
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
@@ -394,8 +400,12 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
+    val selector = atTimestamp.map(_.getTimestampInSec(timeParams))
+      .map(time => IntervalSelector(Math.max(60000, time * 1000) - 60000, time * 1000))
+      .getOrElse(Base.timeParamToSelector(timeParams))
+
     // multiply by 1000 to convert unix timestamp in seconds to millis
-    val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
+    val rs = RawSeries(selector, columnFilters, column.toSeq,
       Some(window.millis(timeParams.step * 1000)),
       offset.map(_.millis(timeParams.step * 1000))
     )

@@ -15,6 +15,14 @@ message SerializedRangeVector {
   uint32 startRecordNo              = 6;
 }
 
+message RepeatValueVector {
+  RangeVectorKey key                = 1;
+  repeated bytes recordContainers   = 3;
+  RecordSchema recordSchema         = 4;
+  optional RvRange rvRange          = 5;
+}
+
+
 // Similar to RvRange
 message RangeParams {
   int64 startSecs = 1;
@@ -82,6 +90,7 @@ message SerializableRangeVector {
     DayOfWeekScalar  dayOfWeekScalar            = 9;
     DaysInMonthScalar daysInMonthScalar         = 10;
     ScalarVaryingDouble scalarVaryingDouble     = 11;
+    RepeatValueVector RepeatValueVector         = 12;
   }
 }
 

@@ -446,6 +446,7 @@ extends Iterator[ChunkSetInfoReader] {
    * Advances to the next window.
    */
   final def nextWindow(): Unit = {
+    require(hasMoreWindows, s"curWindow=[$curWindowStart, $curWindowEnd] step=$step end=$end")
     // advance window pointers and reset read index
     if (curWindowEnd == -1L) {
       curWindowEnd = start

@@ -312,7 +312,7 @@ trait  DefaultPlanner {
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
       val rangeVectorTransformer =
         PeriodicSamplesMapper(
-          sqww.startMs, sqww.stepMs, sqww.endMs,
+          sqww.atMs.getOrElse(sqww.startMs), sqww.stepMs, sqww.atMs.getOrElse(sqww.endMs),
           window,
           Some(rangeFn),
           qContext,
@@ -322,7 +322,11 @@ trait  DefaultPlanner {
           rawSource = false,
           leftInclusiveWindow = true
         )
-      innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
+      innerExecPlan.plans.foreach { p => {
+        p.addRangeVectorTransformer(rangeVectorTransformer)
+        sqww.atMs.map(_ => p.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs
+          , p.queryWithPlanName(qContext))))
+      }}
       innerExecPlan
     } else {
       val innerPlan = sqww.innerPeriodicSeries
@@ -338,17 +342,24 @@ trait  DefaultPlanner {
                                         sqww: SubqueryWithWindowing
                                       ) : PlanResult = {
     // absent over time is essentially sum(last(series)) sent through AbsentFunctionMapper
-    innerExecPlan.plans.foreach(
-      _.addRangeVectorTransformer(PeriodicSamplesMapper(
-        sqww.startMs, sqww.stepMs, sqww.endMs,
-        window,
-        Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
-        qContext,
-        stepMultipleNotationUsed = false,
-        Seq(),
-        offsetMs,
-        rawSource = false
-      ))
+     val realStartMs = sqww.atMs.getOrElse(sqww.startMs)
+     val realEndMs = sqww.atMs.getOrElse(sqww.endMs)
+     val realStep = sqww.atMs.map(_ => 0L).getOrElse(sqww.stepMs)
+
+     innerExecPlan.plans.foreach(plan => {
+       plan.addRangeVectorTransformer(PeriodicSamplesMapper(
+         realStartMs, realStep, realEndMs,
+         window,
+         Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
+         qContext,
+         stepMultipleNotationUsed = false,
+         Seq(),
+         offsetMs,
+         rawSource = false
+       ))
+       sqww.atMs.map(_ => plan.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs,
+         plan.queryWithPlanName(qContext))))
+     }
     )
     val aggregate = Aggregate(AggregationOperator.Sum, innerPlan, Nil,
                               AggregateClause.byOpt(Seq("job")))
@@ -360,14 +371,17 @@ trait  DefaultPlanner {
           innerExecPlan)
       )
     )
-    addAbsentFunctionMapper(
+    val plans = addAbsentFunctionMapper(
       aggregatePlanResult,
       Seq(),
-      RangeParams(
-        sqww.startMs / 1000, sqww.stepMs / 1000, sqww.endMs / 1000
-      ),
+      RangeParams(realStartMs / 1000, realStep / 1000, realEndMs / 1000),
       qContext
-    )
+    ).plans
+
+    if (sqww.atMs.nonEmpty) {
+       plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs,
+         p.queryWithPlanName(qContext))))
+    }
     aggregatePlanResult
   }
 
