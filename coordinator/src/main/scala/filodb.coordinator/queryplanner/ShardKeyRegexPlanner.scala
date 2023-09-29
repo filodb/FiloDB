@@ -1,7 +1,5 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.Seq
-
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
@@ -31,9 +29,10 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
+                           partitionLocationProvider: PartitionLocationProvider,
                            config: QueryConfig,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
-  extends QueryPlanner with DefaultPlanner {
+  extends PartitionLocationPlanner(dataset, partitionLocationProvider, shardKeyMatcher) {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -59,6 +58,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     LogicalPlanUtils.getPushdownKeys(
       plan,
       targetSchemaProvider(qContext),
+      shardKeyMatcher,
       dataset.options.nonMetricShardColumns,
       getRawShardKeys,
       rs => getShardKeys(rs))
@@ -71,7 +71,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
     val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
     if (pushdownKeys.isDefined) {
-      val plans = generateExecForEachKey(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
       Some(PlanResult(plans))
     } else None
@@ -142,6 +142,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
+    // Materialize for each key with the inner planner if:
+    //   - all plan data lies on one partition
+    //   - all RawSeries filters are identical
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
+    val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
+    // Note: unchecked .get is OK here since it will only be called for each tail element.
+    val sameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
+    val partitions = getShardKeys(logicalPlan)
+      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
+    if (partitions.isEmpty) {
+      return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
+    } else if (sameFilters && isSinglePartition(partitions)) {
+      val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
+      return PlanResult(plans)
+    }
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -162,9 +179,34 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    generateExecForEachKey(logicalPlan, shardKeyMatches, qContext)
+    generateExec(logicalPlan, shardKeyMatches, qContext)
   }
 
+  private def updateQueryParams(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams): PromQlQueryParams = {
+    val promQl = LogicalPlanParser.convertToQuery(logicalPlan)
+    logicalPlan match {
+      case tls: TopLevelSubquery => {
+        val instantTime = queryParams.startSecs
+        queryParams.copy(
+          promQl = promQl,
+          startSecs = instantTime,
+          endSecs = instantTime
+        )
+      }
+      case psp: PeriodicSeriesPlan => {
+        queryParams.copy(
+          promQl = promQl,
+          startSecs = psp.startMs / 1000,
+          endSecs = psp.endMs / 1000,
+          stepSecs = psp.stepMs / 1000
+        )
+      }
+      case _ => queryParams.copy(promQl = promQl)
+    }
+  }
+
+  // This will be deprecated to reduce query fanout.
+  @Deprecated
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
                                      qContext: QueryContext): Seq[ExecPlan] = {
@@ -175,28 +217,33 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
       // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
-      val newQueryParams = logicalPlan match {
-        case tls: TopLevelSubquery => {
-          val instantTime = queryParams.startSecs
-          queryParams.copy(
-            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
-            startSecs = instantTime,
-            endSecs = instantTime
-          )
-        }
-        case psp: PeriodicSeriesPlan => {
-          queryParams.copy(
-            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
-            startSecs = psp.startMs / 1000,
-            endSecs = psp.endMs / 1000,
-            stepSecs = psp.stepMs / 1000
-          )
-        }
-        case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
-      }
+      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
       val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
         copy(skipAggregatePresent = skipAggregatePresentValue))
       queryPlanner.materialize(newLogicalPlan, newQueryContext)
+    }
+  }
+
+  private def generateExec(logicalPlan: LogicalPlan,
+                           keys: Seq[Seq[ColumnFilter]],
+                           qContext: QueryContext): Seq[ExecPlan] = {
+    // Create one plan per RawSeries/shard-key pair, then resolve its partitions.
+    // If any resides on more than one partition, the leaf is "split".
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    lazy val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+      .filter(_.isInstanceOf[RawSeries])
+      .flatMap { rs =>
+        val rawFilters = LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)
+        val filters = rawFilters.flatMap(shardKeyMatcher(_))
+        filters.map(rs.replaceFilters)
+      }
+      .exists(getPartitions(_, qParams).size > 1)
+    if (qContext.plannerParams.reduceShardKeyRegexFanout && !hasMultiPartitionLeaves) {
+      val newQueryParams = updateQueryParams(logicalPlan, qParams)
+      val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+      Seq(queryPlanner.materialize(logicalPlan, newQueryContext))
+    } else {
+      generateExecForEachKey(logicalPlan, keys, qContext)
     }
   }
 
@@ -261,7 +308,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // locally and then run count on the results. The following implementation checks for descendant aggregates, if
     // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
     // using the wrapped planner
-    val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
+    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
       val childPlan = materialize(aggregate.vectors, queryContext)
       // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
