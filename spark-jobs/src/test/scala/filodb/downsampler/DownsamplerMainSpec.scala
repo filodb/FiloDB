@@ -51,7 +51,43 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
+  // Add a path here to enable export during these tests. Useful for debugging export data.
+  val exportToFile = None  // Some("file:///path/to/dir/")
+  val exportConf =
+    s"""{
+       |  "filodb": { "downsampler": { "data-export": {
+       |    "enabled": ${exportToFile.isDefined},
+       |    "key-labels": [],
+       |    "bucket": "${exportToFile.getOrElse("")}",
+       |    "format": "csv",
+       |    "options": {
+       |      "header": true,
+       |      "escape": "\\"",
+       |    }
+       |    "groups": [
+       |      {
+       |        "key": [],
+       |        "rules": [
+       |          {
+       |            "allow-filters": [],
+       |            "block-filters": [],
+       |            "drop-labels": []
+       |          }
+       |        ]
+       |      }
+       |    ],
+       |    "path-spec": [
+       |      "year", "<<YYYY>>",
+       |      "month", "<<M>>",
+       |      "day", "<<d>>",
+       |      "_metric_", "{{__name__}}"
+       |    ]
+       |  }}}
+       |}
+       |""".stripMargin
+
+  val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+  val conf = ConfigFactory.parseString(exportConf).withFallback(baseConf).resolve()
   val settings = new DownsamplerSettings(conf)
   val schemas = Schemas.fromConfig(settings.filodbConfig).get
   val queryConfig = QueryConfig(settings.filodbConfig.getConfig("query"))
@@ -396,59 +432,60 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
   }
 
-  it ("should correctly escape quotes in a label's value prior to export") {
-    val inputOutputPairs = Map(
+  it("should correctly escape quotes and commas in a label's value prior to export") {
+    val inputOutputPairs = Seq(
       // empty string
-      "" -> "",
+      "" -> """{"key":""}""",
       // no quotes
-      """ abc """ -> """ abc """,
+      """ abc """ -> """{"key":" abc "}""",
       // ======= DOUBLE QUOTES =======
       // single double-quote
-      """ " """ -> """ " """,
+      """ " """ -> """{"key":" \" "}""",
       // double-quote pair
-      """ "" """ -> """ "" """,
+      """ "" """ -> """{"key":" \"\" "}""",
       // escaped quote
-      """ \" """ -> """ \" """,
+      """ \" """ -> """{"key":" \\\" "}""",
       // double-escaped quote
-      """ \\" """ -> """ \\" """,
+      """ \\" """ -> """{"key":" \\\\\" "}""",
       // double-escaped quote pair
-      """ \\"" """ -> """ \\"" """,
+      """ \\"" """ -> """{"key":" \\\\\"\" "}""",
       // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """ "foo\" " ""\""\ bar "baz" """,
+      """ "foo\" " ""\""\ bar "baz" """ -> """{"key":" \"foo\\\" \" \"\"\\\"\"\\ bar \"baz\" "}""",
       // ======= SINGLE QUOTES =======
       // single single-quote
-      """ ' """ -> """ \' """,
+      """ ' """ -> """{"key":" ' "}""",
       // single-quote pair
-      """ '' """ -> """ \'\' """,
+      """ '' """ -> """{"key":" '' "}""",
       // escaped quote
-      """ \' """ -> """ \' """,
+      """ \' """ -> """{"key":" \\' "}""",
       // double-escaped quote
-      """ \\' """ -> """ \\' """,
+      """ \\' """ -> """{"key":" \\\\' "}""",
       // double-escaped quote pair
-      """ \\'' """ -> """ \\'\' """,
+      """ \\'' """ -> """{"key":" \\\\'' "}""",
       // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
+      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
       // ======= COMMAS =======
-      // single single-quote
-      """ , """ -> """ \, """,
-      // single-quote pair
-      """ ,, """ -> """ \,\, """,
-      // escaped quote
-      """ \, """ -> """ \, """,
-      // double-escaped quote
-      """ \\, """ -> """ \\, """,
-      // double-escaped quote pair
-      """ \\,, """ -> """ \\,\, """,
+      // single comma
+      """ , """ -> """{"key":" , "}""",
+      // comma pair
+      """ ,, """ -> """{"key":" ,, "}""",
+      // escaped comma
+      """ \, """ -> """{"key":" \\, "}""",
+      // double-escaped comma
+      """ \\, """ -> """{"key":" \\\\, "}""",
+      // double-escaped comma pair
+      """ \\,, """ -> """{"key":" \\\\,, "}""",
       // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
-      // ======= COMBINATION =======
-      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """ \'foo\" \' "\'\'"\ bar \'baz" """,
-      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """ \'foo\" \' \,\, "\'\'"\ bar \'baz" \, """,
-      """ ["foo","ba'r:1234"] """ -> """ ["foo"\,"ba\'r:1234"] """,
-      """ "foo,bar:1234" """ -> """ "foo\,bar:1234" """
+      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
+      // ======= COMBINATIONS =======
+      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """{"key":" 'foo\\\" ' \"'\\'\"\\ bar 'baz\" "}""",
+      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """{"key":" 'foo\\\" ' ,, \"'\\'\"\\ bar 'baz\" \\, "}""",
+      """ ["foo","ba'r:1234"] """ -> """{"key":" [\"foo\",\"ba'r:1234\"] "}""",
+      """ "foo,bar:1234" """ -> """{"key":" \"foo,bar:1234\" "}"""
     )
     for ((value, expected) <- inputOutputPairs) {
-      BatchExporter.getExportLabelValueString(value) shouldEqual expected
+      val map = Map("key" -> value)
+      BatchExporter.makeLabelString(map) shouldEqual expected
     }
   }
 
