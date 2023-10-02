@@ -7,6 +7,8 @@ import java.util.Date
 import scala.collection.mutable
 import scala.util.matching.Regex
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import kamon.Kamon
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
@@ -18,10 +20,9 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{getExportLabelValueString, DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
-
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       blockFilterGroups: Seq[Seq[ColumnFilter]],
@@ -41,13 +42,11 @@ object BatchExporter {
   val LABEL_REGEX_MATCHER: Regex = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER: Regex = """<<(.*)>>""".r
 
-  /**
-   * Converts a label's value to a value of an exported row's LABELS column.
-   */
-  def getExportLabelValueString(value: String): String = {
-    value
-      // escape all single-quotes and commas if they aren't already escaped
-      .replaceAll("""\\(\,|\')|(\,|\')""", """\\$1$2""")
+  val JSON_MAPPER: ObjectMapper = new ObjectMapper()
+  JSON_MAPPER.registerModule(DefaultScalaModule)
+
+  def makeLabelString(labels: collection.Map[String, String]): String = {
+    JSON_MAPPER.writeValueAsString(labels)
   }
 }
 
@@ -217,14 +216,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
 
-  private def makeLabelString(labels: collection.Map[String, String]): String = {
-    val inner = labels
-      .map {case (k, v) => (k, getExportLabelValueString(v))}
-      .map {case (k, v) => s"'$k':'$v'"}
-      .mkString (",")
-    s"{$inner}"
-  }
-
   private def mergeLabelStrings(left: String, right: String): String = {
     left.substring(0, left.size - 1) + "," + right.substring(1)
   }
@@ -263,7 +254,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
     val tupleIter = columns(valueCol).columnType match {
       case DoubleColumn =>
-        val labelString = makeLabelString(partKeyMap)
+        val labelString = BatchExporter.makeLabelString(partKeyMap)
         rangeInfoIter.flatMap{ info =>
           val doubleIter = info.valueIter.asDoubleIt
           (info.irowStart to info.irowEnd).iterator.map{ _ =>
@@ -285,7 +276,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
         // make labelString without __name__; will be replaced with _bucket-suffixed name
         partKeyMap.remove("__name__")
-        val baseLabelString = makeLabelString(partKeyMap)
+        val baseLabelString = BatchExporter.makeLabelString(partKeyMap)
         partKeyMap.put("__name__", nameWithoutBucket)
 
         rangeInfoIter.flatMap{ info =>
@@ -300,7 +291,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
               }
               val bucketMapping = Map("__name__" -> nameWithBucket, "le" -> bucketTopString)
               val bucketLabels = partKeyMap ++ bucketMapping
-              val labelString = mergeLabelStrings(baseLabelString, makeLabelString(bucketMapping))
+              val labelString = mergeLabelStrings(baseLabelString, BatchExporter.makeLabelString(bucketMapping))
               (bucketLabels, labelString, timestamp, hist.bucketValue(i))
             }
           }
