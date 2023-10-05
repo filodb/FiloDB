@@ -768,7 +768,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }
         (rvs, obs._2)
       }
-      val outputSchema = deriveOutputSchema(schemas)
+      // find first non-empty result schema. If all of them are empty, then return empty
+      val outputSchema = schemas.findL(!_._1.isEmpty).map(_.map(_._1).getOrElse(ResultSchema.empty))
 
       val results = composeStreaming(rvs, schemas, querySession)
       ExecResult(results, outputSchema)
@@ -837,10 +838,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
       else Some(r1.fixedVectorLen.getOrElse(0) + r2.fixedVectorLen.getOrElse(0))
       r1.copy(fixedVectorLen = fixedVecLen)
     }
-  }
-
-  def deriveOutputSchema(childSchemas: Observable[(ResultSchema, Int)]): Task[ResultSchema] = {
-    childSchemas.firstOptionL.map(_.map(_._1).getOrElse(ResultSchema.empty))
   }
 
   /**
