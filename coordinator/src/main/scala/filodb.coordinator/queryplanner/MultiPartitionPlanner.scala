@@ -277,8 +277,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (execPlans.size == 1) execPlans.head
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
-        MultiPartitionDistConcatExec(
-          qContext, inProcessPlanDispatcher, execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+        StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
       }
       // Sort to move RemoteExec in end as it does not have schema
     }

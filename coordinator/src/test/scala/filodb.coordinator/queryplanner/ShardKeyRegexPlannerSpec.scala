@@ -120,7 +120,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should generate Exec plan for subquery with windowing") {
     val expected =
     """T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
-      |-E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher
+      |-E~StitchRvsExec() on InProcessPlanDispatcher
       |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
       |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
       |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(App.*)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
@@ -141,7 +141,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       lp,
       QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
     )
-    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     validatePlan(execPlan, expected)
   }
@@ -185,7 +185,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should generate Exec plan for top level subquery") {
     val expected =
-        """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher
+        """E~StitchRvsExec() on InProcessPlanDispatcher
           |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
           |--T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(App.*)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
@@ -201,7 +201,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000, 1000
     )
     val execPlan = skrp.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
-    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     validatePlan(execPlan, expected)
   }
