@@ -98,12 +98,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else logicalPlan match {
       case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
-      case _                                  =>
-        val result = walkLogicalPlanTree(logicalPlan, qContext)
-        if (result.plans.size > 1) {
-          val dispatcher = PlannerUtil.pickDispatcher(result.plans)
-          MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
-        } else result.plans.head
+      case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
@@ -430,7 +425,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // Create one plan per RawSeries/shard-key pair, then resolve its partitions.
     // If any resides on more than one partition, the leaf is "split".
-    val hasMultiPartitionLeaves =
+    val hasSplitPartitionLeaves =
       LogicalPlan.findLeafLogicalPlans(logicalPlan)
         .filter(_.isInstanceOf[RawSeries])
         .flatMap { rs =>
@@ -439,7 +434,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           filters.map(rs.replaceFilters)
         }
         .exists(getPartitions(_, qParams).size > 1)
-    if (hasMultiPartitionLeaves) {
+    if (hasSplitPartitionLeaves) {
       materializeSplitLeafPlan(logicalPlan, qContext)
     } else { logicalPlan match {
       case agg: Aggregate => materializeAggregate(agg, qContext)
@@ -453,7 +448,20 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case ps: PeriodicSeries => materializeNonSplitPeriodicAndRawSeries(ps, qContext)
       case rcm: RawChunkMeta => materializeNonSplitPeriodicAndRawSeries(rcm, qContext)
       case rs: RawSeries => materializeNonSplitPeriodicAndRawSeries(rs, qContext)
-      case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
+      case _: ApplyInstantFunctionRaw |
+           _: ApplyLimitFunction  |
+           _: ApplyMiscellaneousFunction |
+           _: ApplySortFunction |
+           _: LabelCardinality |
+           _: LabelNames |
+           _: LabelValues |
+           _: ScalarBinaryOperation |
+           _: ScalarFixedDoublePlan |
+           _: ScalarTimeBasedPlan |
+           _: SeriesKeysByFilters |
+           _: TopLevelSubquery |
+           _: TsCardinalities |
+           _: VectorPlan => throw new IllegalArgumentException(s"unhandled type: ${logicalPlan.getClass}")
     }}
   }
 
