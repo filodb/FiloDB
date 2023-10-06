@@ -42,27 +42,32 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
     s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteIndexCql = session.prepare(
     s"DELETE FROM $tableString WHERE partition=? AND ingestion_time=? AND start_time=?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val allCql = session.prepare(
     s"SELECT ingestion_time, start_time, info FROM $tableString " +
     s"WHERE partition = ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCql1 = session.prepare(
     s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
     s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCql2 = session.prepare(
     s"SELECT partition FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
     s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   /**
     * Test method which returns all rows for a partition. Not async-friendly.

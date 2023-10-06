@@ -38,6 +38,7 @@ sealed class CheckpointTable(val config: Config,
          | databasename = ? AND
          | datasetname = ? AND
          | shardnum = ? """.stripMargin).setConsistencyLevel(checkPointReadConsistencyLevel)
+      .setIdempotent(true)
     // we want consistent reads during recovery
 
   lazy val writeCheckpointCql = {
@@ -45,7 +46,7 @@ sealed class CheckpointTable(val config: Config,
       s"""INSERT INTO $tableString (databasename, datasetname, shardnum, groupnum, offset)
          | VALUES (?, ?, ?, ?, ?)""".stripMargin
     )
-    statement.setConsistencyLevel(writeConsistencyLevel)
+    statement.setConsistencyLevel(writeConsistencyLevel).setIdempotent(true)
     statement
   }
 
