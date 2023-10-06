@@ -37,7 +37,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
                                  on: Option[Seq[String]],
                                  ignoring: Seq[String],
                                  metricColumn: String,
-                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLike {
+                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLikeExec {
 
   def children: Seq[ExecPlan] = lhs ++ rhs
 
@@ -94,7 +94,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     */
   private[exec] def isEmpty(rv: RangeVector, schema: ResultSchema) = {
     if (schema.isHistogram) rv.rows().forall(_.getHistogram(1).numBuckets == 0)
-    else rv.rows().forall(_.getDouble(1).isNaN)
+    else rv.rows().forall(x => java.lang.Double.isNaN(x.getDouble(1)))
   }
 
   // TODO: Note that these SetOperations don't work well with histograms
@@ -168,7 +168,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
             val lhsRow = lhsRows.next()
             val rhsRow = rhsRows.next()
             // LHS row should not be added to result if corresponding RHS row does not exist
-            val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1)
+            val res = if (java.lang.Double.isNaN(rhsRow.getDouble(1))) Double.NaN else lhsRow.getDouble(1)
             cur.setValues(lhsRow.getLong(0), res)
             cur
           }
@@ -244,7 +244,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
               val reader = rows.next()
               // TODO: What is the expected behavior for Histograms?
               val value = reader.getDouble(1)
-              val res = if (value.isNaN) {
+              val res = if (java.lang.Double.isNaN(value)) {
                 Double.NaN
               } else {
                 bitSet += idx

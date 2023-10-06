@@ -16,7 +16,7 @@ import filodb.query.Query.qLogger
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 
-trait BinaryJoinLike {
+trait BinaryJoinLikeExec {
   val lhs: Seq[ExecPlan]
   val rhs: Seq[ExecPlan]
   val on: Option[Seq[String]]
@@ -65,7 +65,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                                 ignoring: Seq[String],
                                 include: Seq[String],
                                 metricColumn: String,
-                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLike {
+                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLikeExec {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
