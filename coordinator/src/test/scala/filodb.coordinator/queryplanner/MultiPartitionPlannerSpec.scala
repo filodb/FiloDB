@@ -899,7 +899,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   }
 
-  it ("should generate at most one PromQlRemoteExec plan for non-shard-key-regex instant queries") {
+  it ("should generate at most one PromQlRemoteExec plan for split non-shard-key-regex instant queries") {
+    // This is an instant query, so only one timestamp is evaluated. There is enough space on the second partition
+    //   (remote2) to fit the query's 100s lookback. We should expect only one RemoteExec to be materialized,
+    //   and it should be materialized for remote2.
     val startSeconds = 1000
     val endSeconds = 1000
     val localPartitionStartSec = 850
