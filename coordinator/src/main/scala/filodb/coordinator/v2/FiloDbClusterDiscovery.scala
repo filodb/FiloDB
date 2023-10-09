@@ -71,12 +71,22 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   def shardsForLocalhost(numShards: Int): Seq[Int] = shardsForOrdinal(ordinalOfLocalhost, numShards)
 
   lazy private val hostNames = {
-    require(settings.minNumNodes.isDefined, "Minimum Number of Nodes config not provided")
+    require(settings.minNumNodes.isDefined, "[ClusterV2] Minimum Number of Nodes config not provided")
     if (settings.k8sHostFormat.isDefined) {
-      (0 until settings.minNumNodes.get).map(i => String.format(settings.k8sHostFormat.get, i.toString))
+      // This is used in kubernetes setup. We read the host format config and resolve the IP address from each host
+      val hosts = (0 until settings.minNumNodes.get)
+        .map(i => {
+          val resolvedIp = InetAddress.getByName(String.format(settings.k8sHostFormat.get, i.toString))
+          // return resolvedIpAddress and port combination for akka communication
+          s"${resolvedIp.getHostAddress()}:${settings.akkaPort}"
+        })
+      logger.info(s"[ClusterV2] hosts to communicate: " + hosts)
+      hosts.sorted
     } else if (settings.hostList.isDefined) {
+      // All the required hosts are provided manually in the config. usually used for local runs/setup
+      logger.info(s"[ClusterV2] hosts to communicate: ${settings.hostList.get}")
       settings.hostList.get.sorted // sort to make order consistent on all nodes of cluster
-    } else throw new IllegalArgumentException("Cluster Discovery mechanism not defined")
+    } else throw new IllegalArgumentException("[ClusterV2] Cluster Discovery mechanism not defined")
   }
 
   lazy private val nodeCoordActorSelections = {
