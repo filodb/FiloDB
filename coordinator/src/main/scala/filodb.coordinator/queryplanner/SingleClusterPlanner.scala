@@ -584,14 +584,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
                       else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
 
-    val realStartMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.startMs)
-    val realEndMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.endMs)
-    val realStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+    val realScanStartMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
 
     val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realStartMs,
-      realStepMs, realEndMs, window, Some(execRangeFn), qContext,
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs,
+      realScanStepMs, realScanEndMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
     val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
@@ -602,7 +602,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
         qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
       addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
-        RangeParams(realStartMs / 1000, realStepMs / 1000, realEndMs / 1000), qContext)
+        RangeParams(realScanStartMs / 1000, realScanStepMs / 1000, realScanEndMs / 1000), qContext)
 
     } else series
 
@@ -657,17 +657,17 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     } else (None, None, lp)
 
-    val realStartMs = lp.atMs.getOrElse(lp.startMs)
-    val realEndMs = lp.atMs.getOrElse(lp.endMs)
-    val realStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+    val realScanStartMs = lp.atMs.getOrElse(lp.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(lp.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realStartMs, realStepMs, realEndMs,
-      None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs, realScanStepMs,
+      realScanEndMs, None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realStartMs/1000, realStepMs/1000,
-        realEndMs/1000))
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
+        realScanEndMs/1000))
       rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
         Seq(paramsExec))))
     }

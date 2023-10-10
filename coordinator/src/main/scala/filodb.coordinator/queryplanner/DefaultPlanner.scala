@@ -342,13 +342,13 @@ trait  DefaultPlanner {
                                         sqww: SubqueryWithWindowing
                                       ) : PlanResult = {
     // absent over time is essentially sum(last(series)) sent through AbsentFunctionMapper
-     val realStartMs = sqww.atMs.getOrElse(sqww.startMs)
-     val realEndMs = sqww.atMs.getOrElse(sqww.endMs)
-     val realStep = sqww.atMs.map(_ => 0L).getOrElse(sqww.stepMs)
+     val realScanStartMs = sqww.atMs.getOrElse(sqww.startMs)
+     val realScanEndMs = sqww.atMs.getOrElse(sqww.endMs)
+     val realScanStep = sqww.atMs.map(_ => 0L).getOrElse(sqww.stepMs)
 
      innerExecPlan.plans.foreach(plan => {
        plan.addRangeVectorTransformer(PeriodicSamplesMapper(
-         realStartMs, realStep, realEndMs,
+         realScanStartMs, realScanStep, realScanEndMs,
          window,
          Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
          qContext,
@@ -374,7 +374,7 @@ trait  DefaultPlanner {
     val plans = addAbsentFunctionMapper(
       aggregatePlanResult,
       Seq(),
-      RangeParams(realStartMs / 1000, realStep / 1000, realEndMs / 1000),
+      RangeParams(realScanStartMs / 1000, realScanStep / 1000, realScanEndMs / 1000),
       qContext
     ).plans
 

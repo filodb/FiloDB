@@ -735,7 +735,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
   }
 
 
-  it("should convert RepeatValueVector double to proto and back") {2
+  it("should convert RepeatValueVector double to proto and back") {
     val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
       ColumnInfo("value", ColumnType.DoubleColumn)))
     val keysMap = Map("key1".utf8 -> "val1".utf8,

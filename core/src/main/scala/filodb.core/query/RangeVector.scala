@@ -220,6 +220,10 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
   }
 
   val recordSchema: RecordSchema = schema
+
+  // There is potential for optimization.
+  // The parent transformer does not need to iterate all rows.
+  // It can transform one data because data at all steps are identical. It just need to return a RepeatValueVector.
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
     // If rowReader is empty, iterate nothing.
