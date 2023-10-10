@@ -899,6 +899,41 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   }
 
+  it("should generate an empty plan when partition-split shard-key data is sourced from multiple " +
+     "partitions for all timesteps") {
+    // This is an instant query, so only one timestamp is evaluated. There is not enough space on the second partition
+    //   (remote2) to fit the query's 100s lookback. We should expect an empty plan to be materialized.
+    val startSeconds = 1000
+    val endSeconds = 1000
+    val localPartitionStartSec = 950
+    val lookbackMs = 100000
+    val step = 1
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app")))
+          List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
+            localPartitionStartSec * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
+            TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
+        else Nil
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+          localPartitionStartSec * 1000 - 1)), PartitionAssignment("local", "local-url",
+          TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}[100s]", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[EmptyResultExec] shouldEqual (true)
+  }
+
   it ("should generate at most one PromQlRemoteExec plan for split non-shard-key-regex instant queries") {
     // This is an instant query, so only one timestamp is evaluated. There is enough space on the second partition
     //   (remote2) to fit the query's 100s lookback. We should expect only one RemoteExec to be materialized,
