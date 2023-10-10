@@ -17,9 +17,9 @@ message SerializedRangeVector {
 
 message RepeatValueVector {
   RangeVectorKey key                = 1;
-  repeated bytes recordContainers   = 3;
-  RecordSchema recordSchema         = 4;
-  optional RvRange rvRange          = 5;
+  repeated bytes recordContainers   = 2;
+  RecordSchema recordSchema         = 3;
+  optional RvRange rvRange          = 4;
 }
 
 
