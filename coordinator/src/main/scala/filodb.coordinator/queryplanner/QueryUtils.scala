@@ -1,7 +1,5 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.mutable
-
 /**
  * Storage for miscellaneous utility functions.
  */
@@ -14,22 +12,13 @@ object QueryUtils {
    * @return ordered sequences; each sequence is ordered such that the element
    *         at index i is chosen from the ith argument sequence.
    */
-  def combinations[T](choices: Seq[Seq[T]]): Seq[Seq[T]] = {
-    val running = new mutable.ArraySeq[T](choices.size)
-    val result = new mutable.ArrayBuffer[Seq[T]]
-
-    def helper(iChoice: Int): Unit = {
-      if (iChoice == choices.size) {
-        result.append(Nil ++ running)
-        return
-      }
-      for (choice <- choices(iChoice)) {
-        running(iChoice) = choice
-        helper(iChoice + 1)
-      }
-    }
-
-    helper(0)
-    result
+  def combinations[T](choices: Seq[Seq[T]]): Seq[Seq[T]] = choices match {
+    case Nil => Nil
+    case head +: Nil => head.map(Seq(_))
+    case head +: tail =>
+      val tailCombos = combinations(tail)
+      head.flatMap(h => {
+        tailCombos.map(Seq(h) ++ _)
+      })
   }
 }
