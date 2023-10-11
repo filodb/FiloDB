@@ -467,12 +467,13 @@ trait  DefaultPlanner {
       val execPlan =
         if (logicalPlan.operator.isInstanceOf[SetOperator])
           SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-            LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
+            logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
             LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
             rvRangeFromPlan(logicalPlan))
         else
           BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-            logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
+            logicalPlan.cardinality,
+            logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
             LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
             dsOptions.metricColumn, rvRangeFromPlan(logicalPlan))
 

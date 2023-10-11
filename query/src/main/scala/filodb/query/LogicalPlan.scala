@@ -450,7 +450,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       operator: BinaryOperator,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
-                      on: Seq[String] = Nil,
+                      on: Option[Seq[String]] = None,
                       ignoring: Seq[String] = Nil,
                       include: Seq[String] = Nil)
       extends PeriodicSeriesPlan with NonLeafLogicalPlan with CandidatePushdownPlan {

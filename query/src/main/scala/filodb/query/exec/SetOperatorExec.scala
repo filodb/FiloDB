@@ -11,7 +11,6 @@ import monix.reactive.Observable
 import filodb.core.Utils
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
-import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 
@@ -35,17 +34,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
                                  lhs: Seq[ExecPlan],
                                  rhs: Seq[ExecPlan],
                                  binaryOp: BinaryOperator,
-                                 on: Seq[String],
+                                 on: Option[Seq[String]],
                                  ignoring: Seq[String],
                                  metricColumn: String,
-                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
-  require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains(metricColumn), "On cannot contain metric name")
-
-  private val onLabels = on.map(Utf8Str(_)).toSet
-  private val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
-  // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
-  // doing matching based on ignoringLabels even if it is empty
+                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLikeExec {
 
   def children: Seq[ExecPlan] = lhs ++ rhs
 
@@ -95,18 +87,18 @@ final case class SetOperatorExec(queryContext: QueryContext,
     Observable.fromTask(taskOfResults).flatten
   }
 
-  private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
-    else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
-  }
+
 
   /***
     * Returns true when range vector does not have any values
     */
   private[exec] def isEmpty(rv: RangeVector, schema: ResultSchema) = {
     if (schema.isHistogram) rv.rows().forall(_.getHistogram(1).numBuckets == 0)
-    else rv.rows().forall(_.getDouble(1).isNaN)
+    else rv.rows().forall(x => java.lang.Double.isNaN(x.getDouble(1)))
   }
+
+  // TODO: Note that these SetOperations don't work well with histograms
+  //  Check behavior in prometheus and accordingly implement
 
   /***
    * Add LHS range vector in result which have matching join keys in RHS.
@@ -126,6 +118,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it contains no rows
+      // TODO: isEmpty is expensive and iterates all the rows, we need a performant implementation, we may very well not
+      //  keep this check and it will do less iterations in case where we dont have several empty Range vectors
       if (!isEmpty(rv, rhsSchema)) {
         // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
         // Each of these range vectors would contain data for different time ranges
@@ -134,6 +128,13 @@ final case class SetOperatorExec(queryContext: QueryContext,
           if (resVal.key.labelValues == rv.key.labelValues) {
             rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal, outputRvRange) )
           } else {
+            // TODO: Is it ok to overwrite the rhs of multiple RVs match the joinKey
+            //  Consider the case where two Range vectors match the join key and one of them has a non NaN value while
+            //  while other one has a NaN value for a given time step and the one with a non NaN value is the final RV
+            //  in the map. When we run this logic
+            //    val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1) the rhs is not NaN and
+            //  assuming LHS is non NaN too, we will have a result for that given timestep but one of trhe matching RHS
+            //  timeseries for that time is NaN. Test this case with prometheus and revisit
             rhsMap.put(jk, rv)
           }
         } else rhsMap.put(jk, rv)
@@ -167,7 +168,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
             val lhsRow = lhsRows.next()
             val rhsRow = rhsRows.next()
             // LHS row should not be added to result if corresponding RHS row does not exist
-            val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1)
+            val res = if (java.lang.Double.isNaN(rhsRow.getDouble(1))) Double.NaN else lhsRow.getDouble(1)
             cur.setValues(lhsRow.getLong(0), res)
             cur
           }
@@ -187,6 +188,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
   // scalastyle:on method.length
 
 
+  //scalastyle:off method.length
   /***
    * Add all LHS range vector in result. From RHS only only add the range vectors which have join key not
    * present in result
@@ -194,52 +196,167 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
-    val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
-    val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val lhsResult = groupAndStitchRangeVectors(lhsRvs)
+    val rhsResult = groupAndStitchRangeVectors(rhsRvs)
+    // All lhsResults should be considered
+    // All rhsResults whose joinKey is not present in lhsResults should be considered
+    // While iterating all lhs rangevectors for a time instant where none of the lhs range vectors are having a value
+    // all RHS range vectors for that time instant having a matching join key will have a value in o/p
 
-    // Add everything from left hand side range vector
-    lhsRvs.foreach { rv =>
+    //lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
+
+    // Create a Map of join key as key and value is a two tuple where _1 is all LHS Rvs for the join key and _2
+    // are all RHS Rvs for that same join key
+    val lRvs = lhsResult.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], (Seq[RangeVector], Seq[RangeVector])]) {
+      case (acc, (jk, rvs)) => acc + (jk -> ((rvs, Seq.empty[RangeVector])))
+    }
+
+    val joinedRvs = rhsResult.foldLeft(lRvs) {
+      case (acc, (jk, rvs))  =>
+        val newVal = acc.get(jk).map {
+            // RHS will be Nil
+          case (lhs, rhs) => (lhs, rvs)
+        }.getOrElse((Nil, rvs))
+        acc + (jk -> newVal)
+    }
+
+    case class OrSetOpIteratorWrapper(lhs: Seq[RangeVector], rhs: Seq[RangeVector]) {
+      // Has a side effect where LHS are consumed first and a bit is set to indicate the time instant where there
+      // is at least one non Nan value. the rhs values are then iterated over and emitted only where the given timestep
+      // has no value in any of the LHS timeseries
+      assert(outputRvRange.isDefined, "Expected to see a non null outputRvRange")
+      val (start, end, step) = (outputRvRange.get.startMs, outputRvRange.get.endMs, outputRvRange.get.stepMs)
+      // 64 bits in one word (long), 1 bit per step
+      assert(start == end || step > 0, "Expected to see a non 0 step size when start and end are not same")
+      val wordsRequired = if (start == end) 1 else ((((end - start) / step) >> 6) + 1).toInt
+      val bitSet = new mutable.BitSet(wordsRequired)
+
+      def joined(): Seq[RangeVector] = {
+        val lhsRvs: Seq[RangeVector] = lhs.map(x => {
+          var idx = 0
+          val rows = x.rows()
+          val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
+            val cur = new TransientRow()
+
+            override def hasNext: Boolean = rows.hasNext
+
+            override def next(): RowReader = {
+              val reader = rows.next()
+              // TODO: What is the expected behavior for Histograms?
+              val value = reader.getDouble(1)
+              val res = if (java.lang.Double.isNaN(value)) {
+                Double.NaN
+              } else {
+                bitSet += idx
+                value
+              }
+              idx += 1
+              cur.setValues(reader.getLong(0), res)
+              cur
+            }
+
+            override def close(): Unit = {
+              rows.close()
+            }
+          }
+          IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+        })
+
+        val rhsRvs: Seq[RangeVector] = rhs.map(x => {
+          var idx = 0
+          val rows = x.rows()
+          val rowsCursor: RangeVectorCursor = new RangeVectorCursor {
+            val cur = new TransientRow()
+
+            override def hasNext: Boolean = rows.hasNext
+
+            override def next(): RowReader = {
+              val reader = rows.next()
+              // TODO: What is the expected behavior for Histograms?
+              val res = if (bitSet.contains(idx)) {
+                Double.NaN
+              } else {
+                reader.getDouble(1)
+              }
+              idx += 1
+              cur.setValues(reader.getLong(0), res)
+              cur
+            }
+
+            override def close(): Unit = {
+              rows.close()
+            }
+          }
+          IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
+        })
+        // This order is important, when lhs Rvs are executed they set a bitmap which is used when iterating RHS
+        // DONOT flip this order
+        val mergedRvs = lhsRvs ++ rhsRvs
+
+        // Dedupe the LHS and RHS rvs by keys, if same key is found for multiple RVs, stitch them
+        // For e.g sum(foo{}) OR sum(bar{}), both have empty RV Key, we want them to return one RV
+        // instead of two both with empty RV Keys
+        val mergedGroupedRvs = mergedRvs.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], List[RangeVector]]){
+          case (acc, rv)  =>
+          val key = rv.key.labelValues
+          val groupedRvs = acc.get(key).map(rv :: _).getOrElse(List(rv))
+          acc + (key -> groupedRvs)
+        }
+
+        mergedGroupedRvs.map {
+          case (_, rv :: Nil)   => rv
+          case (key, rvs)       => IteratorBackedRangeVector(CustomRangeVectorKey(key),
+                                        StitchRvsExec.merge(rvs.reverse.map(_.rows()), outputRvRange),
+                                        outputRvRange)
+        }
+      }.toSeq
+    }
+
+
+    joinedRvs.values.flatMap {
+      // Case where only lhs rvs are present but no matching Rvs on rhs, just return the lhs
+      case (lhs, Nil)  => lhs
+      // Case where only rhs rvs are present but no matching Rvs on lhs, just return the rhs
+      case (Nil, rhs)  => rhs
+      // More involved case where the there will be a value for a time instant for rhs ONLY IF ALL rvs on lhs have no
+      // value defined for that time instant
+      case (lhs, rhs)  =>
+        OrSetOpIteratorWrapper(lhs, rhs).joined()
+    }.toIterator
+  }
+  //scalastyle:on method.length
+
+  /**
+   * Takes a List of rangevectors and groups them in Map grouped by the join key, if the Range vector with same labels
+   * is encountered multiple times (possibly diuring spread change), the two range vectors will be deduplicated by
+   * stitching
+   *
+   * @param rangeVectors List of range vectors
+   * @return Map grouped by the joinKey and the value is a list of range vectors sharing the same join key
+   */
+  private def groupAndStitchRangeVectors(rangeVectors: List[RangeVector]):
+    mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]] = {
+    val results = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    rangeVectors.foreach { rv =>
       val jk = joinKeys(rv.key)
-       if (lhsResult.contains(jk)) {
-        val resVal = lhsResult(jk)
-         // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
-         // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
+      if (results.contains(jk)) {
+        val resVal = results(jk)
+        // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+        // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
           val stitched = StitchRvsExec.stitch(rv, resVal(index), outputRvRange)
           resVal.update(index, stitched)
         } else {
-          lhsResult(jk).append(rv)
+          results(jk).append(rv)
         }
       } else {
-         val lhsList = ArrayBuffer[RangeVector]()
-         lhsList.append(rv)
-         lhsResult.put(jk, lhsList)
+        val list = ArrayBuffer[RangeVector]()
+        list.append(rv)
+        results.put(jk, list)
       }
     }
-    // Add range vectors from right hand side which are not present on lhs
-    rhsRvs.foreach { rhs =>
-      val jk = joinKeys(rhs.key)
-      if (!lhsResult.contains(jk)) {
-        if (rhsResult.contains(jk)) {
-          val resVal = rhsResult(jk)
-          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
-          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
-          val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
-          if (index >= 0) {
-            val stitched = StitchRvsExec.stitch(rhs, resVal(index), outputRvRange)
-            resVal.update(index, stitched)
-          } else {
-            resVal.append(rhs)
-          }
-        } else {
-          val rhsList = rhsResult.getOrElse(jk, ArrayBuffer())
-          rhsList.append(rhs)
-          rhsResult.put(jk, rhsList)
-        }
-      }
-    }
-    lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
+    results
   }
 
   /***

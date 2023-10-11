@@ -432,12 +432,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs))
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
         rvRangeFromPlan(lp)))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(lp)))
 
