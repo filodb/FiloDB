@@ -73,12 +73,18 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   lazy private val hostNames = {
     require(settings.minNumNodes.isDefined, "[ClusterV2] Minimum Number of Nodes config not provided")
     if (settings.k8sHostFormat.isDefined) {
-      // This is used in kubernetes setup. We read the host format config and resolve the IP address from each host
+      // This is used in kubernetes setup. We read the host format config and resolve the FQDN using env variables
       val hosts = (0 until settings.minNumNodes.get)
         .map(i => {
-          val resolvedIp = InetAddress.getByName(String.format(settings.k8sHostFormat.get, i.toString))
-          // return resolvedIpAddress and port combination for akka communication
-          s"${resolvedIp.getHostAddress()}:${settings.akkaPort}"
+          val currentHostname = String.format(
+            settings.k8sHostFormat.get,
+            sys.env("PLATFORM_APPLICATION_ID"),
+            i.toString,
+            sys.env("PLATFORM_APPLICATION_ID"),
+            sys.env("K8S_NAMESPACE"),
+            sys.env("K8S_CLUSTER_NAME"),
+          )
+          s"${currentHostname}:${settings.akkaPort}"
         })
       logger.info(s"[ClusterV2] hosts to communicate: " + hosts)
       hosts.sorted
