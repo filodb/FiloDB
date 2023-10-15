@@ -72,25 +72,20 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val hostNames = {
     require(settings.minNumNodes.isDefined, "[ClusterV2] Minimum Number of Nodes config not provided")
-    if (settings.k8sHostFormat.isDefined) {
+    if (settings.k8sHostFormat.isDefined && settings.akkaPort.isDefined) {
       // This is used in kubernetes setup. We read the host format config and resolve the FQDN using env variables
       val hosts = (0 until settings.minNumNodes.get)
         .map(i => {
           val currentHostname = String.format(
             settings.k8sHostFormat.get,
-            sys.env("PLATFORM_APPLICATION_ID"),
-            i.toString,
-            sys.env("PLATFORM_APPLICATION_ID"),
-            sys.env("K8S_NAMESPACE"),
-            sys.env("K8S_CLUSTER_NAME"),
+            i.toString
           )
-          s"${currentHostname}:${settings.akkaPort}"
+          s"${currentHostname}:${settings.akkaPort.get}"
         })
       logger.info(s"[ClusterV2] hosts to communicate: " + hosts)
       hosts.sorted
     } else if (settings.hostList.isDefined) {
       // All the required hosts are provided manually in the config. usually used for local runs/setup
-      logger.info(s"[ClusterV2] hosts to communicate: ${settings.hostList.get}")
       settings.hostList.get.sorted // sort to make order consistent on all nodes of cluster
     } else throw new IllegalArgumentException("[ClusterV2] Cluster Discovery mechanism not defined")
   }
