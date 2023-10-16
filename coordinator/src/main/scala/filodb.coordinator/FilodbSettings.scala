@@ -56,8 +56,6 @@ final class FilodbSettings(val conf: Config) {
 
   lazy val minNumNodes = config.as[Option[Int]]("min-num-nodes-in-cluster")
 
-  lazy val akkaPort = allConfig.as[Option[Int]]("akka.remote.netty.tcp.port")
-
   /**
    * Returns IngestionConfig/dataset configuration from parsing dataset-configs file paths.
    * If those are empty, then parse the "streams" config key for inline configs.
