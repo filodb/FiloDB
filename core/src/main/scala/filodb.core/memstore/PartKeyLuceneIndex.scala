@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
 import java.util.regex.Pattern
+
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
@@ -13,6 +14,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
+
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -32,7 +34,8 @@ import org.apache.lucene.store.{MMapDirectory, NIOFSDirectory}
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
 import spire.syntax.cfor._
-import filodb.core.{DatasetRef, concurrentCache}
+
+import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.memstore.ratelimit.CardinalityTracker
