@@ -142,12 +142,19 @@ object Parser extends StrictLogging {
                                   ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
             case RegexMatch    =>
               // Relax the length limit only for matchers that contain at most the "|" special character.
-              val shouldRelax = queryConf.getBoolean("relax-pipe-only-equals-regex-limit") &&
+              val shouldRelax = queryConf.getBoolean("should-relax-pipe-only-equals-regex-limit") &&
                                   QueryUtils.isPipeOnlyRegex(l.value)
-              if (!shouldRelax) {
+              if (shouldRelax) {
+                val limit = queryConf.getInt("relaxed-pipe-only-equals-regex-limit");
+                require(l.value.length <= limit,
+                  s"Regular expression filters should be <= $limit characters " +
+                    s"when no special characters except '|' are used. " +
+                    s"Violating filter is: ${l.label}=${l.value}")
+              } else {
                 require(l.value.length <= Parser.REGEX_MAX_LEN,
                   s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
-                    s"when non-`|` special characters are used.")
+                   s"when non-`|` special characters are used. " +
+                   s"Violating filter is: ${l.label}=${l.value}")
               }
               ColumnFilter(l.label, Filter.EqualsRegex(l.value))
             case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))

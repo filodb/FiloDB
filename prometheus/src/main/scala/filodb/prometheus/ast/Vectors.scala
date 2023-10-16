@@ -269,12 +269,19 @@ sealed trait Vector extends Expression {
                                 ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
-          val shouldRelax = queryConfig.getBoolean("relax-pipe-only-equals-regex-limit") &&
+          val shouldRelax = queryConfig.getBoolean("should-relax-pipe-only-equals-regex-limit") &&
                               QueryUtils.isPipeOnlyRegex(labelValue)
-          if (!shouldRelax) {
+          if (shouldRelax) {
+            val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
+            require(labelValue.length <= limit,
+              s"Regular expression filters should be <= $limit characters " +
+               s"when no special characters except '|' are used. " +
+               s"Violating filter is: ${labelMatch.label}=$labelValue")
+          } else {
             require(labelValue.length <= Parser.REGEX_MAX_LEN,
               s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
-                s"when non-`|` special characters are used.")
+               s"when non-`|` special characters are used. " +
+               s"Violating filter is: ${labelMatch.label}=$labelValue")
           }
           ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
