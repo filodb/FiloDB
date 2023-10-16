@@ -1,7 +1,8 @@
 package filodb.prometheus.ast
 
 import scala.util.Try
-import filodb.core.{GlobalConfig, query}
+
+import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.Utils
 import filodb.prometheus.parse.Parser

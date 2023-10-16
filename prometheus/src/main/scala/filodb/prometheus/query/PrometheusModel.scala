@@ -1,6 +1,7 @@
 package filodb.prometheus.query
 
 import remote.RemoteStorage._
+
 import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
 import filodb.core.metadata.Column.ColumnType

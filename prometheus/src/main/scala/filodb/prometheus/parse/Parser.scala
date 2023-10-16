@@ -1,6 +1,7 @@
 package filodb.prometheus.parse
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
 import filodb.prometheus.Utils
