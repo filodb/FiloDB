@@ -1,10 +1,12 @@
 package filodb.prometheus.parse
 
+import filodb.prometheus.Utils
 import filodb.prometheus.ast.{AtEnd, AtStart, AtTimestamp, AtUnix, PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams, VectorSpec}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 
 import java.util.concurrent.TimeUnit.{DAYS, HOURS, MINUTES, SECONDS}
 import scala.concurrent.duration.Duration
@@ -929,6 +931,79 @@ class ParserSpec extends AnyFunSpec with Matchers {
           step.map(_.millis(0)).getOrElse(0) shouldEqual spec.stepDuration.toMillis
           offset.get.millis(0) shouldEqual spec.offsetDuration.toMillis
           atTimestamp shouldEqual spec.atTimestamp
+      }
+    }
+  }
+
+  it("should correctly identify the set of unescaped special regex chars") {
+    val tests = Seq(
+      ("a.b?c+d*e|f{g}h[i]j(k)?l\"m\\", Set('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')),
+      ("\\a.b?c+d*e|\\f{g}h[i]j(k)?l\"\\m\\", Set('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')),
+      ("a\\.b\\?c\\+d\\*e\\|f\\{g\\}h\\[i\\]j\\(k\\)\\?l\\\"m\\\\", Set('\\')),
+      ("foo|.*", Set('.', '*', '|')),
+      ("foo\\|.*", Set('.', '*', '\\')),
+      ("foo\\\\|.*", Set('.', '*', '|')),
+      ("foo\\\\\\|.*", Set('.', '*', '\\'))
+    )
+
+    for ((string, expected) <- tests) {
+      val res = Utils.getUnescapedSpecialRegexChars(string)
+      res shouldEqual expected
+    }
+  }
+
+  it("should correctly enforce filter length limit for EqualsRegex") {
+    val lim = Parser.REGEX_MAX_LEN
+
+    // true -> should not throw an exception; else false
+    val succeedQueryPairs = Seq(
+      // Begin successful...
+      (true, s"""job=~"${"a".repeat(lim)}""""),
+      (true, s"""job=~"${".".repeat(lim)}""""),
+      // May want to enforce this (no regex chars, but length limit exceeded).
+      (true, s"""job=~"${"a".repeat(lim + 1)}""""),
+      (true, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}""""),
+      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim)}""""),
+      // May want to enforce this (single "|"-joined value exceeds limit).
+      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim + 1)}""""),
+
+      // Begin unsuccessful...
+      (false, s"""job=~"${".".repeat(lim + 1)}""""),
+      (false, s"""job=~"${".".repeat(lim + 1).split("").mkString("|")}""""),
+      (false, s"""job=~"${"a".repeat(lim + 1)}.*"}"""),
+      (false, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}.*""""),
+    )
+    val timeParams = TimeStepParams(1000, 1, 1000)
+    val testFunc = (shouldSucceed: Boolean, lambda: () => Unit) => {
+      if (shouldSucceed) {
+        lambda.apply()
+      } else {
+        intercept[IllegalArgumentException] { lambda.apply() }
+      }
+    }
+    for ((shouldSucceed, filterString) <- succeedQueryPairs) {
+      val queryString = s"""foo{$filterString}"""
+      val idLambdaPairs: Seq[(String, () => Unit)] = Seq(
+        ("q",  () => Parser.queryToLogicalPlan(queryString, timeParams.start, timeParams.step)),
+        ("qr", () => Parser.queryRangeToLogicalPlan(queryString, timeParams)),
+        ("ln", () => Parser.labelNamesQueryToLogicalPlan(queryString, timeParams)),
+        ("lv", () => Parser.labelValuesQueryToLogicalPlan(Seq("job"), Some(filterString), timeParams)),
+        ("m",  () => Parser.metadataQueryToLogicalPlan(queryString, timeParams)),
+        ("lc", () => Parser.labelCardinalityToLogicalPlan(queryString, timeParams))
+      )
+      idLambdaPairs.foreach{case (id, lambda) =>
+        try {
+          testFunc.apply(shouldSucceed, lambda)
+        } catch {
+          case t: Throwable =>
+            val failMsg =
+              s"""======= TEST FAILED =======
+                 |filterString: $filterString
+                 |id: $id
+                 |""".stripMargin
+            println(failMsg)
+            throw t
+        }
       }
     }
   }

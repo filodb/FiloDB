@@ -1,9 +1,9 @@
 package filodb.prometheus.parse
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
+import filodb.prometheus.Utils
 import filodb.prometheus.ast._
 import filodb.query.{LabelValues, LogicalPlan}
 
@@ -138,9 +138,14 @@ object Parser extends StrictLogging {
             case NotRegexMatch => require(l.value.length <= REGEX_MAX_LEN,
                                    s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
                                   ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
-            case RegexMatch =>  require(l.value.length <= REGEX_MAX_LEN,
-                                   s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
-                                ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case RegexMatch    =>
+              // Relax the length limit only for matchers that contain at most the "|" special character.
+              if (!Utils.isPipeOnlyRegex(l.value)) {
+                require(l.value.length <= Parser.REGEX_MAX_LEN,
+                  s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
+                    s"when non-`|` special characters are used.")
+              }
+              ColumnFilter(l.label, Filter.EqualsRegex(l.value))
             case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
             case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
           }
