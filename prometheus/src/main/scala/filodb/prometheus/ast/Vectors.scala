@@ -12,6 +12,8 @@ object Vectors {
   val PromMetricLabel = "__name__"
   val TypeLabel       = "_type_"
   val BucketFilterLabel = "_bucket_"
+  val conf = GlobalConfig.systemConfig
+  val queryConfig = conf.getConfig("filodb.query")
 }
 
 object WindowConstants {
@@ -268,7 +270,9 @@ sealed trait Vector extends Expression {
                                 ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
-          if (!Utils.isPipeOnlyRegex(labelValue)) {
+          val shouldRelax = queryConfig.getBoolean("relax-pipe-only-equals-regex-limit") &&
+                              Utils.isPipeOnlyRegex(labelValue)
+          if (!shouldRelax) {
             require(labelValue.length <= Parser.REGEX_MAX_LEN,
               s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
                 s"when non-`|` special characters are used.")

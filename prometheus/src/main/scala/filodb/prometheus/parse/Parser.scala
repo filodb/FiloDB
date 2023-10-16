@@ -20,9 +20,11 @@ object Parser extends StrictLogging {
   case object Antlr extends Mode
   case object Shadow extends Mode
 
+  private val conf = GlobalConfig.systemConfig
+  private val queryConf = conf.getConfig("filodb.query")
+
   val mode: Mode = {
-    val conf = GlobalConfig.systemConfig
-    val queryConfig = QueryConfig(conf.getConfig("filodb.query"))
+    val queryConfig = QueryConfig(queryConf)
     val parser = queryConfig.parser
     logger.info(s"Query parser mode: $parser")
     parser match {
@@ -141,7 +143,9 @@ object Parser extends StrictLogging {
                                   ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
             case RegexMatch    =>
               // Relax the length limit only for matchers that contain at most the "|" special character.
-              if (!Utils.isPipeOnlyRegex(l.value)) {
+              val shouldRelax = queryConf.getBoolean("relax-pipe-only-equals-regex-limit") &&
+                                  Utils.isPipeOnlyRegex(l.value)
+              if (!shouldRelax) {
                 require(l.value.length <= Parser.REGEX_MAX_LEN,
                   s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
                     s"when non-`|` special characters are used.")

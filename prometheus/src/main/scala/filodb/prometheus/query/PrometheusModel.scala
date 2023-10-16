@@ -15,8 +15,8 @@ import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
   import com.softwaremill.quicklens._
-  val conf = GlobalConfig.defaultsFromUrl
-  val queryConfig = conf.getConfig("filodb.query")
+  private val conf = GlobalConfig.systemConfig
+  private val queryConfig = conf.getConfig("filodb.query")
 
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
@@ -44,7 +44,9 @@ object PrometheusModel {
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
           case MatchType.REGEX_MATCH =>
             // Relax the length limit only for matchers that contain at most the "|" special character.
-            if (!Utils.isPipeOnlyRegex(m.getValue)) {
+            val shouldRelax = queryConfig.getBoolean("relax-pipe-only-equals-regex-limit") &&
+                                Utils.isPipeOnlyRegex(m.getValue)
+            if (!shouldRelax) {
               require(m.getValue.length <= REGEX_MAX_LEN,
                 s"Regular expression filters should be <= ${REGEX_MAX_LEN} characters " +
                 s"when non-`|` special characters are used.")
