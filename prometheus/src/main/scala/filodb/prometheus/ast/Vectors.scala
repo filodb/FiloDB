@@ -3,8 +3,7 @@ package filodb.prometheus.ast
 import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
-import filodb.core.query.{ColumnFilter, RangeParams}
-import filodb.prometheus.Utils
+import filodb.core.query.{ColumnFilter, QueryUtils, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
@@ -271,7 +270,7 @@ sealed trait Vector extends Expression {
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
           val shouldRelax = queryConfig.getBoolean("relax-pipe-only-equals-regex-limit") &&
-                              Utils.isPipeOnlyRegex(labelValue)
+                              QueryUtils.isPipeOnlyRegex(labelValue)
           if (!shouldRelax) {
             require(labelValue.length <= Parser.REGEX_MAX_LEN,
               s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +

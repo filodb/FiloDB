@@ -3,8 +3,7 @@ package filodb.prometheus.parse
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.GlobalConfig
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
-import filodb.prometheus.Utils
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryUtils}
 import filodb.prometheus.ast._
 import filodb.query.{LabelValues, LogicalPlan}
 
@@ -144,7 +143,7 @@ object Parser extends StrictLogging {
             case RegexMatch    =>
               // Relax the length limit only for matchers that contain at most the "|" special character.
               val shouldRelax = queryConf.getBoolean("relax-pipe-only-equals-regex-limit") &&
-                                  Utils.isPipeOnlyRegex(l.value)
+                                  QueryUtils.isPipeOnlyRegex(l.value)
               if (!shouldRelax) {
                 require(l.value.length <= Parser.REGEX_MAX_LEN,
                   s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +

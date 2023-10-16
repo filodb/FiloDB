@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
 import java.util.regex.Pattern
-
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
@@ -14,7 +13,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
-
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -34,14 +32,13 @@ import org.apache.lucene.store.{MMapDirectory, NIOFSDirectory}
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
 import spire.syntax.cfor._
-
-import filodb.core.{concurrentCache, DatasetRef}
+import filodb.core.{DatasetRef, concurrentCache}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
 import filodb.core.query.Filter._
 import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
@@ -828,9 +825,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
-  val regexChars = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
-  val regexCharsMinusPipe = (regexChars.toSet - '|').toArray
-
   // scalastyle:off method.length
   private def leafFilter(column: String, filter: Filter): Query = {
 
@@ -848,14 +842,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         } else if (regex.replaceAll("\\.\\*", "") == "") {
           // if label=~".*" then match all docs since promQL matches .* with absent label too
           new MatchAllDocsQuery
-        } else if (regex.forall(c => !regexChars.contains(c))) {
+        } else if (!QueryUtils.containsRegexChars(regex)) {
           // if all regex special chars absent, then treat like Equals
           equalsQuery(regex)
-        } else if (regex.forall(c => !regexCharsMinusPipe.contains(c))) {
+        } else if (QueryUtils.isPipeOnlyRegex(regex)) {
           // if pipe is only regex special char present, then convert to IN query
           new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
         } else if (regex.endsWith(".*") && regex.length > 2 &&
-                   regex.dropRight(2).forall(c => !regexChars.contains(c))) {
+                   !QueryUtils.containsRegexChars(regex.dropRight(2))) {
           // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
           new PrefixQuery(new Term(column, regex.dropRight(2)))
         } else {

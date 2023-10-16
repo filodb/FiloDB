@@ -1,6 +1,5 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.Utils
 import filodb.prometheus.ast.{AtEnd, AtStart, AtTimestamp, AtUnix, PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams, VectorSpec}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
@@ -932,23 +931,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
           offset.get.millis(0) shouldEqual spec.offsetDuration.toMillis
           atTimestamp shouldEqual spec.atTimestamp
       }
-    }
-  }
-
-  it("should correctly identify the set of unescaped special regex chars") {
-    val tests = Seq(
-      ("a.b?c+d*e|f{g}h[i]j(k)?l\"m\\", Set('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')),
-      ("\\a.b?c+d*e|\\f{g}h[i]j(k)?l\"\\m\\", Set('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')),
-      ("a\\.b\\?c\\+d\\*e\\|f\\{g\\}h\\[i\\]j\\(k\\)\\?l\\\"m\\\\", Set('\\')),
-      ("foo|.*", Set('.', '*', '|')),
-      ("foo\\|.*", Set('.', '*', '\\')),
-      ("foo\\\\|.*", Set('.', '*', '|')),
-      ("foo\\\\\\|.*", Set('.', '*', '\\'))
-    )
-
-    for ((string, expected) <- tests) {
-      val res = Utils.getUnescapedSpecialRegexChars(string)
-      res shouldEqual expected
     }
   }
 

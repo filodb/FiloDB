@@ -6,8 +6,7 @@ import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{Result => _, _}
-import filodb.prometheus.Utils
+import filodb.core.query.{QueryUtils, Result => _, _}
 import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
@@ -45,7 +44,7 @@ object PrometheusModel {
           case MatchType.REGEX_MATCH =>
             // Relax the length limit only for matchers that contain at most the "|" special character.
             val shouldRelax = queryConfig.getBoolean("relax-pipe-only-equals-regex-limit") &&
-                                Utils.isPipeOnlyRegex(m.getValue)
+                                QueryUtils.isPipeOnlyRegex(m.getValue)
             if (!shouldRelax) {
               require(m.getValue.length <= REGEX_MAX_LEN,
                 s"Regular expression filters should be <= ${REGEX_MAX_LEN} characters " +
