@@ -43,7 +43,7 @@ object PrometheusModel {
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
           case MatchType.REGEX_MATCH =>
             // Relax the length limit only for matchers that contain at most the "|" special character.
-            val shouldRelax = queryConfig.getBoolean("should-relax-pipe-only-equals-regex-limit") &&
+            val shouldRelax = queryConfig.getBoolean("relaxed-pipe-only-equals-regex-limit") &&
                                 QueryUtils.isPipeOnlyRegex(m.getValue)
             if (shouldRelax) {
               val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
