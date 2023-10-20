@@ -143,7 +143,7 @@ object Parser extends StrictLogging {
             case RegexMatch    =>
               // Relax the length limit only for matchers that contain at most the "|" special character.
               val shouldRelax = queryConf.hasPath("relaxed-pipe-only-equals-regex-limit") &&
-                                  QueryUtils.isPipeOnlyRegex(l.value)
+                                  QueryUtils.containsPipeOnlyRegex(l.value)
               if (shouldRelax) {
                 val limit = queryConf.getInt("relaxed-pipe-only-equals-regex-limit");
                 require(l.value.length <= limit,

@@ -270,7 +270,7 @@ sealed trait Vector extends Expression {
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
           val shouldRelax = queryConfig.hasPath("relaxed-pipe-only-equals-regex-limit") &&
-                              QueryUtils.isPipeOnlyRegex(labelValue)
+                              QueryUtils.containsPipeOnlyRegex(labelValue)
           if (shouldRelax) {
             val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
             require(labelValue.length <= limit,

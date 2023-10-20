@@ -19,7 +19,7 @@ object QueryUtils {
    *   characters except the pipe character ('|').
    * True is also returned when the string contains no pipes.
    */
-  def isPipeOnlyRegex(str: String): Boolean = {
+  def containsPipeOnlyRegex(str: String): Boolean = {
     str.forall(!regexCharsMinusPipe.contains(_))
   }
 }

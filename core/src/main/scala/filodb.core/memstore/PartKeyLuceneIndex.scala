@@ -848,7 +848,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         } else if (!QueryUtils.containsRegexChars(regex)) {
           // if all regex special chars absent, then treat like Equals
           equalsQuery(regex)
-        } else if (QueryUtils.isPipeOnlyRegex(regex)) {
+        } else if (QueryUtils.containsPipeOnlyRegex(regex)) {
           // if pipe is only regex special char present, then convert to IN query
           new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
         } else if (regex.endsWith(".*") && regex.length > 2 &&
