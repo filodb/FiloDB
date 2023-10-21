@@ -4,14 +4,15 @@ package filodb.core.query
  * Storage for utility functions.
  */
 object QueryUtils {
-  private val regexChars = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
-  private val regexCharsMinusPipe = (regexChars.toSet - '|').toArray
+  val REGEX_CHARS = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+
+  private val regexCharsMinusPipe = (REGEX_CHARS.toSet - '|').toArray
 
   /**
    * Returns true iff the argument string contains any special regex chars.
    */
   def containsRegexChars(str: String): Boolean = {
-    str.exists(regexChars.contains(_))
+    str.exists(REGEX_CHARS.contains(_))
   }
 
   /**
