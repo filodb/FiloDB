@@ -6,7 +6,7 @@ import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{Result => _, _}
+import filodb.core.query.{QueryUtils, Result => _, _}
 import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
@@ -14,8 +14,8 @@ import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
   import com.softwaremill.quicklens._
-  val conf = GlobalConfig.defaultsFromUrl
-  val queryConfig = conf.getConfig("filodb.query")
+  private val conf = GlobalConfig.systemConfig
+  private val queryConfig = conf.getConfig("filodb.query")
 
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
@@ -42,9 +42,22 @@ object PrometheusModel {
           case MatchType.EQUAL => Filter.Equals(m.getValue)
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
           case MatchType.REGEX_MATCH =>
-                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
-                              s"be <= ${REGEX_MAX_LEN} characters")
-                            Filter.EqualsRegex(m.getValue)
+            // Relax the length limit only for matchers that contain at most the "|" special character.
+            val shouldRelax = queryConfig.getBoolean("relaxed-pipe-only-equals-regex-limit") &&
+                                QueryUtils.containsPipeOnlyRegex(m.getValue)
+            if (shouldRelax) {
+              val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
+              require(m.getValue.length <= limit,
+                s"Regular expression filters should be <= $limit characters " +
+                  s"when no special characters except '|' are used. " +
+                  s"Violating filter is: ${m.getName}=${m.getValue}")
+            } else {
+              require(m.getValue.length <= REGEX_MAX_LEN,
+                s"Regular expression filters should be <= $REGEX_MAX_LEN characters " +
+                  s"when non-`|` special characters are used. " +
+                  s"Violating filter is: ${m.getName}=${m.getValue}")
+            }
+            Filter.EqualsRegex(m.getValue)
           case MatchType.REGEX_NO_MATCH =>
                             require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
                               s"be <= ${REGEX_MAX_LEN} characters")
