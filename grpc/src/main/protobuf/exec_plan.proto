@@ -1,0 +1,120 @@
+syntax="proto3";
+
+package filodb.grpc;
+
+//import "google/protobuf/timestamp.proto";
+option java_outer_classname = "ExecPlans";
+option java_generate_equals_and_hash = true;
+import "query_service.proto";
+
+message DatasetRef {
+  string dataset           = 1;
+  optional string database = 2;
+}
+
+message QueryCommand {
+  int64 submitTime  = 1;
+  DatasetRef datasetRef    = 2;
+
+}
+
+message Filter {
+  string operatorString           = 1;
+  repeated string valueStrings    = 2;
+}
+
+message FilterEquals {
+  Filter filter = 1;
+}
+message ColumnFilter {
+  string column  = 1;
+  oneof filter {
+    FilterEquals filterEquals = 2;
+  }
+}
+
+//message PromQlQueryParams {
+//  string promQl                   = 1;
+//  int64 startSecs                 = 2;
+//  int64 stepSecs                  = 3;
+//  int64 endSecs                   = 4;
+//  optional string remoteQueryPath = 5;
+//  bool verbose                    = 6;
+//}
+
+message QueryContext {
+  QueryParams origQueryParams        = 1;
+  string queryId                     = 2;
+  int64 submitTime                   = 3; // duplicate with LeafExecPlan?
+  PlannerParams plannerParams        = 4;
+  map<string, string> traceInfo      = 5;
+}
+
+message PlanDispatcher {
+  string clusterName                 = 1;
+  bool isLocalCall                   = 2;
+}
+
+
+message ActorPlanDispatcher {
+  PlanDispatcher planDispatcher     = 1;
+  string actorPath                   = 2;
+}
+
+message ExecPlan {
+  string planId                             = 1;
+  QueryContext queryContext                 = 2;
+  bool enforceSampleLimit                   = 3;
+  QueryCommand queryCommand                 = 4;
+  oneof dispatcher  {
+    ActorPlanDispatcher actorPlanDispatcher = 5;
+  }
+  //transformers            =
+}
+
+enum ChunkScanMethod {
+  ALL_CHUNKS_SCAN = 0;
+  IN_MEMORY_CHUNK_SCAN = 1;
+  WRITE_BUFFER_CHUNK_SCAN = 2;
+  TIME_RANGE_CHUNK_SCAN = 3;
+}
+
+message ChunkScan {
+  int64 startTime         = 1;
+  int64 endTime           = 2;
+  ChunkScanMethod  method = 3;
+}
+
+message LeafExecPlan {
+  ExecPlan execPlan = 1;
+  int64 submitTime  = 2;
+
+}
+
+message MultiSchemaPartitionsExec {
+  LeafExecPlan leafExecPlan     = 1;
+  int32 shard                   = 2;
+  repeated ColumnFilter filters = 3;
+  ChunkScan chunkScan           = 4;
+  string metricColumn           = 5;
+  optional string schema        = 6;
+  optional string colName       = 7;
+}
+
+message NonLeafExecPlan {
+  ExecPlan execPlan = 1;
+  repeated ExecPlanContainer children = 2;
+
+}
+
+message LocalPartitionDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message ExecPlanContainer {
+  oneof execPlan {
+    MultiSchemaPartitionsExec multiSchemaPartitionsExec       = 1;
+    LocalPartitionDistConcatExec localPartitionDistConcatExec = 2;
+  }
+}
+

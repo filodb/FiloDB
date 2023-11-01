@@ -1,16 +1,14 @@
 package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
-
 import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorRef
-import akka.pattern.{ask, AskTimeoutException}
+import akka.pattern.{AskTimeoutException, ask}
 import akka.util.Timeout
+import filodb.coordinator.client.QueryCommands.ProtoExecPlan
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
@@ -44,7 +42,15 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           emptyPartialResult
         })
       } else {
-        val fut = (target ? plan.execPlan) (t).map {
+        // HACK
+        val doProto = plan.execPlan.queryContext.plannerParams.warnLimits.groupByCardinality == 7777
+        val message = if (doProto) {
+          val protoPlan = ProtoConverters.execPlanToProto(plan.execPlan)
+          ProtoExecPlan(plan.execPlan.dataset, protoPlan.toByteArray, plan.execPlan.submitTime)
+        } else {
+          plan.execPlan
+        }
+        val fut = (target ? message) (t).map {
           case resp: QueryResponse => resp
           case e => throw new IllegalStateException(s"Received bad response $e")
         }
