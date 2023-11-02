@@ -350,6 +350,7 @@ case class InstantExpression(metricName: Option[String],
   }
 
   def toLabelNamesPlan(timeParams: TimeRangeParams): LabelNames = {
+    val columnFilters = getUnvalidatedColumnFilters()
     LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
   }
 
