@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryUtils}
 import filodb.prometheus.ast._
-import filodb.query.{LabelValues, LogicalPlan}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan}
 
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
@@ -169,10 +169,14 @@ object Parser extends StrictLogging {
 
   def labelNamesQueryToLogicalPlan(query: String,
                                    timeParams: TimeRangeParams): LogicalPlan = {
-    val expression = parseQuery(query)
-    expression match {
-      case p: InstantExpression => p.toLabelNamesPlan(timeParams)
-      case _ => throw new UnsupportedOperationException()
+    if (query == null || query.isEmpty) {
+      LabelNames(Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
+    } else {
+      val expression = parseQuery(query)
+      expression match {
+        case p: InstantExpression => p.toLabelNamesPlan(timeParams)
+        case _ => throw new UnsupportedOperationException()
+      }
     }
   }
 
