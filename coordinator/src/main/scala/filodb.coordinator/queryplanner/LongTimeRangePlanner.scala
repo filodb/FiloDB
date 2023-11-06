@@ -53,7 +53,7 @@ import filodb.query.exec._
     val earliestRawTime = earliestRawTimestampFn
     val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
     val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
-    require(periodicSeriesPlan.validateAtModifier(earliestRawTime),
+    require(!periodicSeriesPlan.hasAtModifier || periodicSeriesPlan.getDataSource(earliestRawTime) != 2,
       s"$periodicSeriesPlan @modifier and query range should be all greater or less than $earliestRawTime")
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
