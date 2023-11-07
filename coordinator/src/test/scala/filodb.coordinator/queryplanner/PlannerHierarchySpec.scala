@@ -1895,7 +1895,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
+      .contains("should be empty") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because topk needs both raw and downsample cluster with @modifier") {
@@ -1905,7 +1905,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
+      .contains("should be empty") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because @modifier and offset reads from downsample cluster, and the query range reads from raw cluster") {
@@ -1916,7 +1916,27 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
+      .contains("should be empty") shouldEqual true
+  }
+
+  it("should thrown IllegalArgumentException because while @modifier needs data from downsample cluster, the plan is dispatched to raw cluster") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      s"""topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] @${now / 1000 - 8.days.toSeconds}))""".stripMargin,
+      TimeStepParams(now / 1000 - 1.days.toSeconds, step, now / 1000), Antlr)
+    val thrown = the[IllegalArgumentException] thrownBy
+      rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    thrown.toString
+      .contains("should be no less than") shouldEqual true
+  }
+
+  it("should thrown IllegalArgumentException because while @modifier needs data from raw cluster, the plan is dispatched to downsample cluster") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      s"""topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] @${now / 1000}))""".stripMargin,
+      TimeStepParams(now / 1000 - 9.days.toSeconds, step, now / 1000 - 8.days.toSeconds), Antlr)
+    val thrown = the[IllegalArgumentException] thrownBy
+      rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    thrown.toString
+      .contains("should be less than") shouldEqual true
   }
 
   it("both modifier and query range require the data from downsample cluster.") {

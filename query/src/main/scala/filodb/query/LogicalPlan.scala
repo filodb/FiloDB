@@ -71,13 +71,8 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 
-  /**
-   * validate the @modifier timestamp is in the same cluster as the query range.
-   * @param earliestRawTime the earliest timestamp of the raw cluster.
-   * @param lookbackMs the look back time.
-   * @return
-   */
-  def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = true
+  // The array of all at modifier
+  def atModifierTimestamps: Seq[Long] = Seq()
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -269,11 +264,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
-      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
-      || (at < earliestRawTime && endMs < earliestRawTime))
+  override def atModifierTimestamps: Seq[Long] = {
+    atMs.toSeq
   }
 }
 
@@ -338,11 +330,8 @@ case class SubqueryWithWindowing(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
-      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
-        || (at < earliestRawTime && endMs < earliestRawTime))
+  override def atModifierTimestamps: Seq[Long] = {
+    atMs.toSeq
   }
 }
 
@@ -383,11 +372,8 @@ case class TopLevelSubquery(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.map(at => at - lookbackMs - originalOffsetMs.getOrElse(0L))
-      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - originalOffsetMs.getOrElse(0L) >= earliestRawTime)
-        || (at < earliestRawTime && endMs < earliestRawTime))
+  override def atModifierTimestamps: Seq[Long] = {
+    atMs.toSeq
   }
 }
 
@@ -419,11 +405,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
-      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
-        || (at < earliestRawTime && endMs < earliestRawTime))
+  override def atModifierTimestamps: Seq[Long] = {
+    atMs.toSeq
   }
 }
 
@@ -473,8 +456,8 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 
 }
@@ -507,9 +490,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def isRoutable: Boolean = lhs.isRoutable || rhs.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
-
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    lhs.validateAtModifier(earliestRawTime, lookbackMs) && rhs.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    lhs.atModifierTimestamps ++ rhs.atModifierTimestamps
   }
 }
 
@@ -547,8 +529,8 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 }
 
@@ -581,8 +563,8 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 }
 
@@ -598,8 +580,8 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 }
 
@@ -709,8 +691,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 }
 
@@ -729,8 +711,8 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime, lookbackMs)
+  override def atModifierTimestamps: Seq[Long] = {
+    vectors.atModifierTimestamps
   }
 }
 
