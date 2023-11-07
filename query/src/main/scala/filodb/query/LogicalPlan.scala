@@ -72,7 +72,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 
   // The array of all at modifier
-  def atModifierTimestamps: Seq[Long] = Seq()
+  def atModifierTimestampsWithOffset: Seq[Long] = Seq()
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -264,8 +264,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    atMs.toSeq
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    atMs.map(at => at - offsetMs.getOrElse(0L)).toSeq
   }
 }
 
@@ -330,7 +330,7 @@ case class SubqueryWithWindowing(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 
-  override def atModifierTimestamps: Seq[Long] = {
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
     atMs.toSeq
   }
 }
@@ -372,8 +372,8 @@ case class TopLevelSubquery(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
 
-  override def atModifierTimestamps: Seq[Long] = {
-    atMs.toSeq
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    atMs.map(at => at - originalOffsetMs.getOrElse(0L)).toSeq
   }
 }
 
@@ -405,8 +405,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    atMs.toSeq
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    atMs.map(at => at - offsetMs.getOrElse(0L)).toSeq
   }
 }
 
@@ -456,8 +456,8 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 
 }
@@ -490,8 +490,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def isRoutable: Boolean = lhs.isRoutable || rhs.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
-  override def atModifierTimestamps: Seq[Long] = {
-    lhs.atModifierTimestamps ++ rhs.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    lhs.atModifierTimestampsWithOffset ++ rhs.atModifierTimestampsWithOffset
   }
 }
 
@@ -529,8 +529,8 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 }
 
@@ -563,8 +563,8 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 }
 
@@ -580,8 +580,8 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 }
 
@@ -691,8 +691,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 }
 
@@ -711,8 +711,8 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def atModifierTimestamps: Seq[Long] = {
-    vectors.atModifierTimestamps
+  override def atModifierTimestampsWithOffset: Seq[Long] = {
+    vectors.atModifierTimestampsWithOffset
   }
 }
 

@@ -1895,7 +1895,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("should be empty") shouldEqual true
+      .contains("both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because topk needs both raw and downsample cluster with @modifier") {
@@ -1905,7 +1905,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("should be empty") shouldEqual true
+      .contains("both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because @modifier and offset reads from downsample cluster, and the query range reads from raw cluster") {
@@ -1916,7 +1916,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("should be empty") shouldEqual true
+      .contains("both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because while @modifier needs data from downsample cluster, the plan is dispatched to raw cluster") {
@@ -1926,7 +1926,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("should be no less than") shouldEqual true
+      .contains("both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier") shouldEqual true
   }
 
   it("should thrown IllegalArgumentException because while @modifier needs data from raw cluster, the plan is dispatched to downsample cluster") {
@@ -1936,7 +1936,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("should be less than") shouldEqual true
+      .contains("both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier") shouldEqual true
   }
 
   it("both modifier and query range require the data from downsample cluster.") {

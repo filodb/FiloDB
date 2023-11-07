@@ -59,17 +59,19 @@ import filodb.query.exec._
     val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
-    val atModifierTimestamps = periodicSeriesPlan.atModifierTimestamps
+    val atModifierTimestampsWithOffset = periodicSeriesPlan.atModifierTimestampsWithOffset
 
-    if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
-      require(atModifierTimestamps.forall(at => at - lookbackMs >= earliestRawTime),
-      s"all @modifier $atModifierTimestamps should be no less than $earliestRawTime")
+    val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
+      // should be in raw cluster.
+      atModifierTimestampsWithOffset.forall(at => at - lookbackMs >= earliestRawTime)
     } else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
-      require(atModifierTimestamps.forall(at => at - lookbackMs < earliestRawTime),
-        s"all @modifier $atModifierTimestamps should be less than $earliestRawTime")
+      // should be in down sample cluster.
+      atModifierTimestampsWithOffset.forall(at => at - lookbackMs < earliestRawTime)
     } else {
-      require(atModifierTimestamps.isEmpty, s"@modifier $atModifierTimestamps should be empty")
+      atModifierTimestampsWithOffset.isEmpty
     }
+    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported because it queries data" +
+      s" from both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier.")
 
     if (maxOffset != minOffset
           && startWithOffsetMs - lookbackMs < earliestRawTime
