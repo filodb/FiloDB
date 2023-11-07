@@ -1887,7 +1887,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan, expectedPlan)
   }
 
-  it("should thrown IllegalArgumentException due to the need of both raw and downsample cluster with @modifierx") {
+  it("should thrown IllegalArgumentException due to the need of both raw and downsample cluster with @modifier") {
     val lp = Parser.queryRangeToLogicalPlan(
       """rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m]) AND
         | topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] @end()))""".stripMargin,
@@ -1895,8 +1895,59 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val thrown = the[IllegalArgumentException] thrownBy
       rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
     thrown.toString
-      .contains("@modifier and query range should be all greater or less than 1634172530000") shouldEqual (true)
+      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
   }
+
+  it("should thrown IllegalArgumentException because topk needs both raw and downsample cluster with @modifier") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      """topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] @end()))""".stripMargin,
+      TimeStepParams(now / 1000 - 8.days.toSeconds, step, now / 1000), Antlr)
+    val thrown = the[IllegalArgumentException] thrownBy
+      rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    thrown.toString
+      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
+  }
+
+  it("should thrown IllegalArgumentException because @modifier and offset reads from downsample cluster, and the query range reads from raw cluster") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      """rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m]) AND
+        | topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] offset 8d @end()))""".stripMargin,
+      TimeStepParams(now / 1000 - 1.days.toSeconds, step, now / 1000), Antlr)
+    val thrown = the[IllegalArgumentException] thrownBy
+      rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    thrown.toString
+      .contains("The timestamps query data should be all before or after 1634172530000") shouldEqual (true)
+  }
+
+  it("both modifier and query range require the data from downsample cluster.") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      """rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m]) AND
+        | topk(1, rate(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[1m] offset 8d @end()))""".stripMargin,
+      TimeStepParams(now / 1000 - 9.days.toSeconds, step, now / 1000 - 8.days.toSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+    println()
+    println(execPlan.printTree())
+    println()
+    val expectedPlan =
+      """E~SetOperatorExec(binaryOp=LAND, on=None, ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)
+        |-T~PeriodicSamplesMapper(start=1633999730000, step=300000, end=1634086130000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633999670000,1634086130000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)
+        |-T~PeriodicSamplesMapper(start=1633999730000, step=300000, end=1634086130000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633999670000,1634086130000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)
+        |-T~AggregatePresenter(aggrOp=TopK, aggrParams=List(1.0), rangeParams=RangeParams(1633999730,300,1634086130))
+        |--E~LocalPartitionReduceAggregateExec(aggrOp=TopK, aggrParams=List(1.0)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)
+        |---T~AggregateMapReduce(aggrOp=TopK, aggrParams=List(1.0), without=List(), by=List())
+        |----T~RepeatTransformer(startMs=1633999730000, stepMs=300000, endMs=1634086130000, funcParams=List())
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=0, end=1634086130000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(691200000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633394810000,1633394930000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)
+        |---T~AggregateMapReduce(aggrOp=TopK, aggrParams=List(1.0), without=List(), by=List())
+        |----T~RepeatTransformer(startMs=1633999730000, stepMs=300000, endMs=1634086130000, funcParams=List())
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=0, end=1634086130000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(691200000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633394810000,1633394930000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-324361366],downsample)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
+  }
+
 
   it("Vector plan on a binary join in  RR and raw happen in memory") {
     val lp = Parser.queryRangeToLogicalPlan(

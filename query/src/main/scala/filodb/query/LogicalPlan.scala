@@ -74,9 +74,10 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
   /**
    * validate the @modifier timestamp is in the same cluster as the query range.
    * @param earliestRawTime the earliest timestamp of the raw cluster.
+   * @param lookbackMs the look back time.
    * @return
    */
-  def validateAtModifier(earliestRawTime: Long): Boolean = true
+  def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = true
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -268,11 +269,11 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    val earliestRawTimeWithOffset = offsetMs.map(offset => offset + earliestRawTime).getOrElse(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
     // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.forall(at => (at >= earliestRawTimeWithOffset && startMs >= earliestRawTimeWithOffset)
-      || (at < earliestRawTimeWithOffset && endMs < earliestRawTimeWithOffset))
+    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
+      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
+      || (at < earliestRawTime && endMs < earliestRawTime))
   }
 }
 
@@ -337,11 +338,11 @@ case class SubqueryWithWindowing(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    val earliestRawTimeWithOffset = offsetMs.map(offset => offset + earliestRawTime).getOrElse(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
     // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.forall(at => (at >= earliestRawTimeWithOffset && startMs >= earliestRawTimeWithOffset)
-      || (at < earliestRawTimeWithOffset && endMs < earliestRawTimeWithOffset))
+    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
+      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
+        || (at < earliestRawTime && endMs < earliestRawTime))
   }
 }
 
@@ -382,11 +383,11 @@ case class TopLevelSubquery(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    val earliestRawTimeWithOffset = originalOffsetMs.map(offset => offset + earliestRawTime).getOrElse(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
     // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.forall(at => (at >= earliestRawTimeWithOffset && startMs >= earliestRawTimeWithOffset)
-      || (at < earliestRawTimeWithOffset && endMs < earliestRawTimeWithOffset))
+    atMs.map(at => at - lookbackMs - originalOffsetMs.getOrElse(0L))
+      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - originalOffsetMs.getOrElse(0L) >= earliestRawTime)
+        || (at < earliestRawTime && endMs < earliestRawTime))
   }
 }
 
@@ -418,11 +419,11 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    val earliestRawTimeWithOffset = offsetMs.map(offset => offset + earliestRawTime).getOrElse(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
     // the @modifier timestamp and range should be all in raw or downsample cluster.
-    atMs.forall(at => (at >= earliestRawTimeWithOffset && startMs>= earliestRawTimeWithOffset)
-        || (at < earliestRawTimeWithOffset && endMs < earliestRawTimeWithOffset))
+    atMs.map(at => at - lookbackMs - offsetMs.getOrElse(0L))
+      .forall(at => (at >= earliestRawTime && startMs - lookbackMs - offsetMs.getOrElse(0L) >= earliestRawTime)
+        || (at < earliestRawTime && endMs < earliestRawTime))
   }
 }
 
@@ -472,8 +473,8 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 
 }
@@ -507,8 +508,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    lhs.validateAtModifier(earliestRawTime) && rhs.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    lhs.validateAtModifier(earliestRawTime, lookbackMs) && rhs.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 
@@ -546,8 +547,8 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 
@@ -580,8 +581,8 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 
@@ -597,8 +598,8 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 
@@ -708,8 +709,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 
@@ -728,8 +729,8 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def validateAtModifier(earliestRawTime: Long): Boolean = {
-    vectors.validateAtModifier(earliestRawTime)
+  override def validateAtModifier(earliestRawTime: Long, lookbackMs: Long): Boolean = {
+    vectors.validateAtModifier(earliestRawTime, lookbackMs)
   }
 }
 

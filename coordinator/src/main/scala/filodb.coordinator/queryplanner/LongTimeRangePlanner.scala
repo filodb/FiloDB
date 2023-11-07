@@ -53,10 +53,12 @@ import filodb.query.exec._
     val earliestRawTime = earliestRawTimestampFn
     val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
     val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
-    require(periodicSeriesPlan.validateAtModifier(earliestRawTime),
-      s"$periodicSeriesPlan @modifier and query range should be all greater or less than $earliestRawTime")
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
+    require(periodicSeriesPlan.validateAtModifier(earliestRawTime, lookbackMs),
+      s"Because $periodicSeriesPlan has @modifier." +
+        s" The timestamps query data should be all before or after $earliestRawTime")
+
     val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
