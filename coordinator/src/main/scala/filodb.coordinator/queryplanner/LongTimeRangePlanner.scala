@@ -70,8 +70,8 @@ import filodb.query.exec._
     } else {
       atModifierTimestampsWithOffset.isEmpty
     }
-    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported because it queries data" +
-      s" from both downsample and raw cluster. Please adjust the start and end time if you want to use @modifier.")
+    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported. Because it queries" +
+      s"both down sampled and raw data. Please adjust the query parameters if you want to use @modifier.")
 
     if (maxOffset != minOffset
           && startWithOffsetMs - lookbackMs < earliestRawTime

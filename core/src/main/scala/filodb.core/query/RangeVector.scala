@@ -227,7 +227,7 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
     // If rowReader is empty, iterate nothing.
-    val it = Iterator.from(0, rowReader.map(_ => stepMs.toInt).getOrElse(0))
+    val it = Iterator.from(0, rowReader.map(_ => stepMs.toInt).getOrElse(1))
       .takeWhile(_ <= endMs - startMs).map { i =>
       val rr = rowReader.get
       val t = i + startMs
