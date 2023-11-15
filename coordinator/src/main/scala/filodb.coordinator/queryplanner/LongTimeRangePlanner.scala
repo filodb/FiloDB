@@ -47,6 +47,24 @@ import filodb.query.exec._
     PlanResult(Seq(execPlan))
   }
 
+  private def getAtModifierTimestampsWithOffset(periodicSeriesPlan: PeriodicSeriesPlan): Seq[Long] = {
+    periodicSeriesPlan match {
+      case ps: PeriodicSeries => ps.atMs.map(at => at - ps.offsetMs.getOrElse(0L)).toSeq
+      case sww: SubqueryWithWindowing => sww.atMs.map(at => at - sww.offsetMs.getOrElse(0L)).toSeq
+      case psw: PeriodicSeriesWithWindowing => psw.atMs.map(at => at - psw.offsetMs.getOrElse(0L)).toSeq
+      case ts: TopLevelSubquery =>     ts.atMs.map(at => at - ts.originalOffsetMs.getOrElse(0L)).toSeq
+      case bj: BinaryJoin =>  getAtModifierTimestampsWithOffset(bj.lhs) ++ getAtModifierTimestampsWithOffset(bj.rhs)
+      case agg: Aggregate => getAtModifierTimestampsWithOffset(agg.vectors)
+      case aif: ApplyInstantFunction => getAtModifierTimestampsWithOffset(aif.vectors)
+      case amf: ApplyMiscellaneousFunction => getAtModifierTimestampsWithOffset(amf.vectors)
+      case asf: ApplySortFunction => getAtModifierTimestampsWithOffset(asf.vectors)
+      case aaf: ApplyAbsentFunction => getAtModifierTimestampsWithOffset(aaf.vectors)
+      case alf: ApplyLimitFunction => getAtModifierTimestampsWithOffset(alf.vectors)
+      case _ => Seq()
+    }
+  }
+
+
   // scalastyle:off method.length
   private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
     import LogicalPlan._
@@ -59,7 +77,7 @@ import filodb.query.exec._
     val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
-    val atModifierTimestampsWithOffset = periodicSeriesPlan.atModifierTimestampsWithOffset
+    val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
 
     val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
       // should be in raw cluster.

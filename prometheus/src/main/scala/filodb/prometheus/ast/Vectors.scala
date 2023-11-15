@@ -401,7 +401,7 @@ case class RangeExpression(metricName: Option[String],
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
     val selector = atTimestamp.map(_.getTimestampInSec(timeParams))
-      .map(time => IntervalSelector(Math.max(60000, time * 1000) - 60000, time * 1000))
+      .map(time => IntervalSelector(time * 1000, time * 1000))
       .getOrElse(Base.timeParamToSelector(timeParams))
 
     // multiply by 1000 to convert unix timestamp in seconds to millis
