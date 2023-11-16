@@ -265,12 +265,12 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
       val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
       slidingIt.close()
-      // drop first sample because of exclusive start
-      aggregated shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
+      // do not drop first sample because of inclusive start
+      aggregated shouldEqual data.sliding(windowSize, step).map(_.sum).toBuffer
 
       val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
-      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.sum).toBuffer
     }
   }
 
@@ -282,7 +282,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
 
       val chunkedIt = chunkedWindowItHist(data, rv, new SumOverTimeChunkedFunctionH(), windowSize, step)
-      chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
+      chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
         val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
@@ -302,7 +302,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
       val row = new TransientHistMaxRow()
       val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
-      chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
+      chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
         val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
@@ -327,22 +327,22 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val minSlidingIt = slidingWindowIt(data, rv, new MinMaxOverTimeFunction(Ordering[Double].reverse), windowSize, step)
       val aggregated = minSlidingIt.map(_.getDouble(1)).toBuffer
       minSlidingIt.close()
-      // drop first sample because of exclusive start
-      aggregated shouldEqual data.sliding(windowSize, step).map(_.drop(1).min).toBuffer
+      // do not drop first sample because of inclusive start
+      aggregated shouldEqual data.sliding(windowSize, step).map(_.min).toBuffer
 
       val minChunkedIt = chunkedWindowIt(data, rv, new MinOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
-      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).min).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.min).toBuffer
 
       val maxSlidingIt = slidingWindowIt(data, rv, new MinMaxOverTimeFunction(Ordering[Double]), windowSize, step)
       val aggregated3 = maxSlidingIt.map(_.getDouble(1)).toBuffer
       maxSlidingIt.close()
-      // drop first sample because of exclusive start
-      aggregated3 shouldEqual data.sliding(windowSize, step).map(_.drop(1).max).toBuffer
+      // do not drop first sample because of inclusive start
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(_.max).toBuffer
 
       val maxChunkedIt = chunkedWindowIt(data, rv, new MaxOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = maxChunkedIt.map(_.getDouble(1)).toBuffer
-      aggregated4 shouldEqual data.sliding(windowSize, step).map(_.drop(1).max).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(_.max).toBuffer
     }
   }
 
@@ -359,25 +359,25 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val countSliding = slidingWindowIt(data, rv, new CountOverTimeFunction(), windowSize, step)
       val aggregated1 = countSliding.map(_.getDouble(1)).toBuffer
       countSliding.close()
-      aggregated1 shouldEqual data.sliding(windowSize, step).map(_.length - 1).toBuffer
+      aggregated1 shouldEqual data.sliding(windowSize, step).map(_.length).toBuffer
 
       val countChunked = chunkedWindowIt(data, rv, new CountOverTimeChunkedFunction(), windowSize, step)
       val aggregated2 = countChunked.map(_.getDouble(1)).toBuffer
-      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.length - 1).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.length).toBuffer
 
       val avgSliding = slidingWindowIt(data, rv, new AvgOverTimeFunction(), windowSize, step)
       val aggregated3 = avgSliding.map(_.getDouble(1)).toBuffer
       avgSliding.close()
-      aggregated3 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(a => avg(a)).toBuffer
 
       // In sample_data2, there are no NaN's, that's why using avg function is fine
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
-      aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a)).toBuffer
 
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
-      aggregated5.drop(0) shouldEqual data.sliding(windowSize, step).map(_.length - 2).drop(0).toBuffer
+      aggregated5 shouldEqual data.sliding(windowSize, step).map(_.length - 1).toBuffer
     }
   }
 
@@ -394,22 +394,22 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val varSlidingIt = slidingWindowIt(data, rv, new StdVarOverTimeFunction(), windowSize, step)
       val aggregated2 = varSlidingIt.map(_.getDouble(1)).toBuffer
       varSlidingIt.close()
-      aggregated2 shouldEqual data.sliding(windowSize, step).map(a => stdVar(a drop 1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(a => stdVar(a)).toBuffer
 
       val stdDevSlidingIt = slidingWindowIt(data, rv, new StdDevOverTimeFunction(), windowSize, step)
       val aggregated3 = stdDevSlidingIt.map(_.getDouble(1)).toBuffer
       stdDevSlidingIt.close()
-      aggregated3 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d drop 1))).toBuffer
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d))).toBuffer
 
       val varFunc = new StdVarOverTimeChunkedFunctionD()
       val windowIt4 = chunkedWindowIt(data, rv, varFunc, windowSize, step)
       val aggregated4 = windowIt4.map(_.getDouble(1)).toBuffer
-      aggregated4 shouldEqual data.sliding(windowSize, step).map(a => stdVar(a drop 1)).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(a => stdVar(a)).toBuffer
 
       val devFunc = new StdDevOverTimeChunkedFunctionD()
       val windowIt5 = chunkedWindowIt(data, rv, devFunc, windowSize, step)
       val aggregated5 = windowIt5.map(_.getDouble(1)).toBuffer
-      aggregated5 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d drop 1))).toBuffer
+      aggregated5 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d))).toBuffer
     }
   }
 
@@ -424,7 +424,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), querySession)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 3.0))
   }
 
   it("should correctly calculate quantileovertime") {
@@ -481,7 +481,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       (Seq(StaticFuncArgs(0.5, rangeParams))), windowSize, step)
 
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
-      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(median).toBuffer
     }
   }
 
@@ -504,7 +504,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
 
-      data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
+      data.sliding(windowSize, step).map(_.length - 1).toBuffer.zip(aggregated2).foreach {
         case (val1, val2) => if (val1 == -1) {
                                 val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
                               } else {
@@ -649,7 +649,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
       val chunkedIt = chunkedWindowIt(data, rv, new ZScoreChunkedFunctionD(), windowSize, step)
       val aggregated = chunkedIt.map(_.getDouble(1)).toBuffer
-      aggregated shouldEqual data.sliding(windowSize, step).map(d => z_score(d drop 1)).toBuffer
+      aggregated shouldEqual data.sliding(windowSize, step).map(d => z_score(d)).toBuffer
     }
   }
 
