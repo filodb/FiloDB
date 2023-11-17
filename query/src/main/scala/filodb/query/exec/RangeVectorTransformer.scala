@@ -5,6 +5,7 @@ import scala.collection.mutable.ListBuffer
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
@@ -326,6 +327,29 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
     }
   }
   override def funcParams: Seq[FuncArgs] = Nil
+}
+
+final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long, execPlan: String)
+  extends RangeVectorTransformer {
+  protected[exec] def args: String = s"startMs=$startMs, stepMs=$stepMs, endMs=$endMs, funcParams=$funcParams"
+  override def funcParams: Seq[FuncArgs] = Nil
+
+  def apply(source: Observable[RangeVector],
+            querySession: QuerySession,
+            limit: Int,
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RepeatValueVector] = {
+    source.map { rv =>
+        RepeatValueVector(rv, startMs, stepMs, endMs,
+          new RecordSchema(sourceSchema.columns, brSchema = sourceSchema.brSchemas),
+          execPlan,
+          querySession.queryStats)
+    }
+  }
+  override def schema(source: ResultSchema): ResultSchema = {
+    // need to change the length of result vector.
+    source.copy(fixedVectorLen = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt))
+  }
 }
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,

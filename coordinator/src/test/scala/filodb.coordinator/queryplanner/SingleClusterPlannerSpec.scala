@@ -2444,7 +2444,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         1, 10, 100,
         RangeFunctionId.QuantileOverTime,
         Seq(funcArg),
-        100, 50, None
+        100, 50, None, None
       ),
       PeriodicSeriesWithWindowing(
         rawSeries,
