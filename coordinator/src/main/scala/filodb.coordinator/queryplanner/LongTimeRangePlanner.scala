@@ -60,7 +60,8 @@ import filodb.query.exec._
       case asf: ApplySortFunction => getAtModifierTimestampsWithOffset(asf.vectors)
       case aaf: ApplyAbsentFunction => getAtModifierTimestampsWithOffset(aaf.vectors)
       case alf: ApplyLimitFunction => getAtModifierTimestampsWithOffset(alf.vectors)
-      case _ => Seq()
+      case _: RawChunkMeta | _: ScalarBinaryOperation | _: ScalarFixedDoublePlan | _: ScalarTimeBasedPlan|
+        _: ScalarVaryingDoublePlan | _: ScalarVectorBinaryOperation | _: VectorPlan => Seq()
     }
   }
 
