@@ -239,9 +239,9 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
-    val start = now - (numRawSamples-100) * reportingInterval
+    val start = now - (numRawSamples-100) * reportingInterval + 1
     val step = 0
-    val end = now - (numRawSamples-100) * reportingInterval
+    val end = now - (numRawSamples-100) * reportingInterval + 1
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(reportingInterval * 3),
       Some(InternalRangeFunction.SumOverTime), QueryContext()))
 

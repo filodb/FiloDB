@@ -186,9 +186,9 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val rv = timeValueRVPk(samples, partKey)
 
     val expectedResults = List(
-      500000L -> 125d,
-      900000L -> 100d,
-      1300000 -> 400d
+      500000L -> 100d,
+      900000L -> 80d,
+      1300000 -> 320d,
     )
 
     // step == lookback here
@@ -233,9 +233,9 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val rv = timeValueRVPk(samples, partKey)
 
     val expectedResults = List(
-      500000L -> 125d,
-      900000L -> 100d,
-      1300000 -> 400d
+      500000L -> 100d,
+      900000L -> 80d,
+      1300000 -> 320d,
     )
 
     // step == lookback here
@@ -280,9 +280,9 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val rv = timeValueRVPk(samples, partKey)
 
     val expectedResults = List(
-      500000L -> 125d,
-      900000L -> 100d,
-      1300000 -> 400d
+      500000L -> 100d,
+      900000L -> 80d,
+      1300000 -> 320d,
     )
 
     // step == lookback here

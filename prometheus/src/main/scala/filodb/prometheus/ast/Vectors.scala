@@ -3,7 +3,7 @@ package filodb.prometheus.ast
 import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
-import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.core.query.{ColumnFilter, QueryUtils, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
@@ -11,6 +11,8 @@ object Vectors {
   val PromMetricLabel = "__name__"
   val TypeLabel       = "_type_"
   val BucketFilterLabel = "_bucket_"
+  val conf = GlobalConfig.systemConfig
+  val queryConfig = conf.getConfig("filodb.query")
 }
 
 object WindowConstants {
@@ -266,9 +268,23 @@ sealed trait Vector extends Expression {
         case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
                                          s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
                                 ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
-        case RegexMatch      => require(labelValue.length <= Parser.REGEX_MAX_LEN,
-                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
-                                ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
+        case RegexMatch      =>
+          // Relax the length limit only for matchers that contain at most the "|" special character.
+          val shouldRelax = queryConfig.hasPath("relaxed-pipe-only-equals-regex-limit") &&
+                              QueryUtils.containsPipeOnlyRegex(labelValue)
+          if (shouldRelax) {
+            val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
+            require(labelValue.length <= limit,
+              s"Regular expression filters should be <= $limit characters " +
+               s"when no special characters except '|' are used. " +
+               s"Violating filter is: ${labelMatch.label}=$labelValue")
+          } else {
+            require(labelValue.length <= Parser.REGEX_MAX_LEN,
+              s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
+               s"when non-`|` special characters are used. " +
+               s"Violating filter is: ${labelMatch.label}=$labelValue")
+          }
+          ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
         case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
       }
@@ -340,6 +356,7 @@ case class InstantExpression(metricName: Option[String],
   }
 
   def toLabelNamesPlan(timeParams: TimeRangeParams): LabelNames = {
+    val columnFilters = getUnvalidatedColumnFilters()
     LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
   }
 

@@ -3,9 +3,9 @@ package filodb.prometheus.parse
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.GlobalConfig
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryUtils}
 import filodb.prometheus.ast._
-import filodb.query.{LabelValues, LogicalPlan}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan}
 
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
@@ -19,9 +19,11 @@ object Parser extends StrictLogging {
   case object Antlr extends Mode
   case object Shadow extends Mode
 
+  private val conf = GlobalConfig.systemConfig
+  private val queryConf = conf.getConfig("filodb.query")
+
   val mode: Mode = {
-    val conf = GlobalConfig.systemConfig
-    val queryConfig = QueryConfig(conf.getConfig("filodb.query"))
+    val queryConfig = QueryConfig(queryConf)
     val parser = queryConfig.parser
     logger.info(s"Query parser mode: $parser")
     parser match {
@@ -138,9 +140,23 @@ object Parser extends StrictLogging {
             case NotRegexMatch => require(l.value.length <= REGEX_MAX_LEN,
                                    s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
                                   ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
-            case RegexMatch =>  require(l.value.length <= REGEX_MAX_LEN,
-                                   s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
-                                ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case RegexMatch    =>
+              // Relax the length limit only for matchers that contain at most the "|" special character.
+              val shouldRelax = queryConf.hasPath("relaxed-pipe-only-equals-regex-limit") &&
+                                  QueryUtils.containsPipeOnlyRegex(l.value)
+              if (shouldRelax) {
+                val limit = queryConf.getInt("relaxed-pipe-only-equals-regex-limit");
+                require(l.value.length <= limit,
+                  s"Regular expression filters should be <= $limit characters " +
+                    s"when no special characters except '|' are used. " +
+                    s"Violating filter is: ${l.label}=${l.value}")
+              } else {
+                require(l.value.length <= Parser.REGEX_MAX_LEN,
+                  s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
+                   s"when non-`|` special characters are used. " +
+                   s"Violating filter is: ${l.label}=${l.value}")
+              }
+              ColumnFilter(l.label, Filter.EqualsRegex(l.value))
             case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
             case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
           }
@@ -153,10 +169,14 @@ object Parser extends StrictLogging {
 
   def labelNamesQueryToLogicalPlan(query: String,
                                    timeParams: TimeRangeParams): LogicalPlan = {
-    val expression = parseQuery(query)
-    expression match {
-      case p: InstantExpression => p.toLabelNamesPlan(timeParams)
-      case _ => throw new UnsupportedOperationException()
+    if (query == null || query.isEmpty) {
+      LabelNames(Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
+    } else {
+      val expression = parseQuery(query)
+      expression match {
+        case p: InstantExpression => p.toLabelNamesPlan(timeParams)
+        case _ => throw new UnsupportedOperationException()
+      }
     }
   }
 

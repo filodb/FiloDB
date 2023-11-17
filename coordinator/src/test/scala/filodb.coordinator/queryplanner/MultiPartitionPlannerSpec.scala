@@ -1314,6 +1314,52 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       .children(0).asInstanceOf[LabelNamesExec].endMs shouldEqual (endSeconds * 1000)
   }
 
+  it("should materialize LabelNames query without metric filter correctly") {
+    val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
+
+    val promQl = """{job="app"}"""
+    val lv = Parser.labelNamesQueryToLogicalPlan(promQl, TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
+    val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelNamesDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+
+    val expectedUrlParams = Map("match[]" -> promQl)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual (expectedUrlParams)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      endSecs shouldEqual (localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].startMs shouldEqual (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].endMs shouldEqual (endSeconds * 1000)
+  }
+
+  it("should materialize LabelNames with empty query correctly") {
+    val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
+
+    val promQl = """"""
+    val lv = Parser.labelNamesQueryToLogicalPlan(promQl, TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
+    val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelNamesDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+
+    val expectedUrlParams = Map("match[]" -> "{}")
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual (expectedUrlParams)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      endSecs shouldEqual (localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].startMs shouldEqual (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].endMs shouldEqual (endSeconds * 1000)
+  }
+
   it ("should generate correct plan for multipartition BinaryJoin with instant function") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
