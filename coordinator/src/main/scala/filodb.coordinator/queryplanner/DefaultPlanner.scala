@@ -119,7 +119,10 @@ trait  DefaultPlanner {
     } else lp
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
-    val rawSource = logicalPlanWithoutBucket.series.isRaw
+    val rawSource = logicalPlanWithoutBucket.series.isRaw && (logicalPlanWithoutBucket.series match {
+      case r: RawSeries   => !r.supportsRemoteDataCall
+      case _              => true
+    })   // the series is raw and supports raw export, its going to yield an iterator
 
     /* Last function is used to get the latest value in the window for absent_over_time
     If no data is present AbsentFunctionMapper will return range vector with value 1 */
@@ -623,7 +626,7 @@ object PlannerUtil extends StrictLogging {
 
   //scalastyle:off method.length
   def rewritePlanWithRemoteRawExport(lp: LogicalPlan,
-                                     rangeSelector: RangeSelector,
+                                     rangeSelector: IntervalSelector,
                                      additionalLookback: Long = 0): LogicalPlan =
     lp match {
       case lp: ApplyInstantFunction =>
@@ -681,7 +684,7 @@ object PlannerUtil extends StrictLogging {
       case lp: RawChunkMeta => lp
       case lp: PeriodicSeries =>
         lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries, rangeSelector, additionalLookback)
-          .asInstanceOf[RawSeriesLikePlan])
+          .asInstanceOf[RawSeriesLikePlan], startMs = rangeSelector.from, endMs = rangeSelector.to)
       case lp: PeriodicSeriesWithWindowing =>
         val rs = rangeSelector.asInstanceOf[IntervalSelector]
         lp.copy(

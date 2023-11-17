@@ -133,11 +133,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
               val (thisPartitionStartMs, thisPartitionEndMs) =
                 (Math.max(pa.timeRange.startMs, rawExportStart), Math.min(pa.timeRange.endMs, rawExportEnd))
               val totalOffsetThisPartitionMs = thisPartitionEndMs - thisPartitionStartMs
-              // Add additional 1 second to avoid ms to sec rounding issues
-              val thisPartitionLp = lp.copy(offsetMs = None, lookbackMs = Some(totalOffsetThisPartitionMs + 1000L))
+              val thisPartitionLp = lp.copy(offsetMs = None, lookbackMs = Some(totalOffsetThisPartitionMs))
               val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(thisPartitionLp),
-                  startSecs = thisPartitionEndMs / 1000,
-                  endSecs = thisPartitionEndMs / 1000,
+                  startSecs = thisPartitionEndMs / 1000L,
+                  endSecs = thisPartitionEndMs / 1000L,
                   stepSecs = 1
                 )
               val newContext = qContext.copy(origQueryParams = newPromQlParams)
@@ -145,10 +144,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             })
           PlanResult(
             Seq( if (execPlans.tail == Seq.empty) execPlans.head
-            else
-              StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
-                execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
-            ))
+            else {
+              val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp))
+                StitchRvsExec(qContext.copy(origQueryParams = newPromQlParams)
+                  , inProcessPlanDispatcher, None,
+                  execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+            }
+            )
+          )
         case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
@@ -551,7 +554,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case (Some((_, prevTimeRange)), ep : ListBuffer[ExecPlan])      =>
           val (currentAssignment, currentTimeRange) = next
           // Start and end is the next and previous second of the previous and current time range respectively
-          val (startTime, endTime) = (prevTimeRange.endMs + 1000, currentTimeRange.startMs - 1000)
+          val (startTime, endTime) = (prevTimeRange.endMs / 1000L * 1000L,
+            (currentTimeRange.startMs / 1000L * 1000L) - 1000L)
 
 
           // If we enable stitching the missing part of time range between the previous time range's end time and
@@ -594,7 +598,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs
             if (queryConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
               // Only if the raw export is completely within the previous partition's timerange
-              val newParams = qParams.copy(startSecs = startTime / 1000, endSecs = endTime / 1000 - 1)
+              val newParams = qParams.copy(startSecs = startTime / 1000, endSecs = endTime / 1000)
               val newContext = qContext.copy(origQueryParams = newParams)
               val newLp = rewritePlanWithRemoteRawExport(logicalPlan, IntervalSelector(startTime, endTime))
               ep ++= walkLogicalPlanTree(newLp, newContext, true).plans
@@ -604,14 +608,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             }
           }
           val newParams = qParams.copy(startSecs = currentTimeRange.startMs / 1000,
-              endSecs = currentTimeRange.endMs / 1000)
+              endSecs = qParams.endSecs.min((currentTimeRange.endMs / 1000)))
           val newContext = qContext.copy(origQueryParams = newParams)
           ep += materializeForPartition(logicalPlan, currentAssignment, newContext)
           (Some(next), ep)
 
         case (None, ep: ListBuffer[ExecPlan])                                         =>
           val (assignment, range) = next
-          val newParams = qParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000)
+          val newParams = qParams.copy(startSecs = qParams.startSecs, endSecs = range.endMs / 1000)
           val newContext = qContext.copy(origQueryParams = newParams)
           ep += materializeForPartition(logicalPlan, assignment, newContext)
           (Some(next), ep)
