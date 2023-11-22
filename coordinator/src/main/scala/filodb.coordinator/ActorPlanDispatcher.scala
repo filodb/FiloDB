@@ -89,13 +89,20 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
               // This conditional was needed since the onSubscribe was being invoked multiple times
               // due to multiple subscribers downstream in the plan execution pipeline, and hence the
               // plan was dispatched multiple times. This check de-duplicates the send.
-              if (!dispatchedPlanIds.containsKey(plan.execPlan.planId)) {
-                target.tell(plan.execPlan, ResultActor.resultActor)
-                dispatchedPlanIds.put(plan.execPlan.planId, value)
+              if (dispatchedPlanIds.computeIfAbsent(plan.execPlan.planId,
+                                                    new java.util.function.Function[String, Object]() {
+                            override def apply(t: String): Object = {
+                              target.tell(plan.execPlan, ResultActor.resultActor)
+                              qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
+                              value
+                            }
+                    }) == null) {
+                qLogger.debug(s"NOT DISPATCHING SINCE ALREADY SENT ${plan.execPlan.planId}")
               }
             })
            .filter(_.planId == plan.execPlan.planId)
            .takeWhileInclusive(!_.isLast)
+           .dump(s"ResultActor-${plan.execPlan.planId}")
         // TODO timeout query if response stream not completed in time
       }
     }
