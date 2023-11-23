@@ -236,8 +236,6 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
-
-
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
       try {

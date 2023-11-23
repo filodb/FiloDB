@@ -1,12 +1,8 @@
 package filodb.coordinator
 
-import scala.concurrent.duration._
-
 import akka.actor.Props
-import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
+import monix.reactive.MulticastStrategy
 import monix.reactive.subjects.ConcurrentSubject
-import monix.reactive.{MulticastStrategy, Observable, Pipe}
 
 import filodb.coordinator.ActorSystemHolder.system
 import filodb.query.Query.qLogger
@@ -33,27 +29,4 @@ class ResultActor(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryRes
     case msg =>
       qLogger.error(s"Unexpected message $msg in ResultActor from sender ${sender()}")
   }
-}
-
-
-object MyApp extends App with StrictLogging {
-
-  import monix.execution.Scheduler.Implicits.global
-
-  val obs1 = Observable.interval(1.second)
-    .doOnSubscribe(Task.eval {
-      println("subscribed")
-    })
-    .pipeThrough(Pipe.publish[Long])
-
-
-  val first = obs1.dump("obs1").firstL
-
-  val obs3 = Observable.fromTask(first.map { first =>
-    obs1.dump("obs2")
-  }).flatten
-
-  obs3.dump("obs3").take(10).countL.runToFuture
-
-  Thread.sleep(20000)
 }

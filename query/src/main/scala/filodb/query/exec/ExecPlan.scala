@@ -237,7 +237,7 @@ trait ExecPlan extends QueryCommand {
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
         .bufferTumbling(querySession.queryConfig.numRvsPerResultMessage)
         .map { f =>
-          val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
+          lazy val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
           val srvs = f.map {
             case srvable: SerializableRangeVector => srvable
             case rv: RangeVector =>
