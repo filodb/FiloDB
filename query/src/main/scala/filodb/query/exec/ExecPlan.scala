@@ -869,5 +869,5 @@ abstract class NonLeafExecPlan extends ExecPlan {
 }
 
 // deadline is set to QueryContext.plannerParams.queryTimeoutMillis for the top level call
-case class ClientParams(deadline: Long)
+case class ClientParams(deadlineMs: Long)
 case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams)

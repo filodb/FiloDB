@@ -27,7 +27,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
   def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -69,7 +69,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId, plan.execPlan.planId,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -100,6 +100,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
             })
            .filter(_.planId == plan.execPlan.planId)
            .takeWhileInclusive(!_.isLast)
+          .dump(s"result-actor-${plan.execPlan.planId}")
         // TODO timeout query if response stream not completed in time
       }
     }

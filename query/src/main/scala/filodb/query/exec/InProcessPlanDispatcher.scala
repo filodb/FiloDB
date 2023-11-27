@@ -22,7 +22,7 @@ import filodb.query.Query.qLogger
 /**
   * Executes an ExecPlan on the current thread.
   */
-  case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
+case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
 
@@ -41,7 +41,7 @@ import filodb.query.Query.qLogger
                               streamingDispatch = PlanDispatcher.streamingResultsEnabled,
                               catchMultipleLockSetErrors = true)
       plan.execPlan.execute(source, querySession)
-        .timeout(plan.clientParams.deadline.milliseconds)
+        .timeout(plan.clientParams.deadlineMs.milliseconds)
         .guarantee(Task.eval(querySession.close()))
         .onErrorRecover {
         case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
