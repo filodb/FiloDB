@@ -289,7 +289,7 @@ trait ExecPlan extends QueryCommand {
     if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedLimits.execPlanSamples) {
       val msg = s"Exceeded enforced limit of samples produced on a single shard or processing node. " +
         s"Max number of samples is ${queryContext.plannerParams.enforcedLimits.execPlanSamples}"
-      qLogger.warn(queryContext.getQueryLogLine(msg))
+      qLogger.error(queryContext.getQueryLogLine(msg))
       throw QueryLimitException(s"This query results in more than " +
         s"${queryContext.plannerParams.enforcedLimits.execPlanSamples} samples. " +
         s"Try applying more filters or reduce time range.", queryContext.queryId)
@@ -297,7 +297,7 @@ trait ExecPlan extends QueryCommand {
     if (numResultSamples > queryContext.plannerParams.warnLimits.execPlanSamples) {
       val msg = s"Exceeded warning limit of samples produced on a single shard or processing node. " +
         s"Max number of samples is ${queryContext.plannerParams.warnLimits.execPlanSamples}"
-      qLogger.info(queryContext.getQueryLogLine(msg))
+      qLogger.error(queryContext.getQueryLogLine(msg))
       queryWarnings.updateExecPlanSamples(numResultSamples)
     }
   }
