@@ -251,7 +251,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
                 value
               }
               idx += 1
-              println(s"${x.key} : \t${reader.getLong(0)} -> $res")
               cur.setValues(reader.getLong(0), res)
               cur
             }
@@ -280,7 +279,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
                 reader.getDouble(1)
               }
               idx += 1
-              println(s"${x.key} : \t${reader.getLong(0)} -> $res")
               cur.setValues(reader.getLong(0), res)
               cur
             }
