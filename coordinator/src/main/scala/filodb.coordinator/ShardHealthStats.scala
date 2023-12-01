@@ -33,8 +33,8 @@ class ShardHealthStats(ref: DatasetRef,
   def update(mapper: ShardMapper, skipUnassigned: Boolean = false): Unit = {
     numActive.update(mapper.statuses.count(_ == ShardStatusActive))
     numRecovering.update(mapper.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
-    numUnassigned.update(mapper.statuses.count(_ == ShardStatusUnassigned))
-    if (!skipUnassigned) numAssigned.update(mapper.statuses.count(_ == ShardStatusAssigned))
+    numAssigned.update(mapper.statuses.count(_ == ShardStatusAssigned))
+    if (!skipUnassigned) numUnassigned.update(mapper.statuses.count(_ == ShardStatusUnassigned))
     numError.update(mapper.statuses.count(_ == ShardStatusError))
     numStopped.update(mapper.statuses.count(_ == ShardStatusStopped))
     numDown.update(mapper.statuses.count(_ == ShardStatusDown))

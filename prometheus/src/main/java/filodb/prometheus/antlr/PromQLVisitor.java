@@ -1,4 +1,4 @@
-// Generated from PromQL.g4 by ANTLR 4.9.3
+// Generated from PromQL.g4 by ANTLR 4.9.1
 package filodb.prometheus.antlr;
 import org.antlr.v4.runtime.tree.ParseTreeVisitor;
 
@@ -129,6 +129,18 @@ public interface PromQLVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitOffset(PromQLParser.OffsetContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#atModifier}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAtModifier(PromQLParser.AtModifierContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#modifier}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitModifier(PromQLParser.ModifierContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link PromQLParser#limit}.
 	 * @param ctx the parse tree

@@ -12,6 +12,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 
 class ProtoConvertersSpec extends AnyFunSpec with Matchers {
@@ -733,4 +734,45 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     deserializedise.getCause shouldEqual isecause
   }
 
+
+  it("should convert RepeatValueVector double to proto and back") {
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)))
+    val keysMap = Map("key1".utf8 -> "val1".utf8,
+      "key2".utf8 -> "val2".utf8)
+    val key = CustomRangeVectorKey(keysMap)
+
+    val repeatValueVector = new RepeatValueVector(key, 100, 10, 600,
+      Some(new TransientRow(100, 599)), recSchema)
+
+    val proto = repeatValueVector.toProto.fromProto
+    proto.key shouldEqual repeatValueVector.key
+    proto.numRows shouldEqual repeatValueVector.numRows
+    proto.outputRange shouldEqual repeatValueVector.outputRange
+    proto.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
+      repeatValueVector.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
+    proto.recordSchema shouldEqual repeatValueVector.recordSchema
+  }
+
+  it("should convert RepeatValueVector histogram to proto and back") {
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.HistogramColumn)))
+
+    val customScheme = CustomBuckets(Array(0.25, 0.5, 1.0, 2.5, 5.0, 10, Double.PositiveInfinity))
+    val longHist = LongHistogram(customScheme, Array[Long](10, 15, 17, 20, 25, 34, 76))
+
+    val keysMap = Map("key1".utf8 -> "val1".utf8,
+      "key2".utf8 -> "val2".utf8)
+    val key = CustomRangeVectorKey(keysMap)
+
+    val repeatValueVector = new RepeatValueVector(key, 100, 10, 600,
+      Some(new TransientHistRow(40, longHist)), recSchema)
+    val proto = repeatValueVector.toProto.fromProto
+    proto.key shouldEqual repeatValueVector.key
+    proto.numRows shouldEqual repeatValueVector.numRows
+    proto.outputRange shouldEqual repeatValueVector.outputRange
+    proto.rows().map(r => (r.getLong(0), r.getHistogram(1))).toList shouldEqual
+      repeatValueVector.rows().map(r => (r.getLong(0), r.getHistogram(1))).toList
+    proto.recordSchema shouldEqual repeatValueVector.recordSchema
+  }
 }
