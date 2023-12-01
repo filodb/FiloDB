@@ -289,18 +289,24 @@ final case class SetOperatorExec(queryContext: QueryContext,
           }
           IteratorBackedRangeVector(x.key, rowsCursor, x.outputRange)
         })
-        // This order is important, when lhs Rvs are executed they set a bitmap which is used when iterating RHS
-        // DONOT flip this order
-        val mergedRvs = lhsRvs ++ rhsRvs
+
+        val lhsRvMap = lhsRvs.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], List[RangeVector]]) {
+          case (acc, rv) =>
+            val key = rv.key.labelValues
+            val groupedRvs = acc.get(key).map(rv :: _).getOrElse(List(rv))
+            acc + (key -> groupedRvs)
+        }
 
         // Dedupe the LHS and RHS rvs by keys, if same key is found for multiple RVs, stitch them
         // For e.g sum(foo{}) OR sum(bar{}), both have empty RV Key, we want them to return one RV
         // instead of two both with empty RV Keys
-        val mergedGroupedRvs = mergedRvs.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], List[RangeVector]]){
+        val mergedGroupedRvs = rhsRvs.foldLeft(lhsRvMap){
           case (acc, rv)  =>
           val key = rv.key.labelValues
-          val groupedRvs = acc.get(key).map(rv :: _).getOrElse(List(rv))
-          acc + (key -> groupedRvs)
+          acc.get(key) match {
+            case Some(lhsRvs)   => acc + (key -> (rv :: lhsRvs))
+            case None           => acc
+          }
         }
 
         mergedGroupedRvs.map {
@@ -308,8 +314,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
           case (key, rvs)       => IteratorBackedRangeVector(CustomRangeVectorKey(key),
                                         StitchRvsExec.merge(rvs.reverse.map(_.rows()), outputRvRange),
                                         outputRvRange)
-        }
-      }.toSeq
+        }.toSeq ++ rhsRvs.filter(rv => !mergedGroupedRvs.contains(rv.key.labelValues))
+      }
     }
 
 
