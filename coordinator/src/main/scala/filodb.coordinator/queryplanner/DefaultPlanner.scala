@@ -135,7 +135,7 @@ trait  DefaultPlanner {
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
       logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
-      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
+      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource = rawSource)))
     if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
         AggregateClause.byOpt(Seq("job")))
@@ -194,8 +194,12 @@ trait  DefaultPlanner {
     } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
+    val rawSource = lpWithoutBucket.rawSeries.isRaw && (lpWithoutBucket.rawSeries match {
+      case r: RawSeries => !r.supportsRemoteDataCall
+      case _ => true
+    })
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
+      None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs, rawSource = rawSource)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
       val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,

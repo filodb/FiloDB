@@ -12,8 +12,13 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  private class RVCursorImpl(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange])
+  private class RVCursorImpl(
+                              vectors: Iterable[RangeVectorCursor],
+                              outputRange: Option[RvRange],
+                              enableApproximatelyEqualCheck: Boolean = true,
+                              toleranceNumDecimal: Int = 10)
     extends RangeVectorCursor {
+    private val weight = math.pow(10, toleranceNumDecimal)
     private val bVectors = vectors.map(_.buffered)
     val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
     val nanResult = new TransientRow(0, Double.NaN)
@@ -44,6 +49,7 @@ object StitchRvsExec {
             minTime = t
             mins += r
           }
+
           else if (t < minTime) {
             mins.clear()
             mins += r
@@ -53,6 +59,7 @@ object StitchRvsExec {
           }
         }
       }
+      println(s"t: $minTime, mins.length ${mins.length}")
       if (mins.isEmpty && tsIter.isEmpty) throw new IllegalStateException("next was called when no element")
       if (minTime > tsIter.head) {
         nanResult.timestamp = tsIter.next()
@@ -67,7 +74,14 @@ object StitchRvsExec {
           // until we have a different indicator for "unable-to-calculate", use NaN when multiple values seen
           val minRows = mins.map(it => if (it.hasNext) it.next() else nanResult) // move iterators forward
           val minsWithoutNan = minRows.filter(!_.getDouble(1).isNaN)
-          if (minsWithoutNan.size == 1) minsWithoutNan.head else nanResult
+          println(s"multiple mins for time $minTime, values are ${minsWithoutNan.map(_.getDouble(1))}")
+          // The second condition checks if these values are equal within the tolerable limits and if yes, do not
+          // emit NaN.
+          // TODO: Make the second check and tolerance configurable?
+          if (minsWithoutNan.size == 1 ||
+            !enableApproximatelyEqualCheck ||     // Approximately equal check is disabled
+            minsWithoutNan.map(x => (x.getDouble(1) * weight).toLong / weight).toSet.size == 1)
+            minsWithoutNan.head else nanResult
         }
       }
 

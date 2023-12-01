@@ -235,10 +235,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: SubqueryWithWindowing       => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
-      case lp: PeriodicSeriesWithWindowing => materializePlanHandleSplitLeaf(lp, qContext)
-      case _: PeriodicSeries |
-           _: RawChunkMeta |
-           _: RawSeries                    => materializePeriodicAndRawSeries(logicalPlan, qContext)
+      case _: PeriodicSeriesWithWindowing |
+           _: PeriodicSeries               => materializePlanHandleSplitLeaf(logicalPlan, qContext)
+      case raw: RawSeries                  =>
+                                              val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+                                              if(getPartitions(raw, params).tail.nonEmpty)
+                                                this.walkLogicalPlanTree(
+                                                  raw.copy(supportsRemoteDataCall = true),
+                                                  qContext,
+                                                  forceInProcess = true)
+                                              else
+                                                materializePlanHandleSplitLeaf(logicalPlan, qContext)
+
+
+
+      case lp: RawChunkMeta                => materializePeriodicAndRawSeries(lp, qContext)
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -469,7 +480,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // Filter out the Nones and flatten the Somes.
     (Seq(headRange) ++ tailRanges).zip(assignments).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
       (part, rangeOpt.get)
-    }
+
   }
 
   /**
