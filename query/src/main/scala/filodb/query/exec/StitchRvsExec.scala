@@ -18,6 +18,13 @@ object StitchRvsExec {
     val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
     val nanResult = new TransientRow(0, Double.NaN)
     val tsIter: BufferedIterator[Long] = outputRange match {
+      case Some(RvRange(startMs, 0, endMs)) =>
+        if (startMs == endMs)
+          List(startMs).toIterator.buffered
+        else {
+          // Should never happen
+          throw new IllegalStateException("Expected to a non zero step size when start and end timestamps are not same")
+        }
       case Some(RvRange(startMs, stepMs, endMs)) =>
         Iterator.iterate(startMs){_ + stepMs}.takeWhile( _ <= endMs).buffered
       case None                                  => Iterator.iterate(Long.MaxValue)(_ =>Long.MaxValue).buffered

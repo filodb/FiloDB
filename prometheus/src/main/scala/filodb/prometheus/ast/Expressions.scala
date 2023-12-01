@@ -141,7 +141,7 @@ case class BinaryExpression(lhs: Expression,
             val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
             val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
             BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
-              onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
+              onLabels, ignoringLabels.getOrElse(Nil),
               vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
           }
         case _ => throw new UnsupportedOperationException(s"Invalid operands: $lhsWithPrecedence, $rhsWithPrecedence")

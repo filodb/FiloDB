@@ -811,6 +811,34 @@ object ProtoConverters {
     def fromProto: ScalarFixedDouble = ScalarFixedDouble(sfd.getRangeParams.fromProto, sfd.getValue)
   }
 
+  implicit class RepeatValueVectorToProtoConverter(rv: RepeatValueVector) {
+    def toProto: ProtoRangeVector.RepeatValueVector = {
+      val builder = ProtoRangeVector.RepeatValueVector.newBuilder()
+      rv.outputRange.map(_.toProto).map(builder.setRvRange)
+      builder.setRecordSchema(rv.recordSchema.toProto)
+      builder.setKey(rv.key.toProto)
+      builder.addAllRecordContainers(rv.containers.map(
+        container => ByteString.copyFrom(
+        if (container.hasArray) container.array else container.trimmedArray)
+      ).asJava)
+      builder.build()
+    }
+  }
+
+  implicit class RepeatValueVectorFromProtoConverter(rvProto: ProtoRangeVector.RepeatValueVector) {
+    def fromProto: RepeatValueVector = {
+      import collection.JavaConverters._
+      val schema = rvProto.getRecordSchema.fromProto
+      val containers = rvProto.getRecordContainersList
+        .asScala.map(byteString => RecordContainer(byteString.toByteArray))
+      val rowReader = containers.toIterator.flatMap(_.iterate(schema)).find(_ => true)
+      new RepeatValueVector(rvProto.getKey.fromProto,
+        rvProto.getRvRange.getStartMs, rvProto.getRvRange.getStep, rvProto.getRvRange.getEndMs,
+        rowReader,
+        schema)
+    }
+  }
+
   implicit class SerializableRangeVectorFromProtoConverter(rv: ProtoRangeVector.SerializableRangeVector) {
     def fromProto: SerializableRangeVector =
       if (rv.hasScalarFixedDouble) {
@@ -833,6 +861,8 @@ object ProtoConverters {
         rv.getDaysInMonthScalar.fromProto
       } else if (rv.hasSerializedRangeVector) {
         rv.getSerializedRangeVector.fromProto
+      } else if (rv.hasRepeatValueVector) {
+        rv.getRepeatValueVector.fromProto
       } else {
         rv.getScalarVaryingDouble.fromProto
       }
@@ -860,6 +890,7 @@ object ProtoConverters {
         case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
+        case rvv: RepeatValueVector            => builder.setRepeatValueVector(rvv.toProto).build()
       }
     }
   }

@@ -15,6 +15,25 @@ import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
+
+trait BinaryJoinLikeExec {
+  val lhs: Seq[ExecPlan]
+  val rhs: Seq[ExecPlan]
+  val on: Option[Seq[String]]
+  val ignoring: Seq[String]   // TODO: Should this be an option too?
+  val metricColumn: String
+
+  require(on == None || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
+  require(on.map(!_.contains(metricColumn)).getOrElse(true), "On cannot contain metric name")
+
+  lazy val onLabels: Option[Set[Utf8Str]] = on.map(_.map(Utf8Str(_)).toSet)
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
+  val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
+
+  def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] =
+    onLabels.map(l => rvk.labelValues.filter(lv => l.contains(lv._1)))
+      .getOrElse(rvk.labelValues.filterNot(lv => ignoringLabelsForJoin.contains(lv._1)))
+}
 /**
   * Binary join operator between results of lhs and rhs plan.
   *
@@ -42,20 +61,15 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                                 rhs: Seq[ExecPlan],
                                 binaryOp: BinaryOperator,
                                 cardinality: Cardinality,
-                                on: Seq[String],
+                                on: Option[Seq[String]],
                                 ignoring: Seq[String],
                                 include: Seq[String],
                                 metricColumn: String,
-                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
+                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan with BinaryJoinLikeExec {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
-  require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains(metricColumn), "On cannot contain metric name")
 
-  val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
-  val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
 
@@ -174,11 +188,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     Observable.fromTask(taskOfResults).flatten
   }
 
-  private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
-    else rvk.labelValues.filterNot(lv => ignoringLabelsForJoin.contains(lv._1))
-  }
-
   private def resultKeys(oneSideKey: RangeVectorKey, otherSideKey: RangeVectorKey): RangeVectorKey = {
     // start from otherSideKey which could be many or one
     var result = otherSideKey.labelValues
@@ -186,8 +195,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str(metricColumn)
 
     if (cardinality == Cardinality.OneToOne) {
-      result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
-               else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
+      result = onLabels.map(onLabelsSet => result.filter(lv => onLabelsSet.contains(lv._1)))
+        // retain what is in onLabel list
+        .getOrElse(result.filterNot(lv => ignoringLabels.contains(lv._1))) // remove the labels in ignoring label list
     } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
       // For group_left/group_right add labels in include from one side. Result should have all keys from many side
       include.foreach { x =>
