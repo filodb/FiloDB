@@ -309,13 +309,12 @@ final case class SetOperatorExec(queryContext: QueryContext,
           }
         }
 
-        val joined = mergedGroupedRvs.map {
+        mergedGroupedRvs.map {
           case (_, rv :: Nil)   => rv
           case (key, rvs)       => IteratorBackedRangeVector(CustomRangeVectorKey(key),
                                         StitchRvsExec.merge(rvs.reverse.map(_.rows()), outputRvRange),
                                         outputRvRange)
         }.toSeq ++ rhsRvs.filter(rv => !mergedGroupedRvs.contains(rv.key.labelValues))
-        joined
       }
     }
 
