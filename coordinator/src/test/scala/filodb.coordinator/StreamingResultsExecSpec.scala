@@ -91,6 +91,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   override def afterAll(): Unit = {
     memStore.shutdown()
+    // TODO ActorSystemHolder.system.shutdown
   }
 
   it("should read raw samples from Memstore using IntervalSelector in result streaming mode") {
@@ -166,13 +167,18 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val endTime = now - (numRawSamples - 10) * reportingInterval
     val queryContext = QueryContext()
 
-
-    val mspExec = MultiSchemaPartitionsExec(queryContext, actorPlanDispatcher,
+    val mspExec1 = MultiSchemaPartitionsExec(queryContext, actorPlanDispatcher,
       dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
-    mspExec.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Count, Nil))
+    mspExec1.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Count, Nil))
+
+    val mspExec2 = MultiSchemaPartitionsExec(queryContext, actorPlanDispatcher,
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
+    mspExec2.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Count, Nil))
 
     val reducerExec = LocalPartitionReduceAggregateExec(queryContext, actorPlanDispatcher,
-      Seq(mspExec, mspExec), AggregationOperator.Count, Nil)
+      Seq(mspExec1, mspExec2), AggregationOperator.Count, Nil)
+
+    println(s"Executing ${reducerExec.printTree()}")
 
     val resp = actorPlanDispatcher.dispatchStreaming(
       ExecPlanWithClientParams(reducerExec, ClientParams(5000)), memStore).toListL.runToFuture.futureValue
