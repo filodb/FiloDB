@@ -9,9 +9,11 @@ import filodb.query.Query.qLogger
 import filodb.query.StreamQueryResponse
 
 object ResultActor {
-  def props(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryResponse]): Props =
+  def props(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryResponse]): Props = {
     Props(classOf[ResultActor], subject)
-  lazy val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.Publish)(QueryScheduler.queryScheduler)
+  }
+
+  lazy val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.publish)(QueryScheduler.queryScheduler)
   lazy val resultActor = system.actorOf(Props(new ResultActor(subject)))
 }
 

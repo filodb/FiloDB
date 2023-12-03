@@ -221,9 +221,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         if (PlanDispatcher.streamingResultsEnabled) {
           val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
           queryengine.Utils.streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
-            case Success(resp) =>
-              logger.debug(s"Sending to $replyTo response $resp")
-              replyTo ! resp
+            case Success(resp) => replyTo ! resp
             case Failure(e) => replyTo ! QueryError(q.qContext.queryId, QueryStats(), e)
           }(queryScheduler)
         } else {

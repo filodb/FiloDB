@@ -752,8 +752,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
             }
             (respWithoutErrors, i)
           }
-        }.pipeThrough(Pipe.publish[(Observable[StreamQueryResponse], Int)])
-             // pipeThrough helps with multiple subscribers
+        }.cache // cache needed since multiple subscribers
 
       val schemas = childResults.flatMap { obs =>
         obs._1.find(_.isInstanceOf[StreamQueryResultHeader])
