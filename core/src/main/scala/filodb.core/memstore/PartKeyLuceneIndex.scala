@@ -903,7 +903,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          startTime: Long,
                          endTime: Long,
                          limit: Int = Int.MaxValue): debox.Buffer[Int] = {
-    val collector = new PartIdCollector(limit) // passing zero for unlimited results
+    val collector = new PartIdCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.result
   }
@@ -912,7 +912,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                startTime: Long,
                                endTime: Long): Option[Array[Byte]] = {
 
-    val collector = new SinglePartKeyCollector() // passing zero for unlimited results
+    val collector = new SinglePartKeyCollector
     searchFromFilters(columnFilters, startTime, endTime, collector)
     val pkBytesRef = collector.singleResult
     if (pkBytesRef == null)
