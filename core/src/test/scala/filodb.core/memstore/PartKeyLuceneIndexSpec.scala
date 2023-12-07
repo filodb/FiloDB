@@ -73,7 +73,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
     partNums2 shouldEqual debox.Buffer(7, 8, 9)
 
-    // return only 4 partIds - empty filter
+    // return only 2 partIds - with filter
     val partNumsLimitFilter = keyIndex.partIdsFromFilters(Seq(filter2), start, end, 2)
     partNumsLimitFilter shouldEqual debox.Buffer(7, 8)
 
