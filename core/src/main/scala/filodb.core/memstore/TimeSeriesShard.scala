@@ -1819,21 +1819,21 @@ class TimeSeriesShard(val ref: DatasetRef,
                           startTime: Long,
                           limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
-      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
+      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
         val partKeyMap = convertPartKeyWithTimesToMap(
           PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
         partKeyMap ++ Map(
           ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
           ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
-      } take(limit)
+      }
     } else {
-      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, limit)
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
       val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
         convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
-      (inMemPartKeys ++ skippedPartKeys).take(limit)
+      (inMemPartKeys ++ skippedPartKeys)
     }
   }
 
