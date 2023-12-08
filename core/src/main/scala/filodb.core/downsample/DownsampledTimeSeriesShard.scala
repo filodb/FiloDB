@@ -169,7 +169,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                           endTime: Long,
                           startTime: Long,
                           limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.take(limit).map { pk =>
+    partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
       val partKey = PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
       schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
         pair._1.utf8 -> pair._2.utf8

@@ -65,9 +65,17 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
     partNums1 shouldEqual debox.Buffer(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
+    // return only 4 partIds - empty filter
+    val partNumsLimit = keyIndex.partIdsFromFilters(Nil, start, end, 4)
+    partNumsLimit shouldEqual debox.Buffer(0, 1, 2, 3)
+
     val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
     val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
     partNums2 shouldEqual debox.Buffer(7, 8, 9)
+
+    // return only 2 partIds - with filter
+    val partNumsLimitFilter = keyIndex.partIdsFromFilters(Seq(filter2), start, end, 2)
+    partNumsLimitFilter shouldEqual debox.Buffer(7, 8)
 
     val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
     val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), start, end)
@@ -107,6 +115,24 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
+  }
+
+  it("should fetch only two part key records from filters") {
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result = keyIndex.partKeyRecordsFromFilters(Seq(filter2), 0, Long.MaxValue, 2)
+    val expected = Seq(pkrs(7), pkrs(8))
+
+    result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
+    result.map(p => (p.startTime, p.endTime)) shouldEqual expected.map(p => (p.startTime, p.endTime))
   }
 
 
