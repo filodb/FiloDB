@@ -429,7 +429,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
    * @return matching partIds
    */
   def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
-    val collector = new PartIdCollector()
+    val collector = new PartIdCollector(Int.MaxValue)
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
 
     withNewSearcher(s => s.search(deleteQuery, collector))
@@ -900,8 +900,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   //scalastyle:on method.length
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
-                         endTime: Long): debox.Buffer[Int] = {
-    val collector = new PartIdCollector() // passing zero for unlimited results
+                         endTime: Long,
+                         limit: Int = Int.MaxValue): debox.Buffer[Int] = {
+    val collector = new PartIdCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.result
   }
@@ -910,7 +911,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                startTime: Long,
                                endTime: Long): Option[Array[Byte]] = {
 
-    val collector = new SinglePartKeyCollector() // passing zero for unlimited results
+    val collector = new SinglePartKeyCollector
     searchFromFilters(columnFilters, startTime, endTime, collector)
     val pkBytesRef = collector.singleResult
     if (pkBytesRef == null)
@@ -929,8 +930,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
                                 startTime: Long,
-                                endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
-    val collector = new PartKeyRecordCollector()
+                                endTime: Long,
+                                limit: Int = Int.MaxValue): Seq[PartKeyLuceneIndexRecord] = {
+    val collector = new PartKeyRecordCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.records
   }
@@ -1175,7 +1177,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
   }
 }
 
-class PartIdCollector extends SimpleCollector {
+class PartIdCollector(limit: Int) extends SimpleCollector {
   val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
   private var partIdDv: NumericDocValues = _
 
@@ -1187,7 +1189,9 @@ class PartIdCollector extends SimpleCollector {
   }
 
   override def collect(doc: Int): Unit = {
-    if (partIdDv.advanceExact(doc)) {
+    if (result.length >= limit) {
+      throw new CollectionTerminatedException
+    } else if (partIdDv.advanceExact(doc)) {
       result += partIdDv.longValue().toInt
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
@@ -1219,7 +1223,7 @@ class PartIdStartTimeCollector extends SimpleCollector {
   }
 }
 
-class PartKeyRecordCollector extends SimpleCollector {
+class PartKeyRecordCollector(limit: Int) extends SimpleCollector {
   val records = new ArrayBuffer[PartKeyLuceneIndexRecord]
   private var partKeyDv: BinaryDocValues = _
   private var startTimeDv: NumericDocValues = _
@@ -1234,7 +1238,9 @@ class PartKeyRecordCollector extends SimpleCollector {
   }
 
   override def collect(doc: Int): Unit = {
-    if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
+    if (records.size >= limit) {
+      throw new CollectionTerminatedException
+    } else if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
       val pkBytesRef = partKeyDv.binaryValue()
       // Gotcha! make copy of array because lucene reuses bytesRef for next result
       val pkBytes = util.Arrays.copyOfRange(pkBytesRef.bytes, pkBytesRef.offset, pkBytesRef.offset + pkBytesRef.length)
