@@ -1190,11 +1190,10 @@ class PartIdCollector(limit: Int) extends SimpleCollector {
   }
 
   override def collect(doc: Int): Unit = {
-    if (partIdDv.advanceExact(doc)) {
+    if (result.length >= limit) {
+      throw new CollectionTerminatedException
+    } else if (partIdDv.advanceExact(doc)) {
       result += partIdDv.longValue().toInt
-      if (result.length >= limit) {
-        throw new CollectionTerminatedException
-      }
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
     }
@@ -1240,14 +1239,13 @@ class PartKeyRecordCollector(limit: Int) extends SimpleCollector {
   }
 
   override def collect(doc: Int): Unit = {
-    if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
+    if (records.size >= limit) {
+      throw new CollectionTerminatedException
+    } else if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
       val pkBytesRef = partKeyDv.binaryValue()
       // Gotcha! make copy of array because lucene reuses bytesRef for next result
       val pkBytes = util.Arrays.copyOfRange(pkBytesRef.bytes, pkBytesRef.offset, pkBytesRef.offset + pkBytesRef.length)
       records += PartKeyLuceneIndexRecord(pkBytes, startTimeDv.longValue(), endTimeDv.longValue())
-      if (records.size >= limit) {
-        throw new CollectionTerminatedException
-      }
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")
     }
