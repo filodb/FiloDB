@@ -179,7 +179,7 @@ trait  DefaultPlanner {
     }
   }
 
-  def materializePeriodicSeries(qContext: QueryContext,
+  private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                 lp: PeriodicSeries,
                                 forceInProcess: Boolean): PlanResult = {
 

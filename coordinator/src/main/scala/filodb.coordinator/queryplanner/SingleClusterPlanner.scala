@@ -558,7 +558,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
 
-  private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
+  override private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      forceInProcess: Boolean): PlanResult = {
     val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
@@ -605,7 +605,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     result
   }
 
-  private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
+  override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
     val rawSeries = lp match {
       case Right(value) => value.series
       case Left(value)  => value.rawSeries
@@ -633,7 +633,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case _ => (None, None, lp)
     }
   }
-  private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
+  override private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries,
                                         forceInProcess: Boolean): PlanResult = {
 
