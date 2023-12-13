@@ -13,11 +13,14 @@ import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChan
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
+import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.exec.InternalRangeFunction.Last
 
 // scalastyle:off file.size.limit
 
