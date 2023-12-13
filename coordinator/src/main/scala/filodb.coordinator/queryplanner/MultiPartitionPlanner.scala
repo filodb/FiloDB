@@ -566,11 +566,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         walkLogicalPlanTree(newLp, qContext, true).plans
       } else {
         if (queryConfig.supportRemoteRawExport) {
-          logger.warn("Remote raw export not supported")
-        } else {
           logger.warn(
             s"Remote raw export is supported and the $totalExpectedRawExport ms" +
               s" is greater than the max allowed raw export duration of ${queryConfig.maxRemoteRawExportTimeRange}")
+        } else {
+          logger.warn("Remote raw export not supported")
         }
         Seq(EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher))
       }

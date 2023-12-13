@@ -55,9 +55,7 @@ object StitchRvsExec {
           if (mins.isEmpty) {
             minTime = t
             mins += r
-          }
-
-          else if (t < minTime) {
+          } else if (t < minTime) {
             mins.clear()
             mins += r
             minTime = t
@@ -66,7 +64,6 @@ object StitchRvsExec {
           }
         }
       }
-      println(s"t: $minTime, mins.length ${mins.length}")
       if (mins.isEmpty && tsIter.isEmpty) throw new IllegalStateException("next was called when no element")
       if (minTime > tsIter.head) {
         nanResult.timestamp = tsIter.next()
@@ -81,7 +78,6 @@ object StitchRvsExec {
           // until we have a different indicator for "unable-to-calculate", use NaN when multiple values seen
           val minRows = mins.map(it => if (it.hasNext) it.next() else nanResult) // move iterators forward
           val minsWithoutNan = minRows.filter(!_.getDouble(1).isNaN)
-          println(s"multiple mins for time $minTime, values are ${minsWithoutNan.map(_.getDouble(1))}")
           // The second condition checks if these values are equal within the tolerable limits and if yes, do not
           // emit NaN.
           // TODO: Make the second check and tolerance configurable?
