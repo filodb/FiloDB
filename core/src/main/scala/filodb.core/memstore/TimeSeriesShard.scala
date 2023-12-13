@@ -934,14 +934,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         markPartAsNotIngesting(p, odp = false)
         if (storeConfig.meteringEnabled) {
           val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-            p.schema.options.shardKeyColumns)
-          val newCard = cardTracker.modifyCount(shardKey, 0, -1)
-          // TODO remove temporary debugging since we are seeing some negative counts
-          if (newCard.exists(_.value.activeTsCount < 0) && p.partID % 100 < 5)
-            // log for 5% of the cases to reduce log volume
-            logger.error(s"For some reason, activeTs count negative when updating card for " +
-              s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
-              s"newActivelyIngestingSize=${activelyIngesting.size}")
+                                                          p.schema.options.shardKeyColumns)
+          cardTracker.modifyCount(shardKey, 0, -1)
         }
       }
     }
@@ -1775,15 +1769,18 @@ class TimeSeriesShard(val ref: DatasetRef,
                                    startTime: Long,
                                    querySession: QuerySession,
                                    limit: Int): Iterator[ZeroCopyUTF8String] = {
-    if (indexFacetingEnabledAllLabels ||
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    val startNs = Utils.currentThreadCpuTimeNanos
+    val res = if (indexFacetingEnabledAllLabels ||
       (indexFacetingEnabledShardKeyLabels && schemas.part.options.shardKeyColumns.contains(label))) {
       partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
     } else {
-      val metricShardKeys = schemas.part.options.shardKeyColumns
-      val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
       SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
         label, querySession, metricGroupBy, limit)
     }
+    querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(startNs - Utils.currentThreadCpuTimeNanos)
+    res
   }
 
   /**
@@ -1822,21 +1819,21 @@ class TimeSeriesShard(val ref: DatasetRef,
                           startTime: Long,
                           limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
-      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
+      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
         val partKeyMap = convertPartKeyWithTimesToMap(
           PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
         partKeyMap ++ Map(
           ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
           ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
-      } take(limit)
+      }
     } else {
-      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, limit)
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
       val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
         convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
-      (inMemPartKeys ++ skippedPartKeys).take(limit)
+      (inMemPartKeys ++ skippedPartKeys)
     }
   }
 
@@ -1940,9 +1937,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
+        val startNs = Utils.currentThreadCpuTimeNanos
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
         querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
+        querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory

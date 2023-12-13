@@ -2,7 +2,6 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
-import filodb.query.exec.TsCardExec
 
 //scalastyle:off number.of.types
 //scalastyle:off file.size.limit
@@ -187,7 +186,9 @@ object TsCardinalities {
 case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
                            version: Int = 1,
-                           datasets: Seq[String] = Seq()) extends LogicalPlan {
+                           datasets: Seq[String] = Seq(),
+                           userDatasets: String = "",
+                           overrideClusterName: String = "") extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
@@ -214,7 +215,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
                        .mkString(",") + "}"),
         "numGroupByFields" -> numGroupByFields.toString,
         "verbose" -> "true", // Using this plan to determine if we need to pass additional values in groupKey or not
-        "datasets" -> datasets.mkString(TsCardExec.PREFIX_DELIM)
+        "datasets" -> userDatasets
     )
   }
 }
@@ -255,7 +256,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           startMs: Long,
                           stepMs: Long,
                           endMs: Long,
-                          offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offsetMs: Option[Long] = None,
+                          atMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
@@ -312,7 +314,8 @@ case class SubqueryWithWindowing(
   functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
   subqueryStepMs: Long, //1m
-  offsetMs: Option[Long]
+  offsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -350,7 +353,8 @@ case class TopLevelSubquery(
   stepMs: Long,
   endMs: Long,
   orginalLookbackMs: Long,
-  originalOffsetMs: Option[Long]
+  originalOffsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -358,8 +362,6 @@ case class TopLevelSubquery(
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
-
-
 }
 
 /**
@@ -380,6 +382,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None,
+                                       atMs: Option[Long] = None,
                                        columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
@@ -435,6 +438,7 @@ case class Aggregate(operator: AggregationOperator,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
 }
 
 /**
@@ -451,7 +455,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       operator: BinaryOperator,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
-                      on: Seq[String] = Nil,
+                      on: Option[Seq[String]] = None,
                       ignoring: Seq[String] = Nil,
                       include: Seq[String] = Nil)
       extends PeriodicSeriesPlan with NonLeafLogicalPlan with CandidatePushdownPlan {

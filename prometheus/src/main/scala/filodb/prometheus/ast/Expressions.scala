@@ -3,8 +3,16 @@ package filodb.prometheus.ast
 import filodb.core.query.RangeParams
 import filodb.query._
 
-case class UnaryExpression(operator: Operator, operand: Expression) extends Expression {
+case class UnaryExpression(operator: Operator, operand: Expression) extends Expression with PeriodicSeries {
   //TODO Need to pass an operator to a series
+  override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    if (operator != Add && operator != Sub) {
+      throw new IllegalArgumentException(s"operator=$operator is not allowed in expression=$operand")
+    }
+    // use binary expression to implement the unary operators.
+    // eg. -foo is implemented through (0 - foo).
+    BinaryExpression(Scalar(0), operator, None, operand).toSeriesPlan(timeParams)
+  }
 }
 
 case class PrecedenceExpression(expression: Expression) extends Expression
@@ -133,7 +141,7 @@ case class BinaryExpression(lhs: Expression,
             val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
             val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
             BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
-              onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
+              onLabels, ignoringLabels.getOrElse(Nil),
               vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
           }
         case _ => throw new UnsupportedOperationException(s"Invalid operands: $lhsWithPrecedence, $rhsWithPrecedence")

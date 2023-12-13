@@ -65,9 +65,17 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
     partNums1 shouldEqual debox.Buffer(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
+    // return only 4 partIds - empty filter
+    val partNumsLimit = keyIndex.partIdsFromFilters(Nil, start, end, 4)
+    partNumsLimit shouldEqual debox.Buffer(0, 1, 2, 3)
+
     val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
     val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
     partNums2 shouldEqual debox.Buffer(7, 8, 9)
+
+    // return only 2 partIds - with filter
+    val partNumsLimitFilter = keyIndex.partIdsFromFilters(Seq(filter2), start, end, 2)
+    partNumsLimitFilter shouldEqual debox.Buffer(7, 8)
 
     val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
     val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), start, end)
@@ -107,6 +115,24 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
+  }
+
+  it("should fetch only two part key records from filters") {
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result = keyIndex.partKeyRecordsFromFilters(Seq(filter2), 0, Long.MaxValue, 2)
+    val expected = Seq(pkrs(7), pkrs(8))
+
+    result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
+    result.map(p => (p.startTime, p.endTime)) shouldEqual expected.map(p => (p.startTime, p.endTime))
   }
 
 
@@ -282,7 +308,6 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
-
   it("should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys with del count") {
     // Identical to test
     // it("should add part keys and fetch partIdsEndedBefore and removePartKeys correctly for more than 1024 keys")
@@ -344,7 +369,6 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // Important, while the unit test uses partIds to assert the presence or absence before and after deletion
     // it is no longer required to have partIds in the index on non unit test setup
   }
-
 
   it("should update part keys with endtime and parse filters correctly") {
     val start = System.currentTimeMillis()
@@ -445,6 +469,32 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       ColumnFilter("Actor2Name", Equals("CHINA".utf8)))
     val partNums2 = keyIndex.partIdsFromFilters(filters2, 0, Long.MaxValue)
     partNums2 shouldEqual debox.Buffer.empty[Int]
+  }
+
+  it("should be able to convert pipe regex to TermInSetQuery") {
+    // Add the first ten keys and row numbers
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(99)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("Actor2Code", EqualsRegex("GOV|KHM|LAB|MED".utf8)))
+    val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1 shouldEqual debox.Buffer(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 73, 81, 90)
+  }
+
+  it("should be able to convert prefix regex to PrefixQuery") {
+    // Add the first ten keys and row numbers
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(99)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("Actor2Name", EqualsRegex("C.*".utf8)))
+    val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1 shouldEqual debox.Buffer(3, 12, 22, 23, 24, 31, 59, 60, 66, 69, 72, 78, 79, 80, 88, 89)
   }
 
   it("should ignore unsupported columns and return empty filter") {
@@ -1058,5 +1108,11 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val expected5 = Seq(pkrs(7), pkrs(8), pkrs(9))
     result5.map(_.partKey.toSeq) shouldEqual expected5.map(_.partKey.toSeq)
     result5.map(p => (p.startTime, p.endTime)) shouldEqual expected5.map(p => (p.startTime, p.endTime))
+
+
+    val filter10 = ColumnFilter("Actor2Code", EqualsRegex(".*".utf8))
+    val result10= keyIndex.partKeyRecordsFromFilters(Seq(filter10), 0, Long.MaxValue)
+    result10.map(_.partKey.toSeq) shouldEqual pkrs.map(_.partKey.toSeq)
+    result10.map(p => (p.startTime, p.endTime)) shouldEqual pkrs.map(p => (p.startTime, p.endTime))
   }
 }

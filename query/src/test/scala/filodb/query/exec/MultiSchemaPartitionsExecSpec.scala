@@ -138,6 +138,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
                                              dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
 
+    querySession.queryStats.clear() // so this can be run as a standalone test
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.result.size shouldEqual 1
@@ -145,6 +146,10 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
+    querySession.queryStats.getResultBytesCounter().get() shouldEqual 297
+    querySession.queryStats.getCpuNanosCounter().get() > 0 shouldEqual true
+    querySession.queryStats.getDataBytesScannedCounter().get() shouldEqual 48
+    querySession.queryStats.getTimeSeriesScannedCounter().get() shouldEqual 1
   }
 
   it("should get empty schema if query returns no results") {
@@ -234,9 +239,9 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
-    val start = now - (numRawSamples-100) * reportingInterval
+    val start = now - (numRawSamples-100) * reportingInterval + 1
     val step = 0
-    val end = now - (numRawSamples-100) * reportingInterval
+    val end = now - (numRawSamples-100) * reportingInterval + 1
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(reportingInterval * 3),
       Some(InternalRangeFunction.SumOverTime), QueryContext()))
 

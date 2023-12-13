@@ -680,12 +680,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     else
       BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        logicalPlan.cardinality, logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
@@ -767,7 +767,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp, qContext)
         else {
-          createMetadataRemoteExec(qContext, p, lp.queryParams())
+          val newQueryContext = qContext.copy(origQueryParams = queryParams.copy(verbose = true))
+          createMetadataRemoteExec(newQueryContext, p, lp.queryParams())
         }
       }
       if (execPlans.size == 1) {

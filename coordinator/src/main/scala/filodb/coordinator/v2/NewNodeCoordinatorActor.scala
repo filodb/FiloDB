@@ -42,7 +42,6 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val ingestionActors = new mutable.HashMap[DatasetRef, ActorRef]
   private val queryActors = new mutable.HashMap[DatasetRef, ActorRef]
   private val localShardMaps = new mutable.HashMap[DatasetRef, ShardMapper]
-  private val shardsOnThisNode = new mutable.HashMap[DatasetRef, Seq[Int]]
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
   private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
@@ -94,7 +93,6 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     val mapper = localShardMaps(dataset.ref)
     val shardsToStart = clusterDiscovery.shardsForLocalhost(ic.numShards)
     shardsToStart.foreach(sh => updateFromShardEvent(ShardAssignmentStarted(dataset.ref, sh, self)))
-    shardsOnThisNode.put(dataset.ref, shardsToStart)
     ingestionActors(dataset.ref) ! ShardIngestionState(0, dataset.ref, mapper)
   }
 
@@ -151,12 +149,14 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   private def startTenantIngestionMetering(): Unit = {
-    logger.info(s"Starting tenant level ingestion cardinality metering...")
-    val inst = TenantIngestionMetering(
-      settings,
-      dsIterProducer = () => { localShardMaps.keysIterator },
-      coordActorProducer = () => self)
-    inst.schedulePeriodicPublishJob()
+    if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
+      logger.info(s"Starting tenant level ingestion cardinality metering...")
+      val inst = TenantIngestionMetering(
+        settings,
+        dsIterProducer = () => { localShardMaps.keysIterator },
+        coordActorProducer = () => self)
+      inst.schedulePeriodicPublishJob()
+    }
   }
 
   def queryHandlers: Receive = LoggingReceive {

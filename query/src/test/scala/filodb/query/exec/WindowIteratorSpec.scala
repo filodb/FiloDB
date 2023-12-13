@@ -197,7 +197,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val windowResults = Seq(
       150000->1.0,
       250000->5.0,
-      350000->9.0,
+      350000->12.0,
       450000->13.0,
       750000->17.0
     )
@@ -482,7 +482,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val windowResults = Seq(
       150000 -> 1.0,
       250000 -> 2.5,
-      350000 -> 4.5,
+      350000 -> 4.0,
       450000 -> 6.5
     )
 
@@ -518,7 +518,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val windowResults = Seq(
       150000 -> 1.0,
       250000 -> 2.0,
-      350000 -> 2.0,
+      350000 -> 3.0,
       450000 -> 2.0
     )
 
@@ -563,7 +563,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val avgWindowResults = Seq(
       150000 -> 4.0,
       250000 -> 4.875,
-      350000 -> 3.2,
+      350000 -> 3.533333333333333,
       450000 -> 6.916666666666667,
       750000 -> 4.2592592592592595
     )
@@ -579,7 +579,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val countWindowResults = Seq(
       150000 -> 5.0,
       250000 -> 8.0,
-      350000 -> 10.0,
+      350000 -> 15.0,
       450000 -> 12.0,
       750000 -> 27.0
     )
@@ -608,7 +608,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val windowResults = Seq(
       150000 -> 1.0,
       250000 -> 2.0,
-      350000 -> 4.0,
+      350000 -> 3.0,
       450000 -> 6.0
     )
 

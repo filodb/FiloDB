@@ -37,7 +37,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private val _coordinators = new mutable.LinkedHashMap[Address, ActorRef]
   private val _errorShardReassignedAt = new mutable.HashMap[DatasetRef, mutable.HashMap[Int, Long]]
 
-  // TODO move to startup-v2
   private val _tenantIngestionMeteringOpt =
     if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
       val inst = TenantIngestionMetering(

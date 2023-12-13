@@ -116,16 +116,17 @@ class SingleClusterPlanner(val dataset: Dataset,
       //For binary join LHS & RHS should have same times
       val boundParams = periodicSeriesPlan.get.head match {
         case p: PeriodicSeries => (p.startMs, p.stepMs, WindowConstants.staleDataLookbackMillis,
-          p.offsetMs.getOrElse(0L), p.endMs)
-        case w: PeriodicSeriesWithWindowing => (w.startMs, w.stepMs, w.window, w.offsetMs.getOrElse(0L), w.endMs)
+          p.offsetMs.getOrElse(0L), p.atMs.getOrElse(0), p.endMs)
+        case w: PeriodicSeriesWithWindowing => (w.startMs, w.stepMs, w.window, w.offsetMs.getOrElse(0L),
+          w.atMs.getOrElse(0L), w.endMs)
         case _  => throw new UnsupportedOperationException(s"Invalid plan: ${periodicSeriesPlan.get.head}")
       }
 
       val newStartMs = boundToStartTimeToEarliestRetained(boundParams._1, boundParams._2, boundParams._3,
         boundParams._4)
-      if (newStartMs <= boundParams._5) { // if there is an overlap between query and retention ranges
+      if (newStartMs <= boundParams._6) { // if there is an overlap between query and retention ranges
         if (newStartMs != boundParams._1)
-          Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(newStartMs, boundParams._5)))
+          Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(newStartMs, boundParams._6)))
         else Some(logicalPlan)
       } else { // query is outside retention period, simply return empty result
         None
@@ -419,12 +420,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs))
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
         rvRangeFromPlan(lp)))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(lp)))
 
@@ -552,6 +553,117 @@ class SingleClusterPlanner(val dataset: Dataset,
         materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
       }
     }
+  }
+
+  private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
+                                                     lp: PeriodicSeriesWithWindowing,
+                                                     forceInProcess: Boolean): PlanResult = {
+    val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
+       removeBucket(Right(lp))._3.right.get
+    } else lp
+
+    val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
+    val rawSource = logicalPlanWithoutBucket.series.isRaw
+
+    /* Last function is used to get the latest value in the window for absent_over_time
+    If no data is present AbsentFunctionMapper will return range vector with value 1 */
+
+    val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
+                      else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
+
+    val realScanStartMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+
+    val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
+    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs,
+      realScanStepMs, realScanEndMs, window, Some(execRangeFn), qContext,
+      logicalPlanWithoutBucket.stepMultipleNotationUsed,
+      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
+    val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
+                                AggregateClause.byOpt(Seq("job")))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
+      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
+        RangeParams(realScanStartMs / 1000, realScanStepMs / 1000, realScanEndMs / 1000), qContext)
+
+    } else series
+
+    // repeat the same value for each step if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      result.plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs,
+        p.queryWithPlanName(qContext))))
+    }
+
+    result
+  }
+
+  private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
+    val rawSeries = lp match {
+      case Right(value) => value.series
+      case Left(value)  => value.rawSeries
+    }
+
+    rawSeries match {
+      case rawSeriesLp: RawSeries =>
+
+        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+          map(_.filter.valuesStrings.head.toString)
+        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
+
+        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
+        else {
+          val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+            filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+            Equals(nameFilter.get.replace("_bucket", "")))
+          val newLp =
+            if (lp.isLeft)
+             Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+            else
+             Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+          (nameFilter, leFilter, newLp)
+        }
+      case _ => (None, None, lp)
+    }
+  }
+  private def materializePeriodicSeries(qContext: QueryContext,
+                                        lp: PeriodicSeries,
+                                        forceInProcess: Boolean): PlanResult = {
+
+   // Convert to FiloDB histogram by removing le label and bucket prefix
+   // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
+   // with _sum/_count as suffix
+    val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
+    if (queryConfig.translatePromToFilodbHistogram) {
+     val result = removeBucket(Left(lp))
+      (result._1, result._2, result._3.left.get)
+
+    } else (None, None, lp)
+
+    val realScanStartMs = lp.atMs.getOrElse(lp.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(lp.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs, realScanStepMs,
+      realScanEndMs, None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
+
+    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
+        realScanEndMs/1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
+    }
+    // repeat the same value for each step if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      rawSeries.plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs,
+        p.queryWithPlanName(qContext))))
+    }
+    rawSeries
   }
 
   /**
@@ -727,9 +839,16 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeTsCardinalities(qContext: QueryContext,
                                          lp: TsCardinalities,
                                          forceInProcess: Boolean): PlanResult = {
+    // If no clusterName is passed in the logical plan, we use the passed clusterName in the SingleClusterPlanner
+    // We are using the passed cluster name in logical plan for tenant metering apis
+    val clusterNameToPass = lp.overrideClusterName match {
+      case "" => clusterName
+      case _ => lp.overrideClusterName
+    }
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterName)
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass,
+        lp.version)
     }
     PlanResult(metaExec)
   }

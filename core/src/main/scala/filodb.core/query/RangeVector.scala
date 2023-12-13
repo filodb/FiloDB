@@ -195,6 +195,103 @@ final case class ScalarVaryingDouble(val timeValueMap: Map[Long, Double],
 
 final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
+/**
+ * Populate the vector from a single row.
+ * Let say startMs=10, stepMs=10, endMs=50, RowReader has a double value 5 with a timestamp 100.
+ * The result vector would be [10 -> 5, 20 -> 5, 30 -> 5, 40 -> 5, 50->5].
+ * @param rangeVectorKey the range vector key.
+ * @param startMs the start timestamp in ms.
+ * @param stepMs the step in ms.
+ * @param endMs the end timestamp in ms
+ * @param rowReader the row read that provide the value.
+ * @param schema the schema.
+ */
+final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
+                              startMs: Long, stepMs: Long, endMs: Long,
+                              rowReader: Option[RowReader],
+                              schema: RecordSchema) extends SerializableRangeVector {
+  override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
+  override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
+
+  lazy val containers: Seq[RecordContainer] = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
+    rowReader.map(builder.addFromReader(_, schema, 0))
+    builder.allContainers.toList
+  }
+
+  val recordSchema: RecordSchema = schema
+
+  // There is potential for optimization.
+  // The parent transformer does not need to iterate all rows.
+  // It can transform one data because data at all steps are identical. It just need to return a RepeatValueVector.
+  override def rows(): RangeVectorCursor = {
+    import NoCloseCursor._
+    // If rowReader is empty, iterate nothing.
+    val it = Iterator.from(0, rowReader.map(_ => stepMs.toInt).getOrElse(1))
+      .takeWhile(_ <= endMs - startMs).map { i =>
+      val rr = rowReader.get
+      val t = i + startMs
+      new RowReader {
+        override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
+        override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
+        override def getInt(columnNo: Int): Int = rr.getInt(columnNo)
+        override def getLong(columnNo: Int): Long = if (columnNo == 0) t else rr.getLong(columnNo)
+        override def getDouble(columnNo: Int): Double = rr.getDouble(columnNo)
+        override def getFloat(columnNo: Int): Float = rr.getFloat(columnNo)
+        override def getString(columnNo: Int): String = rr.getString(columnNo)
+        override def getAny(columnNo: Int): Any = rr.getAny(columnNo)
+        override def getBlobBase(columnNo: Int): Any = rr.getBlobBase(columnNo)
+        override def getBlobOffset(columnNo: Int): Long = rr.getBlobOffset(columnNo)
+        override def getBlobNumBytes(columnNo: Int): Int = rr.getBlobNumBytes(columnNo)
+        override def getHistogram(columnNo: Int): Histogram = rr.getHistogram(columnNo)
+      }
+    }
+    // address step == 0 case
+    if (startMs == endMs) it.take(1)
+    else it
+  }
+  override def key: RangeVectorKey = rangeVectorKey
+
+  /**
+   * Used to calculate number of samples sent over the wire for limiting resources used by query
+   */
+  override def numRowsSerialized: Int = 1
+
+  /**
+   * Estimates the total size (in bytes) of all rows after serialization.
+   */
+  override def estimateSerializedRowBytes: Long = containers.size
+}
+
+object RepeatValueVector extends StrictLogging {
+  import filodb.core._
+  def apply(rv: RangeVector,
+            startMs: Long, stepMs: Long, endMs: Long,
+            schema: RecordSchema,
+            execPlan: String,
+            queryStats: QueryStats): RepeatValueVector = {
+    val startNs = Utils.currentThreadCpuTimeNanos
+    try {
+      var nextRow: Option[RowReader] = None
+      try {
+        ChunkMap.validateNoSharedLocks(execPlan)
+        val rows = rv.rows()
+        if (rows.hasNext) {
+           nextRow = Some(rows.next())
+        }
+      } finally {
+        rv.rows().close()
+        // clear exec plan
+        // When the query is done, clean up lingering shared locks caused by iterator limit.
+        ChunkMap.releaseAllSharedLocks()
+      }
+      new RepeatValueVector(rv.key, startMs, stepMs, endMs, nextRow, schema)
+    } finally {
+      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
+    }
+  }
+}
+
 sealed trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
@@ -213,8 +310,8 @@ sealed trait ScalarSingleValue extends ScalarRangeVector {
     else it
   }
 
-  // Negligible bytes sent over-the-wire.
-  override def estimateSerializedRowBytes: Long = 0
+  // Negligible bytes sent over-the-wire. Don't bother calculating accurately.
+  override def estimateSerializedRowBytes: Long = SerializableRangeVector.SizeOfDouble
 }
 
 /**
@@ -399,7 +496,10 @@ final class SerializedRangeVector(val key: RangeVectorKey,
     } else it
   }
 
-  override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
+  override def estimateSerializedRowBytes: Long =
+    containers.toIterator.flatMap(_.iterate(schema))
+      .slice(startRecordNo, startRecordNo + numRowsSerialized)
+      .foldLeft(0)(_ + _.recordLength)
 
   def containersIterator : Iterator[RecordContainer] = containers.toIterator
 
@@ -487,11 +587,7 @@ object SerializedRangeVector extends StrictLogging {
         case None => builder.allContainers.toList
         case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
       }
-      val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
-      val resultSize = srv.estimatedSerializedBytes
-      SerializedRangeVector.queryResultBytes.record(resultSize)
-      queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-      srv
+      new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
     } finally {
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }
