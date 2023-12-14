@@ -20,6 +20,7 @@ import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query.exec.TsCardExec.MAX_RESULT_SIZE
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -76,7 +77,8 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
   */
 final case class TsCardReduceExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
-                                  children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                  children: Seq[ExecPlan],
+                                  resultSize: Int = MAX_RESULT_SIZE) extends NonLeafExecPlan {
   import TsCardExec._
 
   override protected def args: String = ""
@@ -88,7 +90,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       val accCountsOpt = acc.get(data.group)
       // Check if we either (1) won't increase the size or (2) have enough room for another.
       // Accordingly retrieve the key to update and the counts to increment.
-      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESULT_SIZE) {
+      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.contains(data.group) || acc.size < resultSize) {
         (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
       } else {
         // handle overflow group based on result schema given

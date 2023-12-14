@@ -13,6 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.memstore.ratelimit.CardinalityStore
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
@@ -432,6 +433,61 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
             prefixToGroup(prefix) -> counts
           }
       }
+    }
+  }
+
+  it ("should add overflow group") {
+    import filodb.query.exec.TsCardExec._
+
+    // create a new memstore for the records needed and ingest it
+    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Seq[(Seq[String], CardCounts)])
+
+   val testSpec = TestSpec(Seq(), 3, Seq(
+     Seq("demo", "App-0", "http_req_total", "timeseries") -> CardCounts(2, 2, 2),
+     Seq("demo", "App-0", "http_bar_total", "timeseries") -> CardCounts(1, 1, 1),
+     Seq("demo", "App-0", "http_foo_total", "timeseries") -> CardCounts(1, 1, 1),
+     Seq("demo-A", "App-A", "http_req_total-A", "timeseries") -> CardCounts(1, 1, 1),
+     Seq("testws", "testns", "long_labels_metric", "timeseries") -> CardCounts(1, 1, 1)
+   ))
+
+    val leavesRaw = (0 until shardPartKeyLabelValues.size).map { ishard =>
+      new TsCardExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+        ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "raw", 2)
+    }
+
+    val leavesDownsample = (0 until shardPartKeyLabelValues.size).map { ishard =>
+      new TsCardExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+        ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields, "downsample", 2)
+    }
+
+    val allLeaves = leavesRaw ++ leavesDownsample
+    val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, allLeaves, 1)
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(id, _, response, _, _, _, _) =>
+        // should only have a single RangeVector
+        response.size shouldEqual 1
+
+        val respRows = response(0).rows().map(x => RowData.fromRowReader(x)).toList
+        respRows.size shouldEqual 2
+        // should have one overflow prefix
+        val overFlowRow = respRows.filter(x => x.group.toString.startsWith(CardinalityStore.OVERFLOW_PREFIX(0)))(0)
+        val nonOverflowRow = respRows.filter(x => !x.group.toString.startsWith(CardinalityStore.OVERFLOW_PREFIX(0)))(0)
+        // now check for the count
+
+        val testMap = testSpec.exp.map { case (prefix, counts) =>
+          prefixToGroup(prefix) -> counts
+        }.toMap
+
+        testMap.contains(nonOverflowRow.group) shouldEqual true
+        testMap.get(nonOverflowRow.group).get shouldEqual nonOverflowRow.counts
+
+        var totalCardCountWithoutOverflow = CardCounts(0, 0, 0)
+        val cardCountsWithoutNonOverflow = testMap.filter(x => (x._1 != nonOverflowRow.group)).toList
+
+        cardCountsWithoutNonOverflow.map(x => totalCardCountWithoutOverflow = totalCardCountWithoutOverflow.add(x._2))
+
+        totalCardCountWithoutOverflow shouldEqual overFlowRow.counts
     }
   }
 }
