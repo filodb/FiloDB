@@ -1,11 +1,13 @@
 package filodb.query.exec
 
 import scala.collection.mutable
+
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
+
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.TimeSeriesStore

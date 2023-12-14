@@ -472,6 +472,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
         respRows.size shouldEqual 2
         // should have one overflow prefix
         val overFlowRow = respRows.filter(x => x.group.toString.startsWith(CardinalityStore.OVERFLOW_PREFIX(0)))(0)
+
+        val expectedOverflowGroup = prefixToGroupWithDataset(CardinalityStore.OVERFLOW_PREFIX,
+          timeseriesDatasetMultipleShardKeys.ref.dataset)
+        overFlowRow.group shouldEqual expectedOverflowGroup
+
         val nonOverflowRow = respRows.filter(x => !x.group.toString.startsWith(CardinalityStore.OVERFLOW_PREFIX(0)))(0)
         // now check for the count
 
