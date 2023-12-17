@@ -23,7 +23,7 @@ class ResultActor(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryRes
     case q: StreamQueryResponse =>
       try {
         subject.onNext(q)
-        qLogger.debug(s"Got ${q.getClass.getSimpleName} for plan ${q.planId}")
+        qLogger.debug(s"Result Actor got ${q.getClass.getSimpleName} for plan ${q.planId}")
       } catch {
         case e: Throwable =>
           qLogger.error(s"Exception when processing $q", e)

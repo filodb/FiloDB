@@ -31,13 +31,15 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val allConfig = ConfigFactory.load("application_test.conf")
+  val allConfig = ConfigFactory.parseString("filodb.query.streaming-query-results-enabled = true")
+    .withFallback(ConfigFactory.load("application_test.conf"))
+
   val filodbConfig = allConfig.getConfig("filodb")
   val queryConfig = QueryConfig(filodbConfig.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(filodbConfig, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
-  val inProcessPlanDispatcher = new InProcessPlanDispatcher(queryConfig)
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
   val metric = "http_req_total"
   val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787", "host" -> "host-1")
