@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -62,9 +62,6 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     }
   }
 
-  private val value = new Object()
-  private val dispatchedPlanIds = new ConcurrentHashMap[String, Object]()
-
   def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
@@ -86,17 +83,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       } else {
         ResultActor.subject
           .doOnSubscribe(Task.eval {
-            // This conditional was needed since the onSubscribe was being invoked multiple times
-            // due to multiple subscribers downstream in the plan execution pipeline, and hence the
-            // plan was dispatched multiple times. This check de-duplicates the send.
-            dispatchedPlanIds.computeIfAbsent(plan.execPlan.planId,
-                        new java.util.function.Function[String, Object]() {
-                          override def apply(t: String): Object = {
-                            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
-                            target.tell(plan.execPlan, ResultActor.resultActor)
-                            value
-                          }
-                        })
+            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
+            target.tell(plan.execPlan, ResultActor.resultActor)
           })
          .filter(_.planId == plan.execPlan.planId)
          .takeWhileInclusive(!_.isLast)

@@ -805,7 +805,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }
         .filter(_._1.resultSchema != ResultSchema.empty)
         .cache
-        //.pipeThrough(Pipe.publish[(QueryResult, Int)]) // pipeThrough helps with multiple subscribers
 
       val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
         case (QueryResult(_, schema, _, _, _, _, _), _) if schema.columns.nonEmpty => schema
