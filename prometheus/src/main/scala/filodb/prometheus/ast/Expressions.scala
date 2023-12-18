@@ -17,7 +17,7 @@ case class UnaryExpression(operator: Operator, operand: Expression) extends Expr
     // eg. -foo is implemented through (0 - foo).
     operand match {
       case unaryExpression: UnaryExpression =>
-        // recursively convert unary expression to a binary expression.
+        // recursively convert a unary expression to a binary expression.
         BinaryExpression(Scalar(0), operator, None, unaryExpression.convertUnaryExpression())
       case _ =>
         BinaryExpression(Scalar(0), operator, None, operand)

@@ -229,7 +229,25 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan, expected)
   }
 
-  it("Should be able to handle multiple unary signs.") {
+  it("Plan with unary expression should be equals to its binary counterpart2.") {
+    val unaryExpressions = List("""-foo{_ws_ = "demo", _ns_ = "localNs"}""", """+foo{_ws_ = "demo", _ns_ = "localNs"}""",
+      """-(foo{_ws_ = "demo", _ns_ = "localNs"} - bar{_ws_ = "demo", _ns_ = "localNs"})""",
+      """+(foo{_ws_ = "demo", _ns_ = "localNs"} - bar{_ws_ = "demo", _ns_ = "localNs"})""")
+    val binaryExpressions = List("""(0 -foo{_ws_ = "demo", _ns_ = "localNs"})""", """(0 + foo{_ws_ = "demo", _ns_ = "localNs"})""",
+      """(0 -(foo{_ws_ = "demo", _ns_ = "localNs"} - bar{_ws_ = "demo", _ns_ = "localNs"}))""",
+      """(0 + (foo{_ws_ = "demo", _ns_ = "localNs"} - bar{_ws_ = "demo", _ns_ = "localNs"}))""")
+    unaryExpressions.zip(binaryExpressions).foreach(
+      pair => {
+        val lp1 = Parser.queryRangeToLogicalPlan(pair._1, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+        val execPlan1 = rootPlanner.materialize(lp1, QueryContext(origQueryParams = queryParams))
+        val lp2 = Parser.queryRangeToLogicalPlan(pair._2, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+        val execPlan2 = rootPlanner.materialize(lp2, QueryContext(origQueryParams = queryParams))
+        validatePlan(execPlan1, execPlan2.printTree())
+      }
+    )
+  }
+
+    it("Should be able to handle multiple unary signs.") {
     val lp = Parser.queryRangeToLogicalPlan(
       """-+---+-foo{_ws_ = "demo", _ns_ = "localNs"} > ---+--+--1""",
       TimeStepParams(startSeconds, step, endSeconds), Antlr)
