@@ -83,12 +83,11 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       } else {
         ResultActor.subject
           .doOnSubscribe(Task.eval {
-            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
             target.tell(plan.execPlan, ResultActor.resultActor)
+            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
           })
          .filter(_.planId == plan.execPlan.planId)
          .takeWhileInclusive(!_.isLast)
-         .cache // TODO can we remove the cache from here? This will save memory
         // TODO timeout query if response stream not completed in time
       }
     }

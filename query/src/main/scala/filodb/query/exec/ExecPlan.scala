@@ -9,7 +9,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.{Observable, Pipe}
+import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Utils}
 import filodb.core.binaryrecord2.RecordSchema
@@ -237,6 +237,7 @@ trait ExecPlan extends QueryCommand {
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
         .bufferTumbling(querySession.queryConfig.numRvsPerResultMessage)
         .map { f =>
+          // lazy because there may be no RVs in result
           lazy val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
           val srvs = f.map {
             case srvable: SerializableRangeVector => srvable
@@ -731,6 +732,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
         .mapParallelUnordered(parallelism) { case (plan, i) =>
           Task {
             val results = dispatchStreamingRemotePlan(plan, querySession, span, source)
+                          .cache // TODO cache needed since multiple subscribers. See how to avoid the memory
             // find schema mismatch errors and re-throw errors
             val respWithoutErrors = results.map {
               case header@StreamQueryResultHeader(_, _, rs) =>
@@ -752,13 +754,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
             }
             (respWithoutErrors, i)
           }
-        }.cache // cache needed since multiple subscribers
+        }
 
       val schemas = childResults.flatMap { obs =>
         obs._1.find(_.isInstanceOf[StreamQueryResultHeader])
           .map(_.asInstanceOf[StreamQueryResultHeader].resultSchema)
           .map(rs => (rs, obs._2))
-      }.pipeThrough(Pipe.publish[(ResultSchema, Int)]) // pipeThrough helps with multiple subscribers
+      }
 
       val rvs = childResults.map { obs =>
         val rvs = obs._1.flatMap {
