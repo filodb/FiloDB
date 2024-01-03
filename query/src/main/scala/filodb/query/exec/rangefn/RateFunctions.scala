@@ -189,7 +189,7 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
     if (highestTime > lowestTime) {
       // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
       val result = RateFunctions.extrapolatedRate(
-                     windowStart - 1, windowEnd, numSamples,
+                     windowStart, windowEnd, numSamples,
                      lowestTime, lowestValue,
                      highestTime, highestValue,
                      isCounter, isRate)
@@ -286,7 +286,7 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
         val rateArray = new Array[Double](lowestValue.numBuckets)
         cforRange { 0 until rateArray.size } { b =>
           rateArray(b) = RateFunctions.extrapolatedRate(
-                           windowStart - 1, windowEnd, numSamples,
+                           windowStart, windowEnd, numSamples,
                            lowestTime, lowestValue.bucketValue(b),
                            highestTime, highestValue.bucketValue(b),
                            isCounter, isRate)
@@ -330,7 +330,7 @@ class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
     sumFunc.addTimeDoubleChunks(doubleVectAcc, doubleVect, doubleReader, startRowNum, endRowNum)
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
-    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart - 1)) * 1000)
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart)) * 1000)
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
 }
 
@@ -347,7 +347,7 @@ class RateOverDeltaChunkedFunctionL extends ChunkedLongRangeFunction {
     sumFunc.addTimeChunks(longVectAcc, longVect, longReader, startRowNum, endRowNum)
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
-    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart - 1)) * 1000)
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart)) * 1000)
 
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
 }
@@ -363,7 +363,7 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
     cforRange {
       0 until rateArray.size
     } { b =>
-      rateArray(b) = hFunc.h.bucketValue(b) / (windowEnd - (windowStart - 1)) * 1000
+      rateArray(b) = hFunc.h.bucketValue(b) / (windowEnd - windowStart) * 1000
     }
     sampleToEmit.setValues(windowEnd, bv.MutableHistogram(hFunc.h.buckets, rateArray))
   }

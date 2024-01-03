@@ -531,7 +531,7 @@ trait ExecPlan extends QueryCommand {
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
-  protected def queryWithPlanName(queryContext: QueryContext): String = {
+  def queryWithPlanName(queryContext: QueryContext): String = {
     // Disabling this since it showed up in local method profiles. Re-enable if needed for debugging
     // s"${this.getClass.getSimpleName}-${queryContext.origQueryParams}"
     s"${queryContext.queryId}:$planId"
