@@ -147,7 +147,7 @@ object LogicalPlanParser {
   private def binaryJoinToQuery(lp: BinaryJoin): String = {
     val lhs = convertToQuery(lp.lhs)
     val rhs = convertToQuery(lp.rhs)
-    val on = if (lp.on.isEmpty) "" else s"${Space}on$OpeningRoundBracket${lp.on.mkString(Comma)}$ClosingRoundBracket"
+    val on = lp.on.map(l => s"${Space}on$OpeningRoundBracket${l.mkString(Comma)}$ClosingRoundBracket").getOrElse("")
     val ignoring = if (lp.ignoring.isEmpty) "" else s"${Space}ignoring$OpeningRoundBracket" +
       s"${lp.ignoring.mkString(Comma)}$ClosingRoundBracket"
 
