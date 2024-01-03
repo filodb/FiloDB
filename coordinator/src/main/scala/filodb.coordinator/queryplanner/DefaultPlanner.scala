@@ -199,7 +199,8 @@ trait  DefaultPlanner {
       case _ => true
     })
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      None, None, qContext, stepMultipleNotationUsed = false, Nil, lp.offsetMs, rawSource = rawSource)))
+      window = None, functionId = None, qContext, stepMultipleNotationUsed = false, funcParams = Nil,
+      lp.offsetMs, rawSource = rawSource)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
       val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
@@ -663,7 +664,9 @@ object PlannerUtil extends StrictLogging {
           rhs = rewritePlanWithRemoteRawExport(lp.rhs, rangeSelector, additionalLookback)
             .asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarVectorBinaryOperation =>
-        lp.copy(vector = rewritePlanWithRemoteRawExport(lp.vector, rangeSelector, additionalLookback)
+        lp.copy(scalarArg = rewritePlanWithRemoteRawExport(lp.scalarArg, rangeSelector, additionalLookback)
+          .asInstanceOf[ScalarPlan],
+          vector = rewritePlanWithRemoteRawExport(lp.vector, rangeSelector, additionalLookback)
           .asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplyMiscellaneousFunction =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookback)
