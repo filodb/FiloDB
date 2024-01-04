@@ -143,7 +143,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
               val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp))
                 StitchRvsExec(qContext.copy(origQueryParams = newPromQlParams)
                   , inProcessPlanDispatcher, None,
-                  execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+                  execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+                  enableApproximatelyEqualCheck = true)
             }
             )
           )

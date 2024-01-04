@@ -15,8 +15,8 @@ object StitchRvsExec {
   private class RVCursorImpl(
                               vectors: Iterable[RangeVectorCursor],
                               outputRange: Option[RvRange],
-                              enableApproximatelyEqualCheck: Boolean = true,
-                              toleranceNumDecimal: Int = 10)
+                              enableApproximatelyEqualCheck: Boolean,
+                              toleranceNumDecimal: Int)
     extends RangeVectorCursor {
     private val weight = math.pow(10, toleranceNumDecimal)
     private val bVectors = vectors.map(_.buffered)
@@ -81,10 +81,14 @@ object StitchRvsExec {
           // The second condition checks if these values are equal within the tolerable limits and if yes, do not
           // emit NaN.
           // TODO: Make the second check and tolerance configurable?
-          if (minsWithoutNan.size == 1 ||
-            !enableApproximatelyEqualCheck ||     // Approximately equal check is disabled
-            minsWithoutNan.map(x => (x.getDouble(1) * weight).toLong / weight).toSet.size == 1)
-            minsWithoutNan.head else nanResult
+          if (minsWithoutNan.tail.isEmpty) {
+            minsWithoutNan.head
+          } else if (enableApproximatelyEqualCheck &&
+            minsWithoutNan.map(x => (x.getDouble(1) * weight).toLong / weight).toSet.size == 1) {
+            minsWithoutNan.head
+          } else {
+            nanResult
+          }
         }
       }
 
@@ -98,8 +102,10 @@ object StitchRvsExec {
     IteratorBackedRangeVector(v1.key, rows, outputRvRange)
   }
 
-  def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange]): RangeVectorCursor = {
-    new RVCursorImpl(vectors, outputRange)
+  def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange],
+            enableApproximatelyEqualCheck: Boolean = false,
+            toleranceNumDecimal: Int = 10): RangeVectorCursor = {
+    new RVCursorImpl(vectors, outputRange, enableApproximatelyEqualCheck, toleranceNumDecimal)
   }
 }
 
@@ -110,7 +116,9 @@ object StitchRvsExec {
 final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
                                outputRvRange: Option[RvRange],
-                               children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                               children: Seq[ExecPlan],
+                               enableApproximatelyEqualCheck: Boolean = false,
+                               toleranceNumDecimal: Int = 10) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
   outputRvRange match {
@@ -131,7 +139,8 @@ final case class StitchRvsExec(queryContext: QueryContext,
     val stitched = childResponses.map(_._1.result).toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange,
+          enableApproximatelyEqualCheck, toleranceNumDecimal)
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows, outputRvRange)
       }.values

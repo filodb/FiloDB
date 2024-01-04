@@ -687,8 +687,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       "namespace".utf8 -> "aci-telemetry-prod1".utf8,
       "res".utf8 -> "res-val".utf8))
     result.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList shouldEqual
-      List((4800,"4.0"), (4900,"4.0"), (5000,"4.0"), (5100,"4.0"), (5200,"4.0"), (5300,"4.0"), (5400,"4.0"),
-        (5500,"4.0"), (5600,"4.0"), (5700,"4.0"), (5800,"4.0"), (5900,"4.0"), (6000,"4.0"))
+      List((4800,"4.0"), (4900,"4.0"), (5000,"4.0"), (5100,"4.0"), (5200,"NaN"), (5300,"NaN"),
+        (5400,"NaN"), (5500,"NaN"), (5600,"NaN"), (5700,"4.0"), (5800,"4.0"), (5900,"4.0"), (6000,"4.0"))
   }
 }
 // scalastyle:on number.of.methods
