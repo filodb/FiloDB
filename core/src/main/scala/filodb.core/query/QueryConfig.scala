@@ -28,6 +28,8 @@ object QueryConfig {
     val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
     val numRvsPerResultMessage = queryConfig.getInt("num-rvs-per-result-message")
     val supportRemoteRawExport = queryConfig.getBoolean("routing.enable-remote-raw-exports")
+    val  enableApproximatelyEqualCheckInStitch =
+      queryConfig.getBoolean("routing.enable-approximate-equals-in-stitch")
     val maxRemoteRawExportTimeRange =
       FiniteDuration(
         queryConfig.getDuration("routing.max-time-range-remote-raw-export").toMillis, TimeUnit.MILLISECONDS)
@@ -40,7 +42,7 @@ object QueryConfig {
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides, supportRemoteRawExport, maxRemoteRawExportTimeRange)
+      containerOverrides, supportRemoteRawExport, maxRemoteRawExportTimeRange, enableApproximatelyEqualCheckInStitch)
   }
 
   import scala.concurrent.duration._
@@ -85,4 +87,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        plannerSelector: Option[String] = None,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
                        supportRemoteRawExport: Boolean = false,
-                       maxRemoteRawExportTimeRange: FiniteDuration = 3 days)
+                       maxRemoteRawExportTimeRange: FiniteDuration = 3 days,
+                       enableApproximatelyEqualCheckInStitch: Boolean = true)

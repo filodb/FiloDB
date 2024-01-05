@@ -144,7 +144,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                 StitchRvsExec(qContext.copy(origQueryParams = newPromQlParams)
                   , inProcessPlanDispatcher, None,
                   execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
-                  enableApproximatelyEqualCheck = true)
+                  enableApproximatelyEqualCheck = queryConfig.enableApproximatelyEqualCheckInStitch)
             }
             )
           )
@@ -398,7 +398,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
         StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
-          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+          enableApproximatelyEqualCheck = queryConfig.enableApproximatelyEqualCheckInStitch)
       }
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
@@ -667,7 +668,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans,
+        enableApproximatelyEqualCheck = queryConfig.enableApproximatelyEqualCheckInStitch)
     }
     PlanResult(Seq(resPlan))
   }

@@ -651,10 +651,14 @@ object PlannerUtil extends StrictLogging {
     lp match {
       case lp: ApplyInstantFunction =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookback)
-          .asInstanceOf[PeriodicSeriesPlan])
+          .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+          rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookback).asInstanceOf[FunctionArgsPlan]))
       case lp: ApplyInstantFunctionRaw =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookback)
-          .asInstanceOf[RawSeries])
+          .asInstanceOf[RawSeries],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookback).asInstanceOf[FunctionArgsPlan]))
       case lp: Aggregate =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookback)
           .asInstanceOf[PeriodicSeriesPlan])
@@ -676,7 +680,9 @@ object PlannerUtil extends StrictLogging {
           .asInstanceOf[PeriodicSeriesPlan])
       case lp: ScalarVaryingDoublePlan =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookback)
-          .asInstanceOf[PeriodicSeriesPlan])
+          .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookback).asInstanceOf[FunctionArgsPlan]))
       case lp: ScalarTimeBasedPlan => lp
       case lp: VectorPlan =>
         lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars, rangeSelector, additionalLookback)
@@ -692,7 +698,9 @@ object PlannerUtil extends StrictLogging {
       case lp: SubqueryWithWindowing =>
         lp.copy(innerPeriodicSeries =
           rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, rangeSelector, additionalLookback)
-            .asInstanceOf[PeriodicSeriesPlan])
+            .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookback).asInstanceOf[FunctionArgsPlan]))
       case lp: TopLevelSubquery =>
         lp.copy(innerPeriodicSeries =
           rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, rangeSelector, additionalLookback = additionalLookback)
@@ -712,6 +720,8 @@ object PlannerUtil extends StrictLogging {
         lp.copy(
           startMs = rs.from,
           endMs = rs.to,
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookback).asInstanceOf[FunctionArgsPlan]),
           series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookback)
           .asInstanceOf[RawSeriesLikePlan])
       case lp: MetadataQueryPlan => lp
