@@ -12,8 +12,13 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  private class RVCursorImpl(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange])
+  private class RVCursorImpl(
+                              vectors: Iterable[RangeVectorCursor],
+                              outputRange: Option[RvRange],
+                              enableApproximatelyEqualCheck: Boolean,
+                              toleranceNumDecimal: Int)
     extends RangeVectorCursor {
+    private val weight = math.pow(10, toleranceNumDecimal)
     private val bVectors = vectors.map(_.buffered)
     val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
     val nanResult = new TransientRow(0, Double.NaN)
@@ -50,8 +55,7 @@ object StitchRvsExec {
           if (mins.isEmpty) {
             minTime = t
             mins += r
-          }
-          else if (t < minTime) {
+          } else if (t < minTime) {
             mins.clear()
             mins += r
             minTime = t
@@ -74,7 +78,17 @@ object StitchRvsExec {
           // until we have a different indicator for "unable-to-calculate", use NaN when multiple values seen
           val minRows = mins.map(it => if (it.hasNext) it.next() else nanResult) // move iterators forward
           val minsWithoutNan = minRows.filter(!_.getDouble(1).isNaN)
-          if (minsWithoutNan.size == 1) minsWithoutNan.head else nanResult
+          // The second condition checks if these values are equal within the tolerable limits and if yes, do not
+          // emit NaN.
+          // TODO: Make the second check and tolerance configurable?
+          if (minsWithoutNan.tail.isEmpty) {
+            minsWithoutNan.head
+          } else if (enableApproximatelyEqualCheck &&
+            minsWithoutNan.map(x => (x.getDouble(1) * weight).toLong / weight).toSet.size == 1) {
+            minsWithoutNan.head
+          } else {
+            nanResult
+          }
         }
       }
 
@@ -88,8 +102,10 @@ object StitchRvsExec {
     IteratorBackedRangeVector(v1.key, rows, outputRvRange)
   }
 
-  def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange]): RangeVectorCursor = {
-    new RVCursorImpl(vectors, outputRange)
+  def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange],
+            enableApproximatelyEqualCheck: Boolean = false,
+            toleranceNumDecimal: Int = 10): RangeVectorCursor = {
+    new RVCursorImpl(vectors, outputRange, enableApproximatelyEqualCheck, toleranceNumDecimal)
   }
 }
 
@@ -100,7 +116,9 @@ object StitchRvsExec {
 final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
                                outputRvRange: Option[RvRange],
-                               children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                               children: Seq[ExecPlan],
+                               enableApproximatelyEqualCheck: Boolean = false,
+                               toleranceNumDecimal: Int = 10) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
   outputRvRange match {
@@ -121,7 +139,8 @@ final case class StitchRvsExec(queryContext: QueryContext,
     val stitched = childResponses.map(_._1.result).toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange,
+          enableApproximatelyEqualCheck, toleranceNumDecimal)
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows, outputRvRange)
       }.values

@@ -14,7 +14,6 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
@@ -83,6 +82,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
+
 
   val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
     .withTag("cluster", clusterName)
@@ -263,16 +263,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
   // scalastyle:off method.length
-
-  private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
-    rangeSelector match {
-      case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
-      case AllChunksSelector          => AllChunkScan
-      case WriteBufferSelector        => WriteBufferChunkScan
-      case InMemoryChunksSelector     => InMemoryChunkScan
-      case x @ _                      => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
-    }
-  }
 
   /**
     * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
@@ -568,7 +558,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
 
-  private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
+  override private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      forceInProcess: Boolean): PlanResult = {
     val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
@@ -615,7 +605,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     result
   }
 
-  private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
+  override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
     val rawSeries = lp match {
       case Right(value) => value.series
       case Left(value)  => value.rawSeries
@@ -643,7 +633,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case _ => (None, None, lp)
     }
   }
-  private def materializePeriodicSeries(qContext: QueryContext,
+  override private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries,
                                         forceInProcess: Boolean): PlanResult = {
 
