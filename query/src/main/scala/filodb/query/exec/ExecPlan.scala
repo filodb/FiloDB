@@ -539,7 +539,7 @@ trait ExecPlan extends QueryCommand {
   }
 
   def curNodeText(level: Int): String =
-    s"${"-"*level}E~${getClass.getSimpleName}($args) $planId on ${dispatcher}"
+    s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
     val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n"))
