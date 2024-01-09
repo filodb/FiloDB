@@ -235,31 +235,28 @@ trait ExecPlan extends QueryCommand {
       @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       @volatile var resultSize = 0L
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
-        .map {
-          case srvable: SerializableRangeVector => srvable
-          case rv: RangeVector =>
-            // materialize, and limit rows per RV
-            val execPlanString = queryWithPlanName(queryContext)
-            val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
-            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
-            if (rv.outputRange.isEmpty)
-              qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
-                s"execPlan is: $execPlanString, execPlan children ${this.children}")
-            srv
-        }
-        .map { srv =>
-          // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-          numResultSamples += srv.numRowsSerialized
-          checkSamplesLimit(numResultSamples, querySession.warnings)
-          val srvBytes = srv.estimatedSerializedBytes
-          resultSize += srvBytes
-          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
-          checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
-          srv
-        }
-        .filter(_.numRowsSerialized > 0)
         .bufferTumbling(querySession.queryConfig.numRvsPerResultMessage)
-        .map(StreamQueryResult(queryContext.queryId, planId, _))
+        .map { f =>
+          val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
+          val srvs = f.map {
+            case srvable: SerializableRangeVector => srvable
+            case rv: RangeVector =>
+              val execPlanString = queryWithPlanName(queryContext)
+              SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
+          }
+          .map { srv =>
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            numResultSamples += srv.numRowsSerialized
+            checkSamplesLimit(numResultSamples, querySession.warnings)
+            val srvBytes = srv.estimatedSerializedBytes
+            resultSize += srvBytes
+            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
+            checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
+            srv
+          }
+          .filter(_.numRowsSerialized > 0)
+          StreamQueryResult(queryContext.queryId, planId, srvs)
+        }
         .guarantee(Task.eval {
           Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
             MeasurementUnit.time.milliseconds)
@@ -534,7 +531,7 @@ trait ExecPlan extends QueryCommand {
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
-  protected def queryWithPlanName(queryContext: QueryContext): String = {
+  def queryWithPlanName(queryContext: QueryContext): String = {
     // Disabling this since it showed up in local method profiles. Re-enable if needed for debugging
     // s"${this.getClass.getSimpleName}-${queryContext.origQueryParams}"
     s"${queryContext.queryId}:$planId"

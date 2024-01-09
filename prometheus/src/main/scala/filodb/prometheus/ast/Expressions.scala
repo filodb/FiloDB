@@ -9,9 +9,19 @@ case class UnaryExpression(operator: Operator, operand: Expression) extends Expr
     if (operator != Add && operator != Sub) {
       throw new IllegalArgumentException(s"operator=$operator is not allowed in expression=$operand")
     }
+    convertUnaryExpression().toSeriesPlan(timeParams)
+  }
+
+  private def convertUnaryExpression() : BinaryExpression = {
     // use binary expression to implement the unary operators.
     // eg. -foo is implemented through (0 - foo).
-    BinaryExpression(Scalar(0), operator, None, operand).toSeriesPlan(timeParams)
+    operand match {
+      case unaryExpression: UnaryExpression =>
+        // recursively convert a unary expression to a binary expression.
+        BinaryExpression(Scalar(0), operator, None, unaryExpression.convertUnaryExpression())
+      case _ =>
+        BinaryExpression(Scalar(0), operator, None, operand)
+    }
   }
 }
 
@@ -43,6 +53,7 @@ case class BinaryExpression(lhs: Expression,
   def hasScalarResult(expression: Expression): Boolean = {
     expression match {
       case scalarExpression: ScalarExpression => true
+      case unaryExpression: UnaryExpression => hasScalarResult(unaryExpression.operand)
       case binaryExpression: BinaryExpression => hasScalarResult(binaryExpression.lhs) &&
                                                  hasScalarResult(binaryExpression.rhs)
       case _                                  => false
@@ -141,7 +152,7 @@ case class BinaryExpression(lhs: Expression,
             val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
             val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
             BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
-              onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
+              onLabels, ignoringLabels.getOrElse(Nil),
               vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
           }
         case _ => throw new UnsupportedOperationException(s"Invalid operands: $lhsWithPrecedence, $rhsWithPrecedence")

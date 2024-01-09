@@ -101,6 +101,7 @@ case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Long, to: Long) extends RangeSelector
 
+
 /**
   * Concrete logical plan to query for raw data in a given range
   * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
@@ -111,7 +112,8 @@ case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
                      columns: Seq[String],
                      lookbackMs: Option[Long] = None,
-                     offsetMs: Option[Long] = None) extends RawSeriesLikePlan {
+                     offsetMs: Option[Long] = None,
+                     supportsRemoteDataCall: Boolean = false) extends RawSeriesLikePlan {
   override def isRaw: Boolean = true
 
   override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = {
@@ -254,7 +256,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           startMs: Long,
                           stepMs: Long,
                           endMs: Long,
-                          offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offsetMs: Option[Long] = None,
+                          atMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
@@ -311,7 +314,8 @@ case class SubqueryWithWindowing(
   functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
   subqueryStepMs: Long, //1m
-  offsetMs: Option[Long]
+  offsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -349,7 +353,8 @@ case class TopLevelSubquery(
   stepMs: Long,
   endMs: Long,
   orginalLookbackMs: Long,
-  originalOffsetMs: Option[Long]
+  originalOffsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -357,8 +362,6 @@ case class TopLevelSubquery(
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
-
-
 }
 
 /**
@@ -379,6 +382,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None,
+                                       atMs: Option[Long] = None,
                                        columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
@@ -434,6 +438,7 @@ case class Aggregate(operator: AggregationOperator,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
 }
 
 /**
@@ -450,7 +455,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       operator: BinaryOperator,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
-                      on: Seq[String] = Nil,
+                      on: Option[Seq[String]] = None,
                       ignoring: Seq[String] = Nil,
                       include: Seq[String] = Nil)
       extends PeriodicSeriesPlan with NonLeafLogicalPlan with CandidatePushdownPlan {

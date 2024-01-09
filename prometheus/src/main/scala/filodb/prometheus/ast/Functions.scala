@@ -189,7 +189,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
 
         PeriodicSeriesWithWindowing(instantExpression.toRawSeriesPlan(timeParams),
           timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0,
-          rangeFunctionId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)))
+          rangeFunctionId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)),
+          instantExpression.atTimestamp.map(_.getTimestampInSec(timeParams) * 1000))
       } else {
         seriesParam match {
           case re: RangeExpression => rangeExpressionArgument(re, timeParams, rangeFunctionId, otherParams)
@@ -213,6 +214,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       rangeExpression.window.timeUnit == IntervalMultiple,
       otherParams,
       rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
+      rangeExpression.atTimestamp.map(_.getTimestampInSec(timeParams) * 1000),
       rangeExpression.columnFilters
     )
   }
@@ -260,7 +262,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       otherParams,
       sqe.sqcl.window.millis(1L),
       subqueryStepToUseMs,
-      offsetMs
+      offsetMs,
+      sqe.atTimestamp.map(_.getTimestampInSec(timeParams)  * 1000)
     )
   }
   // scalastyle:on method.length
