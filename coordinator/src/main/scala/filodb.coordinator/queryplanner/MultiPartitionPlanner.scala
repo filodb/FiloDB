@@ -227,7 +227,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
-      case _: PeriodicSeriesWithWindowing |
+      case _: BinaryJoin |
+           _: ApplyInstantFunction |
+           _: Aggregate |
+           _: ScalarVectorBinaryOperation |
+           _: ScalarVaryingDoublePlan |
+           _: ApplyAbsentFunction |
+           _: SubqueryWithWindowing |
+           _: PeriodicSeriesWithWindowing |
            _: PeriodicSeries |
            _: RawChunkMeta                 => materializePlanHandleSplitLeaf(logicalPlan, qContext)
       case raw: RawSeries                  =>

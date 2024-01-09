@@ -959,7 +959,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 //    remoteExec2.queryEndpoint shouldEqual "remote-url"
 //
 //  }
->>>>>>> develop
 
   it ("should generate Exec plan for Metadata Label values query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
