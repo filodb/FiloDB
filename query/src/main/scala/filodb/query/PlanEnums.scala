@@ -124,7 +124,7 @@ object BinaryOperator extends Enum[BinaryOperator] {
   case object SUB extends MathOperator("-", 4)
   case object ADD extends MathOperator("+", 4)
   case object MUL extends MathOperator("*", 5)
-  case object MOD extends MathOperator("+", 5)
+  case object MOD extends MathOperator("%", 5)
   case object DIV extends MathOperator("/", 5)
   case object POW extends MathOperator("^", 6, true)
   case object LAND extends SetOperator("and", 2)

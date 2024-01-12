@@ -137,7 +137,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                   stepSecs = 1
                 )
               val newContext = qContext.copy(origQueryParams = newPromQlParams)
-              materializeForPartition(thisPartitionLp, pa, newContext)
+              // Materialize this as an instant, raw-data query.
+              materializeForPartition(thisPartitionLp, pa, newContext,
+                Some(TimeRange(thisPartitionEndMs, thisPartitionEndMs)))
             })
           PlanResult(
             Seq( if (execPlans.tail == Seq.empty) execPlans.head

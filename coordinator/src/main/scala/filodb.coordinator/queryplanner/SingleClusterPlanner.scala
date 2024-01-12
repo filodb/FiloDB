@@ -270,7 +270,9 @@ class SingleClusterPlanner(val dataset: Dataset,
         shardColumns.contains(filter.column) && !filter.filter.isInstanceOf[Equals]
       }
       val filterGroups = if (hasNonEqualsShardKeyFilter) {
-        shardKeyMatcher(rawFilters).map(LogicalPlanUtils.upsertFilters(rawFilters, _))
+        val shardKeyFilters = rawFilters.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))
+        shardKeyMatcher(shardKeyFilters)
+          .map(LogicalPlanUtils.upsertFilters(rawFilters, _))
       } else {
         Seq(rawFilters)
       }

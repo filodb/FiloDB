@@ -81,9 +81,9 @@ object StitchRvsExec {
           // The second condition checks if these values are equal within the tolerable limits and if yes, do not
           // emit NaN.
           // TODO: Make the second check and tolerance configurable?
-          if (minsWithoutNan.tail.isEmpty) {
+          if (minsWithoutNan.size == 1) {
             minsWithoutNan.head
-          } else if (enableApproximatelyEqualCheck &&
+          } else if (minsWithoutNan.size > 1 && enableApproximatelyEqualCheck &&
             minsWithoutNan.map(x => (x.getDouble(1) * weight).toLong / weight).toSet.size == 1) {
             minsWithoutNan.head
           } else {
