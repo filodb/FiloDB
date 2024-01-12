@@ -18,9 +18,6 @@ import filodb.prometheus.parse.Parser.Antlr
 import filodb.query.{BadQueryException, IntervalSelector, LabelCardinality, PlanValidationSpec, RawSeries}
 import filodb.query.exec._
 
-
-import scala.collection.mutable
-
 // scalastyle:off line.size.limit
 // scalastyle:off number.of.methods
 class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec {
@@ -591,18 +588,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         |-E~PromQlRemoteExec(PromQlQueryParams((bar{_ws_="demo",_ns_="remoteNs0",instance="Inst-1"} or vector(0.0)),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
 
     validatePlan(execPlan, expected)
-  }
-
-  class QueryExpectedPairs {
-    val pairs = new mutable.ArrayBuffer[(String, String)]
-    def addPair(query: String, plan: ExecPlan): Unit = {
-      pairs.append((query, plan.printTree().replaceAll("\n", "\n    |")))
-    }
-    def printPairs(): Unit = {
-      for ((query, expected) <- pairs) {
-        println(s"""(\"\"\"$query\"\"\",\n  \"\"\"$expected\"\"\".stripMargin),""")
-      }
-    }
   }
 
 
