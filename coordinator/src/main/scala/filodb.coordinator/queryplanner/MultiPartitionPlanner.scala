@@ -559,13 +559,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val offsetMs = getOffsetMillis(logicalPlan).max
     val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
     val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
-    val assignmentRanges = {
-      // "distinct" in case this is a BinaryJoin
-      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
-      require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
-      getAssignmentQueryRanges(partitions, timeRange,
+    val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
+    require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
+    val assignmentRanges = getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
-    }
     val execPlans = if (assignmentRanges.isEmpty) {
       // Assignment ranges empty means we cant run this query fully on one partition and needs
       // remote raw export Check if the total time of raw export is within the limits, if not return Empty result
@@ -680,7 +677,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // period 1 - 1:10 can not be served from one partition alone and needs to be computed on query service. Here
       // we will handle this case and add the missing execPlan if needed
 
-      if (assignmentRanges.length > 1 && queryConfig.routingConfig.supportRemoteRawExport) {
+      if (partitions.length > 1 && queryConfig.routingConfig.supportRemoteRawExport) {
         // Here we check if the assignment ranges cover the entire query duration
         val (_, lastTimeRange) = assignmentRanges.last
         if (lastTimeRange.endMs < timeRange.endMs) {
