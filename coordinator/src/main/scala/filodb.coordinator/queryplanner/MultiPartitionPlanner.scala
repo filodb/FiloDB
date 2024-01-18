@@ -597,7 +597,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             // Start and end is the next and previous second of the previous and current time range respectively
             val (gapStartTimeMs, gapEndTimeMs) = (
               if (stepMsOpt.isDefined)
-                snapToStep(prevTimeRange.endMs / 1000L * 1000L + 1000L, stepMsOpt.get, timeRange.startMs)
+                snapToStep(prevTimeRange.endMs / 1000L * 1000L + 1, stepMsOpt.get, timeRange.startMs)
               else
                 prevTimeRange.endMs / 1000L * 1000L + 1000L,
               (currentTimeRange.startMs / 1000L * 1000L) - 1000L)
@@ -683,7 +683,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (lastTimeRange.endMs < timeRange.endMs) {
           // this means we need to add the missing time range to the end to execute the bit on Query service
           val (gapStartTimeMs, gapEndTimeMs) = stepMsOpt match {
-            case Some(step)   =>   (snapToStep(lastTimeRange.endMs + 1000L, step, timeRange.startMs),
+            case Some(step)   =>   (snapToStep(lastTimeRange.endMs + 1, step, timeRange.startMs),
               timeRange.endMs)
             case None           => (lastTimeRange.endMs, timeRange.endMs)
           }
