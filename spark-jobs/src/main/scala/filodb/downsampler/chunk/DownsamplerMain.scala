@@ -2,12 +2,10 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
-
+import org.apache.spark.sql.{Column, SparkSession}
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
@@ -160,13 +158,17 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         if (settings.exportIsEnabled) {
           batchExporter.getExportRows(readablePartsBatch)
         } else Iterator.empty
-      }
+      }.map(row => row.)
+
+    val repartitioned = spark
+      .createDataFrame(rdd, batchExporter.exportSchema)
+      .repartition(new Column("_ws_"))
 
     // Export the data produced by "getExportRows" above.
     if (settings.exportIsEnabled) {
       val exportStartMs = System.currentTimeMillis()
       // NOTE: toDF(partitionCols: _*) seems buggy
-      spark.createDataFrame(rdd, batchExporter.exportSchema)
+      repartitioned
         .write
         .format(settings.exportFormat)
         .mode(settings.exportSaveMode)
@@ -176,7 +178,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       val exportEndMs = System.currentTimeMillis()
       exportLatency.record(exportEndMs - exportStartMs)
     } else {
-      rdd.foreach(_ => {})
+      repartitioned.foreach(_ => {})
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
