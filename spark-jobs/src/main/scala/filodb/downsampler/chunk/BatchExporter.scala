@@ -3,16 +3,13 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable
 import scala.util.matching.Regex
-
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import kamon.Kamon
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.metadata.Schemas
@@ -23,6 +20,9 @@ import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
+
+
+import scala.util.Random
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       blockFilterGroups: Seq[Seq[ColumnFilter]],
@@ -187,7 +187,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    */
   def getPartitionByValues(partKeyMap: collection.Map[String, String]): Iterator[String] = {
     partitionByValuesTemplate.iterator.zipWithIndex.map{ case (value, i) =>
-      if (partitionByValuesIndicesWithTemplate.contains(i)) {
+      if (i == 0) {
+        "ws" + Random.nextInt(3).toString
+      } else if (partitionByValuesIndicesWithTemplate.contains(i)) {
         LABEL_REGEX_MATCHER.replaceAllIn(partitionByValuesTemplate(i), matcher => partKeyMap(matcher.group(1)))
       } else {
         value

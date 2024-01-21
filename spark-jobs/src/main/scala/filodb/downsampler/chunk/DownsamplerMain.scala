@@ -158,7 +158,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         if (settings.exportIsEnabled) {
           batchExporter.getExportRows(readablePartsBatch)
         } else Iterator.empty
-      }.map(row => row.)
+      }
 
     val repartitioned = spark
       .createDataFrame(rdd, batchExporter.exportSchema)
