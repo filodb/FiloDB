@@ -328,7 +328,7 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     val datasets = Seq("longtime-prometheus",
       "recordingrules-prometheus_rules_longterm")
     val userDatasets = "\"raw\",\"recordingrules\""
-    val plan = TsCardinalities(Seq("a","b","c"), 3, 2, datasets, userDatasets)
+    val plan = TsCardinalities(Seq("a","b","c"), 3, datasets, userDatasets)
     val queryParamsMap = plan.queryParams()
 
     queryParamsMap.get("numGroupByFields").get shouldEqual "3"
