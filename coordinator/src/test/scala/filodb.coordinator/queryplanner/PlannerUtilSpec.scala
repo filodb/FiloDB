@@ -72,7 +72,7 @@ class PlannerUtilSpec  extends AnyFunSpec with Matchers {
     val q6 = "sum_over_time(foo{}[10m] offset 10m)"
     val lp6 = rewritePlanWithRemoteRawExport(
       Parser.queryRangeToLogicalPlan(q6, TimeStepParams(start, 0, end)), expectedRangeSelector,
-      additionalLookback = 600000)
+      additionalLookbackMs = 600000)
     assert(LogicalPlan.findLeafLogicalPlans(lp6) forall {
       case rs: RawSeries =>
         rs.supportsRemoteDataCall && rs.lookbackMs.isDefined && rs.lookbackMs.get == 1800000L && !rs.offsetMs.isDefined
@@ -82,7 +82,7 @@ class PlannerUtilSpec  extends AnyFunSpec with Matchers {
     val q7 = "sum(rate(foo{}[5m])) + sum(rate(bar{}[5m] offset 5m))"
     val lp7 = rewritePlanWithRemoteRawExport(
       Parser.queryRangeToLogicalPlan(q7, TimeStepParams(start, 0, end)), expectedRangeSelector,
-      additionalLookback = 600000)
+      additionalLookbackMs = 600000)
     assert(LogicalPlan.findLeafLogicalPlans(lp7) forall {
       case rs: RawSeries =>
         rs.supportsRemoteDataCall &&
