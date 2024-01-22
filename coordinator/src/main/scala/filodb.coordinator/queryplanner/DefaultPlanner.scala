@@ -683,18 +683,21 @@ object PlannerUtil extends StrictLogging {
           .asInstanceOf[PeriodicSeriesPlan],
           functionArgs = lp.functionArgs.map(
             rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]))
-      case lp: ScalarTimeBasedPlan => lp
+      case lp: ScalarTimeBasedPlan => lp.copy(
+        rangeParams = lp.rangeParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
       case lp: VectorPlan =>
         lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars, rangeSelector, additionalLookbackMs)
           .asInstanceOf[ScalarPlan])
-      case lp: ScalarFixedDoublePlan => lp
+      case lp: ScalarFixedDoublePlan => lp.copy(timeStepParams =
+        lp.timeStepParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
       case lp: ApplyAbsentFunction =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
           .asInstanceOf[PeriodicSeriesPlan])
       case lp: ApplyLimitFunction =>
         lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
           .asInstanceOf[PeriodicSeriesPlan])
-      case lp: ScalarBinaryOperation => lp
+      case lp: ScalarBinaryOperation => lp.copy(
+        rangeParams = lp.rangeParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
       case lp: SubqueryWithWindowing =>
         lp.copy(innerPeriodicSeries =
           rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, rangeSelector, additionalLookbackMs)
@@ -711,19 +714,19 @@ object PlannerUtil extends StrictLogging {
         val newLookback = lp.lookbackMs.getOrElse(0L) + lp.offsetMs.getOrElse(0L) + additionalLookbackMs
         lp.copy(supportsRemoteDataCall = true, rangeSelector = rangeSelector,
           lookbackMs = if (newLookback == 0) None else Some(newLookback), offsetMs = None)
-      case lp: RawChunkMeta => lp
+      case lp: RawChunkMeta =>  lp.copy(rangeSelector = rangeSelector)
       case lp: PeriodicSeries =>
         lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries, rangeSelector, additionalLookbackMs)
           .asInstanceOf[RawSeriesLikePlan], startMs = rangeSelector.from, endMs = rangeSelector.to)
       case lp: PeriodicSeriesWithWindowing =>
-        val rs = rangeSelector.asInstanceOf[IntervalSelector]
         lp.copy(
-          startMs = rs.from,
-          endMs = rs.to,
+          startMs = rangeSelector.from,
+          endMs = rangeSelector.to,
           functionArgs = lp.functionArgs.map(
             rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]),
           series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookbackMs)
           .asInstanceOf[RawSeriesLikePlan])
+      // wont bother rewriting and adjusting the start and end for metadata calls
       case lp: MetadataQueryPlan => lp
       case lp: TsCardinalities => lp
     }
