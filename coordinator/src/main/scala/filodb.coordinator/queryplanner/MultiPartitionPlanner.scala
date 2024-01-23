@@ -298,7 +298,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val timeRange = timeRangeOverride.getOrElse(TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
     val (partitionName, grpcEndpoint) = (partition.partitionName, partition.grpcEndPoint)
     if (partitionName.equals(localPartitionName)) {
-      // FIXME: subquery tests fail when their time-ranges are updated.
+      // FIXME: subquery tests fail when their time-ranges are updated
+      //   with the original query params
       val lpWithUpdatedTime = if (timeRangeOverride.isDefined) {
         copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
       } else logicalPlan
@@ -324,7 +325,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
    * Given a sequence of assignments and a time-range to query, returns (assignment, range)
    *   pairs that describe the time-ranges to be queried for each assignment such that:
-   *     (a) the returned ranges span only the argument time-range, and
+   *     (a) the returned ranges lie within the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
    * @param assignments must be sorted and time-disjoint
    * @param queryRange the complete time-range. Does not include the offset.
@@ -366,14 +367,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-  // FIXME: this is a copy-paste of a method in the ShardKeyRegexPlanner --
-  //  more evidence that these two classes should be merged.
-  private def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
-    execPlans.forall {
-      case _: PromQlRemoteExec => false
-      case _ => true
-    }
-
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
@@ -413,8 +406,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   private def materializePlanHandleSplitLeaf(logicalPlan: LogicalPlan,
                                              qContext: QueryContext): PlanResult = {
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // Create one plan per RawSeries/shard-key pair, then resolve its partitions.
-    // If any resides on more than one partition, the leaf is "split".
+    // (1) Find the set of shard-key filter groups for each plan.
+    // (2) Resolve each group into a set of groups (e.g. if any regex filters exist).
+    // (3) For each filter group, replace the filters of the source RawSeries plan.
+    // (4) Identify whether-or-not any of the RawSeries plans would source data from multiple partitions.
     val hasMultiPartitionLeaves =
       LogicalPlan.findLeafLogicalPlans(logicalPlan)
         .filter(_.isInstanceOf[RawSeries])
@@ -468,10 +463,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   /**
    * Materializes a LogicalPlan with leaves that individually span multiple partitions.
-   * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they span more than
-   * one non-metric shard key prefix.
-   * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize if any
-   * of the plan's BinaryJoins contain an offset.
+   * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they
+   *   span more than one non-metric shard key prefix.
+   * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize
+   *   if any of the plan's BinaryJoins contain an offset.
    */
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
@@ -491,7 +486,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // materialize a plan for each range/assignment pair
     val plans = assignmentRanges.map { case (part, range) =>
       val newParams = qParams.copy(startSecs = range.startMs / 1000,
-        endSecs = range.endMs / 1000)
+                                   endSecs = range.endMs / 1000)
       val newContext = qContext.copy(origQueryParams = newParams)
       materializeForPartition(logicalPlan, part, newContext)
     }
@@ -501,8 +496,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else {
       // returns NaNs for missing timestamps
       val rvRange = RvRange(1000 * qParams.startSecs,
-        1000 * qParams.stepSecs,
-        1000 * qParams.endSecs)
+                            1000 * qParams.stepSecs,
+                            1000 * qParams.endSecs)
       StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), plans)
     }
     PlanResult(Seq(resPlan))

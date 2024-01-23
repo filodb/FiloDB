@@ -6,9 +6,13 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, PromQlQueryParams}
 import filodb.core.query.Filter.Equals
 import filodb.query.LogicalPlan
+import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
 
 object PartitionLocationPlanner {
-  // Can be used as a default matcher function.
+  /**
+   * A default matcher function.
+   * @throws IllegalArgumentException if any filter isn't an Equals.
+   */
   def equalsOnlyShardKeyMatcher(filters: Seq[ColumnFilter]): Seq[Seq[ColumnFilter]] = {
     filters.foreach{
       case ColumnFilter(_, Equals(_)) => { /* do nothing */ }
@@ -101,4 +105,11 @@ abstract class PartitionLocationPlanner(
       partitions.forall(_.partitionName.equals(partName))
     }
   }
+
+  // TODO
+  protected def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
+    execPlans.forall {
+      case _: PromQlRemoteExec => false
+      case _ => true
+    }
 }

@@ -150,12 +150,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
     val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
     // Note: unchecked .get is OK here since it will only be called for each tail element.
-    val sameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
+    val hasSameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
     val partitions = getShardKeys(logicalPlan)
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
     if (partitions.isEmpty) {
       return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
-    } else if (sameFilters && isSinglePartition(partitions)) {
+    } else if (hasSameFilters && isSinglePartition(partitions)) {
       val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
       return PlanResult(plans)
     }
@@ -264,12 +264,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       PlanResult(Seq(execPlan))
     }
   }
-
-  private def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
-    execPlans.forall{
-      case _: PromQlRemoteExec  => false
-      case _                    => true
-    }
 
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
