@@ -213,7 +213,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   private def generateRemoteExecParams(queryContext: QueryContext, promQl: String, startMs: Long, endMs: Long) = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryContext.copy(
-      origQueryParams = queryParams.copy(promQl = promQl, startSecs = startMs/1000, endSecs = endMs / 1000),
+      origQueryParams = queryParams.copy(promQl = promQl, startSecs = startMs / 1000, endSecs = endMs / 1000),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
 
