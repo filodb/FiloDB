@@ -208,15 +208,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   // scalastyle:on cyclomatic.complexity
 
   private def getRoutingKeys(logicalPlan: LogicalPlan) = {
-    val shardKeyFilters = LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-    val columnFilterGroups =
-      shardKeyFilters.flatMap(LogicalPlanUtils.resolveShardKeyFilters(_, shardKeyMatcher))
-    val routingKeys = dataset.options.nonMetricShardColumns
-      .map{ col =>
-        val values = LogicalPlan.getColumnValues(columnFilterGroups.map(_.toSet), col)
-        (col, values)
-      }
-    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys.filter(pair => pair._2.nonEmpty)
+    LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
+        .flatMap(LogicalPlanUtils.resolveShardKeyFilters(_, shardKeyMatcher))
   }
 
   private def generateRemoteExecParams(queryContext: QueryContext, promQl: String, startMs: Long, endMs: Long) = {
@@ -258,13 +251,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
       periodicSeriesTimeWithOffset.endMs)
 
-    // create a set of routing-key key->value pairs for all combinations of values,
-    //   then use these sets to determine which partitions own the data.
-    val keys = routingKeys.map(_._1)
-    val values = routingKeys.map(_._2.toSeq)
-    val partitions = QueryUtils.combinations(values)
-      .map(valueCombo => keys.zip(valueCombo))
-      .flatMap(shardKey => partitionLocationProvider.getPartitions(shardKey.toMap, queryTimeRange))
+    val partitions = routingKeys
+      .map{ key =>
+        // Convert Seq[ColumnFilter] to Map[String, String]
+        key.map(filter => (filter.column, filter.filter.valuesStrings.head.toString)).toMap
+      }
+      .flatMap(shardKey => partitionLocationProvider.getPartitions(shardKey, queryTimeRange))
       .distinct
       .sortBy(_.timeRange.startMs)
     if (partitions.isEmpty && routingKeys.nonEmpty)
@@ -279,7 +271,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   def materializeNonSplitPeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
-    val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
+    val execPlan = if (partitions.isEmpty || routingKeys.isEmpty)
       localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val execPlans = partitions.map(materializeForPartition(logicalPlan, _, qContext))
