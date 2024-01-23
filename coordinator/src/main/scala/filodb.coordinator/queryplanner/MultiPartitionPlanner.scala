@@ -240,10 +240,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
            _: SubqueryWithWindowing |
            _: PeriodicSeriesWithWindowing |
            _: PeriodicSeries |
-           _: RawChunkMeta |
-           _: RawSeries                    => materializePlanHandleSplitLeaf(logicalPlan, qContext)
-      case _: PeriodicSeriesWithWindowing |
-           _: PeriodicSeries               => materializePlanHandleSplitLeaf(logicalPlan, qContext)
+           _: RawChunkMeta => materializePlanHandleSplitLeaf(logicalPlan, qContext)
       case raw: RawSeries                  =>
                                               val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
                                               if(getPartitions(raw, params).tail.nonEmpty
@@ -254,10 +251,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                                   forceInProcess = true)
                                               else
                                                 materializePlanHandleSplitLeaf(logicalPlan, qContext)
-
-
-
-      case lp: RawChunkMeta                => materializePeriodicAndRawSeries(lp, qContext)
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -492,16 +485,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       materializeSplitLeafPlan(logicalPlan, qContext)
     } else { logicalPlan match {
       case agg: Aggregate => materializeAggregate(agg, qContext)
-      case psw: PeriodicSeriesWithWindowing => materializeNonSplitPeriodicAndRawSeries(psw, qContext)
+      case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
       case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
       case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
       case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
-      case ps: PeriodicSeries => materializeNonSplitPeriodicAndRawSeries(ps, qContext)
-      case rcm: RawChunkMeta => materializeNonSplitPeriodicAndRawSeries(rcm, qContext)
-      case rs: RawSeries => materializeNonSplitPeriodicAndRawSeries(rs, qContext)
+      case ps: PeriodicSeries => materializePeriodicAndRawSeries(ps, qContext)
+      case rcm: RawChunkMeta => materializePeriodicAndRawSeries(rcm, qContext)
+      case rs: RawSeries => materializePeriodicAndRawSeries(rs, qContext)
       case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
     }}
   }
