@@ -607,19 +607,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Binary join; same shards, join key is ts superset. Should pushdown.
       ("""foo{job="baz"} + on(job,app) bar{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)""".stripMargin),
       // Binary join; different shards, join key is ts superset. Should not pushdown.
       ("""foo{job="baz"} + on(job, app) bar{job="bat"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1594457115],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1594457115],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1594457115],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -631,19 +631,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // BinaryJoin with SetOp; same shards, join key is strict ts superset. Should pushdown.
       ("""foo{job="baz"} and on(job, app, inst) bar{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#169424276],raw)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(job, app, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#169424276],raw)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(job, app, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#169424276],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@54755dd9)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@54755dd9)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(job, app, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#169424276],raw)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(job, app, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#169424276],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@54755dd9)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@54755dd9)""".stripMargin),
       // BinaryJoin with SetOp; different shards, join key is ts superset. Should not pushdown.
       ("""foo{job="baz"} and on (job, app) bar{job="bat"}""",
-        """E~SetOperatorExec(binaryOp=LAND, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-917749872],raw)
+        """E~SetOperatorExec(binaryOp=LAND, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-917749872],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-917749872],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -655,16 +655,16 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown nested joins.
       ("""(foo{job="baz"} - on(job, app) bar{job="baz"}) and on(job, app) bat{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1262424879],raw)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1262424879],raw)
-          |--E~BinaryJoinExec(binaryOp=SUB, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1262424879],raw)
+          |--E~BinaryJoinExec(binaryOp=SUB, on=Some(List(job, app)), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1262424879],raw)
-          |--E~BinaryJoinExec(binaryOp=SUB, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1262424879],raw)
+          |--E~BinaryJoinExec(binaryOp=SUB, on=Some(List(job, app)), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -673,13 +673,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)""".stripMargin),
       // Should only pushdown inner join since outer join key is not ts superset.
       ("""(foo{job="baz"} - on(job, app) bar{job="baz"}) and on(job) bat{job="baz"}""",
-        """E~SetOperatorExec(binaryOp=LAND, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
-          |-E~BinaryJoinExec(binaryOp=SUB, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
+        """E~SetOperatorExec(binaryOp=LAND, on=Some(List(job)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
+          |-E~BinaryJoinExec(binaryOp=SUB, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
-          |-E~BinaryJoinExec(binaryOp=SUB, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
+          |-E~BinaryJoinExec(binaryOp=SUB, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -690,7 +690,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1264611289],raw)""".stripMargin),
       // Should not pushdown; missing ts "on" labels.
       ("""foo{job="baz"} + on(job, label, inst) bar{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, label, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1632120907],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, label, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1632120907],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1632120907],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -701,7 +701,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1632120907],raw)""".stripMargin),
       // Should not pushdown w/ ignoring clause.
       ("""foo{job="baz"} + ignoring(inst) baz{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1742163606],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1742163606],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1742163606],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -713,13 +713,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown each mapper function.
       ("""sgn(foo{job="baz"}) + on(job, app) rate(bar{job="baz"}[1m])""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1164681354],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1164681354],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1164681354],raw)
           |--T~InstantVectorFunctionMapper(function=Sgn)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1164681354],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1164681354],raw)
           |--T~InstantVectorFunctionMapper(function=Sgn)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
@@ -729,13 +729,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ("""sgn(foo{job="baz"} + on(job, app) bar{job="baz"})""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1827417788],raw)
           |-T~InstantVectorFunctionMapper(function=Sgn)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1827417788],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1827417788],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |-T~InstantVectorFunctionMapper(function=Sgn)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1827417788],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1827417788],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -745,13 +745,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-852082083],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-852082083],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-852082083],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c3e4b1a)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c3e4b1a)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-852082083],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-852082083],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c3e4b1a)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -759,7 +759,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown most scalars (see below for the exceptions).
       ("""(foo{job="bak"} + 3 + time()) + on(job, app) (baz{job="bak"} + (4 + 5))""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
           |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |---FA1~TimeFuncArgs(RangeParams(20000,100,30000))
           |---T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
@@ -771,7 +771,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~ScalarBinaryOperationExec(params = RangeParams(20000,100,30000), operator = ADD, lhs = Left(4.0), rhs = Left(5.0)) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@5a545b0f)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@9301672)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
           |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |---FA1~TimeFuncArgs(RangeParams(20000,100,30000))
           |---T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
@@ -785,7 +785,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@9301672)""".stripMargin),
       // Should not pushdown scalar(<vector>) or vector(<scalar>).
       ("""(foo{job="bak"} + on(job, app) scalar(bar{job="bak"})) + (foo{job="bak"} + on(job, app) vector(0))""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
+        """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
           |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |--FA1~
           |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
@@ -806,7 +806,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -815,7 +815,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~ScalarFixedDoubleExec(params = RangeParams(20000,100,30000), value = 0.0) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)""".stripMargin),
       // Should not pushdown with regex when some target-schema cols are missing from `on` clause.
       ("""foo{job="baz",app=~"abc|123"} + on(job) bar{job="baz",app=~"abc|123"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -827,12 +827,12 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown with regex when all target-schema cols are given in `on` clause.
       ("""foo{job="baz",app=~"abc|123"} + on(job,app) bar{job="baz",app=~"abc|123"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -851,9 +851,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
          |    sgn(rate(foo{job="baz"}[1m])) + on(job, app) sqrt(bar{job="baz"})
          |  )
          |)""".stripMargin,
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, inst, tag), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job, inst, tag), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, inst, tag)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, inst, tag)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -862,7 +862,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
@@ -873,8 +873,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---T~InstantVectorFunctionMapper(function=Ceil)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~InstantVectorFunctionMapper(function=Floor)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
@@ -885,14 +885,14 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~InstantVectorFunctionMapper(function=Sgn)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~InstantVectorFunctionMapper(function=Sqrt)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-114649842],raw)
           |---T~InstantVectorFunctionMapper(function=Sgn)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
@@ -1064,7 +1064,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
       // Should not pushdown join when aggregate 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job) + on(job, app) bat{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
@@ -1079,7 +1079,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)""".stripMargin),
       // Should only pushdown aggregate when join 'on' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job) bat{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1162894714],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1162894714],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1162894714],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1097,7 +1097,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown join and aggregate when by/on labels are TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job, app) bat{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-747302117],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-747302117],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-747302117],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5e5aafc6)
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1105,7 +1105,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5e5aafc6)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5e5aafc6)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-747302117],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-747302117],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5e5aafc6)
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1116,7 +1116,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown join and aggregates when by/on labels are TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job, app) sum(bat{job="baz"}) by (job, app)""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1974371112],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1974371112],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1974371112],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1127,7 +1127,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1974371112],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1974371112],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1140,7 +1140,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)""".stripMargin),
       // Should pushdown only one aggregate when other 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job, app) sum(bat{job="baz"}) by (job)""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1736249280],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1736249280],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1736249280],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
@@ -1165,7 +1165,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1207946820],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
-          |----E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
+          |----E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1173,7 +1173,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1207946820],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
-          |----E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
+          |----E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1183,7 +1183,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1197,13 +1197,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(job, app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1243,19 +1243,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Binary join; same shards, join key is ts superset. Should pushdown.
       ("""foo{job="baz"} + on(app) bar{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-932570002],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-932570002],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-932570002],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-932570002],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-932570002],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Binary join; different shards, join key is ts superset. Should not pushdown.
       ("""foo{job="baz"} + on(app) bar{job="bat"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1973748247],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1973748247],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1973748247],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1267,19 +1267,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // BinaryJoin with SetOp; same shards, join key is strict ts superset. Should pushdown.
       ("""foo{job="baz"} and on(app, inst) bar{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1851388859],raw)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(app, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1851388859],raw)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(app, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1851388859],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(app, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1851388859],raw)
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(app, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1851388859],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // BinaryJoin with SetOp; different shards, join key is ts superset. Should not pushdown.
       ("""foo{job="baz"} and on (app) bar{job="bat"}""",
-        """E~SetOperatorExec(binaryOp=LAND, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#467623007],raw)
+        """E~SetOperatorExec(binaryOp=LAND, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#467623007],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#467623007],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1291,16 +1291,16 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown nested joins.
       ("""(foo{job="baz"} - on(app) bar{job="baz"}) and on(app) bat{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1223793877],raw)
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1223793877],raw)
-          |--E~BinaryJoinExec(binaryOp=SUB, on=List(app), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1223793877],raw)
+          |--E~BinaryJoinExec(binaryOp=SUB, on=Some(List(app)), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~SetOperatorExec(binaryOp=LAND, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1223793877],raw)
-          |--E~BinaryJoinExec(binaryOp=SUB, on=List(app), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |-E~SetOperatorExec(binaryOp=LAND, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1223793877],raw)
+          |--E~BinaryJoinExec(binaryOp=SUB, on=Some(List(app)), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1309,13 +1309,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Should only pushdown inner join since outer join key is not ts superset.
       ("""(foo{job="baz"} - on(app) bar{job="baz"}) and on() bat{job="baz"}""",
-        """E~SetOperatorExec(binaryOp=LAND, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
-          |-E~BinaryJoinExec(binaryOp=SUB, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
+        """E~SetOperatorExec(binaryOp=LAND, on=Some(List()), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
+          |-E~BinaryJoinExec(binaryOp=SUB, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=SUB, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
+          |-E~BinaryJoinExec(binaryOp=SUB, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1326,7 +1326,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1687173675],raw)""".stripMargin),
       // Should not pushdown; missing ts "on" labels.
       ("""foo{job="baz"} + on(label, inst) bar{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(label, inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#837645626],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(label, inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#837645626],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#837645626],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1338,13 +1338,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown each mapper function.
       ("""sgn(foo{job="baz"}) + on(app) rate(bar{job="baz"}[1m])""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~InstantVectorFunctionMapper(function=Sgn)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~InstantVectorFunctionMapper(function=Sgn)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
@@ -1354,13 +1354,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ("""sgn(foo{job="baz"} + on(app) bar{job="baz"})""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~InstantVectorFunctionMapper(function=Sgn)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-T~InstantVectorFunctionMapper(function=Sgn)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1370,13 +1370,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1384,7 +1384,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown most scalars (see below for the exceptions).
       ("""(foo{job="bak"} + 3 + time()) + on(app) (baz{job="bak"} + (4 + 5))""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |---FA1~TimeFuncArgs(RangeParams(20000,100,30000))
           |---T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
@@ -1396,7 +1396,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~ScalarBinaryOperationExec(params = RangeParams(20000,100,30000), operator = ADD, lhs = Left(4.0), rhs = Left(5.0)) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |---FA1~TimeFuncArgs(RangeParams(20000,100,30000))
           |---T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
@@ -1410,7 +1410,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Should not pushdown scalar(<vector>) or vector(<scalar>).
       ("""(foo{job="bak"} + on(app) scalar(bar{job="bak"})) + (foo{job="bak"} + on(app) vector(0))""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+        """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
           |--FA1~
           |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
@@ -1431,7 +1431,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1440,7 +1440,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~ScalarFixedDoubleExec(params = RangeParams(20000,100,30000), value = 0.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Should not pushdown with regex when some target-schema cols are missing from `on` clause.
       ("""foo{job="baz",app=~"abc|123"} + on() bar{job="baz",app=~"abc|123"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List()), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1452,12 +1452,12 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown with regex when all target-schema cols are given in `on` clause.
       ("""foo{job="baz",app=~"abc|123"} + on(app) bar{job="baz",app=~"abc|123"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1476,9 +1476,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
          |    sgn(rate(foo{job="baz"}[1m])) + on(app) sqrt(bar{job="baz"})
          |  )
          |)""".stripMargin,
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(inst, tag), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(inst, tag), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(inst, tag)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(inst, tag)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1487,7 +1487,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List(inst)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
@@ -1498,8 +1498,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---T~InstantVectorFunctionMapper(function=Ceil)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(inst), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(inst)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List()), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~InstantVectorFunctionMapper(function=Floor)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
@@ -1510,14 +1510,14 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~InstantVectorFunctionMapper(function=Sgn)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |---T~InstantVectorFunctionMapper(function=Sqrt)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |--E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~InstantVectorFunctionMapper(function=Sgn)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19940000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
@@ -1669,7 +1669,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
       // Should not pushdown join when aggregate 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by () + on(app) bat{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
@@ -1684,7 +1684,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)""".stripMargin),
       // Should only pushdown aggregate when join 'on' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (app) + on() bat{job="baz"}""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List()), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1702,7 +1702,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown join and aggregate when by/on labels are TS label supersets.
       ("""sum(foo{job="baz"}) by (app) + on(app) bat{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1710,7 +1710,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1721,7 +1721,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // Should pushdown join and aggregates when by/on labels are TS label supersets.
       ("""sum(foo{job="baz"}) by (app) + on(app) sum(bat{job="baz"}) by (app)""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1732,7 +1732,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
-          |-E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1745,7 +1745,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Should pushdown only one aggregate when other 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (app) + on(app) sum(bat{job="baz"}) by ()""",
-        """E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+        """E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
@@ -1770,7 +1770,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
-          |----E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |----E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1778,7 +1778,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
-          |----E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |----E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1788,7 +1788,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List()), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -1802,13 +1802,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---E~BinaryJoinExec(binaryOp=ADD, on=List(app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |---E~BinaryJoinExec(binaryOp=ADD, on=Some(List(app)), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -2454,7 +2454,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         1, 10, 100,
         RangeFunctionId.QuantileOverTime,
         Seq(funcArg),
-        100, 50, None
+        100, 50, None, None
       ),
       PeriodicSeriesWithWindowing(
         rawSeries,

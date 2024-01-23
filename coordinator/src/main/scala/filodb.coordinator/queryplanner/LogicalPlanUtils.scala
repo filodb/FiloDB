@@ -476,7 +476,8 @@ object LogicalPlanUtils extends StrictLogging {
 
     val clauseLabels = plan match {
       case Aggregate(_, _, _, clauseOpt) => clauseOpt.get.labels
-      case BinaryJoin(_, _, _, _, on, _, _) => on
+      // TODO: Validate this is indeed the expected behavior as on clause with empty () vs no on clause are not same
+      case BinaryJoin(_, _, _, _, on, _, _) => on.getOrElse(Nil)
     }
 
     // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema

@@ -47,6 +47,25 @@ import filodb.query.exec._
     PlanResult(Seq(execPlan))
   }
 
+  private def getAtModifierTimestampsWithOffset(periodicSeriesPlan: PeriodicSeriesPlan): Seq[Long] = {
+    periodicSeriesPlan match {
+      case ps: PeriodicSeries => ps.atMs.map(at => at - ps.offsetMs.getOrElse(0L)).toSeq
+      case sww: SubqueryWithWindowing => sww.atMs.map(at => at - sww.offsetMs.getOrElse(0L)).toSeq
+      case psw: PeriodicSeriesWithWindowing => psw.atMs.map(at => at - psw.offsetMs.getOrElse(0L)).toSeq
+      case ts: TopLevelSubquery =>     ts.atMs.map(at => at - ts.originalOffsetMs.getOrElse(0L)).toSeq
+      case bj: BinaryJoin =>  getAtModifierTimestampsWithOffset(bj.lhs) ++ getAtModifierTimestampsWithOffset(bj.rhs)
+      case agg: Aggregate => getAtModifierTimestampsWithOffset(agg.vectors)
+      case aif: ApplyInstantFunction => getAtModifierTimestampsWithOffset(aif.vectors)
+      case amf: ApplyMiscellaneousFunction => getAtModifierTimestampsWithOffset(amf.vectors)
+      case asf: ApplySortFunction => getAtModifierTimestampsWithOffset(asf.vectors)
+      case aaf: ApplyAbsentFunction => getAtModifierTimestampsWithOffset(aaf.vectors)
+      case alf: ApplyLimitFunction => getAtModifierTimestampsWithOffset(alf.vectors)
+      case _: RawChunkMeta | _: ScalarBinaryOperation | _: ScalarFixedDoublePlan | _: ScalarTimeBasedPlan|
+        _: ScalarVaryingDoublePlan | _: ScalarVectorBinaryOperation | _: VectorPlan => Seq()
+    }
+  }
+
+
   // scalastyle:off method.length
   private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
     import LogicalPlan._
@@ -55,9 +74,24 @@ import filodb.query.exec._
     val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
+
     val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
+    val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
+
+    val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
+      // should be in raw cluster.
+      atModifierTimestampsWithOffset.forall(at => at - lookbackMs >= earliestRawTime)
+    } else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
+      // should be in down sample cluster.
+      atModifierTimestampsWithOffset.forall(at => at - lookbackMs < earliestRawTime)
+    } else {
+      atModifierTimestampsWithOffset.isEmpty
+    }
+    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported. Because it queries" +
+      s"both down sampled and raw data. Please adjust the query parameters if you want to use @modifier.")
+
     if (maxOffset != minOffset
           && startWithOffsetMs - lookbackMs < earliestRawTime
           && endWithOffsetMs >= earliestRawTime) {

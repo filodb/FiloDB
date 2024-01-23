@@ -295,7 +295,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("month(vector(1456790399)) + day_of_month(vector(1456790399))", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
-      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+      """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher
         |-T~InstantVectorFunctionMapper(function=Month)
         |--T~VectorFunctionMapper(funcParams=List())
         |---E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.456790399E9) on InProcessPlanDispatcher
@@ -415,7 +415,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~BinaryJoinExec(binaryOp=GTR_BOOL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349], raw)
+      """E~BinaryJoinExec(binaryOp=GTR_BOOL, on=None, ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349], raw)
         |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349], raw)
         |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)

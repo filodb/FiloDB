@@ -155,16 +155,17 @@ final case class PeriodicSamplesMapper(startMs: Long,
    * pronounced if [1i] notation was used and step == lookback.
    */
   private def extendLookback(rv: RangeVector, window: Long): Long = {
+    window
     // TODO There is a code path is used by Histogram bucket extraction path where
     // underlying vector need not be a RawDataRangeVector. For those cases, we may
     // not able to reliably extend lookback.
     // Much more thought and work needed - so punting the bug
-    val pubInt = rv match {
-      case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
-          => rvrd.publishInterval.getOrElse(0L)
-      case _ => 0L
-    }
-    window + pubInt
+//    val pubInt = rv match {
+//      case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
+//          => rvrd.publishInterval.getOrElse(0L)
+//      case _ => 0L
+//    }
+//    window + pubInt
   }
 
   // Transform source double or long to double schema
@@ -343,7 +344,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
   override def hasNext: Boolean = curWindowEnd <= end
   override def next(): TransientRow = {
     val curWindowStart = curWindowEnd - window
-    // current window is: (curWindowStart, curWindowEnd]. Excludes start, includes end.
+    // current window is: [curWindowStart, curWindowEnd]. Includes start, end.
 
     // Add elements to window until end of current window has reached
     while (rows.hasNext && rows.head.timestamp <= curWindowEnd) {
@@ -377,7 +378,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
     // cur is inside current window
-    cur.timestamp > curWindowStart
+    cur.timestamp >= curWindowStart
   }
 
   /**
@@ -389,7 +390,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     * @param curWindowStart start time of the current window
     */
   private def shouldRemoveWindowHead(curWindowStart: Long): Boolean = {
-    (!windowQueue.isEmpty) && windowQueue.head.timestamp <= curWindowStart
+    (!windowQueue.isEmpty) && windowQueue.head.timestamp < curWindowStart
   }
 }
 

@@ -11,6 +11,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.TimeSeriesStore
+import filodb.core.memstore.ratelimit.CardinalityStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
@@ -21,6 +22,7 @@ import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query.exec.TsCardExec.MAX_RESULT_SIZE
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -77,22 +79,33 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
   */
 final case class TsCardReduceExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
-                                  children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                  children: Seq[ExecPlan],
+                                  resultSize: Int = MAX_RESULT_SIZE) extends NonLeafExecPlan {
   import TsCardExec._
 
   override protected def args: String = ""
 
-  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector):
+  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector, rs: ResultSchema):
       mutable.HashMap[ZeroCopyUTF8String, CardCounts] = {
     rv.rows().foreach{ r =>
       val data = RowData.fromRowReader(r)
       val accCountsOpt = acc.get(data.group)
       // Check if we either (1) won't increase the size or (2) have enough room for another.
       // Accordingly retrieve the key to update and the counts to increment.
-      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESULT_SIZE) {
+      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.contains(data.group) || acc.size < resultSize) {
         (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
       } else {
-        (OVERFLOW_GROUP, acc.getOrElseUpdate(OVERFLOW_GROUP, CardCounts(0, 0)))
+        // handle overflow group based on result schema given
+        if (rs.hasSameColumnsAs(TsCardExec.RESULT_SCHEMA)) {
+          // aggregate by dataset as well
+          val groupArray = data.group.toString.split(TsCardExec.PREFIX_DELIM)
+          val dataset = groupArray(groupArray.size - 1)
+          val dataGroup = prefixToGroupWithDataset(CardinalityStore.OVERFLOW_PREFIX, dataset)
+          (dataGroup, acc.getOrElseUpdate(dataGroup, CardCounts(0, 0)))
+        }
+        else {
+          (OVERFLOW_GROUP, acc.getOrElseUpdate(OVERFLOW_GROUP, CardCounts(0, 0)))
+        }
       }
       acc.update(groupKey, accCounts.add(data.counts))
     }
@@ -106,8 +119,17 @@ final case class TsCardReduceExec(queryContext: QueryContext,
   override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
-    val taskOfResults = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
-      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
+
+    // capture the result schema of responses
+    var rs = ResultSchema.empty
+    val flatMapData = childResponses.flatMap(res => {
+      if (rs == ResultSchema.empty) {
+        rs = res._1.resultSchema
+      }
+      Observable.fromIterable(res._1.result)
+    })
+    val taskOfResults = flatMapData
+      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])((x, y) => mapFold(x, y, rs))
       .map{ aggMap =>
         val it = aggMap.toSeq.sortBy(-_._2.shortTerm).map{ case (group, counts) =>
           CardRowReader(group, counts)

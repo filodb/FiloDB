@@ -3,12 +3,14 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.concurrent.{Map => ConcurrentMap}
+import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
+import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RvRange}
 import filodb.grpc.GrpcCommonUtils
@@ -65,7 +67,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 
-
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       // Pseudo code for the materialize
       //
@@ -111,27 +112,66 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
-    val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
     // and not well tested. The logic below would not work well for any kind of subquery since their actual
     // start and ends are different from the start/end parameter of the query context. If we are to implement
     // stitching across time, we need to to pass proper parameters to getPartitions() call
-    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
+    if (forceInProcess) {
+      // If inprocess is required, we will rely on the DefaultPlanner's implementation as the expectation is that the
+      // raw series is doing a remote call to get all the data.
+      logicalPlan match {
+        case lp: RawSeries    if lp.supportsRemoteDataCall=>
+            val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+            val rs = lp.rangeSelector.asInstanceOf[IntervalSelector]
 
-    if (isSinglePartition(partitions)) {
+            val (rawExportStart, rawExportEnd) =
+              (rs.from - lp.offsetMs.getOrElse(0L) - lp.lookbackMs.getOrElse(0L), rs.to - lp.offsetMs.getOrElse(0L))
 
-      val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
+            val partition = getPartitions(lp, params)
+            assert(partition.nonEmpty, s"Unexpected to see partitions empty for logicalPlan=$lp and param=$params")
+            // Raw export from both involved partitions for the entire time duration as the namespace migration
+            // is not guaranteed to happen exactly at the time of split
+            val execPlans = partition.map(pa => {
+              val (thisPartitionStartMs, thisPartitionEndMs) = (rawExportStart, rawExportEnd)
+              val totalOffsetThisPartitionMs = thisPartitionEndMs - thisPartitionStartMs
+              val thisPartitionLp = lp.copy(offsetMs = None, lookbackMs = Some(totalOffsetThisPartitionMs))
+              val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(thisPartitionLp),
+                  startSecs = thisPartitionEndMs / 1000L,
+                  endSecs = thisPartitionEndMs / 1000L,
+                  stepSecs = 1
+                )
+              val newContext = qContext.copy(origQueryParams = newPromQlParams)
+              materializeForPartition(thisPartitionLp, pa, newContext)
+            })
+          PlanResult(
+            Seq( if (execPlans.tail == Seq.empty) execPlans.head
+            else {
+              val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp))
+                StitchRvsExec(qContext.copy(origQueryParams = newPromQlParams)
+                  , inProcessPlanDispatcher, None,
+                  execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+                  enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
+            }
+            )
+          )
+        case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
+      }
+    } else {
+      val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
+      if (isSinglePartition(partitions)) {
+        val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
           case Some(pa: PartitionAssignment)
-                                         => (pa.partitionName, params.startSecs * 1000L,
-                                                params.endSecs * 1000L, pa.grpcEndPoint)
-          case None                      => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
+          => (pa.partitionName, params.startSecs * 1000L,
+            params.endSecs * 1000L, pa.grpcEndPoint)
+          case None => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
         }
 
         // If the plan is on a single partition, then depending on partition name we either delegate to local or
         // remote planner
         val execPlan = if (partitionName.equals(localPartitionName)) {
-            localPartitionPlanner.materialize(logicalPlan, qContext)
+          localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
           val promQl = LogicalPlanParser.convertToQuery(logicalPlan)
           val remoteContext = logicalPlan match {
@@ -162,7 +202,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           }
         }
         PlanResult(Seq(execPlan))
-    } else walkMultiPartitionPlan(logicalPlan, qContext)
+      } else walkMultiPartitionPlan(logicalPlan, qContext)
+    }
   }
   // scalastyle:on method.length
 
@@ -201,6 +242,22 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
            _: PeriodicSeries |
            _: RawChunkMeta |
            _: RawSeries                    => materializePlanHandleSplitLeaf(logicalPlan, qContext)
+      case _: PeriodicSeriesWithWindowing |
+           _: PeriodicSeries               => materializePlanHandleSplitLeaf(logicalPlan, qContext)
+      case raw: RawSeries                  =>
+                                              val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+                                              if(getPartitions(raw, params).tail.nonEmpty
+                                                && queryConfig.routingConfig.supportRemoteRawExport)
+                                                this.walkLogicalPlanTree(
+                                                  raw.copy(supportsRemoteDataCall = true),
+                                                  qContext,
+                                                  forceInProcess = true)
+                                              else
+                                                materializePlanHandleSplitLeaf(logicalPlan, qContext)
+
+
+
+      case lp: RawChunkMeta                => materializePeriodicAndRawSeries(lp, qContext)
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -264,9 +321,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize plans with leaves that are not split across time.
-   */
-  def materializeNonSplitPeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+    * Materialize all queries except Binary Join and Metadata
+    */
+  private def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
     val execPlan = if (partitions.isEmpty || routingKeys.isEmpty)
@@ -276,8 +333,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (execPlans.size == 1) execPlans.head
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
-        MultiPartitionDistConcatExec(
-          qContext, inProcessPlanDispatcher, execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+        StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+          enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
       }
       // Sort to move RemoteExec in end as it does not have schema
     }
@@ -333,7 +391,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
    *                  (i.e. all range start times (except the first) should be snapped to a step)
    */
-  def getAssignmentQueryRanges(assignments: Seq[PartitionAssignment], queryRange: TimeRange,
+  private def getAssignmentQueryRanges(assignments: Seq[PartitionAssignment], queryRange: TimeRange,
                                lookbackMs: Long = 0L, offsetMs: Long = 0L,
                                stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
@@ -343,11 +401,17 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       return Nil
     }
     val headRange = {
-      val range = filteredAssignments.head.timeRange
-      Some(TimeRange(math.max(queryRange.startMs, range.startMs),
-                     math.min(range.endMs + offsetMs, queryRange.endMs)))
+      val partRange = assignments.head.timeRange
+      if (queryRange.startMs <= partRange.endMs) {
+        // At least, some part of the query ends up in this first partition
+        Some(TimeRange(math.max(queryRange.startMs, partRange.startMs),
+                       math.min(partRange.endMs + offsetMs, queryRange.endMs)))
+      } else
+        None
     }
     // Snap remaining range starts to a step (if a step is provided).
+    // Add the constant period of uncertainity to the start of the Assignment time
+    // TODO: Move to config later
     val tailRanges = filteredAssignments.tail.takeWhile(_.timeRange.startMs < queryRange.endMs).map { assign =>
       val startMs = if (stepMsOpt.nonEmpty) {
         snapToStep(timestamp = assign.timeRange.startMs + lookbackMs + offsetMs,
@@ -357,9 +421,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         assign.timeRange.startMs + lookbackMs + offsetMs
       }
       val endMs = math.min(queryRange.endMs, assign.timeRange.endMs + offsetMs)
-      if (startMs <= endMs) {
-        Some(TimeRange(startMs, endMs))
-      } else None
+      val periodOfUncertaintyMs = if (queryConfig.routingConfig.supportRemoteRawExport)
+              queryConfig.routingConfig.periodOfUncertaintyMs
+              else
+                0
+      if (startMs + periodOfUncertaintyMs <= endMs) {
+        Some(TimeRange(startMs + periodOfUncertaintyMs, endMs))
+      } else
+        None
     }
     // Filter out the Nones and flatten the Somes.
     (Seq(headRange) ++ tailRanges).zip(filteredAssignments).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
@@ -468,41 +537,175 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize
    *   if any of the plan's BinaryJoins contain an offset.
    */
+  //scalastyle:off method.length
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
+    // TODO: Reassess this validate, we should also support binary joins in split leaf as long as they are within
+    //  the limits of max range of data exported
     validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
-    val assignmentRanges = {
-      // "distinct" in case this is a BinaryJoin
-      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
-      val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
-      val lookbackMs = getLookBackMillis(logicalPlan).max
-      val offsetMs = getOffsetMillis(logicalPlan).max
-      val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
-      getAssignmentQueryRanges(partitions, timeRange,
+    val lookbackMs = getLookBackMillis(logicalPlan).max
+    val offsetMs = getOffsetMillis(logicalPlan).max
+    val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
+    val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
+    val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
+    require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
+    val assignmentRanges = getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
+    val execPlans = if (assignmentRanges.isEmpty) {
+      // Assignment ranges empty means we cant run this query fully on one partition and needs
+      // remote raw export Check if the total time of raw export is within the limits, if not return Empty result
+      // While it may seem we don't tune the lookback of the leaf raw queries to exactly what we need from each
+      // partition, in reality it doesnt matter as despite a longer lookback, the actual data exported will be at most
+      // what that partition contains.
+      val (startTime, endTime) = (qParams.startSecs, qParams.endSecs)
+      val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs
+      if (queryConfig.routingConfig.supportRemoteRawExport &&
+        queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
+        val newLp = rewritePlanWithRemoteRawExport(logicalPlan, IntervalSelector(startTime * 1000, endTime * 1000))
+        walkLogicalPlanTree(newLp, qContext, forceInProcess = true).plans
+      } else {
+        if (queryConfig.routingConfig.supportRemoteRawExport) {
+          logger.warn(
+            s"Remote raw export is supported and the $totalExpectedRawExport ms" +
+              s" is greater than the max allowed raw export duration of " +
+              s"${queryConfig.routingConfig.maxRemoteRawExportTimeRange}" +
+              s" for promQl=${qParams.promQl}")
+        } else {
+          logger.warn(s"Remote raw export not enabled for promQl=${qParams.promQl}")
+        }
+        Seq(EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher))
+      }
+    } else {
+      // materialize a plan for each range/assignment pair
+      val (_, execPlans) = assignmentRanges.foldLeft(
+        (None: Option[(PartitionAssignment, TimeRange)], ListBuffer.empty[ExecPlan])) {
+        case (acc, next) => acc match {
+          case (Some((_, prevTimeRange)), ep: ListBuffer[ExecPlan]) =>
+            val (currentAssignment, currentTimeRange) = next
+            // Start and end is the next and previous second of the previous and current time range respectively
+            val (gapStartTimeMs, gapEndTimeMs) = (
+              if (stepMsOpt.isDefined)
+                snapToStep(prevTimeRange.endMs / 1000L * 1000L + 1, stepMsOpt.get, timeRange.startMs)
+              else
+                prevTimeRange.endMs / 1000L * 1000L + 1000L,
+              (currentTimeRange.startMs / 1000L * 1000L) - 1000L)
+
+
+            // If we enable stitching the missing part of time range between the previous time range's end time and
+            // current time range's start time, we will perform remote/local partition raw data export
+            if (queryConfig.routingConfig.supportRemoteRawExport && gapStartTimeMs < gapEndTimeMs) {
+              //  We need to perform raw data export from two partitions, for simplicity we will assume the time range
+              //  spans 2 partition, one partition is on the left and one on the right
+              // Walk the plan to make all RawSeries support remote export fetching the data from previous partition
+              // When we rewrite the RawSeries's rangeSelector, we will make the start and end time same as the end
+              // of the
+              // previous partition's end time and then do a raw query for the duration of the
+              //  (currentTimeRange.startMs - currentAssignment.timeRange.startMs) + offset + lookback.
+              //           Partition split   end time for queries in partition 1
+              //                       V(p)  V(t1)
+              //  |----o---------------|-----x------x-----------------------------o-------|
+              //       ^(s)                         ^(t2)                         ^(e)
+              //    Query start time     Start time in new partition          Query end time
+              //
+              // Given we have offset of 10 mins, the query range from partition P1 (left of the partition split point)
+              // is [s, p + 10m]. The offset looks at data 10 mins back, so we can extent the time range in p1 to 10
+              // mins after the split point p We want to now provide results for time range t1 - t2, which is missing
+              // Lets assume the query is sum(rate(foo{}[5m] offset 10m))
+              // Given the offset is 10m, lookback is 5m, we would need raw data in the range
+              // [t1 - 5m - 10m, t2], this range for raw queries span two partitions and we will let the RawSeries (the
+              // leaf logical plan) with supportsRemoteDataCall = true figure out if this range can entirely be selected
+              // from partition p1 or p2
+              //
+
+              // Do not perform raw exports if the export is beyond a certain value for example
+              // foo{}[10d] or foo[2d] offset 8d  both will export 10 days of raw data which might cause heap pressure
+              // and OOMs. The max cross partition raw export config can control such queries from bring the process
+              // down but simpler queries with few minutes or even hour or two of lookback/offset will continue to work
+              // seamlessly with no data gaps
+              // Note that at the moment, while planning, we only can look at whats the max time range we can support.
+              // We still dont hqve capabilities to check the expected number of timeseries scanned or bytes scanned
+              // and adding capabilities to give up a "part" of query execution if the runtime number of bytes of ts
+              // scanned goes high isn't available. To start with the time range scanned as a static configuration will
+              // be good enough and can be enhanced in future as required.
+              val rawExportStartDurationThisPartition = prevTimeRange.endMs / 1000L * 1000L
+              val totalExpectedRawExport = (gapEndTimeMs - rawExportStartDurationThisPartition) + lookbackMs + offsetMs
+              if (queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
+                // Only if the raw export is completely within the previous partition's timerange
+                val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
+                val newContext = qContext.copy(origQueryParams = newParams)
+                val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
+                  IntervalSelector(gapStartTimeMs, gapEndTimeMs),
+                  additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
+                ep ++= walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
+              } else {
+                logger.warn(
+                  s"Remote raw export is supported but the expected raw export for $totalExpectedRawExport ms" +
+                  s" is greater than the max allowed raw export duration " +
+                    s"${queryConfig.routingConfig.maxRemoteRawExportTimeRange}")
+              }
+            }
+            val newParams = qParams.copy(startSecs = qParams.startSecs.max(currentTimeRange.startMs / 1000),
+              endSecs = qParams.endSecs.min(currentTimeRange.endMs / 1000))
+            val newContext = qContext.copy(origQueryParams = newParams)
+            ep += materializeForPartition(logicalPlan, currentAssignment, newContext)
+            (Some(next), ep)
+          //
+          case (None, ep: ListBuffer[ExecPlan]) =>
+            val (assignment, range) = next
+            val newParams = qParams.copy(startSecs = qParams.startSecs, endSecs = range.endMs / 1000)
+            val newContext = qContext.copy(origQueryParams = newParams)
+            ep += materializeForPartition(logicalPlan, assignment, newContext)
+            (Some(next), ep)
+        }
+      }
+      // Edge case with namespace across multiple partitions includes a case where the a part of time range
+      // of the original params fall in the new partition but that duration is less than the lookback. For example,
+      // Consider the timesplit happening at 1:00, the lookback of the query is 20 mins and the original query params
+      // have end date of 1:10. Then the period of 1 - 1:20 will not have any results, this is due to that fact the
+      // period 1 - 1:10 can not be served from one partition alone and needs to be computed on query service. Here
+      // we will handle this case and add the missing execPlan if needed
+
+      if (partitions.length > 1 && queryConfig.routingConfig.supportRemoteRawExport) {
+        // Here we check if the assignment ranges cover the entire query duration
+        val (_, lastTimeRange) = assignmentRanges.last
+        if (lastTimeRange.endMs < timeRange.endMs) {
+          // this means we need to add the missing time range to the end to execute the bit on Query service
+          val (gapStartTimeMs, gapEndTimeMs) = stepMsOpt match {
+            case Some(step)   =>   (snapToStep(lastTimeRange.endMs + 1, step, timeRange.startMs),
+              timeRange.endMs)
+            case None           => (lastTimeRange.endMs, timeRange.endMs)
+          }
+          val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
+          val newContext = qContext.copy(origQueryParams = newParams)
+          val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
+            IntervalSelector(gapStartTimeMs, gapEndTimeMs),
+            additionalLookbackMs = 0L.max(gapStartTimeMs - lastTimeRange.startMs))
+          execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
+        } else {
+          execPlans
+        }
+      } else {
+        execPlans
+      }
+
     }
-    // materialize a plan for each range/assignment pair
-    val plans = assignmentRanges.map { case (part, range) =>
-      val newParams = qParams.copy(startSecs = range.startMs / 1000,
-                                   endSecs = range.endMs / 1000)
-      val newContext = qContext.copy(origQueryParams = newParams)
-      materializeForPartition(logicalPlan, part, newContext)
-    }
+
     // stitch if necessary
-    val resPlan = if (plans.size == 1) {
-      plans.head
+    val resPlan = if (execPlans.size == 1) {
+      execPlans.head
     } else {
       // returns NaNs for missing timestamps
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), plans)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans,
+        enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
     }
     PlanResult(Seq(resPlan))
   }
-
+  //scalastyle:on method.length
   /**
    * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
    */
@@ -518,12 +721,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     else
       BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        logicalPlan.cardinality, logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
@@ -537,10 +740,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
   }
 
-  def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
+  private def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-
-
     // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
     // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
     // is a metadata operation and shares common components with other metadata endpoints.
@@ -619,7 +820,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan::Nil)
   }
 
-  def getMetadataPartitions(filters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
+  private def getMetadataPartitions(filters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
     val nonMetricShardKeyFilters = filters.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))
     partitionLocationProvider.getMetadataPartitions(nonMetricShardKeyFilters, timeRange)
   }
