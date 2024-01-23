@@ -3,8 +3,6 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.concurrent.{Map => ConcurrentMap}
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -469,131 +467,33 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Merges each set of overlapping ranges into one range
-   * with the min/max start/end times, respectively.
-   * "Overlapping" is inclusive of start and end points.
-   *
-   * @return sorted sequence of these merged ranges
-   */
-  private def mergeAndSortRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
-    if (ranges.isEmpty) {
-      return Nil
-    }
-    val sortedRanges = ranges.sortBy(r => r.startMs)
-    val mergedRanges = new mutable.ArrayBuffer[TimeRange]
-    mergedRanges.append(sortedRanges.head)
-    for (range <- sortedRanges.tail) {
-      if (range.startMs > mergedRanges.last.endMs) {
-        // Cannot overlap with any of the previous ranges; create a new range.
-        mergedRanges.append(range)
-      } else {
-        // Extend the previous range to include this range's span.
-        mergedRanges(mergedRanges.size - 1) = TimeRange(
-          mergedRanges.last.startMs,
-          math.max(mergedRanges.last.endMs, range.endMs))
-      }
-    }
-    mergedRanges
-  }
-
-  /**
-   * Given a sorted sequence of disjoint time-ranges and a "total" range,
-   * inverts the ranges and crops the result to the total range.
-   * Range start/ends are inclusive.
-   *
-   * Example:
-   * Ranges: ----   -------  ---     ---------
-   * Total:         -----------
-   * Result:        -------  --
-   *
-   * @param ranges : must be sorted and disjoint (range start/ends are inclusive)
-   */
-  def invertRanges(ranges: Seq[TimeRange],
-                   totalRange: TimeRange): Seq[TimeRange] = {
-    val invertedRanges = new ArrayBuffer[TimeRange]()
-    invertedRanges.append(totalRange)
-    var irange = 0
-
-    // ignore all ranges before totalRange
-    while (irange < ranges.size &&
-      ranges(irange).endMs < totalRange.startMs) {
-      irange += 1
-    }
-
-    if (irange < ranges.size) {
-      // check if the first overlapping range also overlaps the totalRange.start
-      if (ranges(irange).startMs <= totalRange.startMs) {
-        // if it does, then we either need to adjust the totalRange in the result or remove it altogether.
-        if (ranges(irange).endMs < totalRange.endMs) {
-          invertedRanges(0) = TimeRange(ranges(irange).endMs + 1, totalRange.endMs)
-          irange += 1
-        } else {
-          return Nil
-        }
-      }
-    }
-
-    // add inverted ranges to the result until one crosses totalRange.endMs
-    while (irange < ranges.size && ranges(irange).endMs < totalRange.endMs) {
-      invertedRanges(invertedRanges.size - 1) =
-        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs - 1)
-      invertedRanges.append(TimeRange(ranges(irange).endMs + 1, totalRange.endMs))
-      irange += 1
-    }
-
-    // check if a range overlaps totalRange.endMs; if it does, adjust final inverted range
-    if (irange < ranges.size && ranges(irange).startMs < totalRange.endMs) {
-      invertedRanges(invertedRanges.size - 1) =
-        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs - 1)
-    }
-
-    invertedRanges
-  }
-
-  /**
    * Materializes a LogicalPlan with leaves that individually span multiple partitions.
-   * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if selectors contain
-   *   at least two unique sets of shard-key filters.
+   * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they span more than
+   * one non-metric shard key prefix.
    * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize if any
-   *   of the plan's BinaryJoins contain an offset.
-   * Split plans with regex selectors will be materialized according to the union of all shard-key splits.
+   * of the plan's BinaryJoins contain an offset.
    */
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
     validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // get the seq of ranges and partitions to query
-    val (queryRanges, partitions) = {
+    // get a mapping of assignments to time-ranges to query
+    val assignmentRanges = {
+      // "distinct" in case this is a BinaryJoin
+      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
       val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
-      // get a set of PartitionAssignments per resolved shard key
-      val shardKeys = LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-        .flatMap(LogicalPlanUtils.resolveShardKeyFilters(_, shardKeyMatcher))
-      val assignmentSets =
-        shardKeys.map(logicalPlan.replaceFilters)
-        .map(getPartitions(_, qParams).distinct.sortBy(_.timeRange.startMs))
-      // map each assignment set to a set of valid query ranges
       val lookbackMs = getLookBackMillis(logicalPlan).max
       val offsetMs = getOffsetMillis(logicalPlan).max
       val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
-      val validRangeSets = assignmentSets.map(
-        getAssignmentQueryRanges(
-          _, timeRange,
-          lookbackMs = lookbackMs,
-          offsetMs = offsetMs,
-          stepMsOpt = stepMsOpt
-        ).map(_._2))
-      // Invert the valid ranges for each set, merge these now-invalid ranges across
-      //   sets, then again invert the merged ranges. This gives a single set of valid ranges to query.
-      val invalidRanges = validRangeSets.flatMap(invertRanges(_, timeRange))
-      (invertRanges(mergeAndSortRanges(invalidRanges), timeRange),
-        assignmentSets.flatten.map(assign => assign.partitionName -> assign).toMap.values)
+      getAssignmentQueryRanges(partitions, timeRange,
+        lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
     }
-    // materialize a plan for all range/partition pairs
-    val plans = queryRanges.flatMap { range =>
+    // materialize a plan for each range/assignment pair
+    val plans = assignmentRanges.map { case (part, range) =>
       val newParams = qParams.copy(startSecs = range.startMs / 1000,
-                                   endSecs = range.endMs / 1000)
+        endSecs = range.endMs / 1000)
       val newContext = qContext.copy(origQueryParams = newParams)
-      partitions.map(part => materializeForPartition(logicalPlan, part, newContext))
+      materializeForPartition(logicalPlan, part, newContext)
     }
     // stitch if necessary
     val resPlan = if (plans.size == 1) {
@@ -601,8 +501,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else {
       // returns NaNs for missing timestamps
       val rvRange = RvRange(1000 * qParams.startSecs,
-                            1000 * qParams.stepSecs,
-                            1000 * qParams.endSecs)
+        1000 * qParams.stepSecs,
+        1000 * qParams.endSecs)
       StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), plans)
     }
     PlanResult(Seq(resPlan))
