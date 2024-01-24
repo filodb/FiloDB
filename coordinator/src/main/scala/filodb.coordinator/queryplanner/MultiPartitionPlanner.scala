@@ -330,6 +330,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
           enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
       }
+      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }
     PlanResult(execPlan:: Nil)
@@ -350,7 +351,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val (partitionName, grpcEndpoint) = (partition.partitionName, partition.grpcEndPoint)
     if (partitionName.equals(localPartitionName)) {
       // FIXME: subquery tests fail when their time-ranges are updated
-      //   with the original query params
+      //   even with the original query params
       val lpWithUpdatedTime = if (timeRangeOverride.isDefined) {
         copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
       } else logicalPlan

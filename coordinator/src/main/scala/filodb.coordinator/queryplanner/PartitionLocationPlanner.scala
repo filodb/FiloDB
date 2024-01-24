@@ -106,7 +106,7 @@ abstract class PartitionLocationPlanner(
     }
   }
 
-  // TODO
+  // TODO(amt)
   protected def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
     execPlans.forall {
       case _: PromQlRemoteExec => false

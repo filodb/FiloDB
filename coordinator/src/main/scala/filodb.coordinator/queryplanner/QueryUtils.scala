@@ -6,6 +6,7 @@ import scala.collection.mutable
  * Storage for miscellaneous utility functions.
  */
 object QueryUtils {
+  // TODO(amt): remove?
   /**
    * Returns all possible sets of elements where exactly one element is
    * chosen from each of the argument sequences.

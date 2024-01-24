@@ -218,7 +218,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     materialized
   }
 
-  def shardsFromValues(shardPairs: Seq[(String, String)],
+  // TODO(amt)
+  private def shardsFromValues(shardPairs: Seq[(String, String)],
                        filters: Seq[ColumnFilter],
                        qContext: QueryContext,
                        startMs: Long,
