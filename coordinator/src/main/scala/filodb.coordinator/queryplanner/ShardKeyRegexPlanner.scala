@@ -109,8 +109,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else {
       val result = walkLogicalPlanTree(logicalPlan, qContext)
       if (result.plans.size > 1) {
-        val dispatcher = PlannerUtil.pickDispatcher(result.plans)
-        MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
+        MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, result.plans)
       } else result.plans.head
     }
   }
@@ -142,24 +141,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
-    // TODO(amt): remove?
-//    // Materialize for each key with the inner planner if:
-//    //   - all plan data lies on one partition
-//    //   - all RawSeries filters are identical
-//    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
-//      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
-//    val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
-//    // Note: unchecked .get is OK here since it will only be called for each tail element.
-//    val hasSameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
-//    val partitions = getShardKeys(logicalPlan)
-//      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
-//    if (partitions.isEmpty) {
-//      return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
-//    } else if (hasSameFilters && isSinglePartition(partitions)) {
-//      val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
-//      return PlanResult(plans)
-//    }
+    // Materialize with the inner planner if:
+    //   - all plan data lies on one partition
+    //   - all RawSeries filters are identical
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
+    val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
+    // Note: unchecked .get is OK here since it will only be called for each tail element.
+    val hasSameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
+    val partitions = getShardKeys(logicalPlan)
+      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
+    if (partitions.isEmpty) {
+      return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
+    } else if (hasSameFilters && isSinglePartition(partitions)) {
+      val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
+      return PlanResult(plans)
+    }
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
