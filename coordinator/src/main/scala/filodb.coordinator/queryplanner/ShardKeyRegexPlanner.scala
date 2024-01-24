@@ -149,12 +149,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
     val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
     // Note: unchecked .get is OK here since it will only be called for each tail element.
-    val hasSameFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
+    val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
     val partitions = getShardKeys(logicalPlan)
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
-    if (partitions.isEmpty) {
-      return PlanResult(Seq(queryPlanner.materialize(logicalPlan, qContext)))
-    } else if (hasSameFilters && isSinglePartition(partitions)) {
+    if (hasSameShardKeyFilters && isSinglePartition(partitions)) {
       val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), qContext)
       return PlanResult(plans)
     }
