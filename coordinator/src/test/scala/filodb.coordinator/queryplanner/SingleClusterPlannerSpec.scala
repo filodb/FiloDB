@@ -24,7 +24,6 @@ import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
 
-
 import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -41,19 +40,11 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private def regexPipeShardKeyMatcher(filters: Seq[ColumnFilter]) = {
-    val values = filters.map { filter =>
-      filter.column -> filter.filter.valuesStrings.toList.head.toString.split('|')
-    }
-    val triplets = QueryUtils.combinations(values.map(_._2.toSeq))
-    triplets.map(triplet => values.map(_._1).zip(triplet).map(p => ColumnFilter(p._1, Equals(p._2))))
-  }
-
   private val config = ConfigFactory.load("application_test.conf")
   private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig, "raw", shardKeyMatcher = regexPipeShardKeyMatcher)
+    queryConfig, "raw")
 
   /*
   This is the PromQL
@@ -382,7 +373,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
       targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
-    println(execPlan)
+    println(execPlan.children.size)
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
@@ -425,7 +416,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("__name__", Equals("name")),
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
-        ), qContext, start, end, useTargetSchemaForShards = (filts) => true)
+        ), qContext, start, end, useTargetSchemaForShards = filters => true)
     } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 
@@ -1219,7 +1210,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       } catch {
         case e: TestFailedException =>
           println(s"Plan validation failed for query: $query")
-          println(execPlan.printTree())
           throw e
       }
     }

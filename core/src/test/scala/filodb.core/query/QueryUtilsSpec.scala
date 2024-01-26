@@ -56,4 +56,18 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
       QueryUtils.containsPipeOnlyRegex(test) shouldEqual false
     }
   }
+
+  it("should correctly split strings at unescaped pipes") {
+    val tests = Seq(
+      ("this|is|a|test", Seq("this", "is", "a", "test")),
+      ("this|is|a||test", Seq("this", "is", "a", "", "test")),
+      ("this\\|is|a|test", Seq("this\\|is", "a", "test")),
+      ("this\\\\|is|a|test", Seq("this\\\\", "is", "a", "test")),
+      ("||this\\|is|\\+a|test||", Seq("", "", "this\\|is", "\\+a", "test", "", "")),
+    )
+    for ((string, expected) <- tests) {
+      val res = QueryUtils.splitAtUnescapedPipes(string)
+      res shouldEqual expected
+    }
+  }
 }
