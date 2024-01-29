@@ -77,19 +77,6 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
   /**
-   * Returns the configured exportDestinationFormat with all $i (e.g. $0, $1, $2, etc)
-   *   substrings replaced with the ith string of the argument export key.
-   */
-  private def makeExportAddress(exportKey: Seq[String]): String = {
-    val replaceRegex = "\\$([0-9]+)".r
-    replaceRegex.replaceAllIn(settings.exportDestinationFormat, matcher => {
-      // Replace e.g. $0 with the 0th index of the export key.
-      val index = matcher.group(1).toInt
-      exportKey(index)
-    })
-  }
-
-  /**
    * Exports an RDD for a specific export key.
    *   (1) Create the export destination address from the key.
    *   (2) Generate all rows to be exported from the argument RDD.
@@ -111,7 +98,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       index.get
     })
 
-    val saveAddress = makeExportAddress(exportKey)
+    val saveAddress = batchExporter.makeExportAddress(exportKey)
     val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_)).filter{ row =>
       val rowKey = rowKeyIndices.map(row.get(_).toString)
       rowKey == exportKey
