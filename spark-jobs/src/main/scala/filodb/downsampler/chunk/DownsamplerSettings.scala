@@ -80,7 +80,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 
-  @transient lazy val exportBucket = downsamplerConfig.as[String]("data-export.bucket")
+  @transient lazy val exportDestinationFormat = downsamplerConfig.as[String]("data-export.destination-format")
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 

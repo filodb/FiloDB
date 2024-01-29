@@ -101,6 +101,15 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }.map(_._2).toSet
   }
 
+  /**
+   * Returns the index of a column in the export schema.
+   * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
+   *   of each exported row.
+   */
+  def getRowIndex(fieldName: String): Option[Int] = {
+    exportSchema.zipWithIndex.find(_._1.name == fieldName).map(_._2)
+  }
+
   // Unused, but keeping here for convenience if needed later.
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
