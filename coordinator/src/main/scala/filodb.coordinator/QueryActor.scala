@@ -4,7 +4,6 @@ import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -14,7 +13,6 @@ import monix.eval.Task
 import monix.execution.exceptions.ExecutionRejectedException
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
@@ -27,6 +25,7 @@ import filodb.core.query.QuerySession
 import filodb.core.query.QueryStats
 import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
+import filodb.grpc.ExecPlans.ExecPlanContainer
 import filodb.query._
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
 
@@ -291,12 +290,20 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
+  def execProtoExecPlan(pep: ProtoExecPlan, replyTo: ActorRef): Unit = {
+    import filodb.coordinator.ProtoConverters._
+    val c = ExecPlanContainer.parseFrom(pep.serializedExecPlan)
+    val plan: ExecPlan = c.fromProto()
+    execPhysicalPlan2(plan, replyTo)
+  }
+
   def receive: Receive = {
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: ExecPlan               => execPhysicalPlan2(q, sender())
+    case q: ProtoExecPlan          => execProtoExecPlan(q, sender())
     case q: GetTopkCardinality     => execTopkCardinalityQuery(q, sender())
 
     case GetIndexNames(ref, limit, _) =>

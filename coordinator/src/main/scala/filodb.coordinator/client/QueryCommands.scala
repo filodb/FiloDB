@@ -83,6 +83,10 @@ object QueryCommands {
                                      logicalPlan: LogicalPlan2,
                                      qContext: QueryContext = QueryContext(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
+
+  final case class ProtoExecPlan(dataset: DatasetRef,
+                                 serializedExecPlan: Array[Byte],
+                                 submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse

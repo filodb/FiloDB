@@ -3,13 +3,10 @@ package filodb.query
 
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-
 import scala.collection.JavaConverters._
-
 import akka.pattern.AskTimeoutException
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.metadata.Column.ColumnType._
