@@ -41,12 +41,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val datasetMetricColumn = dataset.options.metricColumn
 
-  // TODO(a_theimer)
-  private val nonMetricShardKeyColToIndex = dataset.options.shardKeyColumns
-    .filterNot(_ == dataset.options.metricColumn)
-    .zipWithIndex
-    .toMap
-
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
     qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
@@ -116,6 +110,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else {
       val result = walkLogicalPlanTree(logicalPlan, qContext)
       if (result.plans.size > 1) {
+        // No need to stitch -- lower-level planners will handle stitching of
+        //   partition-migrated data and/or short/long-term data.
         MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, result.plans)
       } else if (result.plans.size == 1) {
         result.plans.head
@@ -175,67 +171,77 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     generateExec(logicalPlan, shardKeyMatches, qContext)
   }
 
+  // TODO(a_theimer): need this?
   /**
-   * Updates the time params and query of the the argument PromQlQueryParams according to the argument LogicalPlan.
+   * Updates the time params and query of the the argument PromQlQueryParams
+   *   according to the argument LogicalPlan.
    */
   private def updateQueryParams(logicalPlan: LogicalPlan,
                                 queryParams: PromQlQueryParams): PromQlQueryParams = {
+    val newPromql = LogicalPlanParser.convertToQuery(logicalPlan)
     logicalPlan match {
       case tls: TopLevelSubquery => {
         val instantTime = queryParams.startSecs
         queryParams.copy(
-          promQl = LogicalPlanParser.convertToQuery(logicalPlan),
+          promQl = newPromql,
           startSecs = instantTime,
           endSecs = instantTime
         )
       }
       case psp: PeriodicSeriesPlan => {
         queryParams.copy(
-          promQl = LogicalPlanParser.convertToQuery(logicalPlan),
+          promQl = newPromql,
           startSecs = psp.startMs / 1000,
           endSecs = psp.endMs / 1000,
           stepSecs = psp.stepMs / 1000
         )
       }
-      case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan))
+      case _ => queryParams.copy(promQl = newPromql)
     }
   }
 
   // scalastyle:off method.length
   /**
-   * Group shard keys by partition and generate an ExecPlan for each.
-   * Plans will match shard-keys by pipe-separated regex filters. For example, Suppose the following keys are provided:
-   *     keys = {{a=1, b=1}, {a=1, b=2}, {a=2, b=3}}
-   *   These will be grouped according to the partitions they occupy:
-   *     part1 -> {{a=1, b=1}, {a=1, b=2}}
-   *     part2 -> {{a=2, b=3}}
+   * Group shard keys by partition, then generate an ExecPlan for each group.
+   * For example, suppose the following shard keys are provided (by either
+   *   Equals filters or pipe-concatenated EqualsRegex):
+   *       keys = {{a=1, b=1}, {a=1, b=2}, {a=2, b=3}}
+   *   These will be grouped according to the partitions they occupy. Suppose the
+   *     value of `a` indicates the host partition:
+   *       part1 -> {{a=1, b=1}, {a=1, b=2}}
+   *       part2 -> {{a=2, b=3}}
    *   Then a plan will be generated for each partition:
-   *     plan1 -> {a=1, b=~"1|2"}
-   *     plan2 -> {a=2, b=3}
+   *       plan1 -> {a=1, b=~"1|2"}
+   *       plan2 -> {a=2, b=3}
    * Additional plans are materialized per partition when multiple regex filters would otherwise be required.
    *   This prevents scenarios such as:
-   *     keys = {{a=1, b=2}, {a=3, b=4}, {a=5, b=6}}
-   *   These will be grouped according to the partitions they occupy:
-   *     part1 -> {{a=1, b=2}, {a=3, b=4}}
-   *     part2 -> {{a=5, b=6}}
+   *       keys = {{a=1, b=1, c=1}, {a=1, b=2, c=2}, {a=2, b=1, c=1}}
+   *   These will be grouped according to the partitions they occupy (again, suppose `a` determines the partition):
+   *       part1 -> {{a=1, b=1, c=1}, {a=1, b=2, c=1}, {a=1, b=2, c=2}}
+   *       part2 -> {{a=2, b=1, c=2}}
    *   Then a plan will be generated for each partition:
-   *     plan1 -> {a=~"1|3", b=~"2|4"}
-   *     plan2 -> {a=5, b=6}
-   *   This might erroneously read {a=1, b=4}, which was not included in the original key set.
+   *       plan1 -> {a=1, b=~"1|2", c=~"1|2"}
+   *       plan2 -> {a=2, b=1, c=1}
+   *   This might erroneously read data for {a=1, b=1, c=2}, which was not included in the original key set.
+   *   To prevent this, all keys on the same partition are again grouped by "prefix" -- all columns except
+   *   the last in a dataset's non-metric shard key-- and plans are materialized for each group.
+   *   For example, given the above keys, the result plans will instead be:
+   *       plan1a -> {{a=1, b=1, c=1}}}
+   *       plan2a -> {{a=1, b=2, c=~"1|2"}}
+   *       plan2 -> {{a=2, b=1, c=2}}
    */
   private def generateExecForEachPartition(logicalPlan: LogicalPlan,
                                            keys: Seq[Seq[ColumnFilter]],
                                            qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
-    // maps individual partitions to the set of shard-keys they contain.
-    val partitionsToKeys = new mutable.HashMap[String, mutable.Buffer[Seq[ColumnFilter]]]()
+    // Map partitions to the set of *non*-partition-split keys they house.
+    val partitionsToNonSplitKeys = new mutable.HashMap[String, mutable.Buffer[Seq[ColumnFilter]]]()
+    // Set of all *partition-split* key groups. These will be materialized
+    //   individually to take advantage of exiting split-key stitching infrastructure.
     val partitionSplitKeys = new mutable.ArrayBuffer[Seq[ColumnFilter]]
     keys.foreach { key =>
       val newLogicalPlan = logicalPlan.replaceFilters(key)
-      // Querycontext should just have the part of query which has regex
-      // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
-      // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
       val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
       val partitions = getPartitions(newLogicalPlan, newQueryParams)
         .map(_.partitionName)
@@ -243,37 +249,45 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       if (partitions.size > 1) {
         partitionSplitKeys.append(key)
       } else {
-        partitions.foreach(part => partitionsToKeys.getOrElseUpdate(part, new mutable.ArrayBuffer).append(key))
+        partitions.foreach(part => partitionsToNonSplitKeys.getOrElseUpdate(part, new mutable.ArrayBuffer).append(key))
       }
     }
 
     // Sort each key into the same order as nonMetricShardKeys, then group keys with the same prefix.
     // A plan will be created for each group; this prevents the scenario mentioned in the javadoc.
-    // NOTE: this solution is not optimal in all cases, but it does guarantee groupings are valid.
-    val partitionToKeyGroups = partitionsToKeys.map{ case (partition, keys) =>
+    // NOTE: this solution is not optimal, but it is simple and guarantees that the regex filters
+    //   in the result plans don't span unintentional shard keys.
+
+    // Map column -> index, then use this to sort each shard key.
+    // NOTE: this means the order in which shard-key columns are defined will affect query results.
+    //   Columns with higher cardinalities should be defined last.
+    val nonMetricShardKeyColToIndex = dataset.options.nonMetricShardColumns.zipWithIndex.toMap
+    val partitionToKeyGroups = partitionsToNonSplitKeys.map{ case (partition, keys) =>
       val prefixGroups = keys
-        .map(key => key.sortBy(filter => nonMetricShardKeyColToIndex.getOrElse(filter.column, 0)))
+        .map(key => key.sortBy(filter => nonMetricShardKeyColToIndex.get(filter.column)))
         .groupBy(_.dropRight(1))
         .values
-        .flatMap(group => group.grouped(10))  // TODO(a_theimer)
+        .flatMap(group => group.grouped(qContext.plannerParams.maxShardKeyRegexFanoutBatchSize))
       (partition, prefixGroups)
     }
 
-    // Skip the aggregate presentation if there are more than one plans to materialize.
-    val skipAggregatePresentValue = partitionToKeyGroups.size > 1 ||
-                                    partitionToKeyGroups.values.headOption.map(_.size).getOrElse(0) > 1
+    // Skip lower-level aggregate presentation if there is more than one plan to materialize.
+    // In that case, the presentation step will be applied by this planner.
+    val skipAggregatePresentValue = partitionToKeyGroups.values.map(_.size).sum + partitionSplitKeys.size > 1
 
-    // Create one plan per key group.
-    val groupedPlans = partitionToKeyGroups.flatMap{ case (partition, keyGroups) =>
+    // Materialize a plan for each group of non-split of keys.
+    // Each group will be encoded into a set of Equals/EqualsRegex filters, where regex filters
+    //   contain only shard-key values concatenated by pipes.
+    val nonSplitPlans = partitionToKeyGroups.flatMap{ case (partition, keyGroups) =>
       // NOTE: partition is intentionally unused; the inner planner will again determine which partitions own the data.
       keyGroups.map{ keys =>
         // Create a map of key->values, then create a ColumnFilter for each key.
-        val keyToValues = new mutable.HashMap[String, mutable.Set[String]]()
-        keys.flatten.foreach { filter =>
-          // Find the key's list of values in the map (or create it), then add the filter's values.
-          val values = keyToValues.getOrElseUpdate(filter.column, new mutable.HashSet[String]())
-          filter.filter.valuesStrings.map(_.toString).foreach(values.add)
-        }
+        val keyToValues = keys.flatten
+          .foldLeft(new mutable.HashMap[String, mutable.Set[String]]()) { case (acc, filter) =>
+            val values = acc.getOrElseUpdate(filter.column, new mutable.HashSet[String]())
+            filter.filter.valuesStrings.map(_.toString).foreach(values.add)
+            acc
+          }
         val newFilters = keyToValues.map { case (key, values) =>
           val filter = if (values.size == 1) {
             Filter.Equals(values.head)
@@ -283,23 +297,30 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
           }
           ColumnFilter(key, filter)
         }.toSeq
-        // Update the LogicalPlan with the new partition-specific filters, then materialize.
+        // Update the LogicalPlan with the new single-partition filters, then materialize.
         val newLogicalPlan = logicalPlan.replaceFilters(newFilters)
         val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
-        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
-          copy(skipAggregatePresent = skipAggregatePresentValue))
+        val newQueryContext = qContext.copy(
+          origQueryParams = newQueryParams,
+          plannerParams = qContext.plannerParams.copy(skipAggregatePresent = skipAggregatePresentValue)
+        )
         queryPlanner.materialize(newLogicalPlan, newQueryContext)
       }
     }.toSeq
+
+    // Just materialize each of these partition-split plans individually -- let the
+    //   lower-level planners handle stitching.
     val splitPlans = partitionSplitKeys.map{ key =>
-      // Update the LogicalPlan with the new partition-specific filters, then materialize.
       val newLogicalPlan = logicalPlan.replaceFilters(key)
       val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
-      val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
-        copy(skipAggregatePresent = skipAggregatePresentValue))
+      val newQueryContext = qContext.copy(
+        origQueryParams = newQueryParams,
+        plannerParams = qContext.plannerParams.copy(skipAggregatePresent = skipAggregatePresentValue)
+      )
       queryPlanner.materialize(newLogicalPlan, newQueryContext)
     }
-    groupedPlans ++ splitPlans
+
+    nonSplitPlans ++ splitPlans
   }
   // scalastyle:on method.length
 
@@ -340,6 +361,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
+  /**
+   * Materializes the argument LogicalPlan.
+   * This method should be preferred to {@link generateExecForEachPartition}
+   *   or {@link generateExecForEachKey}; one of those will be called internally
+   *   according to the PlannerParams attribute reduceShardKeyRegexFanout.
+   */
   private def generateExec(logicalPlan: LogicalPlan,
                            keys: Seq[Seq[ColumnFilter]],
                            qContext: QueryContext): Seq[ExecPlan] =
@@ -442,18 +469,17 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
    * */
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
-    // Materialize with the inner planner if:
+    // Materialize with the inner planner if both of:
     //   - all plan data lies on one partition
     //   - all RawSeries filters are identical
     val qParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
       .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
-    val headFilters = shardKeyFilterGroups.headOption.map(_.toSet)
-    // Note: unchecked .get is OK here since it will only be called for each tail element.
-    val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == headFilters.get)
+    // Unchecked .get is OK here since it will only be called for each tail element.
+    val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == shardKeyFilterGroups.head.toSet)
     val partitions = getShardKeys(logicalPlan)
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
-    if (partitions.nonEmpty && hasSameShardKeyFilters && isSinglePartition(partitions)) {
+    if (hasSameShardKeyFilters && isSinglePartition(partitions)) {
       val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), queryContext)
       return PlanResult(plans)
     }
