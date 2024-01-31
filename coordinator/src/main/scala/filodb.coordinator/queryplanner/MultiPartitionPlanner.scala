@@ -16,6 +16,9 @@ import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
+
+import scala.collection.mutable
+
 case class PartitionAssignment(partitionName: String, httpEndPoint: String, timeRange: TimeRange,
                                grpcEndPoint: Option[String] = None)
 
@@ -256,25 +259,30 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
   // scalastyle:on cyclomatic.complexity
 
-  // TODO(a_theimer)
   private def getRoutingKeys(logicalPlan: LogicalPlan): Set[Map[String, String]] = {
     val rawSeriesPlans = LogicalPlan.findLeafLogicalPlans(logicalPlan)
       .filter(_.isInstanceOf[RawSeries])
     rawSeriesPlans.flatMap { rs =>
-      val filterGroup = LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns).head
-      val mapThing = filterGroup.map { colFilter =>
-        colFilter.filter match {
-          case eq: Equals =>
-            (colFilter.column, Seq(eq.value.toString))
-          case re: EqualsRegex if QueryUtils.containsPipeOnlyRegex(re.value.toString) =>
-            val allValues = QueryUtils.splitAtUnescapedPipes(re.value.toString)
-            (colFilter.column, allValues)
+      val filterGroups = LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)
+      assert(filterGroups.size == 1, "RawSeries does not have exactly one filter group: " + rs)
+      // Map each key to all values given by the filters.
+      val keyToValues = filterGroups.head.foldLeft(new mutable.HashMap[String, mutable.HashSet[String]])
+        { case (acc, filter) =>
+          val valueSet = acc.getOrElseUpdate(filter.column, new mutable.HashSet[String])
+          filter.filter match {
+            case eq: Equals => valueSet.add(eq.value.toString)
+            case re: EqualsRegex if QueryUtils.containsPipeOnlyRegex(re.value.toString) =>
+              val values = QueryUtils.splitAtUnescapedPipes(re.value.toString)
+              values.foreach(valueSet.add)
+          }
+          acc
         }
-      }
-      val keys = mapThing.map(_._1)
-      val vals = mapThing.map(_._2)
-      val valCombos = QueryUtils.combinations(vals)
-      valCombos.map(keys.zip(_).toMap)
+      // Store the entries with some order, then find all possible value combos s.t. each combo's
+      //   ith value is a value of the ith key.
+      val entries = keyToValues.toSeq
+      val keys = entries.map(_._1)
+      val vals = entries.map(_._2.toSeq)
+      QueryUtils.combinations(vals).map(keys.zip(_).toMap)
     }.toSet
   }
 
@@ -391,8 +399,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val timeRange = timeRangeOverride.getOrElse(TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
     val (partitionName, grpcEndpoint) = (partition.partitionName, partition.grpcEndPoint)
     if (partitionName.equals(localPartitionName)) {
-      // FIXME: subquery tests fail when their time-ranges are updated
-      //   even with the original query params
+      // FIXME: the below check is needed because subquery tests fail when their
+      //   time-ranges are updated even with the original query params.
       val lpWithUpdatedTime = if (timeRangeOverride.isDefined) {
         copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
       } else logicalPlan
@@ -430,7 +438,9 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
-    val filteredAssignments = assignments.dropWhile(_.timeRange.endMs < queryRange.startMs)
+    val filteredAssignments = assignments
+      .dropWhile(_.timeRange.endMs < queryRange.startMs)
+      .takeWhile(_.timeRange.startMs < queryRange.endMs)
     if (filteredAssignments.isEmpty || filteredAssignments.head.timeRange.startMs > queryRange.endMs) {
       return Nil
     }
@@ -446,7 +456,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // Snap remaining range starts to a step (if a step is provided).
     // Add the constant period of uncertainity to the start of the Assignment time
     // TODO: Move to config later
-    val tailRanges = filteredAssignments.tail.takeWhile(_.timeRange.startMs < queryRange.endMs).map { assign =>
+    val tailRanges = filteredAssignments.tail.map { assign =>
       val startMs = if (stepMsOpt.nonEmpty) {
         snapToStep(timestamp = assign.timeRange.startMs + lookbackMs + offsetMs,
                    step = stepMsOpt.get,
