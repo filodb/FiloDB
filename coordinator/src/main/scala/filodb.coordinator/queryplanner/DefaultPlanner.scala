@@ -165,7 +165,7 @@ trait  DefaultPlanner {
 
         if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
         else {
-          // the convention for histogram bucket is to have the "_bucket" string towards the end of the metric name
+          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
           if (!nameFilter.get.endsWith("_bucket")) {
             (nameFilter, leFilter, lp)
           }
