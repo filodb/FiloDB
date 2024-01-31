@@ -274,15 +274,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             case re: EqualsRegex if QueryUtils.containsPipeOnlyRegex(re.value.toString) =>
               val values = QueryUtils.splitAtUnescapedPipes(re.value.toString)
               values.foreach(valueSet.add)
+            case _ => throw new IllegalArgumentException(
+              s"""shard keys must be filtered by equality or "|"-only regex. filter=${filter}""")
           }
           acc
         }
-      // Store the entries with some order, then find all possible value combos s.t. each combo's
-      //   ith value is a value of the ith key.
-      val entries = keyToValues.toSeq
-      val keys = entries.map(_._1)
-      val vals = entries.map(_._2.toSeq)
-      QueryUtils.combinations(vals).map(keys.zip(_).toMap)
+      QueryUtils.makeAllKeyValueCombos(keyToValues.map(pair => (pair._1, pair._2.toSeq)).toMap)
     }.toSet
   }
 

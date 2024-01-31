@@ -14,8 +14,7 @@ import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
  *   and should eventually be merged. Currently, the SKRP needs getPartitions to group
  *   resolved shard-keys by partition before it individually materializes each of these
  *   groups with the MPP. The MPP will again find the corresponding partition for each group
- *   and materialize accordingly, then the SKRP will handle any higher-level concatenation/aggregation/joins
- *   for each of these groups.
+ *   and materialize accordingly.
  */
 abstract class PartitionLocationPlanner(dataset: Dataset,
                                         partitionLocationProvider: PartitionLocationProvider)
@@ -32,7 +31,7 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
     //1.  Get a Seq of all Leaf node filters
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
-    //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
+    //2. Filter from each leaf node filters to keep only nonMetricShardKeyColumns and convert them to key value map
     val routingKeyMap: Seq[Map[String, String]] = leafFilters
       .filter(_.nonEmpty)
       .map(_.filter(col => nonMetricColumnSet.contains(col.column)))
@@ -40,7 +39,6 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
         filters.map { filter =>
           val values = filter.filter match {
             case Equals(value) => Seq(value.toString)
-            // Split '|'-joined values if pipes are the only regex chars used.
             case EqualsRegex(value: String) if QueryUtils.containsPipeOnlyRegex(value) =>
               QueryUtils.splitAtUnescapedPipes(value)
             case _ => throw new IllegalArgumentException(
@@ -49,14 +47,7 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
           (filter.column, values)
         }
       }
-      .flatMap{ keyValuesPairs =>
-        // Get all possible value combos, then create a key->value map for each combo.
-        // Ordering the pairs first since the output of combinations() is also ordered.
-        val orderedPairs = keyValuesPairs.toSeq
-        val keys: Seq[String] = orderedPairs.map(_._1)
-        val values: Seq[Seq[String]] = orderedPairs.map(_._2)
-        QueryUtils.combinations(values).map(keys.zip(_).toMap)
-      }
+      .flatMap(keyToVals => QueryUtils.makeAllKeyValueCombos(keyToVals.toMap))
 
     // 3. Determine the query time range
     val queryTimeRange = if (infiniteTimeRange) {
@@ -95,7 +86,6 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
     }
   }
 
-  // TODO(amt)
   protected def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
     execPlans.forall {
       case _: PromQlRemoteExec => false

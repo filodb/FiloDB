@@ -77,4 +77,23 @@ object QueryUtils {
     splits.append(remaining)
     splits
   }
+
+  /**
+   * Given a mapping of individual keys to sets of values, returns all possible combinations
+   *   of (key,value) pairs s.t. each combo contains all keys.
+   * Example:
+   *   foo -> [foo1, foo2]
+   *   bar -> [bar1, bar2]
+   *   --> [[foo=foo1,bar=bar1], [foo=foo1,bar=bar2], [foo=foo2,bar=bar1], [foo=foo2,bar=bar2]]
+   */
+  def makeAllKeyValueCombos(keyToValues: Map[String, Seq[String]]): Seq[Map[String, String]] = {
+    // Store the entries with some order, then find all possible value combos s.t. each combo's
+    //   ith value is a value of the ith key.
+    val entries = keyToValues.toSeq
+    val keys = entries.map(_._1)
+    val vals = entries.map(_._2.toSeq)
+    val combos = QueryUtils.combinations(vals)
+    // Zip the ordered keys with the ordered values.
+    combos.map(keys.zip(_).toMap)
+  }
 }

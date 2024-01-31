@@ -283,22 +283,15 @@ class SingleClusterPlanner(val dataset: Dataset,
         (shardCol, trimmedValues)
       }
 
-      // Get all (ordered) combinations of values, then create (key,value) pairs for each.
-      val shardKeyValuePairs: Seq[Seq[(String, String)]] = {
-        val keys = shardColToValues.map(_._1)
-        val valueGroups = shardColToValues.map(_._2)
-        QueryUtils.combinations(valueGroups).map(keys.zip(_))
-      }
-
       // For each set of pairs, create a set of Equals filters and compute the shards for each.
-      shardKeyValuePairs.flatMap{ kvPairs =>
-        val kvMap = kvPairs.toMap
+      val shardKeyValuePairs = QueryUtils.makeAllKeyValueCombos(shardColToValues.toMap)
+      shardKeyValuePairs.flatMap{ kvMap =>
         val updFilters = filters.map{ filt =>
             kvMap.get(filt.column)
               .map(value => ColumnFilter(filt.column, Filter.Equals(value)))
               .getOrElse(filt)
           }
-        shardsFromValues(kvPairs, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
+        shardsFromValues(kvMap.toSeq, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
       }.distinct
     }
   }
