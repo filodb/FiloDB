@@ -421,17 +421,20 @@ object LogicalPlanUtils extends StrictLogging {
       .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
         val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
         val rawShardKeyFilters = getShardKeyFilters(rs)
-        val shardKeyFilters = rawShardKeyFilters.flatMap{ filters =>
-          val resolvedFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
+        // The filters might contain pipe-concatenated EqualsRegex values.
+        // Convert these into sets of single-valued Equals filters.
+        val resolvedShardKeyFilters = rawShardKeyFilters.flatMap{ filters =>
+          val equalsFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
             filter.filter match {
-              // Take care of pipe-joined values here -- create one Equals filter per value.
               case EqualsRegex(values: String) if QueryUtils.containsPipeOnlyRegex(values) =>
                 QueryUtils.splitAtUnescapedPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
               case _ => Seq(filter)
             }}
-          QueryUtils.combinations(resolvedFilters)
+          // E.g. foo{key1=~"baz|bat",key2=~"bar|bak"} would give the following combos:
+          // [[baz,bar], [baz,bak], [bat,bar], [bat,bak]]
+          QueryUtils.combinations(equalsFilters)
       }
-      shardKeyFilters.map{ shardKey =>
+      resolvedShardKeyFilters.map{ shardKey =>
         val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
       }
