@@ -133,7 +133,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None,
                          val lifecycleManager: Option[IndexMetadataStore] = None,
-                         useMemoryMappedImpl: Boolean = true
+                         useMemoryMappedImpl: Boolean = true,
+                         disableIndexCaching: Boolean = false
                         ) extends StrictLogging {
 
   import PartKeyLuceneIndex._
@@ -240,7 +241,26 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
   //scalastyle:off
-  private val searcherManager = new SearcherManager(indexWriter, null)
+  private val searcherManager =
+    if (disableIndexCaching) {
+      new SearcherManager(indexWriter,
+        new SearcherFactory() {
+          override def newSearcher(reader: IndexReader, previousReader: IndexReader): IndexSearcher = {
+            val indexSearcher = super.newSearcher(reader, previousReader)
+            indexSearcher.setQueryCache(null)
+            indexSearcher.setQueryCachingPolicy(new QueryCachingPolicy() {
+              override def onUse(query: Query): Unit = {
+
+              }
+
+              override def shouldCache(query: Query): Boolean = false
+            })
+            indexSearcher
+          }
+        })
+    } else {
+      new SearcherManager(indexWriter, null)
+    }
   //scalastyle:on
 
   //start this thread to flush the segments and refresh the searcher every specific time period
