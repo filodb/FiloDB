@@ -7,7 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryplanner.SingleClusterPlanner.{findTargetSchema, isTargetSchemaChanging}
+import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -118,7 +118,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       return false
     }
 
-    val tsChangeExists = isTargetSchemaChanging(targetSchemaChanges, startMs, endMs)
+    val shardKeyFilters = {
+      val filterOpts = dataset.options.nonMetricShardColumns.map(col => filters.find(_.column == col))
+      assert(filterOpts.forall(_.isDefined), "expected all shard-key filters present but found: " + filters)
+      filterOpts.map(_.get)
+    }
+    val tsChangeExists = isTargetSchemaChanging(shardKeyFilters, startMs, endMs, qContext)
     val allTSColsPresent = targetSchemaOpt.get.schema
       .forall(tschemaCol => filters.exists(cf =>
         cf.column == tschemaCol && cf.filter.isInstanceOf[Equals]))
