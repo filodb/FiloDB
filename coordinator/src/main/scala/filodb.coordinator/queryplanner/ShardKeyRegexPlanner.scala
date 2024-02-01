@@ -171,35 +171,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     generateExec(logicalPlan, shardKeyMatches, qContext)
   }
 
-  // TODO(a_theimer): need this?
-  /**
-   * Updates the time params and query of the the argument PromQlQueryParams
-   *   according to the argument LogicalPlan.
-   */
-  private def updateQueryParams(logicalPlan: LogicalPlan,
-                                queryParams: PromQlQueryParams): PromQlQueryParams = {
-    val newPromql = LogicalPlanParser.convertToQuery(logicalPlan)
-    logicalPlan match {
-      case tls: TopLevelSubquery => {
-        val instantTime = queryParams.startSecs
-        queryParams.copy(
-          promQl = newPromql,
-          startSecs = instantTime,
-          endSecs = instantTime
-        )
-      }
-      case psp: PeriodicSeriesPlan => {
-        queryParams.copy(
-          promQl = newPromql,
-          startSecs = psp.startMs / 1000,
-          endSecs = psp.endMs / 1000,
-          stepSecs = psp.stepMs / 1000
-        )
-      }
-      case _ => queryParams.copy(promQl = newPromql)
-    }
-  }
-
   // scalastyle:off method.length
   /**
    * Group shard keys by partition, then generate an ExecPlan for each group.
@@ -242,7 +213,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val partitionSplitKeys = new mutable.ArrayBuffer[Seq[ColumnFilter]]
     keys.foreach { key =>
       val newLogicalPlan = logicalPlan.replaceFilters(key)
-      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+      val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val partitions = getPartitions(newLogicalPlan, newQueryParams)
         .map(_.partitionName)
         .distinct
@@ -299,7 +270,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         }.toSeq
         // Update the LogicalPlan with the new single-partition filters, then materialize.
         val newLogicalPlan = logicalPlan.replaceFilters(newFilters)
-        val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+        val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
         val newQueryContext = qContext.copy(
           origQueryParams = newQueryParams,
           plannerParams = qContext.plannerParams.copy(skipAggregatePresent = skipAggregatePresentValue)
@@ -312,7 +283,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     //   lower-level planners handle stitching.
     val splitPlans = partitionSplitKeys.map{ key =>
       val newLogicalPlan = logicalPlan.replaceFilters(key)
-      val newQueryParams = updateQueryParams(newLogicalPlan, queryParams)
+      val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val newQueryContext = qContext.copy(
         origQueryParams = newQueryParams,
         plannerParams = qContext.plannerParams.copy(skipAggregatePresent = skipAggregatePresentValue)
