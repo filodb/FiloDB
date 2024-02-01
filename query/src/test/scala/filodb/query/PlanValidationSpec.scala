@@ -54,8 +54,9 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
   def validatePlan(plan: ExecPlan,
                    expected: String,
                    sort: Boolean = false): Unit = {
+    val originalPlanString = plan.printTree()
     val (planString, expectedString) = {
-      val denoisedPlan = removeNoise(plan.printTree())
+      val denoisedPlan = removeNoise(originalPlanString)
       val denoisedExpected = removeNoise(expected)
       if (sort) {
         (sortTree(denoisedPlan), sortTree(denoisedExpected))
@@ -67,9 +68,9 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
       logger.error(
         s"""======== PLAN VALIDATION FAILED ========
            |~~~~~~~~~~~~~~~ EXPECTED ~~~~~~~~~~~~~~~
-           |$expectedString
+           |$expected
            |~~~~~~~~~~~~~~~~ ACTUAL ~~~~~~~~~~~~~~~~
-           |$planString
+           |$originalPlanString
            |""".stripMargin
       )
     }
