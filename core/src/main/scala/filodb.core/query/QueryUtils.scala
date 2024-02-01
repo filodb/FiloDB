@@ -84,7 +84,7 @@ object QueryUtils {
    * Example:
    *   foo -> [foo1, foo2]
    *   bar -> [bar1, bar2]
-   *   --> [[foo=foo1,bar=bar1], [foo=foo1,bar=bar2], [foo=foo2,bar=bar1], [foo=foo2,bar=bar2]]
+   *   --> [foo=foo1,bar=bar1], [foo=foo1,bar=bar2], [foo=foo2,bar=bar1], [foo=foo2,bar=bar2]
    */
   def makeAllKeyValueCombos(keyToValues: Map[String, Seq[String]]): Seq[Map[String, String]] = {
     // Store the entries with some order, then find all possible value combos s.t. each combo's
