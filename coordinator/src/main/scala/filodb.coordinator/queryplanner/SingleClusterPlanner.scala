@@ -2,9 +2,11 @@ package filodb.coordinator.queryplanner
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema

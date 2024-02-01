@@ -1,8 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{Seq, mutable}
+import scala.collection.{mutable, Seq}
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.TargetSchemaProvider
 import filodb.core.query.{ColumnFilter, QueryContext, QueryUtils, RangeParams}
 import filodb.core.query.Filter.{Equals, EqualsRegex}

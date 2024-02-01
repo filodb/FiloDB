@@ -1,23 +1,26 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.concurrent.{Map => ConcurrentMap}
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
+
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, QueryUtils, RangeParams, RvRange}
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
-
-import scala.collection.mutable
+//scalastyle:off file.size.limit
 
 case class PartitionAssignment(partitionName: String, httpEndPoint: String, timeRange: TimeRange,
                                grpcEndPoint: Option[String] = None)
@@ -866,3 +869,5 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient, queryConfig)
   }
 }
+
+//scalastyle:on file.size.limit
