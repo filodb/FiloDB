@@ -172,7 +172,7 @@ trait  DefaultPlanner {
           else {
             val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
               filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-              Equals(nameFilter.get.replace("_bucket", "")))
+              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
                 Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
@@ -737,4 +737,19 @@ object PlannerUtil extends StrictLogging {
       case lp: TsCardinalities => lp
     }
     //scalastyle:on method.length
+
+  /**
+   * Replaces the last occurence of '_bucket' string from the given input
+   * @param metricName Metric Name
+   * @return updated metric name without the last occurence of _bucket
+   */
+  def replaceLastBucketOccurenceStringFromMetricName(metricName: String): String = {
+    val lastIndexBucket = metricName.lastIndexOf("_bucket")
+    if (lastIndexBucket > -1) {
+      metricName.patch(lastIndexBucket, "", 7)
+    }
+    else {
+      metricName
+    }
+  }
 }

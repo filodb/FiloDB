@@ -628,7 +628,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           else {
             val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
               filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-              Equals(nameFilter.get.replace("_bucket", "")))
+              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
                 Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
