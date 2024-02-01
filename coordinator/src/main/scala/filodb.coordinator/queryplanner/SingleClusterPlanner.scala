@@ -857,8 +857,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass,
-        lp.version)
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass)
     }
     PlanResult(metaExec)
   }

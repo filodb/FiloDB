@@ -85,7 +85,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
 
   override protected def args: String = ""
 
-  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector, rs: ResultSchema):
+  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector):
       mutable.HashMap[ZeroCopyUTF8String, CardCounts] = {
     rv.rows().foreach{ r =>
       val data = RowData.fromRowReader(r)
@@ -95,17 +95,11 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.contains(data.group) || acc.size < resultSize) {
         (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
       } else {
-        // handle overflow group based on result schema given
-        if (rs.hasSameColumnsAs(TsCardExec.RESULT_SCHEMA)) {
-          // aggregate by dataset as well
-          val groupArray = data.group.toString.split(TsCardExec.PREFIX_DELIM)
-          val dataset = groupArray(groupArray.size - 1)
-          val dataGroup = prefixToGroupWithDataset(CardinalityStore.OVERFLOW_PREFIX, dataset)
-          (dataGroup, acc.getOrElseUpdate(dataGroup, CardCounts(0, 0)))
-        }
-        else {
-          (OVERFLOW_GROUP, acc.getOrElseUpdate(OVERFLOW_GROUP, CardCounts(0, 0)))
-        }
+        // aggregate by dataset as well
+        val groupArray = data.group.toString.split(TsCardExec.PREFIX_DELIM)
+        val dataset = groupArray(groupArray.size - 1)
+        val dataGroup = prefixToGroupWithDataset(CardinalityStore.OVERFLOW_PREFIX, dataset)
+        (dataGroup, acc.getOrElseUpdate(dataGroup, CardCounts(0, 0)))
       }
       acc.update(groupKey, accCounts.add(data.counts))
     }
@@ -121,15 +115,11 @@ final case class TsCardReduceExec(queryContext: QueryContext,
                                  querySession: QuerySession): Observable[RangeVector] = {
 
     // capture the result schema of responses
-    var rs = ResultSchema.empty
     val flatMapData = childResponses.flatMap(res => {
-      if (rs == ResultSchema.empty) {
-        rs = res._1.resultSchema
-      }
       Observable.fromIterable(res._1.result)
     })
     val taskOfResults = flatMapData
-      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])((x, y) => mapFold(x, y, rs))
+      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])((x, y) => mapFold(x, y))
       .map{ aggMap =>
         val it = aggMap.toSeq.sortBy(-_._2.shortTerm).map{ case (group, counts) =>
           CardRowReader(group, counts)
@@ -479,17 +469,7 @@ final case object TsCardExec {
   // results from all TsCardinality derivatives are clipped to this size
   val MAX_RESULT_SIZE = CardinalityStore.MAX_RESULT_SIZE
 
-  // row name assigned to overflow counts
-  val OVERFLOW_GROUP = prefixToGroup(CardinalityStore.OVERFLOW_PREFIX)
-
   val PREFIX_DELIM = ","
-
-  /**
-   * This is the V1 schema version of QueryResult for TSCardinalities query
-   */
-  val RESULT_SCHEMA_V1 = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
-                                          ColumnInfo("active", ColumnType.IntColumn),
-                                          ColumnInfo("total", ColumnType.IntColumn)), 1)
 
   /**
    * V2 schema version of QueryResult for TSCardinalities query. One more additional column `longterm` is added
@@ -499,14 +479,6 @@ final case object TsCardExec {
                                        ColumnInfo("active", ColumnType.IntColumn),
                                        ColumnInfo("shortTerm", ColumnType.IntColumn),
                                        ColumnInfo("longTerm", ColumnType.IntColumn)), 1)
-
-  /**
-   * Convert a shard key prefix to a row's group name.
-   */
-  def prefixToGroup(prefix: Seq[String]): ZeroCopyUTF8String = {
-    // just concat the prefix together with a single char delimiter
-    prefix.mkString(PREFIX_DELIM).utf8
-  }
 
   /**
    * @param prefix ShardKeyPrefix from the Cardinality Record
@@ -580,8 +552,7 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             numGroupByFields: Int,
-                            clusterName: String,
-                            version: Int) extends LeafExecPlan with StrictLogging {
+                            clusterName: String) extends LeafExecPlan with StrictLogging {
   require(numGroupByFields >= 1,
     "numGroupByFields must be positive")
   require(numGroupByFields >= shardKeyPrefix.size,
@@ -607,14 +578,7 @@ final case class TsCardExec(queryContext: QueryContext,
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
-
-            // v1 and v2 cardinality have different schemas and required group key. Hence we are segregating
-            // w.r.t to the version
-            val groupKey =
-              version match {
-                case 1 => prefixToGroup(card.prefix)
-                case _ => prefixToGroupWithDataset(card.prefix, dataset.dataset)
-              }
+            val groupKey = prefixToGroupWithDataset(card.prefix, dataset.dataset)
             // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
             // user perspective, the cardinality data in downsample is a longterm data. Hence, we are forking the
             // data path based on the cluster the data is being served from
@@ -631,14 +595,10 @@ final case class TsCardExec(queryContext: QueryContext,
           }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
-      case other =>
+      case _ =>
         Observable.empty
     }
-    // Sending V1 SCHEMA for v1 queries
-    version match {
-      case 1 => ExecResult(rvs, Task.eval(RESULT_SCHEMA_V1))
-      case _ => ExecResult(rvs, Task.eval(RESULT_SCHEMA))
-    }
+    ExecResult(rvs, Task.eval(RESULT_SCHEMA))
   }
   // scalastyle:on method.length
 
