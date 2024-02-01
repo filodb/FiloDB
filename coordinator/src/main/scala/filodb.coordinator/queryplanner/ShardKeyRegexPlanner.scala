@@ -232,7 +232,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // Map column -> index, then use this to sort each shard key.
     // NOTE: this means the order in which shard-key columns are defined will affect query results.
     //   Columns with higher cardinalities should be defined last.
-    val nonMetricShardKeyColToIndex = dataset.options.nonMetricShardColumns.zipWithIndex.toMap
+    val shardKeyCols = dataset.options.shardKeyColumns.filterNot(_ == dataset.options.metricColumn)
+    val nonMetricShardKeyColToIndex = shardKeyCols.zipWithIndex.toMap
     val partitionToKeyGroups = partitionsToNonSplitKeys.map{ case (partition, keys) =>
       val prefixGroups = keys
         .map(key => key.sortBy(filter => nonMetricShardKeyColToIndex.get(filter.column)))
