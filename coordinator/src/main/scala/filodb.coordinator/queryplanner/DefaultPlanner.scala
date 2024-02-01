@@ -744,12 +744,6 @@ object PlannerUtil extends StrictLogging {
    * @return updated metric name without the last occurence of _bucket
    */
   def replaceLastBucketOccurenceStringFromMetricName(metricName: String): String = {
-    val lastIndexBucket = metricName.lastIndexOf("_bucket")
-    if (lastIndexBucket > -1) {
-      metricName.patch(lastIndexBucket, "", 7)
-    }
-    else {
-      metricName
-    }
+    metricName.replaceAll("_bucket$", "")
   }
 }
