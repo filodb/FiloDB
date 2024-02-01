@@ -78,6 +78,38 @@ class SingleClusterPlanner(val dataset: Dataset,
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
 
+  /**
+   * If TargetSchema exists and all of the target-schema label filters (equals or pipe-only EqualsRegex) are
+   * provided in the query, then return true.
+   *
+   * @param filters      Query Column Filters
+   * @param targetSchema TargetSchema
+   * @return useTargetSchema - use target-schema to calculate query shards
+   */
+  private def useTargetSchemaForShards(filters: Seq[ColumnFilter],
+                                       targetSchema: Option[TargetSchemaChange]): Boolean = {
+    if (targetSchema.isEmpty || targetSchema.get.schema.isEmpty) {
+      return false
+    }
+    // Make sure each target-schema column is filtered by equality.
+    targetSchema.get.schema
+      .forall(tschemaCol => filters.exists(cf =>
+        cf.column == tschemaCol && cf.filter.isInstanceOf[Equals]))
+  }
+
+  /**
+   * Returns true iff a target-schema should be used to identify query shards.
+   */
+  def shouldUseTargetSchemaForShards(filters: Seq[ColumnFilter],
+                                     startMs: Long, endMs: Long,
+                                     qContext: QueryContext): Boolean = {
+    val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(filters)
+    val tsChangeExists = isTargetSchemaChanging(targetSchemaChanges, startMs, endMs)
+    val targetSchemaOpt = findTargetSchema(targetSchemaChanges, startMs, endMs)
+    val allTSLabelsPresent = useTargetSchemaForShards(filters, targetSchemaOpt)
+    !tsChangeExists && allTSLabelsPresent
+  }
+
   import SingleClusterPlanner._
 
   private def dispatcherForShard(shard: Int, forceInProcess: Boolean, queryContext: QueryContext): PlanDispatcher = {
@@ -93,25 +125,6 @@ class SingleClusterPlanner(val dataset: Dataset,
         throw new RuntimeException(s"Shard: $shard is not available")
     }
     ActorPlanDispatcher(targetActor, clusterName)
-  }
-
-  /**
-   * If TargetSchema exists and all of the target-schema label filters (equals or pipe-only EqualsRegex) are
-   * provided in the query, then return true.
-   *
-   * @param filters Query Column Filters
-   * @param targetSchema TargetSchema
-   * @return useTargetSchema - use target-schema to calculate query shards
-   */
-  private def useTargetSchemaForShards(filters: Seq[ColumnFilter],
-                                       targetSchema: Option[TargetSchemaChange]): Boolean = {
-    if (targetSchema.isEmpty || targetSchema.get.schema.isEmpty) {
-      return false
-    }
-    // Make sure each target-schema column is filtered by equality.
-    targetSchema.get.schema
-      .forall( tschemaCol => filters.exists( cf =>
-        cf.column == tschemaCol && cf.filter.isInstanceOf[Equals]))
   }
 
   /**
@@ -214,13 +227,16 @@ class SingleClusterPlanner(val dataset: Dataset,
     materialized
   }
 
-  // TODO(amt)
+  /**
+   * Returns the set of shards that contain query data.
+   * @param shardPairs all shard-key (column,value) pairs to be queried.
+   */
   private def shardsFromValues(shardPairs: Seq[(String, String)],
-                       filters: Seq[ColumnFilter],
-                       qContext: QueryContext,
-                       startMs: Long,
-                       endMs: Long,
-                       useTargetSchemaForShards: Seq[ColumnFilter] => Boolean = _ => false): Seq[Int] = {
+                               filters: Seq[ColumnFilter],
+                               qContext: QueryContext,
+                               startMs: Long,
+                               endMs: Long,
+                               useTargetSchemaForShards: Seq[ColumnFilter] => Boolean = _ => false): Seq[Int] = {
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
 
     val metric = shardPairs.find(_._1 == dsOptions.metricColumn)
@@ -283,15 +299,16 @@ class SingleClusterPlanner(val dataset: Dataset,
         (shardCol, trimmedValues)
       }
 
-      // For each set of pairs, create a set of Equals filters and compute the shards for each.
-      val shardKeyValuePairs = QueryUtils.makeAllKeyValueCombos(shardColToValues.toMap)
-      shardKeyValuePairs.flatMap{ kvMap =>
-        val updFilters = filters.map{ filt =>
-            kvMap.get(filt.column)
+      // Find the union of all shards for each shard-key.
+      val shardKeys = QueryUtils.makeAllKeyValueCombos(shardColToValues.toMap)
+      shardKeys.flatMap{ shardKey =>
+        // Replace any EqualsRegex shard-key filters with Equals.
+        val newFilters = filters.map{ filt =>
+            shardKey.get(filt.column)
               .map(value => ColumnFilter(filt.column, Filter.Equals(value)))
               .getOrElse(filt)
           }
-        shardsFromValues(kvMap.toSeq, updFilters, qContext, startMs, endMs, useTargetSchemaForShards)
+        shardsFromValues(shardKey.toSeq, newFilters, qContext, startMs, endMs, useTargetSchemaForShards)
       }.distinct
     }
   }
@@ -365,7 +382,6 @@ class SingleClusterPlanner(val dataset: Dataset,
                         renamedFilters: Seq[ColumnFilter])
 
     // construct a LeafInfo for each leaf...
-    val tsp = targetSchemaProvider(qContext)
     val leafInfos = new ArrayBuffer[LeafInfo]()
     for (leafPlan <- findLeafLogicalPlans(lp)) {
       val filters = getColumnFilterGroup(leafPlan).map(_.toSeq)
