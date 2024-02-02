@@ -148,6 +148,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
+    // Materialize with the inner planner if both of:
+    //   - all plan data lies on one partition
+    //   - all RawSeries filters are identical
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
+    // Unchecked .get is OK here since it will only be called for each tail element.
+    val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == shardKeyFilterGroups.head.toSet)
+    val shardKeys = getShardKeys(logicalPlan)
+    val partitions = shardKeys
+      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
+      .map(_.partitionName)
+      .distinct
+    if (hasSameShardKeyFilters && partitions.size < 2) {
+      val plans = generateExec(logicalPlan, shardKeys, qContext)
+      return PlanResult(plans)
+    }
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
