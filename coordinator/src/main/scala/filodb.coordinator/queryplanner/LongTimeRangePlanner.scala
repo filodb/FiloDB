@@ -233,17 +233,10 @@ import filodb.query.exec._
    * @return
    */
   private def materializeTSCardinalityPlan(queryContext: QueryContext, logicalPlan: TsCardinalities): PlanResult = {
-    logicalPlan.version match {
-      case 2 => {
-        val rawPlan = rawClusterPlanner.materialize(logicalPlan, queryContext)
-        val dsPlan = downsampleClusterPlanner.materialize(logicalPlan, queryContext)
-        val stitchedPlan = TsCardReduceExec(queryContext, stitchDispatcher, Seq(rawPlan, dsPlan))
-        PlanResult(Seq(stitchedPlan))
-      }
-      // version 1 defaults to raw as done before
-      case 1 => rawClusterMaterialize(queryContext, logicalPlan)
-      case _ => throw new UnsupportedOperationException(s"version ${logicalPlan.version} not supported!")
-    }
+    val rawPlan = rawClusterPlanner.materialize(logicalPlan, queryContext)
+    val dsPlan = downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    val stitchedPlan = TsCardReduceExec(queryContext, stitchDispatcher, Seq(rawPlan, dsPlan))
+    PlanResult(Seq(stitchedPlan))
   }
 
   // scalastyle:off cyclomatic.complexity

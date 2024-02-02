@@ -185,7 +185,6 @@ object TsCardinalities {
  */
 case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
-                           version: Int = 1,
                            datasets: Seq[String] = Seq(),
                            userDatasets: String = "",
                            overrideClusterName: String = "") extends LogicalPlan {

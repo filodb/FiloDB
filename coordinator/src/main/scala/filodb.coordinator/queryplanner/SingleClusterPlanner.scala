@@ -620,6 +620,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   override private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      forceInProcess: Boolean): PlanResult = {
+
     val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
        removeBucket(Right(lp))._3.right.get
     } else lp
@@ -679,15 +680,21 @@ class SingleClusterPlanner(val dataset: Dataset,
 
         if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
         else {
-          val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-            filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-            Equals(nameFilter.get.replace("_bucket", "")))
-          val newLp =
-            if (lp.isLeft)
-             Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-            else
-             Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-          (nameFilter, leFilter, newLp)
+          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
+          if (!nameFilter.get.endsWith("_bucket")) {
+            (nameFilter, leFilter, lp)
+          }
+          else {
+            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
+            val newLp =
+              if (lp.isLeft)
+                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+              else
+                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+            (nameFilter, leFilter, newLp)
+          }
         }
       case _ => (None, None, lp)
     }
@@ -899,8 +906,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass,
-        lp.version)
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass)
     }
     PlanResult(metaExec)
   }

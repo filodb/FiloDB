@@ -94,4 +94,13 @@ class PlannerUtilSpec  extends AnyFunSpec with Matchers {
       case _ => false
     })
   }
+
+  it(" replaceLastBucketFromMetricName should replace bucket names correctly") {
+    PlannerUtil.replaceLastBucketOccurenceStringFromMetricName("test_metric_bucket") shouldEqual "test_metric"
+    PlannerUtil.replaceLastBucketOccurenceStringFromMetricName("test_bucket_bucket") shouldEqual "test_bucket"
+    PlannerUtil.replaceLastBucketOccurenceStringFromMetricName("my_bucket_bucket_bucket_bucket") shouldEqual
+      "my_bucket_bucket_bucket"
+    PlannerUtil.replaceLastBucketOccurenceStringFromMetricName("testbucket") shouldEqual "testbucket"
+    PlannerUtil.replaceLastBucketOccurenceStringFromMetricName("testBucket_bucket") shouldEqual "testBucket"
+  }
 }

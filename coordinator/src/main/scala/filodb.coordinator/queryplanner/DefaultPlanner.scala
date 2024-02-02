@@ -165,15 +165,21 @@ trait  DefaultPlanner {
 
         if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
         else {
-          val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-            filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-            Equals(nameFilter.get.replace("_bucket", "")))
-          val newLp =
-            if (lp.isLeft)
-              Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-            else
-              Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-          (nameFilter, leFilter, newLp)
+          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
+          if (!nameFilter.get.endsWith("_bucket")) {
+            (nameFilter, leFilter, lp)
+          }
+          else {
+            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
+            val newLp =
+              if (lp.isLeft)
+                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+              else
+                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+            (nameFilter, leFilter, newLp)
+          }
         }
       case _ => (None, None, lp)
     }
@@ -731,4 +737,13 @@ object PlannerUtil extends StrictLogging {
       case lp: TsCardinalities => lp
     }
     //scalastyle:on method.length
+
+  /**
+   * Replaces the last occurence of '_bucket' string from the given input
+   * @param metricName Metric Name
+   * @return updated metric name without the last occurence of _bucket
+   */
+  def replaceLastBucketOccurenceStringFromMetricName(metricName: String): String = {
+    metricName.replaceAll("_bucket$", "")
+  }
 }

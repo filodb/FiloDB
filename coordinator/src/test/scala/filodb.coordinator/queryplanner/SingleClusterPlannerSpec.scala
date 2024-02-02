@@ -2202,6 +2202,17 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       isInstanceOf[StaticFuncArgs] shouldEqual(true)
   }
 
+  it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should NOT be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_bucket_counter") shouldEqual true
+  }
+
   it("should convert rate histogram bucket query") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("""rate(my_hist_bucket{job="prometheus",le="0.5"}[10m])""", t)

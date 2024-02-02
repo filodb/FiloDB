@@ -337,7 +337,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
   }
 
   it("tsCardinality should span to both downsample and raw for version 2") {
-    val logicalPlan = TsCardinalities(Seq("a","b"), 2, 2, Seq("longtime-prometheus"))
+    val logicalPlan = TsCardinalities(Seq("a","b"), 2, Seq("longtime-prometheus"))
 
     val cardExecPlan = longTermPlanner.materialize(
       logicalPlan,
@@ -350,26 +350,6 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
     rawEp.name shouldEqual "raw"
     downsampleEp.name shouldEqual "downsample"
-  }
-
-  it("tsCardinality should throw exception for version > 2") {
-    val logicalPlan = TsCardinalities(Seq("a", "b"), 2, 3, Seq("longtime-prometheus"))
-    val ex = intercept[UnsupportedOperationException] {
-      val cardExecPlan = longTermPlanner.materialize(
-        logicalPlan,
-        QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
-    }
-    ex.getMessage.contains("version 3 not supported!") shouldEqual true
-  }
-
-  it("tsCardinality should span to raw ONLY for version 1") {
-    val logicalPlan = TsCardinalities(Seq("a", "b"), 2, 1, Seq("longtime-prometheus"))
-
-    val cardRawExecPlan = longTermPlanner.materialize(
-      logicalPlan,
-      QueryContext(origQueryParams = promQlQueryParams.copy(promQl = ""))).asInstanceOf[MockExecPlan]
-
-    cardRawExecPlan.name shouldEqual "raw"
   }
 
   it("should direct overlapping binary join offset queries with vector(0) " +
