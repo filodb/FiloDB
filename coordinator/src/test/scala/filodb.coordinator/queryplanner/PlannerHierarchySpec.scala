@@ -3574,6 +3574,10 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val query = """sum(my_cool_metric{_ws_="demo", _ns_=~".*"})"""
     val timeParams = TimeStepParams(startSeconds, step, endSeconds)
     val maxFanoutBatchSize = 2
+    // Looking for:
+    //   - keys are batched together into EqualsRegex leaf/remote filters
+    //   - batches contain at most 2 keys
+    //   - split keys are handled separately
     val expected = """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634777330))
                      |-E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
                      |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
