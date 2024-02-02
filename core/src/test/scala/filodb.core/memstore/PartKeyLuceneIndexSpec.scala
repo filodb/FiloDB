@@ -117,6 +117,35 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
   }
 
+
+  it("should fetch part key records from filters correctly with index caching disabled") {
+    // Add the first ten keys and row numbers
+    val keyIndexNoCache =
+      new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition,
+        true,
+        true,
+        0,
+        1.hour.toMillis,
+        disableIndexCaching = true)
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndexNoCache.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndexNoCache.refreshReadersBlocking()
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    Range(1, 100).foreach(_ => {
+      val result = keyIndexNoCache.partKeyRecordsFromFilters(Seq(filter2), 0, Long.MaxValue)
+      val expected = Seq(pkrs(7), pkrs(8), pkrs(9))
+
+      result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
+      result.map(p => (p.startTime, p.endTime)) shouldEqual expected.map(p => (p.startTime, p.endTime))
+    })
+
+  }
+
   it("should fetch only two part key records from filters") {
     // Add the first ten keys and row numbers
     val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
