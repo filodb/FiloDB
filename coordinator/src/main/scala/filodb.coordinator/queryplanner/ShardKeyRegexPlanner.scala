@@ -206,6 +206,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                                            qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
+    if (keys.isEmpty) {
+      // most likely a scalar -- just materialize for the local partition.
+      return Seq(queryPlanner.materialize(logicalPlan, qContext))
+    }
+
     // Map partitions to the set of *non*-partition-split keys they house.
     val partitionsToNonSplitKeys = new mutable.HashMap[String, mutable.Buffer[Seq[ColumnFilter]]]()
     // Set of all *partition-split* key groups. These will be materialized
@@ -441,20 +446,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
    * */
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
-    // Materialize with the inner planner if both of:
-    //   - all plan data lies on one partition
-    //   - all RawSeries filters are identical
-    val qParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val shardKeyFilterGroups = LogicalPlan.getRawSeriesFilters(logicalPlan)
-      .map(_.filter(cf => dataset.options.nonMetricShardColumns.contains(cf.column)))
-    // Unchecked .get is OK here since it will only be called for each tail element.
-    val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == shardKeyFilterGroups.head.toSet)
-    val partitions = getShardKeys(logicalPlan)
-      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
-    if (hasSameShardKeyFilters && isSinglePartition(partitions)) {
-      val plans = generateExec(logicalPlan, getShardKeys(logicalPlan), queryContext)
-      return PlanResult(plans)
-    }
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
