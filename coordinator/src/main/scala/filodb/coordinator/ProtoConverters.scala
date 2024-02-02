@@ -2707,7 +2707,6 @@ object ProtoConverters {
       tce.shardKeyPrefix.foreach(f => builder.addShardKeyPrefix(f))
       builder.setNumGroupByFields(tce.numGroupByFields)
       builder.setClusterName(tce.clusterName)
-      builder.setVersion(tce.version)
       builder.build()
     }
   }
@@ -2726,8 +2725,7 @@ object ProtoConverters {
         tce.getShard,
         shardKeyPrefix,
         tce.getNumGroupByFields,
-        tce.getClusterName,
-        tce.getVersion
+        tce.getClusterName
       )
     }
   }

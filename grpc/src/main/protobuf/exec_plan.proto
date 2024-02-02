@@ -828,11 +828,10 @@ message ScalarFixedDoubleExec {
 
 message TsCardExec {
   LeafExecPlan leafExecPlan      = 1;
-  int32 shard                    = 3;
-  repeated string shardKeyPrefix = 4;
-  int32 numGroupByFields         = 5;
-  string clusterName             = 6;
-  int32 version                  = 7;
+  int32 shard                    = 2;
+  repeated string shardKeyPrefix = 3;
+  int32 numGroupByFields         = 4;
+  string clusterName             = 5;
 }
 
 message TimeScalarGeneratorExec {
