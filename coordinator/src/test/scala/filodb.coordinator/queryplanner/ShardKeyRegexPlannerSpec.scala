@@ -89,9 +89,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -103,15 +103,16 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams(
       """test{_ns_ =~ "App.*", instance = "Inst-1" }""", 100, 1, 1000)))
+    println(execPlan.printTree())
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
-    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
-    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ws_", Equals("demo"))) shouldEqual(true)
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ws_", Equals("demo"))) shouldEqual(true)
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ws_", Equals("demo"))) shouldEqual(true)
   }
 
@@ -134,14 +135,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should generate Exec plan for subquery with windowing") {
     val expected =
-    """|T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
-       |-E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher
-       |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
-       |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
-       |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
-       |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
-       |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
-       |--E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher""".stripMargin
+    """T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
+      |-E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+      |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
+      |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
+      |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
+      |--E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
     val lp = Parser.queryToLogicalPlan(
       """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m])""",
       1000, 1000
@@ -168,10 +169,10 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
-    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -187,22 +188,22 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
-    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
   it("should generate Exec plan for top level subquery") {
     val expected =
-        """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher
-          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1152742389],raw)
           |--T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1152742389],raw)
           |--T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
-          |-E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher""".stripMargin
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1152742389],raw)
+          |-E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
     val lp = Parser.queryToLogicalPlan(
       """test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m]""",
       1000, 1000
@@ -224,9 +225,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -252,14 +253,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
 
     // Child plans should have only inner periodic query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-2\"}"
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -310,15 +311,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -344,15 +345,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -372,9 +373,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lp = Parser.queryToLogicalPlan("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""",
       1000, 1000)
     val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000)
-    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
-      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
-      ColumnFilter("_ns_", Equals("App-2"))))}
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      if (shardColumnFilters.nonEmpty) {
+        Seq(
+          Seq(ColumnFilter("_ws_", Equals("demo")),
+              ColumnFilter("_ns_", Equals("App-1"))),
+          Seq(ColumnFilter("_ws_", Equals("demo")),
+              ColumnFilter("_ns_", Equals("App-2"))))
+      } else Nil
+    }
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
@@ -391,9 +398,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiPartitionExec.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual true
 
     // Child plans should have only inner query in PromQlQueryParams
-    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
+    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
       .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-2"}"""
   }
 
@@ -438,15 +445,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
     lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
-    rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -467,15 +474,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
     lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -497,9 +504,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       contains(ColumnFilter("_ns_", Equals("App-0"))) shouldEqual (true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual (true)
   }
 
@@ -710,7 +717,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // Since we get data from multiple partitions, the dispatcher will be in process
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""test1{_ws_="demo",_ns_="App1"}""",
@@ -749,7 +756,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.head.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual
       InstantFunctionId.Ln
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""test1{_ws_="demo",_ns_="App-1"}""",
@@ -830,7 +837,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       x.rangeVectorTransformers.isEmpty shouldEqual true
     })
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -867,7 +874,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       x.rangeVectorTransformers.isEmpty shouldEqual true
     })
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -954,7 +961,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
 
     child.children match {
-      case plan1::plan2::Nil =>
+      case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""foo{_ws_="demo",_ns_="App-2"}""",
@@ -1135,25 +1142,25 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         """T~InstantVectorFunctionMapper(function=ClampMax)
           |-FA1~
           |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1006757749],raw)
+          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1006757749],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1006757749],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)
           |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1006757749],raw)""".stripMargin),
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1572143277],raw)""".stripMargin),
       // inst func with scalar() arg: _ws_ NOT in query
       ("""clamp_max(test{_ns_="App-1"}, scalar(sc_test{_ns_="App-1"}))""",
         """T~InstantVectorFunctionMapper(function=ClampMax)
           |-FA1~
           |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#806721859],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=14, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#806721859],raw)
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=30, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(sc_test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#806721859],raw)
           |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#739940931],raw)""".stripMargin)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-1)), ColumnFilter(_metric_,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#806721859],raw)""".stripMargin)
     )
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
