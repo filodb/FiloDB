@@ -3532,6 +3532,129 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
+  it("should correctly batch local/remote requests and individually handle split keys separately") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        val ns = routingKey("_ns_")
+        if (ns.contains("split")) {
+          val midMs = (timeRange.startMs + timeRange.endMs) / 2
+          List(
+            PartitionAssignment("part1", "part1-url", TimeRange(timeRange.startMs, midMs)),
+            PartitionAssignment("part2", "part2-url", TimeRange(midMs + 1, timeRange.endMs))
+          )
+        } else if (ns.contains("part1")) {
+          List(PartitionAssignment("part1", "part1-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        } else if (ns.contains("part2")) {
+          List(PartitionAssignment("part2", "part2-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        } else {
+          throw new IllegalArgumentException("unexpected _ns_: " + ns)
+        }
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    // 2 split keys and 4 non-split keys per partition
+    def shardKeyMatcherFunc(shardColumnFilters: Seq[ColumnFilter]): Seq[Seq[ColumnFilter]] = {
+          Seq(
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("a-split"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("b-split"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("c-part1"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("d-part1"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("e-part1"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("f-part1"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("g-part2"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("h-part2"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("i-part2"))),
+            Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("j-part2")))
+          )
+    }
+
+    val query = """sum(my_cool_metric{_ws_="demo", _ns_=~".*"})"""
+    val timeParams = TimeStepParams(startSeconds, step, endSeconds)
+    val maxFanoutBatchSize = 2
+    val expected = """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634777330))
+                     |-E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000)))
+                     |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(b-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(b-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(b-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(b-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |---E~PromQlRemoteExec(PromQlQueryParams(sum(my_cool_metric{_ws_="demo",_ns_="b-split"}),1634345630,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,2), queryEndpoint=part2-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000)))
+                     |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(a-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(a-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(a-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(a-split))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |---E~PromQlRemoteExec(PromQlQueryParams(sum(my_cool_metric{_ws_="demo",_ns_="a-split"}),1634345630,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,2), queryEndpoint=part2-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000)))
+                     |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(e-part1|f-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(e-part1|f-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(e-part1|f-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(e-part1|f-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000)))
+                     |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(c-part1|d-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(c-part1|d-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],raw)
+                     |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(c-part1|d-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                     |-----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_metric_,Equals(my_cool_metric)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,EqualsRegex(c-part1|d-part1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#58670746],downsample)
+                     |--E~PromQlRemoteExec(PromQlQueryParams(sum(my_cool_metric{_ws_="demo",_ns_=~"g-part2|h-part2"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,2), queryEndpoint=part2-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
+                     |--E~PromQlRemoteExec(PromQlQueryParams(sum(my_cool_metric{_ws_="demo",_ns_=~"i-part2|j-part2"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,2), queryEndpoint=part2-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
+
+    val spp = getPlanners(2, dataset).spp
+    val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, spp, "part1", dataset, queryConfig)
+    val shardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFunc, partitionLocationProvider, queryConfig, targetSchemaProvider)
+
+    val lp = Parser.queryRangeToLogicalPlan(query, timeParams)
+    val context = QueryContext(
+      origQueryParams = PromQlQueryParams(query, timeParams.start, timeParams.step, timeParams.end),
+      plannerParams = PlannerParams(processMultiPartition = true, maxShardKeyRegexFanoutBatchSize = maxFanoutBatchSize))
+    val ep = shardKeyRegexPlanner.materialize(lp, context)
+    validatePlan(ep, expected)
+  }
+
   it("should generate correct plan for aggregations/joins without selectors") {
     val queryExpectedPairs = Seq(
       // FIXME: this first plan is needlessly complex (but will return the correct result)
