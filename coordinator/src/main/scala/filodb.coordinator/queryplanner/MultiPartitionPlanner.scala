@@ -130,19 +130,20 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
 
             val partition = getPartitions(lp, params)
             assert(partition.nonEmpty, s"Unexpected to see partitions empty for logicalPlan=$lp and param=$params")
-            // Raw export from both involved partitions for the entire time duration as the namespace migration
+            // Raw export from both involved partitions for the entire time duration as the shard-key migration
             // is not guaranteed to happen exactly at the time of split
             val execPlans = partition.map(pa => {
               val (thisPartitionStartMs, thisPartitionEndMs) = (rawExportStart, rawExportEnd)
+              val timeRangeOverride = TimeRange(thisPartitionEndMs, thisPartitionEndMs)
               val totalOffsetThisPartitionMs = thisPartitionEndMs - thisPartitionStartMs
               val thisPartitionLp = lp.copy(offsetMs = None, lookbackMs = Some(totalOffsetThisPartitionMs))
               val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(thisPartitionLp),
-                  startSecs = thisPartitionEndMs / 1000L,
-                  endSecs = thisPartitionEndMs / 1000L,
+                  startSecs = timeRangeOverride.startMs / 1000L,
+                  endSecs = timeRangeOverride.endMs / 1000L,
                   stepSecs = 1
                 )
               val newContext = qContext.copy(origQueryParams = newPromQlParams)
-              materializeForPartition(thisPartitionLp, pa, newContext)
+              materializeForPartition(thisPartitionLp, pa, newContext, Some(timeRangeOverride))
             })
           PlanResult(
             Seq( if (execPlans.tail == Seq.empty) execPlans.head
@@ -673,11 +674,17 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               val totalExpectedRawExport = (gapEndTimeMs - rawExportStartDurationThisPartition) + lookbackMs + offsetMs
               if (queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
                 // Only if the raw export is completely within the previous partition's timerange
-                val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
+                val timeRangeOverride = TimeRange(gapStartTimeMs, gapEndTimeMs)
+                val newParams = qParams.copy(
+                  startSecs = timeRangeOverride.startMs / 1000,
+                  endSecs = timeRangeOverride.endMs / 1000)
                 val newContext = qContext.copy(origQueryParams = newParams)
-                val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
-                  IntervalSelector(gapStartTimeMs, gapEndTimeMs),
-                  additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
+                val newLp = {
+                  val rawExportPlan = rewritePlanWithRemoteRawExport(logicalPlan,
+                    IntervalSelector(gapStartTimeMs, gapEndTimeMs),
+                    additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
+                  copyLogicalPlanWithUpdatedTimeRange(rawExportPlan, timeRangeOverride)
+                }
                 ep ++= walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
               } else {
                 logger.warn(
