@@ -416,7 +416,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("__name__", Equals("name")),
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
-        ), qContext, start, end)  // TODO(a_theimer)
+        ), qContext, start, end)
     } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 
