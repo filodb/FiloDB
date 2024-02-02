@@ -1171,7 +1171,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       execPlan.isInstanceOf[DistConcatExec] shouldEqual true
-      println(query)
       validatePlan(execPlan.children.head, expected)
     }
   }
