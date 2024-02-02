@@ -1573,7 +1573,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       startSeconds * 1000, endSeconds * 1000)
 
     val localExecPlan = mpPlanner.materialize(localPlan,
-      QueryContext(PromQlQueryParams("", 1000, 100, 10000), plannerParams =
+      QueryContext(PromQlQueryParams("test{job=\"app1\"}", 1000, 100, 10000), plannerParams =
         PlannerParams(processMultiPartition = true)))
 
     val expectedLocalPlan =
