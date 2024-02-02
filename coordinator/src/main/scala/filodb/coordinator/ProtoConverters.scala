@@ -2108,7 +2108,7 @@ object ProtoConverters {
       builder.setBinaryOp(bje.binaryOp.toProto)
       builder.setCardinality(bje.cardinality.toProto)
       builder.build()
-      bje.on.foreach(on => builder.addOn(on))
+      bje.on.foreach(onSeq => onSeq.foreach(on => builder.addOn(on)))
       bje.ignoring.foreach(ignoring => builder.addIgnoring(ignoring))
       bje.include.foreach(include => builder.addIgnoring(include))
       builder.setMetricColumn(bje.metricColumn)
@@ -2128,6 +2128,7 @@ object ProtoConverters {
       val rhs: Seq[filodb.query.exec.ExecPlan] =
         bje.getRhsList.asScala.toSeq.map(c => c.fromProto)
       val on = bje.getOnList.asScala.toSeq
+      val onOption = if (on.isEmpty) None else Option(on)
       val ignoring = bje.getIgnoringList.asScala.toSeq
       val include = bje.getIncludeList.asScala.toSeq
       val outputRvRange =
@@ -2140,7 +2141,7 @@ object ProtoConverters {
         rhs: Seq[ExecPlan],
         bje.getBinaryOp.fromProto,
         bje.getCardinality.fromProto,
-        on,
+        onOption,
         ignoring,
         include,
         bje.getMetricColumn,
@@ -2212,7 +2213,7 @@ object ProtoConverters {
       soe.rhs.foreach(ep => builder.addRhs(ep.toExecPlanContainerProto))
       builder.setBinaryOp(soe.binaryOp.toProto)
       builder.build()
-      soe.on.foreach(on => builder.addOn(on))
+      soe.on.foreach(onOption =>(onOption.foreach(on => builder.addOn(on))))
       soe.ignoring.foreach(ignoring => builder.addIgnoring(ignoring))
       builder.setMetricColumn(soe.metricColumn)
       soe.outputRvRange.foreach(orr => builder.setOutputRvRange(orr.toProto))
@@ -2234,6 +2235,7 @@ object ProtoConverters {
       val rhs: Seq[filodb.query.exec.ExecPlan] =
         soe.getRhsList.asScala.toSeq.map(c => c.fromProto)
       val on = soe.getOnList.asScala.toSeq
+      val onOption = if (on.isEmpty) None else Option(on)
       val ignoring = soe.getIgnoringList.asScala.toSeq
       val outputRvRange =
         if (soe.hasOutputRvRange) Option(soe.getOutputRvRange.fromProto) else None
@@ -2242,13 +2244,13 @@ object ProtoConverters {
       SetOperatorExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
-        lhs: Seq[ExecPlan],
-        rhs: Seq[ExecPlan],
+        lhs,
+        rhs,
         soe.getBinaryOp.fromProto,
-        on: Seq[String],
-        ignoring: Seq[String],
+        onOption,
+        ignoring,
         soe.getMetricColumn,
-        outputRvRange: Option[RvRange]
+        outputRvRange
       )
     }
   }
