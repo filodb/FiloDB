@@ -93,14 +93,24 @@ object LogicalPlanUtils extends StrictLogging {
    */
   def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
                                           timeRange: TimeRange): LogicalPlan = {
+    // Snap the range endpoints to the previous second.
+    // Plans sometimes require (correctly) that their children share the same start/stop times,
+    //   but some plans do not support millisecond precision. A recursive time-range update might
+    //   cause two child plan time-ranges to mismatch if the range is not second-aligned.
+    // Given that millisecond precision is never necessary, timestamps are shifted left to the
+    //   nearest second in order to avoid the hassle.
+    val timeRangeToUse = TimeRange(
+      1000 * (timeRange.startMs / 1000),
+      1000 * (timeRange.endMs / 1000)
+    )
     logicalPlan match {
-      case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRange)
-      case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
-      case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRangeToUse)
+      case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRangeToUse)
+      case lp: LabelValues              => lp.copy(startMs = timeRangeToUse.startMs, endMs = timeRangeToUse.endMs)
+      case lp: LabelNames               => lp.copy(startMs = timeRangeToUse.startMs, endMs = timeRangeToUse.endMs)
+      case lp: LabelCardinality         => lp.copy(startMs = timeRangeToUse.startMs, endMs = timeRangeToUse.endMs)
       case lp: TsCardinalities          => lp  // immutable & no members need to be updated
-      case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRangeToUse.startMs, endMs = timeRangeToUse.endMs)
     }
   }
 

@@ -161,7 +161,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
       .map(_.partitionName)
       .distinct
-    if (hasSameShardKeyFilters && partitions.size < 2) {
+    // NOTE: don't use partitions.size < 2. When partitions == 0, generateExec will not
+    //   materialize any plans because there are no partitions against which it should materialize.
+    //   That is a problem for e.g. scalars or absent().
+    if (hasSameShardKeyFilters && partitions.size == 1) {
       val plans = generateExec(logicalPlan, shardKeys, qContext)
       return PlanResult(plans)
     }

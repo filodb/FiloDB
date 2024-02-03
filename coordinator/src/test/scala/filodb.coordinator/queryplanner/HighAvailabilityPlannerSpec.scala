@@ -86,7 +86,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (100)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (0)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (10000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
