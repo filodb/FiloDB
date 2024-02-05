@@ -114,9 +114,9 @@ sealed abstract class BinaryOperator extends EnumEntry {
   def operatorString: String
 }
 
-sealed class MathOperator (val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed class SetOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed class ComparisonOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed abstract class MathOperator (val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed abstract class SetOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed abstract class ComparisonOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
