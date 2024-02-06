@@ -110,14 +110,9 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else {
       val result = walkLogicalPlanTree(logicalPlan, qContext)
       if (result.plans.size > 1) {
-        // No need to stitch -- lower-level planners will handle stitching of
-        //   partition-migrated data and/or short/long-term data.
-        MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, result.plans)
-      } else if (result.plans.size == 1) {
-        result.plans.head
-      } else {
-        EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
-      }
+        val dispatcher = PlannerUtil.pickDispatcher(result.plans)
+        MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
+      } else result.plans.head
     }
   }
 
@@ -317,7 +312,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       queryPlanner.materialize(newLogicalPlan, newQueryContext)
     }
 
-    nonSplitPlans ++ splitPlans
+    val res = nonSplitPlans ++ splitPlans
+    if (res.nonEmpty) res else Seq(EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher))
   }
   // scalastyle:on method.length
 
