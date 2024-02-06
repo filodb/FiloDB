@@ -79,6 +79,10 @@ object GatewayServer extends StrictLogging {
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
     val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
+    val genHistMinMaxData = toggle(noshort = true,
+              descrYes = "Generate prom-histogram-min-max schema test data and exit")
+    val genDeltaHistMinMaxData = toggle(noshort = true,
+              descrYes = "Generate delta-histogram-min-max-schema test data and exit")
     val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
     val genCounterData = toggle(noshort = true, descrYes = "Generate Prometheus counter-schema test data and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
@@ -133,6 +137,9 @@ object GatewayServer extends StrictLogging {
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
     val genCounterData = userOpts.genCounterData.getOrElse(false)
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
+    val genHistMinMaxData = userOpts.genHistMinMaxData.getOrElse(false)
+    val genDeltaHistMinMaxData = userOpts.genDeltaHistMinMaxData.getOrElse(false)
+
     if (genHist || genGaugeData || genDeltaHist
           || genCounterData || genDeltaCounterData) {
       val startTime = System.currentTimeMillis
