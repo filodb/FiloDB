@@ -48,6 +48,7 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
         }
       }
       .flatMap(keyToVals => QueryUtils.makeAllKeyValueCombos(keyToVals.toMap))
+      .distinct
 
     // 3. Determine the query time range
     val queryTimeRange = if (infiniteTimeRange) {

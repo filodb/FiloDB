@@ -85,7 +85,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val keyToValues = shardKeyFilters.map { filter =>
       val values = filter match {
         case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
-          QueryUtils.splitAtUnescapedPipes(regex.value.toString)
+          QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
         case ColumnFilter(col, equals: Equals) =>
           Seq(equals.value.toString)
       }
@@ -308,7 +308,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
             Seq(filtVal)
           case Some(ColumnFilter(_, Filter.EqualsRegex(filtVal: String)))
-            if QueryUtils.containsPipeOnlyRegex(filtVal) => QueryUtils.splitAtUnescapedPipes(filtVal)
+            if QueryUtils.containsPipeOnlyRegex(filtVal) => QueryUtils.splitAtUnescapedPipes(filtVal).distinct
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")

@@ -435,17 +435,18 @@ object LogicalPlanUtils extends StrictLogging {
         val rawShardKeyFilters = getShardKeyFilters(rs)
         // The filters might contain pipe-concatenated EqualsRegex values.
         // Convert these into sets of single-valued Equals filters.
-        val resolvedShardKeyFilters = rawShardKeyFilters.flatMap{ filters =>
+        val resolvedShardKeyFilters = rawShardKeyFilters.flatMap { filters =>
           val equalsFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
             filter.filter match {
               case EqualsRegex(values: String) if QueryUtils.containsPipeOnlyRegex(values) =>
                 QueryUtils.splitAtUnescapedPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
               case _ => Seq(filter)
-            }}
+            }
+          }
           // E.g. foo{key1=~"baz|bat",key2=~"bar|bak"} would give the following combos:
           // [[baz,bar], [baz,bak], [bat,bar], [bat,bak]]
           QueryUtils.combinations(equalsFilters)
-      }
+        }.map(_.toSet).distinct.map(_.toSeq)  // make sure keys are distinct
       resolvedShardKeyFilters.map{ shardKey =>
         val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)

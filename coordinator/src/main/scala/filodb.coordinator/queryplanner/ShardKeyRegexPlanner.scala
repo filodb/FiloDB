@@ -318,7 +318,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   // scalastyle:on method.length
 
   // FIXME: This will eventually be replaced with generateExecForEachPartition.
-  @Deprecated
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
                                      qContext: QueryContext): Seq[ExecPlan] = {
