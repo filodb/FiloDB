@@ -882,6 +882,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         ingested += ingestConsumer.numActuallyIngested
         _offset = offset
       }
+      else {
+        // Adding this log line to debug the shard stuck in recovery scenario(s)
+        logger.error(s"[Container Empty] record-offset: ${offset} last-ingested-offset: ${_offset}")
+      }
     } else {
       shardStats.oldContainers.increment()
     }
