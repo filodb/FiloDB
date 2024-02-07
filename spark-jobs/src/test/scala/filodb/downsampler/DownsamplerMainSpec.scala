@@ -52,13 +52,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
-  val exportToFile = None  // Some("file:///path/to/dir/")
+  val exportToFile = None  // Some("file:///path/to/dir/$0")
   val exportConf =
     s"""{
        |  "filodb": { "downsampler": { "data-export": {
        |    "enabled": ${exportToFile.isDefined},
        |    "key-labels": [],
-       |    "bucket": "${exportToFile.getOrElse("")}",
+       |    "destination-format": "${exportToFile.getOrElse("")}",
        |    "format": "csv",
        |    "options": {
        |      "header": true,
@@ -398,6 +398,48 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
       }
     }
+  }
+
+  it ("should correctly generate export address from labels") {
+    val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      enabled = true
+          |      key-labels = ["l1", "l2"]
+          |      destination-format = "address/foo/bar/$0/$1"
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+
+    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
+    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
+
+    batchExporter.makeExportAddress(Seq("l1a", "l2a")) shouldEqual "address/foo/bar/l1a/l2a"
+  }
+
+  it ("should give correct export-row index of column name") {
+    val testConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1", "l2"]
+        |      path-spec: [
+        |        year, "<<YYYY>>",
+        |        month, "<<M>>",
+        |        day, "<<d>>",
+        |        _metric_, "{{__name__}}"
+        |      ]
+        |    }
+        |""".stripMargin
+    ).withFallback(conf)
+
+    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
+    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
+    batchExporter.getRowIndex("year").get shouldEqual 3
+    batchExporter.getRowIndex("month").get shouldEqual 4
+    batchExporter.getRowIndex("day").get shouldEqual 5
+    batchExporter.getRowIndex("_metric_").get shouldEqual 6
+
   }
 
   it ("should correctly generate export path names") {

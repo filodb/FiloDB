@@ -101,6 +101,28 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }.map(_._2).toSet
   }
 
+  /**
+   * Returns the index of a column in the export schema.
+   * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
+   *   of each exported row.
+   */
+  def getRowIndex(fieldName: String): Option[Int] = {
+    exportSchema.zipWithIndex.find(_._1.name == fieldName).map(_._2)
+  }
+
+  /**
+   * Returns the configured exportDestinationFormat with all $i (e.g. $0, $1, $2, etc)
+   * substrings replaced with the ith string of the argument export key.
+   */
+  def makeExportAddress(exportKey: Seq[String]): String = {
+    val replaceRegex = "\\$([0-9]+)".r
+    replaceRegex.replaceAllIn(downsamplerSettings.exportDestinationFormat, matcher => {
+      // Replace e.g. $0 with the 0th index of the export key.
+      val index = matcher.group(1).toInt
+      exportKey(index)
+    })
+  }
+
   // Unused, but keeping here for convenience if needed later.
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
