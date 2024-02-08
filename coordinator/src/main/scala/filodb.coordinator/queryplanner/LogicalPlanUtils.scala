@@ -422,9 +422,9 @@ object LogicalPlanUtils extends StrictLogging {
    *   - all plan RawSeries share the same target-schema columns.
    *   - no target-schema definition changes during the query.
    */
-  private def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
-                                               targetSchemaProvider: TargetSchemaProvider,
-                                               getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]])
+  def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
+                                       targetSchemaProvider: TargetSchemaProvider,
+                                       getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]])
   : Option[Seq[String]] = {
     // compose a stream of Options for each RawSeries--
     //   the options contain a target-schema iff it is defined and unchanging.
