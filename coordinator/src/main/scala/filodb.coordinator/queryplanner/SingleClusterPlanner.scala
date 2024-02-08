@@ -170,7 +170,8 @@ class SingleClusterPlanner(val dataset: Dataset,
         boundParams._4)
       if (newStartMs <= boundParams._6) { // if there is an overlap between query and retention ranges
         if (newStartMs != boundParams._1)
-          Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(newStartMs, boundParams._6)))
+          Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedSeconds(
+            logicalPlan, newStartMs / 1000, boundParams._6 / 1000))
         else Some(logicalPlan)
       } else { // query is outside retention period, simply return empty result
         None

@@ -404,7 +404,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       // FIXME: the below check is needed because subquery tests fail when their
       //   time-ranges are updated even with the original query params.
       val lpWithUpdatedTime = if (timeRangeOverride.isDefined) {
-        copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
+        copyLogicalPlanWithUpdatedSeconds(logicalPlan, timeRange.startMs / 1000, timeRange.endMs / 1000)
       } else logicalPlan
       localPartitionPlanner.materialize(lpWithUpdatedTime, qContextWithOverride)
     } else {
@@ -671,16 +671,15 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               val totalExpectedRawExport = (gapEndTimeMs - rawExportStartDurationThisPartition) + lookbackMs + offsetMs
               if (queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
                 // Only if the raw export is completely within the previous partition's timerange
-                val timeRangeOverride = TimeRange(gapStartTimeMs, gapEndTimeMs)
                 val newParams = qParams.copy(
-                  startSecs = timeRangeOverride.startMs / 1000,
-                  endSecs = timeRangeOverride.endMs / 1000)
+                  startSecs = gapStartTimeMs / 1000,
+                  endSecs = gapEndTimeMs / 1000)
                 val newContext = qContext.copy(origQueryParams = newParams)
                 val newLp = {
                   val rawExportPlan = rewritePlanWithRemoteRawExport(logicalPlan,
                     IntervalSelector(gapStartTimeMs, gapEndTimeMs),
                     additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
-                  copyLogicalPlanWithUpdatedTimeRange(rawExportPlan, timeRangeOverride)
+                  copyLogicalPlanWithUpdatedSeconds(rawExportPlan, newParams.startSecs, newParams.endSecs)
                 }
                 ep ++= walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
               } else {
