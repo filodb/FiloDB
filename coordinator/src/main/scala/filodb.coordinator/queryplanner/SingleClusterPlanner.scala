@@ -254,11 +254,11 @@ class SingleClusterPlanner(val dataset: Dataset,
    * Returns the set of shards that contain query data.
    * @param shardPairs all shard-key (column,value) pairs to be queried.
    */
-  private def shardsFromValues(shardPairs: Seq[(String, String)],
-                               filters: Seq[ColumnFilter],
-                               qContext: QueryContext,
-                               startMs: Long,
-                               endMs: Long): Seq[Int] = {
+  def shardsFromValues(shardPairs: Seq[(String, String)],
+                       filters: Seq[ColumnFilter],
+                       qContext: QueryContext,
+                       startMs: Long,
+                       endMs: Long): Seq[Int] = {
 
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
 

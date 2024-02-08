@@ -2637,4 +2637,52 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     )
     useTschemaForShards(tschemaChangesAfter) shouldEqual true
   }
+
+  it ("should correctly identify shards to query") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(
+      ColumnFilter("job", Equals("foo")),
+      ColumnFilter("__name__", Equals("my_metric")),
+      ColumnFilter("label1", Equals("value1"))
+    )
+    val shardKvPairs = dataset.options.shardKeyColumns.map{col =>
+      (col, filters.find(_.column == col).get.filter.valuesStrings.head.toString)
+    }
+    val shardsFromValues = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.shardsFromValues(shardKvPairs, filters, qContext, startMs, endMs)
+    }
+
+    // Only one shard should be returned when a target-schema can be applied.
+    // Otherwise, two shards are returned.
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    shardsFromValues(none).size shouldEqual 2
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    shardsFromValues(unchanging).size shouldEqual 1
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    shardsFromValues(unchangingWrongCol).size shouldEqual 2
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    shardsFromValues(firstTschema).size shouldEqual 2
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChanges).size shouldEqual 2
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChangesAfter).size shouldEqual 1
+  }
 }
