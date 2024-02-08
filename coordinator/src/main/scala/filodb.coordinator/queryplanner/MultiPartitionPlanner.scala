@@ -100,11 +100,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     } else logicalPlan match {
       case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
-      case _                                  =>
-        val result = walkLogicalPlanTree(logicalPlan, qContext)
-        if (result.plans.size > 1) {
-          MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, result.plans)
-        } else result.plans.head
+      case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
