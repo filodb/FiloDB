@@ -259,7 +259,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
   // scalastyle:on cyclomatic.complexity
 
-  private def getRoutingKeys(logicalPlan: LogicalPlan): Set[Map[String, String]] = {
+  def getRoutingKeys(logicalPlan: LogicalPlan): Set[Map[String, String]] = {
     val rawSeriesPlans = LogicalPlan.findLeafLogicalPlans(logicalPlan)
       .filter(_.isInstanceOf[RawSeries])
     rawSeriesPlans.flatMap { rs =>

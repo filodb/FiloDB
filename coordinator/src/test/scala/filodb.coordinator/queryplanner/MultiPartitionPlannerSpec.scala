@@ -1721,4 +1721,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
   }
+
+  it ("should give the correct routing keys") {
+    val dummyPartitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val mpp = new MultiPartitionPlanner(dummyPartitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job=~"abc|def"} + foo{job="ghi"}""", TimeStepParams(1000, 100, 2000))
+    val expected = Set(Map("job" -> "abc"), Map("job" -> "def"), Map("job" -> "ghi"))
+    mpp.getRoutingKeys(lp) shouldEqual expected
+  }
 }
