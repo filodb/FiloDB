@@ -444,7 +444,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val filteredAssignments = assignments
       .dropWhile(_.timeRange.endMs < queryRange.startMs)
       .takeWhile(_.timeRange.startMs <= queryRange.endMs)
-    if (filteredAssignments.isEmpty || filteredAssignments.head.timeRange.startMs > queryRange.endMs) {
+    if (filteredAssignments.isEmpty) {
       return Nil
     }
     val headRange = {
