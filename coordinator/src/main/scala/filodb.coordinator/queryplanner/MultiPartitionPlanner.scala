@@ -679,6 +679,11 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                   val rawExportPlan = rewritePlanWithRemoteRawExport(logicalPlan,
                     IntervalSelector(gapStartTimeMs, gapEndTimeMs),
                     additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
+                  // FIXME: This extra copy is used to second-align the plan start/end
+                  //   timestamps (in milliseconds). This is required because some plans (correctly)
+                  //   validate that their children have similar timestamps, and some plans (namely
+                  //   scalars) do not support millisecond precision. rewritePlanWithRemoteRawExport should
+                  //   be updated to second-align timestamps, then this extra copy can be removed.
                   copyLogicalPlanWithUpdatedSeconds(rawExportPlan, newParams.startSecs, newParams.endSecs)
                 }
                 ep ++= walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
