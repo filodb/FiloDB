@@ -17,7 +17,7 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
       1000 * timeParamsSec.start,
       1000 * timeParamsSec.step,
       1000 * timeParamsSec.end)
-    val query = """foo{operand="lhs"} + bar{operand="rhs"}"""
+    val query = """foo{operand="lhs"} + bar{operand=~"rhs1|rhs2"}"""
 
     val getResult = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
       val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
@@ -41,16 +41,16 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
     getResult(changingSingle) shouldEqual None
 
     val oneChanges = (colFilters: Seq[ColumnFilter]) => {
-      if (colFilters.contains(ColumnFilter("operand", Equals("lhs")))) {
-        Seq(TargetSchemaChange(0, Seq("hello")))
-      } else {
+      if (colFilters.contains(ColumnFilter("operand", Equals("rhs2")))) {
         Seq(TargetSchemaChange(timeParamsMs.start + timeParamsMs.step, Seq("hello")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("hello")))
       }
     }
     getResult(oneChanges) shouldEqual None
 
     val differentCols = (colFilters: Seq[ColumnFilter]) => {
-      if (colFilters.contains(ColumnFilter("operand", Equals("lhs")))) {
+      if (colFilters.contains(ColumnFilter("operand", Equals("rhs2")))) {
         Seq(TargetSchemaChange(0, Seq("hello")))
       } else {
         Seq(TargetSchemaChange(0, Seq("goodbye")))
