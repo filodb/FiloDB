@@ -2547,7 +2547,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val startMs = 1000 * promQlQueryParams.startSecs
     val endMs = 1000 * promQlQueryParams.endSecs
     val filters = Seq(ColumnFilter("app", EqualsRegex("foo|bar")))
-    val getResult = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+    val isTschemaChanging = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
       val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
       val scp = new SingleClusterPlanner(
         dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
@@ -2555,25 +2555,86 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       scp.isTargetSchemaChanging(filters, startMs, endMs, qContext)
     }
 
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    isTschemaChanging(none) shouldEqual false
+
     val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello")))
-    getResult(unchanging) shouldEqual false
+    isTschemaChanging(unchanging) shouldEqual false
 
     val unchangingMultiple = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello", "goodbye")))
-    getResult(unchangingMultiple) shouldEqual false
+    isTschemaChanging(unchangingMultiple) shouldEqual false
+
+    val unchangingDifferent = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(TargetSchemaChange(0, Seq("hello")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(unchangingDifferent) shouldEqual false
 
     val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("hello")))
-    getResult(firstTschema) shouldEqual true
+    isTschemaChanging(firstTschema) shouldEqual true
 
     val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
       TargetSchemaChange(0, Seq("hello")),
       TargetSchemaChange(startMs + 1000, Seq("goodbye")),
     )
-    getResult(tschemaChanges) shouldEqual true
+    isTschemaChanging(tschemaChanges) shouldEqual true
 
     val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
       TargetSchemaChange(0, Seq("hello")),
       TargetSchemaChange(endMs + 1000, Seq("goodbye")),
     )
-    getResult(tschemaChangesAfter) shouldEqual false
+    isTschemaChanging(tschemaChangesAfter) shouldEqual false
+
+    val oneChanges = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(
+          TargetSchemaChange(0, Seq("hello")),
+          TargetSchemaChange(startMs + 1000, Seq("goodbye")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(oneChanges) shouldEqual true
+  }
+
+  it("should correctly determine when to use target-schema to find shards") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("job", Equals("foo")))
+    val useTschemaForShards = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.useTargetSchemaForShards(filters, startMs, endMs, qContext)
+    }
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    useTschemaForShards(none) shouldEqual false
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    useTschemaForShards(unchanging) shouldEqual true
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    useTschemaForShards(unchangingWrongCol) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    useTschemaForShards(firstTschema) shouldEqual false
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChanges) shouldEqual false
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChangesAfter) shouldEqual true
   }
 }

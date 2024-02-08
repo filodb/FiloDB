@@ -111,9 +111,9 @@ class SingleClusterPlanner(val dataset: Dataset,
    * @param targetSchema TargetSchema
    * @return useTargetSchema - use target-schema to calculate query shards
    */
-  private def useTargetSchemaForShards(filters: Seq[ColumnFilter],
-                                       startMs: Long, endMs: Long,
-                                       qContext: QueryContext): Boolean = {
+  def useTargetSchemaForShards(filters: Seq[ColumnFilter],
+                               startMs: Long, endMs: Long,
+                               qContext: QueryContext): Boolean = {
     val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(filters)
     val targetSchemaOpt = findTargetSchema(targetSchemaChanges, startMs, endMs)
     if (targetSchemaOpt.isEmpty) {
