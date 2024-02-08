@@ -430,8 +430,9 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    *     (a) the returned ranges lie within the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
    * @param assignments must be sorted and time-disjoint
-   * @param range the complete time-range. Does not include the offset.
-   * @param lookbackMs the time to skip immediately after a partition split.
+   * @param queryRange the complete time-range. Does not include the offset.
+   * @param lookbackMs a query's maximum lookback. The time to skip immediately after a partition split.
+   * @param offsetMs a query's maximum offset. Offsets the "skipped" ranges (forward in time) after partition splits.
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
    *                  (i.e. all range start times (except the first) should be snapped to a step)
    */
