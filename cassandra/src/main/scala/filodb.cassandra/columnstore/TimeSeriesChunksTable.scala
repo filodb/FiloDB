@@ -45,6 +45,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     s"INSERT INTO $tableString (partition, chunkid, info, chunks) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteChunksCql = session.prepare(
     s"DELETE FROM $tableString WHERE partition=? AND chunkid IN ?")
