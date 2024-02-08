@@ -28,7 +28,8 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, promHistogram}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, deltaHistogramMinMax, gauge, promHistogram,
+  promHistogramMinMax}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -141,11 +142,15 @@ object GatewayServer extends StrictLogging {
     val genDeltaHistMinMaxData = userOpts.genDeltaHistMinMaxData.getOrElse(false)
 
     if (genHist || genGaugeData || genDeltaHist
-          || genCounterData || genDeltaCounterData) {
+          || genCounterData || genDeltaCounterData || genDeltaHistMinMaxData || genHistMinMaxData) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
       val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
+                   else if (genHistMinMaxData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
+                                                  promHistogramMinMax)
+                   else if (genDeltaHistMinMaxData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
+                                                  deltaHistogramMinMax)
                    else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
                    else if (genGaugeData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
                                         userOpts.numMetrics(), userOpts.publishIntervalSecs(), gauge)
@@ -165,7 +170,8 @@ object GatewayServer extends StrictLogging {
       }
       Thread sleep 10000
       TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
-        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, userOpts.publishIntervalSecs())
+        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genHistMinMaxData, genDeltaHistMinMaxData,
+        userOpts.publishIntervalSecs())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {
