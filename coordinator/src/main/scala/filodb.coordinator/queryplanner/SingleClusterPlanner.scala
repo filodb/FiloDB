@@ -79,9 +79,9 @@ class SingleClusterPlanner(val dataset: Dataset,
    *   (1) matches any shard-key matched by the argument filters, and
    *   (2) changes between the argument timestamps.
    */
-  private def isTargetSchemaChanging(shardKeyFilters: Seq[ColumnFilter],
-                                     startMs: Long, endMs: Long,
-                                     qContext: QueryContext): Boolean = {
+  def isTargetSchemaChanging(shardKeyFilters: Seq[ColumnFilter],
+                             startMs: Long, endMs: Long,
+                             qContext: QueryContext): Boolean = {
     val keyToValues = shardKeyFilters.map { filter =>
       val values = filter match {
         case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>

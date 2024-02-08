@@ -9,7 +9,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, _}
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex, NotEquals}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -19,10 +19,10 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.core.query.Filter.NotEquals
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
+
 
 import scala.concurrent.duration._
 
@@ -2540,5 +2540,34 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // When these schemas are reduced, a SchemaMismatch should not be thrown.
     var reduced = concat.reduceSchemas(ResultSchema.empty, qres1.resultSchema)
     reduced = concat.reduceSchemas(reduced, qres2.resultSchema)
+  }
+
+  it ("should correctly determine when target-schema changes") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("app", EqualsRegex("foo|bar")))
+    val getResult = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.isTargetSchemaChanging(filters, startMs, endMs, qContext)
+    }
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello")))
+    getResult(unchanging) shouldEqual false
+
+    val unchangingMultiple = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello", "goodbye")))
+    getResult(unchangingMultiple) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("hello")))
+    getResult(firstTschema) shouldEqual true
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(startMs + 1000, Seq("goodbye")),
+    )
+    getResult(tschemaChanges) shouldEqual true
   }
 }
