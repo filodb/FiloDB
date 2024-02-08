@@ -267,15 +267,15 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       assert(filterGroups.size == 1, "RawSeries does not have exactly one filter group: " + rs)
       // Map each key to all values given by the filters.
       val keyToValues = filterGroups.head.foldLeft(new mutable.HashMap[String, mutable.HashSet[String]])
-        { case (acc, filter) =>
-          val valueSet = acc.getOrElseUpdate(filter.column, new mutable.HashSet[String])
-          filter.filter match {
+        { case (acc, colFilter) =>
+          val valueSet = acc.getOrElseUpdate(colFilter.column, new mutable.HashSet[String])
+          colFilter.filter match {
             case eq: Equals => valueSet.add(eq.value.toString)
             case re: EqualsRegex if QueryUtils.containsPipeOnlyRegex(re.value.toString) =>
               val values = QueryUtils.splitAtUnescapedPipes(re.value.toString)
               values.foreach(valueSet.add)
             case _ => throw new IllegalArgumentException(
-              s"""shard keys must be filtered by equality or "|"-only regex. filter=${filter}""")
+              s"""shard keys must be filtered by equality or "|"-only regex. filter=${colFilter}""")
           }
           acc
         }
