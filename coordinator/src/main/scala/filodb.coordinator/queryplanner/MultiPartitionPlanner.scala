@@ -443,7 +443,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
     val filteredAssignments = assignments
       .dropWhile(_.timeRange.endMs < queryRange.startMs)
-      .takeWhile(_.timeRange.startMs < queryRange.endMs)
+      .takeWhile(_.timeRange.startMs <= queryRange.endMs)
     if (filteredAssignments.isEmpty || filteredAssignments.head.timeRange.startMs > queryRange.endMs) {
       return Nil
     }
