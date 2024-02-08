@@ -601,7 +601,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs
       if (queryConfig.routingConfig.supportRemoteRawExport &&
         queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
-        val newLp = rewritePlanWithRemoteRawExport(logicalPlan, IntervalSelector(startTime * 1000, endTime * 1000))
+        val newLp = rewritePlanWithRemoteRawExport(logicalPlan, startTime, endTime)
         walkLogicalPlanTree(newLp, qContext, forceInProcess = true).plans
       } else {
         if (queryConfig.routingConfig.supportRemoteRawExport) {
@@ -676,10 +676,9 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                   endSecs = gapEndTimeMs / 1000)
                 val newContext = qContext.copy(origQueryParams = newParams)
                 val newLp = {
-                  val rawExportPlan = rewritePlanWithRemoteRawExport(logicalPlan,
-                    IntervalSelector(gapStartTimeMs, gapEndTimeMs),
-                    additionalLookbackMs = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition))
-                  copyLogicalPlanWithUpdatedSeconds(rawExportPlan, newParams.startSecs, newParams.endSecs)
+                  rewritePlanWithRemoteRawExport(logicalPlan,
+                    newParams.startSecs, newParams.endSecs,
+                    additionalLookbackSec = 0L.max(gapStartTimeMs - rawExportStartDurationThisPartition) / 1000)
                 }
                 ep ++= walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
               } else {
@@ -726,8 +725,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
           val newContext = qContext.copy(origQueryParams = newParams)
           val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
-            IntervalSelector(gapStartTimeMs, gapEndTimeMs),
-            additionalLookbackMs = 0L.max(gapStartTimeMs - lastTimeRange.startMs))
+            newParams.startSecs, newParams.endSecs,
+            additionalLookbackSec = 0L.max(gapStartTimeMs - lastTimeRange.startMs) / 1000)
           execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
         } else {
           execPlans
