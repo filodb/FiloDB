@@ -2569,5 +2569,11 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       TargetSchemaChange(startMs + 1000, Seq("goodbye")),
     )
     getResult(tschemaChanges) shouldEqual true
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(endMs + 1000, Seq("goodbye")),
+    )
+    getResult(tschemaChangesAfter) shouldEqual false
   }
 }
