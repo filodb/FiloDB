@@ -9,7 +9,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, _}
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex, NotEquals}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -19,10 +19,10 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.core.query.Filter.NotEquals
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
+
 
 import scala.concurrent.duration._
 
@@ -416,7 +416,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("__name__", Equals("name")),
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
-        ), qContext, start, end, useTargetSchemaForShards = true)
+        ), qContext, start, end)
     } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 
@@ -2540,5 +2540,149 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // When these schemas are reduced, a SchemaMismatch should not be thrown.
     var reduced = concat.reduceSchemas(ResultSchema.empty, qres1.resultSchema)
     reduced = concat.reduceSchemas(reduced, qres2.resultSchema)
+  }
+
+  it ("should correctly determine when target-schema changes") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("app", EqualsRegex("foo|bar")))
+    val isTschemaChanging = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.isTargetSchemaChanging(filters, startMs, endMs, qContext)
+    }
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    isTschemaChanging(none) shouldEqual false
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello")))
+    isTschemaChanging(unchanging) shouldEqual false
+
+    val unchangingMultiple = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello", "goodbye")))
+    isTschemaChanging(unchangingMultiple) shouldEqual false
+
+    val unchangingDifferent = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(TargetSchemaChange(0, Seq("hello")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(unchangingDifferent) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("hello")))
+    isTschemaChanging(firstTschema) shouldEqual true
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(startMs + 1000, Seq("goodbye")),
+    )
+    isTschemaChanging(tschemaChanges) shouldEqual true
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(endMs + 1000, Seq("goodbye")),
+    )
+    isTschemaChanging(tschemaChangesAfter) shouldEqual false
+
+    val oneChanges = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(
+          TargetSchemaChange(0, Seq("hello")),
+          TargetSchemaChange(startMs + 1000, Seq("goodbye")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(oneChanges) shouldEqual true
+  }
+
+  it("should correctly determine when to use target-schema to find shards") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("job", Equals("foo")))
+    val useTschemaForShards = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.useTargetSchemaForShards(filters, startMs, endMs, qContext)
+    }
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    useTschemaForShards(none) shouldEqual false
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    useTschemaForShards(unchanging) shouldEqual true
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    useTschemaForShards(unchangingWrongCol) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    useTschemaForShards(firstTschema) shouldEqual false
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChanges) shouldEqual false
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChangesAfter) shouldEqual true
+  }
+
+  it ("should correctly identify shards to query") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(
+      ColumnFilter("job", Equals("foo")),
+      ColumnFilter("__name__", Equals("my_metric")),
+      ColumnFilter("label1", Equals("value1"))
+    )
+    val shardKvPairs = dataset.options.shardKeyColumns.map{col =>
+      (col, filters.find(_.column == col).get.filter.valuesStrings.head.toString)
+    }
+    val shardsFromValues = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.shardsFromValues(shardKvPairs, filters, qContext, startMs, endMs)
+    }
+
+    // Only one shard should be returned when a target-schema can be applied.
+    // Otherwise, two shards are returned.
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    shardsFromValues(none).size shouldEqual 2
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    shardsFromValues(unchanging).size shouldEqual 1
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    shardsFromValues(unchangingWrongCol).size shouldEqual 2
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    shardsFromValues(firstTschema).size shouldEqual 2
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChanges).size shouldEqual 2
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChangesAfter).size shouldEqual 1
   }
 }

@@ -141,8 +141,9 @@ import filodb.query.exec._
         // ScalarFixedDoublePlan accept times in seconds. Thus cases like sum(rate(foo{}[longtime])) or vector(0)
         // this mismatch in end time for LHS and RHS causes the Binary join object creation to fail and even plan
         // materialize to fail.
-        copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
-          TimeRange(periodicSeriesPlan.startMs, (latestDownsampleTimestampFn + offsetMillis.min) / 1000 * 1000))
+        copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
+          periodicSeriesPlan.startMs / 1000,
+          (latestDownsampleTimestampFn + offsetMillis.min) / 1000)
       }
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(downsampleLp, qContext)
@@ -155,13 +156,14 @@ import filodb.query.exec._
       val lastDownsampleInstant = periodicSeriesPlan.startMs + numStepsInDownsample * periodicSeriesPlan.stepMs
       val firstInstantInRaw = lastDownsampleInstant + periodicSeriesPlan.stepMs
 
-      val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
-        TimeRange(periodicSeriesPlan.startMs, lastDownsampleInstant))
+      val downsampleLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
+        periodicSeriesPlan.startMs / 1000, lastDownsampleInstant / 1000)
       val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
 
-      val rawLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan, TimeRange(firstInstantInRaw,
-        periodicSeriesPlan.endMs))
+      val rawLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
+        firstInstantInRaw / 1000, periodicSeriesPlan.endMs / 1000)
+
       val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
       StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
         Seq(rawEp, downsampleEp))
