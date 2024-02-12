@@ -198,7 +198,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       // Downsample the data.
       // NOTE: this step returns each row of the RDD as-is; it does NOT return downsampled data.
       rdd.map{ part =>
-        batchDownsampler.downsampleBatch(_)
+        batchDownsampler.downsampleBatch(part)
         part
       }
     } else rdd
