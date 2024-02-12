@@ -76,6 +76,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
       else if (metricName.get.endsWith("_count"))
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, querySession)
+      else if (metricName.get.endsWith("_min"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "min", source, querySession)
+      else if (metricName.get.endsWith("_max"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "max", source, querySession)
       else (lookupRes, newColName)
 
       lookupRes = res._1
