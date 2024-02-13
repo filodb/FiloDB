@@ -115,7 +115,7 @@ object DatasetOptions {
                                       metricColumn = "__name__",
                                       // defaults that work well for Prometheus
                                       ignoreShardKeyColumnSuffixes =
-                                        Map("__name__" -> Seq("_bucket", "_count", "_sum")),
+                                        Map("__name__" -> Seq("_bucket", "_count", "_sum", "_min", "_max")),
                                       ignoreTagsOnPartitionKeyHash = Seq("le"))
   val DefaultOptionsConfig = ConfigFactory.parseString(DefaultOptions.toString)
 

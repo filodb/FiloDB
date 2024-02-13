@@ -19,7 +19,10 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
   val counts  = Array(10L, 20L, 25, 38, 50, 66)
   val sum = counts.sum.toDouble
   val count = 50.0
+  val min = counts.min.toDouble
+  val max = counts.max.toDouble
   val sumCountKVs = Seq("sum" -> sum, "count" -> count)
+  val sumCountMinMaxKVs = Seq("sum" -> sum, "count" -> count, "min" -> min, "max" -> max)
 
   it("should writePromHistRecord to BR and be able to deserialize it") {
     val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
@@ -52,6 +55,44 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getHistogram(3) shouldEqual expected
+    }
+  }
+
+  it("should writeDeltaHistRecordMinMax to BR and be able to deserialize it") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val expected = LongHistogram(CustomBuckets(buckets), counts)
+
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq
+    // 1 - sum/count at end
+    InputRecord.writeDeltaHistRecordMinMax(builder, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
+    builder.allContainers.head.iterate(Schemas.deltaHistogramMinMax.ingestionSchema).foreach { row =>
+      row.getDouble(1) shouldEqual sum
+      row.getDouble(2) shouldEqual count
+      row.getDouble(3) shouldEqual min
+      row.getDouble(4) shouldEqual max
+      row.getHistogram(5) shouldEqual expected
+    }
+  }
+
+  it("should writePromHistRecordMinMax to BR and be able to deserialize it") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val expected = LongHistogram(CustomBuckets(buckets), counts)
+
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq
+    // 1 - sum/count at end
+    InputRecord.writePromHistRecordMinMax(builder, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
+    builder.allContainers.head.iterate(Schemas.promHistogramMinMax.ingestionSchema).foreach { row =>
+      row.getDouble(1) shouldEqual sum
+      row.getDouble(2) shouldEqual count
+      row.getDouble(3) shouldEqual min
+      row.getDouble(4) shouldEqual max
+      row.getHistogram(5) shouldEqual expected
     }
   }
 
