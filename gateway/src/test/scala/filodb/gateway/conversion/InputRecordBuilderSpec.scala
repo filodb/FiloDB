@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
+  val builder2 = new RecordBuilder(MemFactory.onHeapFactory)
 
   val baseTags = Map("dataset" -> "timeseries",
                      "host" -> "MacBook-Pro-229.local",
@@ -67,8 +68,8 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       case (b, c) => b.toString -> c.toDouble
     }.toSeq
     // 1 - sum/count at end
-    InputRecord.writeDeltaHistRecordMinMax(builder, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
-    builder.allContainers.head.iterate(Schemas.deltaHistogramMinMax.ingestionSchema).foreach { row =>
+    InputRecord.writeDeltaHistRecordMinMax(builder2, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
+    builder2.allContainers.head.iterate(Schemas.deltaHistogramMinMax.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getDouble(3) shouldEqual min
@@ -86,8 +87,8 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       case (b, c) => b.toString -> c.toDouble
     }.toSeq
     // 1 - sum/count at end
-    InputRecord.writePromHistRecordMinMax(builder, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
-    builder.allContainers.head.iterate(Schemas.promHistogramMinMax.ingestionSchema).foreach { row =>
+    InputRecord.writePromHistRecordMinMax(builder2, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
+    builder2.allContainers.head.iterate(Schemas.promHistogramMinMax.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getDouble(3) shouldEqual min
