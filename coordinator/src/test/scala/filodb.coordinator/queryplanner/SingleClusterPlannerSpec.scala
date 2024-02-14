@@ -2202,6 +2202,26 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       isInstanceOf[StaticFuncArgs] shouldEqual(true)
   }
 
+  it("should add le label filter correctly for histogram query with PeriodicSeriesWithWindowing logical plan") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(rate(my_hist_bucket{job="prometheus",le="0.5"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist") shouldEqual true
+    // le filter should be removed
+    multiSchemaPartitionsExec.filters.filter(_.column == "le").isEmpty shouldEqual true
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).isInstanceOf[InstantVectorFunctionMapper].
+      shouldEqual(true)
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      isInstanceOf[StaticFuncArgs] shouldEqual (true)
+
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      asInstanceOf[StaticFuncArgs].scalar shouldEqual 0.5
+  }
+
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)
