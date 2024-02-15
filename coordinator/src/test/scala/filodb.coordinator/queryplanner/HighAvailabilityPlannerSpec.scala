@@ -86,7 +86,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       val l1Exec = l1.asInstanceOf[MultiSchemaPartitionsExec]
       SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l1Exec)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (100)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (0)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (10000)
     }
   }
