@@ -22,9 +22,34 @@ import org.scalatest.matchers.should.Matchers
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
 
 import scala.concurrent.duration._
+
+object SingleClusterPlannerSpec {
+
+  def validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(lp: MultiSchemaPartitionsExec)
+  : Unit = {
+    // checking for NOT `_count` instead of _bucket, because we remove the the _bucket suffix for histogram queries
+    val metricName = lp.filters.find(x => x.column == lp.metricColumn).head.filter.valuesStrings.head.toString
+    val isBucketQuery = !(metricName.endsWith("_count") || metricName.endsWith("_total"))
+    // f1 is a bucket query with le filter. When le filter is applied, we add an additional rangeVectorTransformer
+    // to select the required bucket. This is not the case with histogram queries with _count, _sum, _min, _max suffix
+    // since these values are stored outside of histogram buckets and don't have le filters
+    if (isBucketQuery) {
+      lp.rangeVectorTransformers.size shouldEqual 3
+      lp.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      lp.rangeVectorTransformers(1).isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+      lp.rangeVectorTransformers(2).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+    else {
+      lp.rangeVectorTransformers.size shouldEqual 2
+      lp.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      lp.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+  }
+}
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
@@ -118,9 +143,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+        SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
       }
     }
   }
@@ -140,9 +164,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         l2.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
         l2.children.foreach { l3 =>
           l3.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-          l3.rangeVectorTransformers.size shouldEqual 2
-          l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-          l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+          val l3Exec = l3.asInstanceOf[MultiSchemaPartitionsExec]
+          SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l3Exec)
         }
       }
     }
@@ -1881,9 +1904,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+        SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
       }
     }
   }
@@ -2220,6 +2242,23 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
       asInstanceOf[StaticFuncArgs].scalar shouldEqual 0.5
+
+    val expected =
+      """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(700,1000,10000))
+        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(0.5,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(0.5,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)"""
+        .stripMargin
+
+    validatePlan(execPlan, expected)
   }
 
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {

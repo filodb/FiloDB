@@ -650,11 +650,14 @@ class SingleClusterPlanner(val dataset: Dataset,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
 
     // Add the le filter transformer to select the required bucket
-    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs / 1000, realScanStepMs / 1000,
-        realScanEndMs / 1000))
-      series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-        Seq(paramsExec))))
+    (nameFilter, leFilter) match {
+      case (Some(filter), Some (le)) if filter.endsWith("_bucket") => {
+        val paramsExec = StaticFuncArgs(le.toDouble, RangeParams(realScanStartMs / 1000,
+          realScanStepMs / 1000, realScanEndMs / 1000))
+        series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+          Seq(paramsExec))))
+      }
+      case _ => //NOP
     }
 
     val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
