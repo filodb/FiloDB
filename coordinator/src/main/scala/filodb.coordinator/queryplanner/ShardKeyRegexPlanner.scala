@@ -161,7 +161,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     //   That is a problem for e.g. scalars or absent().
     if (hasSameShardKeyFilters && partitions.size == 1) {
       val plans = generateExec(logicalPlan, shardKeys, qContext)
-      return PlanResult(plans)
+      // If !=1 plans were produced, additional high-level coordination may be needed
+      //   (e.g. joins / aggregations). In that case, proceed through the logic below.
+      if (plans.size == 1) {
+        return PlanResult(plans)
+      }
     }
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
