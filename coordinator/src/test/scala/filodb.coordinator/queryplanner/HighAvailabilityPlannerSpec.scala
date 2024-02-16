@@ -84,11 +84,10 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     reduceAggregateExec.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-      l1.rangeVectorTransformers.size shouldEqual 2
-      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      val l1Exec = l1.asInstanceOf[MultiSchemaPartitionsExec]
+      SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l1Exec)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (0)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (10000)
-      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
   }
 
@@ -220,11 +219,10 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
         1010000
       l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual
         2000000
-      l1.rangeVectorTransformers.size shouldEqual 2
-      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      val l1Exec = l1.asInstanceOf[MultiSchemaPartitionsExec]
+      SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l1Exec)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (1060000)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (2000000)
-      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
     val queryParams = child2.queryContext.origQueryParams.
       asInstanceOf[PromQlQueryParams]
@@ -354,11 +352,10 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
         (1080000-lookBack)
       l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual
         2000000
-      l1.rangeVectorTransformers.size shouldEqual 2
-      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      val l1Exec = l1.asInstanceOf[MultiSchemaPartitionsExec]
+      SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l1Exec)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual 1080000
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual 2000000
-      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
     val queryParams = child2.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
@@ -434,11 +431,10 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     reduceAggregateExec.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-      l1.rangeVectorTransformers.size shouldEqual 2
-      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      val l1Exec = l1.asInstanceOf[MultiSchemaPartitionsExec]
+      SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l1Exec)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual from *1000
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual  to * 1000
-      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
   }
 

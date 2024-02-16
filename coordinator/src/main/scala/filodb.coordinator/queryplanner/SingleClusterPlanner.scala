@@ -618,13 +618,16 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
 
+  // scalastyle:off method.length
   override private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      forceInProcess: Boolean): PlanResult = {
 
-    val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
-       removeBucket(Right(lp))._3.right.get
-    } else lp
+    val (nameFilter: Option[String], leFilter: Option[String], logicalPlanWithoutBucket: PeriodicSeriesWithWindowing) =
+      if (queryConfig.translatePromToFilodbHistogram) {
+       val result = removeBucket(Right(lp))
+        (result._1, result._2, result._3.right.get)
+    } else (None, None, lp)
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
     val rawSource = logicalPlanWithoutBucket.series.isRaw
@@ -645,6 +648,18 @@ class SingleClusterPlanner(val dataset: Dataset,
       realScanStepMs, realScanEndMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
+
+    // Add the le filter transformer to select the required bucket
+    (nameFilter, leFilter) match {
+      case (Some(filter), Some (le)) if filter.endsWith("_bucket") => {
+        val paramsExec = StaticFuncArgs(le.toDouble, RangeParams(realScanStartMs / 1000,
+          realScanStepMs / 1000, realScanEndMs / 1000))
+        series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+          Seq(paramsExec))))
+      }
+      case _ => //NOP
+    }
+
     val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
                                 AggregateClause.byOpt(Seq("job")))
@@ -662,9 +677,9 @@ class SingleClusterPlanner(val dataset: Dataset,
       result.plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs,
         p.queryWithPlanName(qContext))))
     }
-
     result
   }
+  // scalastyle:on method.length
 
   override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
     val rawSeries = lp match {
