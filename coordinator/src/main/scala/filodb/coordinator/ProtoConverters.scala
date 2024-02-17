@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters
+import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -32,7 +32,6 @@ object ProtoConverters {
   implicit class QueryConfigToProtoConverter(qc: QueryConfig) {
 
     def toProto: ExecPlans.QueryConfig = {
-      import JavaConverters._
       val builder = ExecPlans.QueryConfig.newBuilder()
       builder.setAskTimeoutSeconds(qc.askTimeout.toSeconds)
       builder.setStaleSampleAfterMs(qc.staleSampleAfterMs)
@@ -58,7 +57,6 @@ object ProtoConverters {
 
   implicit class QueryConfigFromProtoConverter(qc: ExecPlans.QueryConfig) {
     def fromProto: QueryConfig = {
-      import JavaConverters._
       val rcoIntegerMap : Map[String, Integer] = qc.getRecordContainerOverridesMap().asScala.toMap
       val rcoIntMap = rcoIntegerMap.map{case (key, value) => key -> value.intValue() }
       val queryConfig = QueryConfig(
@@ -189,11 +187,8 @@ object ProtoConverters {
 
   implicit class ComputedColumnFromProtoConverter(cc: ExecPlans.ComputedColumn) {
     def fromProto: filodb.core.metadata.Column = {
-      //val params = ConfigFactory.parseMap(dc.getParamsMap)
-      import JavaConverters._
       val indicesJava : java.util.List[Integer]= cc.getSourceIndicesList()
       val sourceIndices : Seq[Int]= indicesJava.asScala.toSeq.map(i => i.intValue())
-      //source
       ComputedColumn(
         cc.getId,
         cc.getExpr,
@@ -266,7 +261,6 @@ object ProtoConverters {
 
   implicit class RepeatedStringFromProtoConverter(c: ExecPlans.RepeatedString) {
     def fromProto: Seq[String] = {
-      import JavaConverters._
       c.getStringsList.asScala.toSeq
     }
   }
@@ -304,7 +298,6 @@ object ProtoConverters {
 
   implicit class DatasetOptionsFromProtoConverter(dso: ExecPlans.DatasetOptions) {
     def fromProto: filodb.core.metadata.DatasetOptions = {
-      import JavaConverters._
       filodb.core.metadata.DatasetOptions(
         dso.getShardKeyColumnsList.asScala.toSeq,
         dso.getMetricColumn,
@@ -330,7 +323,6 @@ object ProtoConverters {
 
   implicit class PartitionSchemaFromProtoConverter(ps: ExecPlans.PartitionSchema) {
     def fromProto: filodb.core.metadata.PartitionSchema = {
-      import JavaConverters._
       filodb.core.metadata.PartitionSchema(
         ps.getColumnsList().asScala.toSeq.map(c => c.fromProto),
         ps.getPredefinedKeysList().asScala.toSeq,
@@ -346,7 +338,6 @@ object ProtoConverters {
   }
 
   def getInputColIds(cd : ExecPlans.ChunkDownsampler) : Seq[Int] = {
-    import JavaConverters._
     cd.getInputColIdsList.asScala.toSeq.map(i => i.intValue())
   }
 
@@ -361,7 +352,6 @@ object ProtoConverters {
 
   implicit class TimeDownsamplerFromProtoConverter(td: ExecPlans.TimeDownsampler) {
     def fromProto: filodb.core.downsample.TimeDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.TimeDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -379,7 +369,6 @@ object ProtoConverters {
 
   implicit class LastValueHDownsamplerFromProtoConverter(td: ExecPlans.LastValueHDownsampler) {
     def fromProto: filodb.core.downsample.LastValueHDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.LastValueHDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -397,7 +386,6 @@ object ProtoConverters {
 
   implicit class HistSumDownsamplerFromProtoConverter(td: ExecPlans.HistSumDownsampler) {
     def fromProto: filodb.core.downsample.HistSumDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.HistSumDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -415,7 +403,6 @@ object ProtoConverters {
 
   implicit class AvgDownsamplerFromProtoConverter(td: ExecPlans.AvgDownsampler) {
     def fromProto: filodb.core.downsample.AvgDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.AvgDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -433,7 +420,6 @@ object ProtoConverters {
 
   implicit class AvgScDownsamplerFromProtoConverter(td: ExecPlans.AvgScDownsampler) {
     def fromProto: filodb.core.downsample.AvgScDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.AvgScDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -451,7 +437,6 @@ object ProtoConverters {
 
   implicit class LastValueDDownsamplerFromProtoConverter(td: ExecPlans.LastValueDDownsampler) {
     def fromProto: filodb.core.downsample.LastValueDDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.LastValueDDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -469,7 +454,6 @@ object ProtoConverters {
 
   implicit class MinDownsamplerFromProtoConverter(td: ExecPlans.MinDownsampler) {
     def fromProto: filodb.core.downsample.MinDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.MinDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -487,7 +471,6 @@ object ProtoConverters {
 
   implicit class SumDownsamplerFromProtoConverter(td: ExecPlans.SumDownsampler) {
     def fromProto: filodb.core.downsample.SumDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.SumDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -505,7 +488,6 @@ object ProtoConverters {
 
   implicit class AvgAcDownsamplerFromProtoConverter(td: ExecPlans.AvgAcDownsampler) {
     def fromProto: filodb.core.downsample.AvgAcDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.AvgAcDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -523,7 +505,6 @@ object ProtoConverters {
 
   implicit class MaxDownsamplerFromProtoConverter(td: ExecPlans.MaxDownsampler) {
     def fromProto: filodb.core.downsample.MaxDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.MaxDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -541,7 +522,6 @@ object ProtoConverters {
 
   implicit class CountDownsamplerFromProtoConverter(td: ExecPlans.CountDownsampler) {
     def fromProto: filodb.core.downsample.CountDownsampler = {
-      import JavaConverters._
       filodb.core.downsample.CountDownsampler(
         td.getChunkDownsampler.getInputColIdsList().asScala.toSeq.map(i => i.intValue())
       )
@@ -684,7 +664,6 @@ object ProtoConverters {
 
   implicit class DataSchemaFromProtoConverter(ds: ExecPlans.DataSchema) {
     def fromProto: filodb.core.metadata.DataSchema = {
-      import JavaConverters._
       val columns : Seq[filodb.core.metadata.Column] = ds.getColumnsList.asScala.map(c => c.fromProto)
       val downsamplers = ds.getDownsamplersList.asScala.map(d => d.fromProto)
       val downsampleSchema = if (ds.hasDownsampleSchema) {Option(ds.getDownsampleSchema)} else {None}
@@ -753,7 +732,6 @@ object ProtoConverters {
 
   implicit class PartLookupResultFromProtoConverter(plr: ExecPlans.PartLookupResult) {
     def fromProto: PartLookupResult = {
-      import JavaConverters._
       val psim = plr.getPartsInMemoryList.asScala.map(intgr => intgr.intValue())
       val partsInMemory = debox.Buffer.fromIterable(psim)
       val firstSchemaId = if (plr.hasFirstSchemaID) Option(plr.getFirstSchemaID) else None
@@ -1191,7 +1169,6 @@ object ProtoConverters {
 
   implicit class FilterInFromProtoConverter(fi: ExecPlans.FilterIn) {
     def fromProto: Filter.In = {
-      import JavaConverters._
       Filter.In(
         fi.getFilter.getValueStringsList.asScala.toSet
       )
@@ -1271,7 +1248,7 @@ object ProtoConverters {
       builder.setQueryId(qc.queryId)
       builder.setSubmitTime(qc.submitTime)
       builder.setPlannerParams(qc.plannerParams.toProto)
-      val javaTraceInfoMap = JavaConverters.mapAsJavaMap(qc.traceInfo)
+      val javaTraceInfoMap = mapAsJavaMap(qc.traceInfo)
       builder.putAllTraceInfo(javaTraceInfoMap)
       builder.build()
     }
@@ -1281,7 +1258,6 @@ object ProtoConverters {
     def fromProto: QueryContext = {
       val originalQueryParams = qcProto.getOrigQueryParams().fromProto
       val plannerParams = qcProto.getPlannerParams.fromProto
-      import scala.collection.JavaConverters._
       val traceInfo = qcProto.getTraceInfoMap.asScala.toMap
       val qc = QueryContext(
         originalQueryParams,
@@ -1479,7 +1455,6 @@ object ProtoConverters {
 
   implicit class AggregateClauseFromProto(ac: ExecPlans.AggregateClause) {
     def fromProto(): filodb.query.AggregateClause = {
-      import JavaConverters._
       filodb.query.AggregateClause(
         ac.getClauseType.fromProto,
         ac.getLabelsList.asScala
@@ -1632,7 +1607,6 @@ object ProtoConverters {
 
   implicit class AggregateMapReduceFromProtoConverter(amr: ExecPlans.AggregateMapReduce) {
     def fromProto: AggregateMapReduce = {
-      import JavaConverters._
       AggregateMapReduce(
         amr.getAggrOp.fromProto,
         amr.getAggrParamsList().asScala.toSeq.map(ap => ap.fromProto()),
@@ -1668,7 +1642,6 @@ object ProtoConverters {
 
   implicit class LabelCardinalityPresenterFromProtoConverter(lcp: ExecPlans.LabelCardinalityPresenter) {
     def fromProto: LabelCardinalityPresenter = {
-      import JavaConverters._
       val funcParams = lcp.getFuncParamsList.asScala.map(fa => fa.fromProto)
       new LabelCardinalityPresenter(funcParams)
     }
@@ -1685,7 +1658,6 @@ object ProtoConverters {
 
   implicit class HistogramQuantileMapperFromProtoConverter(hqm: ExecPlans.HistogramQuantileMapper) {
     def fromProto: HistogramQuantileMapper = {
-      import JavaConverters._
       val funcParams = hqm.getFuncParamsList.asScala.map(fa => fa.fromProto)
       HistogramQuantileMapper(funcParams)
     }
@@ -1703,7 +1675,6 @@ object ProtoConverters {
 
   implicit class InstantVectorFunctionMapperFromProtoConverter(ivfm: ExecPlans.InstantVectorFunctionMapper) {
     def fromProto: InstantVectorFunctionMapper = {
-      import JavaConverters._
       val funcParams = ivfm.getFuncParamsList.asScala.toSeq.map(fp => fp.fromProto)
       InstantVectorFunctionMapper(
         ivfm.getFunction.fromProto,
@@ -1712,7 +1683,7 @@ object ProtoConverters {
     }
   }
 
-  // PeriodicSamples
+  // PeriodicSamplesMapper
   implicit class PeriodicSamplesMapperToProtoConverter(psm : PeriodicSamplesMapper) {
     def toProto: ExecPlans.PeriodicSamplesMapper = {
       val builder = ExecPlans.PeriodicSamplesMapper.newBuilder()
@@ -1733,7 +1704,6 @@ object ProtoConverters {
 
   implicit class PeriodicSamplesMapperFromProtoConverter(psm: ExecPlans.PeriodicSamplesMapper) {
     def fromProto: PeriodicSamplesMapper = {
-      import JavaConverters._
       val window = if (psm.hasWindow) Option(psm.getWindow) else None
       val functionId = if (psm.hasFunctionId) Option(psm.getFunctionId.fromProto) else None
       val funcParams = psm.getFuncParamsList.asScala.toSeq.map(fa => fa.fromProto)
@@ -1769,7 +1739,7 @@ object ProtoConverters {
     }
   }
 
-  // MiscellaneousFunction
+  // MiscellaneousFunctionMapper
   implicit class MiscellaneousFunctionMapperToProtoConverter(mfm : MiscellaneousFunctionMapper) {
     def toProto: ExecPlans.MiscellaneousFunctionMapper = {
       val builder = ExecPlans.MiscellaneousFunctionMapper.newBuilder()
@@ -1782,7 +1752,6 @@ object ProtoConverters {
 
   implicit class MiscellaneousFunctionMapperFromProtoConverter(mfm: ExecPlans.MiscellaneousFunctionMapper) {
     def fromProto: MiscellaneousFunctionMapper = {
-      import JavaConverters._
       MiscellaneousFunctionMapper(
         mfm.getFunction.fromProto,
         mfm.getFuncStringParamList.asScala.toSeq,
@@ -1819,7 +1788,6 @@ object ProtoConverters {
 
   implicit class ScalarOperationMapperFromProtoConverter(som: ExecPlans.ScalarOperationMapper) {
     def fromProto: ScalarOperationMapper = {
-      import JavaConverters._
       ScalarOperationMapper(
         som.getOperator.fromProto,
         som.getScalarOnLhs,
@@ -1875,7 +1843,6 @@ object ProtoConverters {
 
   implicit class AggregatePresenterFromProtoConverter(ap: ExecPlans.AggregatePresenter) {
     def fromProto: AggregatePresenter = {
-      import JavaConverters._
       AggregatePresenter(
         ap.getAggrOp.fromProto,
         ap.getAggrParamsList.asScala.toSeq.map(aggrParam => aggrParam.fromProto()),
@@ -1898,7 +1865,6 @@ object ProtoConverters {
 
   implicit class AbsentFunctionMapperFromProtoConverter(afm: ExecPlans.AbsentFunctionMapper) {
     def fromProto: AbsentFunctionMapper = {
-      import JavaConverters._
       AbsentFunctionMapper(
         afm.getColumnFilterList.asScala.toSeq.map(cf => cf.fromProto),
         afm.getRangeParams.fromProto,
@@ -1907,6 +1873,55 @@ object ProtoConverters {
     }
   }
 
+
+  implicit class RangeVectorTransformerToProtoConverter(rangeVectorTransformer: RangeVectorTransformer) {
+    def toProto(): ExecPlans.RangeVectorTransformerContainer = {
+      val b = RangeVectorTransformerContainer.newBuilder()
+      rangeVectorTransformer match {
+        case srm: StitchRvsMapper => b.setStitchRvsMapper(srm.toProto).build()
+        case amr: AggregateMapReduce => b.setAggregateMapReduce(amr.toProto).build()
+        case htpsm: HistToPromSeriesMapper => b.setHistToPromSeriesMapper(htpsm.toProto).build()
+        case lcp: LabelCardinalityPresenter => b.setLabelCardinalityPresenter(lcp.toProto).build()
+        case hqm: HistogramQuantileMapper => b.setHistogramQuantileMapper(hqm.toProto).build()
+        case ivfm: InstantVectorFunctionMapper => b.setInstantVectorFunctionMapper(ivfm.toProto).build()
+        case psm: PeriodicSamplesMapper => b.setPeriodicSamplesMapper(psm.toProto).build()
+        case sfm: SortFunctionMapper => b.setSortFunctionMapper(sfm.toProto).build()
+        case mfm: MiscellaneousFunctionMapper => b.setMiscellaneousFunctionMapper(mfm.toProto).build()
+        case lfm: LimitFunctionMapper => b.setLimitFunctionMapper(lfm.toProto).build()
+        case som: ScalarOperationMapper => b.setScalarOperationMapper(som.toProto).build()
+        case sfum: ScalarFunctionMapper => b.setScalarFunctionMapper(sfum.toProto).build()
+        case vfm: VectorFunctionMapper => b.setVectorFunctionMapper(vfm.toProto).build()
+        case ap: AggregatePresenter => b.setAggregatePresenter(ap.toProto).build()
+        case afm: AbsentFunctionMapper => b.setAbsentFunctionMapper(afm.toProto).build()
+        case _ => throw new IllegalArgumentException("Unexpected Range Vector Transformer")
+      }
+    }
+  }
+
+  implicit class RangeVectorTransformerFromProtoConverter(rvtc: RangeVectorTransformerContainer) {
+    def fromProto(): RangeVectorTransformer = {
+      import filodb.grpc.ExecPlans.RangeVectorTransformerContainer.RangeVectorTransfomerCase
+      rvtc.getRangeVectorTransfomerCase match {
+        case RangeVectorTransfomerCase.STITCHRVSMAPPER => rvtc.getStitchRvsMapper().fromProto
+        case RangeVectorTransfomerCase.AGGREGATEMAPREDUCE => rvtc.getAggregateMapReduce().fromProto
+        case RangeVectorTransfomerCase.HISTTOPROMSERIESMAPPER => rvtc.getHistToPromSeriesMapper().fromProto
+        case RangeVectorTransfomerCase.LABELCARDINALITYPRESENTER => rvtc.getLabelCardinalityPresenter().fromProto
+        case RangeVectorTransfomerCase.HISTOGRAMQUANTILEMAPPER => rvtc.getHistogramQuantileMapper().fromProto
+        case RangeVectorTransfomerCase.INSTANTVECTORFUNCTIONMAPPER => rvtc.getInstantVectorFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.PERIODICSAMPLESMAPPER => rvtc.getPeriodicSamplesMapper().fromProto
+        case RangeVectorTransfomerCase.SORTFUNCTIONMAPPER => rvtc.getSortFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.MISCELLANEOUSFUNCTIONMAPPER => rvtc.getMiscellaneousFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.LIMITFUNCTIONMAPPER => rvtc.getLimitFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.SCALAROPERATIONMAPPER => rvtc.getScalarOperationMapper().fromProto
+        case RangeVectorTransfomerCase.SCALARFUNCTIONMAPPER => rvtc.getScalarFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.VECTORFUNCTIONMAPPER => rvtc.getVectorFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.AGGREGATEPRESENTER => rvtc.getAggregatePresenter().fromProto
+        case RangeVectorTransfomerCase.ABSENTFUNCTIONMAPPER => rvtc.getAbsentFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.RANGEVECTORTRANSFOMER_NOT_SET =>
+          throw new IllegalArgumentException("Unexpected Range Vector Transformer")
+      }
+    }
+  }
 
   implicit class LeafExecPlanToProtoConverter(lep: LeafExecPlan) {
 
@@ -1920,15 +1935,10 @@ object ProtoConverters {
 
 
   implicit class NonLeafExecPlanToProtoConverter(mspe: filodb.query.exec.NonLeafExecPlan) {
-
-    //import collection.JavaConverters._
-
     def toProto(): ExecPlans.NonLeafExecPlan = {
       val builder = ExecPlans.NonLeafExecPlan.newBuilder()
       builder.setExecPlan(mspe.asInstanceOf[filodb.query.exec.ExecPlan].toProto)
       mspe.children.foreach(ep => builder.addChildren(ep.toExecPlanContainerProto))
-
-
       builder.build()
     }
   }
@@ -1950,18 +1960,18 @@ object ProtoConverters {
 
   implicit class LabelCardinalityReduceExecFromProtoConverter(lcre: ExecPlans.LabelCardinalityReduceExec) {
     def fromProto(): LabelCardinalityReduceExec = {
-      import JavaConverters._
       val execPlan = lcre.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = lcre.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-
-      LabelCardinalityReduceExec(
+      val p = LabelCardinalityReduceExec(
         queryContext,
         planDispatcher,
         children
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -1976,13 +1986,14 @@ object ProtoConverters {
 
   implicit class MultiPartitionDistConcatExecFromProtoConverter(mpdce: ExecPlans.MultiPartitionDistConcatExec) {
     def fromProto(): filodb.query.exec.MultiPartitionDistConcatExec = {
-      import scala.collection.JavaConverters._
       val execPlan = mpdce.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = mpdce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      filodb.query.exec.MultiPartitionDistConcatExec(queryContext, planDispatcher, children)
+      val p = filodb.query.exec.MultiPartitionDistConcatExec(queryContext, planDispatcher, children)
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -1997,13 +2008,14 @@ object ProtoConverters {
 
   implicit class LocalPartitionDistConcatExecFromProtoConverter(lpdce: ExecPlans.LocalPartitionDistConcatExec) {
     def fromProto(): LocalPartitionDistConcatExec = {
-      import scala.collection.JavaConverters._
       val execPlan = lpdce.getNonLeafExecPlan().getExecPlan()
       val queryContext : QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = lpdce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      LocalPartitionDistConcatExec(queryContext, planDispatcher, children)
+      val p = LocalPartitionDistConcatExec(queryContext, planDispatcher, children)
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2022,13 +2034,14 @@ object ProtoConverters {
     slpdce: ExecPlans.SplitLocalPartitionDistConcatExec
   ) {
     def fromProto(): filodb.query.exec.SplitLocalPartitionDistConcatExec = {
-      import scala.collection.JavaConverters._
       val execPlan = slpdce.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = slpdce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      SplitLocalPartitionDistConcatExec(queryContext, planDispatcher, children, None)
+      val p = SplitLocalPartitionDistConcatExec(queryContext, planDispatcher, children, None)
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2047,21 +2060,21 @@ object ProtoConverters {
     lcre: ExecPlans.LocalPartitionReduceAggregateExec
   ) {
     def fromProto(): LocalPartitionReduceAggregateExec = {
-      import JavaConverters._
       val execPlan = lcre.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = lcre.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
 
-      import JavaConverters._
-      LocalPartitionReduceAggregateExec(
+      val p = LocalPartitionReduceAggregateExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
         children: Seq[ExecPlan],
         lcre.getAggrOp.fromProto,
         lcre.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto)
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2080,7 +2093,6 @@ object ProtoConverters {
     mprae: ExecPlans.MultiPartitionReduceAggregateExec
   ) {
     def fromProto(): MultiPartitionReduceAggregateExec = {
-      import JavaConverters._
 
       val execPlan = mprae.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
@@ -2088,13 +2100,15 @@ object ProtoConverters {
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = mprae.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
 
-      MultiPartitionReduceAggregateExec(
+      val p = MultiPartitionReduceAggregateExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
         children: Seq[ExecPlan],
         mprae.getAggrOp.fromProto,
         mprae.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto)
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2119,7 +2133,6 @@ object ProtoConverters {
 
   implicit class BinaryJoinExecFromProtoConverter(bje: ExecPlans.BinaryJoinExec) {
     def fromProto(): BinaryJoinExec = {
-      import JavaConverters._
       val execPlan = bje.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2134,7 +2147,7 @@ object ProtoConverters {
       val outputRvRange =
         if (bje.hasOutputRvRange) Option(bje.getOutputRvRange.fromProto) else None
 
-      BinaryJoinExec(
+      val p = BinaryJoinExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
         lhs: Seq[ExecPlan],
@@ -2147,6 +2160,8 @@ object ProtoConverters {
         bje.getMetricColumn,
         outputRvRange: Option[RvRange]
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2161,17 +2176,18 @@ object ProtoConverters {
 
   implicit class TsCardReduceExecFromProtoConverter(tcre: ExecPlans.TsCardReduceExec) {
     def fromProto(): TsCardReduceExec = {
-      import JavaConverters._
       val execPlan = tcre.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = tcre.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      TsCardReduceExec(
+      val p = TsCardReduceExec(
         queryContext,
         dispatcher,
         children
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2187,7 +2203,6 @@ object ProtoConverters {
 
   implicit class StitchRvsExecFromProtoConverter(sre: ExecPlans.StitchRvsExec) {
     def fromProto(): StitchRvsExec = {
-      import JavaConverters._
       val execPlan = sre.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2195,12 +2210,14 @@ object ProtoConverters {
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
       val outputRvRange =
         if (sre.hasOutputRvRange) Option(sre.getOutputRvRange.fromProto) else None
-      StitchRvsExec(
+      val p = StitchRvsExec(
         queryContext,
         dispatcher,
         outputRvRange,
         children
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2224,7 +2241,6 @@ object ProtoConverters {
 
   implicit class SetOperatorExecFromProtoConverter(soe: ExecPlans.SetOperatorExec) {
     def fromProto(): SetOperatorExec = {
-      import JavaConverters._
       val execPlan = soe.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2240,8 +2256,7 @@ object ProtoConverters {
       val outputRvRange =
         if (soe.hasOutputRvRange) Option(soe.getOutputRvRange.fromProto) else None
 
-
-      SetOperatorExec(
+      val p = SetOperatorExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
         lhs,
@@ -2252,6 +2267,8 @@ object ProtoConverters {
         soe.getMetricColumn,
         outputRvRange
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2266,17 +2283,18 @@ object ProtoConverters {
 
   implicit class LabelValuesDistConcatExecFromProtoConverter(lvdce: ExecPlans.LabelValuesDistConcatExec) {
     def fromProto(): LabelValuesDistConcatExec = {
-      import JavaConverters._
       val execPlan = lvdce.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = lvdce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      LabelValuesDistConcatExec(
+      val p = LabelValuesDistConcatExec(
         queryContext,
         dispatcher,
         children
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2291,17 +2309,18 @@ object ProtoConverters {
 
   implicit class PartKeysDistConcatExecFromProtoConverter(pkdce: ExecPlans.PartKeysDistConcatExec) {
     def fromProto(): PartKeysDistConcatExec = {
-      import JavaConverters._
       val execPlan = pkdce.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = pkdce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      PartKeysDistConcatExec(
+      val p = PartKeysDistConcatExec(
         queryContext,
         dispatcher,
         children
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2316,16 +2335,17 @@ object ProtoConverters {
 
   implicit class LabelNamesDistConcatExecFromProtoConverter(lndce: ExecPlans.LabelNamesDistConcatExec) {
     def fromProto(): LabelNamesDistConcatExec = {
-      import JavaConverters._
       val execPlan = lndce.getNonLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[ExecPlans.ExecPlanContainer] = lndce.getNonLeafExecPlan.getChildrenList().asScala.toSeq
       val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto)
-      LabelNamesDistConcatExec(
+      val p = LabelNamesDistConcatExec(
         queryContext: QueryContext,
         dispatcher: PlanDispatcher,
         children: Seq[ExecPlan])
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2350,7 +2370,6 @@ object ProtoConverters {
 
   implicit class LabelNamesExecFromProtoConverter(lne: ExecPlans.LabelNamesExec) {
     def fromProto(): filodb.query.exec.LabelNamesExec = {
-      import scala.collection.JavaConverters._
       val execPlan = lne.getLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2358,7 +2377,7 @@ object ProtoConverters {
         f => f.fromProto
       )
       val datasetRef = execPlan.getQueryCommand.getDatasetRef.fromProto()
-      filodb.query.exec.LabelNamesExec(
+      val p = filodb.query.exec.LabelNamesExec(
         queryContext,
         planDispatcher,
         datasetRef,
@@ -2367,6 +2386,8 @@ object ProtoConverters {
         lne.getStartMs,
         lne.getEndMs
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2388,11 +2409,13 @@ object ProtoConverters {
       val inProcessPlanDispatcher = planDispatcher match {
         case ippd : InProcessPlanDispatcher => ippd
       }
-      filodb.query.exec.EmptyResultExec(
+      val p = filodb.query.exec.EmptyResultExec(
         queryContext,
         datasetRef,
         inProcessPlanDispatcher
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2412,7 +2435,6 @@ object ProtoConverters {
 
   implicit class PartKeysExecFromProtoConverter(pke: ExecPlans.PartKeysExec) {
     def fromProto(): filodb.query.exec.PartKeysExec = {
-      import scala.collection.JavaConverters._
       val execPlan = pke.getLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2420,7 +2442,7 @@ object ProtoConverters {
         f => f.fromProto
       )
       val datasetRef = execPlan.getQueryCommand.getDatasetRef.fromProto()
-      filodb.query.exec.PartKeysExec(
+      val p = filodb.query.exec.PartKeysExec(
         queryContext,
         planDispatcher,
         datasetRef,
@@ -2430,6 +2452,8 @@ object ProtoConverters {
         pke.getStart,
         pke.getEnd
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2449,7 +2473,6 @@ object ProtoConverters {
 
   implicit class LabelValuesExecFromProtoConverter(lve: ExecPlans.LabelValuesExec) {
     def fromProto(): filodb.query.exec.LabelValuesExec = {
-      import scala.collection.JavaConverters._
       val execPlan = lve.getLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2458,7 +2481,7 @@ object ProtoConverters {
       )
       val columns = lve.getColumnsList.asScala.toSeq
       val datasetRef = execPlan.getQueryCommand.getDatasetRef.fromProto()
-      filodb.query.exec.LabelValuesExec(
+      val p = filodb.query.exec.LabelValuesExec(
         queryContext,
         planDispatcher,
         datasetRef,
@@ -2468,6 +2491,8 @@ object ProtoConverters {
         lve.getStartMs,
         lve.getEndMs
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2486,7 +2511,6 @@ object ProtoConverters {
 
   implicit class LabelCardinalityExecFromProtoConverter(lce: ExecPlans.LabelCardinalityExec) {
     def fromProto(): filodb.query.exec.LabelCardinalityExec = {
-      import scala.collection.JavaConverters._
       val execPlan = lce.getLeafExecPlan().getExecPlan()
       val queryContext: QueryContext = execPlan.getQueryContext().fromProto
       val planDispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
@@ -2494,7 +2518,7 @@ object ProtoConverters {
         f => f.fromProto
       )
       val datasetRef = execPlan.getQueryCommand.getDatasetRef.fromProto()
-      filodb.query.exec.LabelCardinalityExec(
+      val p = filodb.query.exec.LabelCardinalityExec(
         queryContext,
         planDispatcher,
         datasetRef,
@@ -2503,13 +2527,13 @@ object ProtoConverters {
         lce.getStartMs,
         lce.getEndMs
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
   // SelectChunkInfosExec
   implicit class SelectChunkInfosExecToProtoConverter(scie: SelectChunkInfosExec) {
-
-    //import collection.JavaConverters._
 
     def toProto(): ExecPlans.SelectChunkInfosExec = {
       val builder = ExecPlans.SelectChunkInfosExec.newBuilder()
@@ -2531,7 +2555,6 @@ object ProtoConverters {
       val queryContext = ep.getQueryContext.fromProto
       val dispatcher = ep.getDispatcher.fromProto
       val datasetRef = scie.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
-      import scala.collection.JavaConverters._
       val filters = scie.getFiltersList.asScala.toSeq.map(
         f => f.fromProto
       )
@@ -2546,19 +2569,19 @@ object ProtoConverters {
       } else {
         None
       }
-      SelectChunkInfosExec(
+      val p = SelectChunkInfosExec(
         queryContext, dispatcher, datasetRef,
         scie.getShard,
         filters,
         chunkMethod, schema, colName
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
   // MultiSchemaPartitionsExec
   implicit class MultiSchemaPartitionsExecToProtoConverter(mspe: MultiSchemaPartitionsExec) {
-
-    //import collection.JavaConverters._
 
     def toProto(): ExecPlans.MultiSchemaPartitionsExec = {
       val builder = ExecPlans.MultiSchemaPartitionsExec.newBuilder()
@@ -2583,7 +2606,6 @@ object ProtoConverters {
       val queryContext = ep.getQueryContext.fromProto
       val dispatcher = ep.getDispatcher.fromProto
       val datasetRef = mspe.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
-      import scala.collection.JavaConverters._
       val filters = mspe.getFiltersList.asScala.toSeq.map(
         f => f.fromProto
       )
@@ -2598,19 +2620,19 @@ object ProtoConverters {
       } else {
         None
       }
-      MultiSchemaPartitionsExec(
+      val p = MultiSchemaPartitionsExec(
         queryContext, dispatcher, datasetRef,
         mspe.getShard,
         filters,
         chunkMethod, mspe.getMetricColumn, schema, colName
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
   // ScalarBinaryOperationExec
   implicit class ScalarBinaryOperationExecToProtoConverter(sboe: ScalarBinaryOperationExec) {
-
-    //import collection.JavaConverters._
 
     def toProto(): ExecPlans.ScalarBinaryOperationExec = {
       val builder = ExecPlans.ScalarBinaryOperationExec.newBuilder()
@@ -2656,7 +2678,7 @@ object ProtoConverters {
       val inProcessPlanDispatcher = dispatcher match {
         case ippd: InProcessPlanDispatcher => ippd
       }
-      ScalarBinaryOperationExec(
+      val p = ScalarBinaryOperationExec(
         queryContext,
         datasetRef,
         sboe.getParams.fromProto,
@@ -2665,6 +2687,8 @@ object ProtoConverters {
         sboe.getOperator.fromProto,
         inProcessPlanDispatcher
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2688,13 +2712,15 @@ object ProtoConverters {
       val inProcessPlanDispatcher = dispatcher match {
         case ippd: InProcessPlanDispatcher => ippd
       }
-      ScalarFixedDoubleExec(
+      val p = ScalarFixedDoubleExec(
         queryContext,
         datasetRef,
         sfde.getParams.fromProto,
         sfde.getValue,
         inProcessPlanDispatcher
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2717,16 +2743,17 @@ object ProtoConverters {
       val queryContext = ep.getQueryContext.fromProto
       val dispatcher = ep.getDispatcher.fromProto
       val datasetRef = tce.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
-      import scala.collection.JavaConverters._
       val shardKeyPrefix = tce.getShardKeyPrefixList.asScala.toSeq
       val numGroupByFields = tce.getNumGroupByFields
-      TsCardExec(
+      val p = TsCardExec(
         queryContext, dispatcher, datasetRef,
         tce.getShard,
         shardKeyPrefix,
         tce.getNumGroupByFields,
         tce.getClusterName
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2750,13 +2777,15 @@ object ProtoConverters {
       val inProcessPlanDispatcher = dispatcher match {
         case ippd: InProcessPlanDispatcher => ippd
       }
-      TimeScalarGeneratorExec(
+      val p = TimeScalarGeneratorExec(
         queryContext,
         datasetRef,
         tsge.getParams.fromProto,
         tsge.getFunction.fromProto,
         inProcessPlanDispatcher
       )
+      ep.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
 
@@ -2777,7 +2806,6 @@ object ProtoConverters {
 
   implicit class SelectRawPartitionsExecFromProtoConverter(srpe: ExecPlans.SelectRawPartitionsExec) {
     def fromProto: SelectRawPartitionsExec = {
-      import JavaConverters._
       val ep = srpe.getLeafExecPlan.getExecPlan
       val dataSchema = if (srpe.hasDataSchema) Option(srpe.getDataSchema.fromProto) else None
       val lookupRes = if (srpe.hasLookupRes) Option(srpe.getLookupRes.fromProto) else None
@@ -2787,7 +2815,7 @@ object ProtoConverters {
       val queryContext = execPlan.getQueryContext.fromProto
       val dispatcher = execPlan.getDispatcher.fromProto
       val datasetRef = leafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
-      SelectRawPartitionsExec(
+      val p = SelectRawPartitionsExec(
         queryContext, dispatcher, datasetRef,
         dataSchema,
         lookupRes,
@@ -2795,9 +2823,10 @@ object ProtoConverters {
         colIds,
         srpe.getPlanId
       )
+      execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto))
+      p
     }
   }
-
 
   implicit class ExecPlanToProtoConverter(ep: filodb.query.exec.ExecPlan) {
     def toProto: ExecPlans.ExecPlan = {
@@ -2808,15 +2837,9 @@ object ProtoConverters {
       builder.setQueryCommand(ep.asInstanceOf[QueryCommand].toProto)
       builder.clearDispatcher()
       builder.setDispatcher(ep.dispatcher.toPlanDispatcherContainer)
-
       ep.rangeVectorTransformers.foreach(t => {
-        val rvtcBuilder = RangeVectorTransformerContainer.newBuilder()
-        t match {
-          case srm: StitchRvsMapper => {
-            builder.addRangeVectorTransformers(rvtcBuilder.setStitchRvsMapper(srm.toProto).build())
-          }
-          case _ => throw new IllegalArgumentException("Unexpected Range Vector Transformer")
-        }
+        val protoRangeVectorTransfomer = t.toProto()
+        builder.addRangeVectorTransformers(protoRangeVectorTransfomer)
       })
       builder.build()
     }
