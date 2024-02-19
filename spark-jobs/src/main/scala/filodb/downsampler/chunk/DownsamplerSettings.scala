@@ -80,7 +80,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 
-  @transient lazy val exportDestinationFormat = downsamplerConfig.as[String]("data-export.destination-format")
+  @transient lazy val exportDestinationPath = downsamplerConfig.as[String]("data-export.destination-path")
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 
@@ -106,15 +106,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
     keyRulesPairs.toMap
   }
 
-  @transient lazy val exportPathSpecPairs =
-    downsamplerConfig.as[Seq[String]]("data-export.path-spec")
-      .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
-
-  @transient lazy val exportOptions = downsamplerConfig.as[Map[String, String]]("data-export.options")
-
-  @transient lazy val exportSaveMode = downsamplerConfig.getString("data-export.save-mode")
-
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
+
+  @transient lazy val exportCatalog = downsamplerConfig.getString("data-export.catalog")
+
+  @transient lazy val exportDatabase = downsamplerConfig.getString("data-export.database")
 
   /**
    * Two conditions should satisfy for eligibility:

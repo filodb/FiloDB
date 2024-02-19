@@ -58,12 +58,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |  "filodb": { "downsampler": { "data-export": {
        |    "enabled": ${exportToFile.isDefined},
        |    "key-labels": [],
-       |    "destination-format": "${exportToFile.getOrElse("")}",
-       |    "format": "csv",
-       |    "options": {
-       |      "header": true,
-       |      "escape": "\\"",
-       |    }
+       |    "destination-path": "${exportToFile.getOrElse("")}",
+       |    "format": "iceberg",
        |    "groups": [
        |      {
        |        "key": [],
@@ -75,12 +71,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |          }
        |        ]
        |      }
-       |    ],
-       |    "path-spec": [
-       |      "year", "<<YYYY>>",
-       |      "month", "<<M>>",
-       |      "day", "<<d>>",
-       |      "_metric_", "{{__name__}}"
        |    ]
        |  }}}
        |}
@@ -169,12 +159,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         """
           |    filodb.downsampler.data-export {
           |      enabled = true
-          |      bucket = "file:///dummy-bucket"
-          |      path-spec = ["unused"]
-          |      save-mode = "error"
-          |      options = {
-          |        "header": "true"
-          |      }
+          |      destination-path = "s3a://<bucket>/<directory>/<catalog>/<database>"
           |    }
           |""".stripMargin
       ))
@@ -406,7 +391,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |    filodb.downsampler.data-export {
           |      enabled = true
           |      key-labels = ["l1", "l2"]
-          |      destination-format = "address/foo/bar/$0/$1"
+          |      destination-path = "s3a://bucket/directory/catalog/database/$0/$1"
           |    }
           |""".stripMargin
       ).withFallback(conf)
@@ -414,121 +399,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
     val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
 
-    batchExporter.makeExportAddress(Seq("l1a", "l2a")) shouldEqual "address/foo/bar/l1a/l2a"
-  }
-
-  it ("should give correct export-row index of column name") {
-    val testConf = ConfigFactory.parseString(
-      """
-        |    filodb.downsampler.data-export {
-        |      enabled = true
-        |      key-labels = ["l1", "l2"]
-        |      path-spec: [
-        |        year, "<<YYYY>>",
-        |        month, "<<M>>",
-        |        day, "<<d>>",
-        |        _metric_, "{{__name__}}"
-        |      ]
-        |    }
-        |""".stripMargin
-    ).withFallback(conf)
-
-    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
-    batchExporter.getRowIndex("year").get shouldEqual 3
-    batchExporter.getRowIndex("month").get shouldEqual 4
-    batchExporter.getRowIndex("day").get shouldEqual 5
-    batchExporter.getRowIndex("_metric_").get shouldEqual 6
-
-  }
-
-  it ("should correctly generate export path names") {
-    val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
-
-    val conf = ConfigFactory.parseString(
-      """
-        |    filodb.downsampler.data-export {
-        |      enabled = true
-        |      key-labels = ["unused"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = []
-        |      path-spec = [
-        |        "api",     "v1",
-        |        "l1",      "{{l1}}-foo",
-        |        "year",    "bar-<<YYYY>>-baz",
-        |        "month",   "hello-<<MM>>"
-        |        "day",     "day-<<dd>>"
-        |        "l2-woah", "{{l2}}-goodbye"
-        |      ]
-        |    }
-        |""".stripMargin
-    )
-
-    val userTimeStart = 1663804760913L
-    val labels = Map("l1" -> "l1val", "l2" -> "l2val", "l3" -> "l3val")
-    val expected =
-      Seq("v1", "l1val-foo", "bar-2022-baz", "hello-09", "day-21", "l2val-goodbye")
-
-    val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)),
-                                          userTimeStart, userTimeStart + 123456)
-    batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
-  }
-
-  it("should correctly escape quotes and commas in a label's value prior to export") {
-    val inputOutputPairs = Seq(
-      // empty string
-      "" -> """{"key":""}""",
-      // no quotes
-      """ abc """ -> """{"key":" abc "}""",
-      // ======= DOUBLE QUOTES =======
-      // single double-quote
-      """ " """ -> """{"key":" \" "}""",
-      // double-quote pair
-      """ "" """ -> """{"key":" \"\" "}""",
-      // escaped quote
-      """ \" """ -> """{"key":" \\\" "}""",
-      // double-escaped quote
-      """ \\" """ -> """{"key":" \\\\\" "}""",
-      // double-escaped quote pair
-      """ \\"" """ -> """{"key":" \\\\\"\" "}""",
-      // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """{"key":" \"foo\\\" \" \"\"\\\"\"\\ bar \"baz\" "}""",
-      // ======= SINGLE QUOTES =======
-      // single single-quote
-      """ ' """ -> """{"key":" ' "}""",
-      // single-quote pair
-      """ '' """ -> """{"key":" '' "}""",
-      // escaped quote
-      """ \' """ -> """{"key":" \\' "}""",
-      // double-escaped quote
-      """ \\' """ -> """{"key":" \\\\' "}""",
-      // double-escaped quote pair
-      """ \\'' """ -> """{"key":" \\\\'' "}""",
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
-      // ======= COMMAS =======
-      // single comma
-      """ , """ -> """{"key":" , "}""",
-      // comma pair
-      """ ,, """ -> """{"key":" ,, "}""",
-      // escaped comma
-      """ \, """ -> """{"key":" \\, "}""",
-      // double-escaped comma
-      """ \\, """ -> """{"key":" \\\\, "}""",
-      // double-escaped comma pair
-      """ \\,, """ -> """{"key":" \\\\,, "}""",
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
-      // ======= COMBINATIONS =======
-      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """{"key":" 'foo\\\" ' \"'\\'\"\\ bar 'baz\" "}""",
-      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """{"key":" 'foo\\\" ' ,, \"'\\'\"\\ bar 'baz\" \\, "}""",
-      """ ["foo","ba'r:1234"] """ -> """{"key":" [\"foo\",\"ba'r:1234\"] "}""",
-      """ "foo,bar:1234" """ -> """{"key":" \"foo,bar:1234\" "}"""
-    )
-    for ((value, expected) <- inputOutputPairs) {
-      val map = Map("key" -> value)
-      BatchExporter.makeLabelString(map) shouldEqual expected
-    }
+    batchExporter.makeExportAddress(Seq("l1a", "l2a")) shouldEqual "s3a://bucket/directory/catalog/database/l1a/l2a"
   }
 
   it ("should write untyped data to cassandra") {

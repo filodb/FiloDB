@@ -1,17 +1,14 @@
 package filodb.downsampler.chunk
 
 import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.{Instant, LocalDateTime, ZoneId}
 
-import scala.collection.mutable
-import scala.util.matching.Regex
-
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import kamon.Kamon
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{Row, SaveMode, SparkSession}
+import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType,
+                                   TimestampType}
+import scala.collection.mutable
 
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
@@ -20,7 +17,6 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
 
@@ -31,24 +27,17 @@ case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
 /**
  * All info needed to output a result Spark Row.
  */
-case class ExportRowData(partKeyMap: collection.Map[String, String],
-                         labelString: String,
-                         timestamp: Long,
+case class ExportRowData(workspace: String,
+                         namespace: String,
+                         metric: String,
+                         labels: collection.Map[String, String],
+                         epoch_timestamp: Long,
+                         timestamp: LocalDateTime,
                          value: Double,
-                         partitionStrings: Iterator[String],
-                         dropLabels: Set[String])
-
-object BatchExporter {
-  val LABEL_REGEX_MATCHER: Regex = """\{\{(.*)\}\}""".r
-  val DATE_REGEX_MATCHER: Regex = """<<(.*)>>""".r
-
-  val JSON_MAPPER: ObjectMapper = new ObjectMapper()
-  JSON_MAPPER.registerModule(DefaultScalaModule)
-
-  def makeLabelString(labels: collection.Map[String, String]): String = {
-    JSON_MAPPER.writeValueAsString(labels)
-  }
-}
+                         year: Int,
+                         month: Int,
+                         day: Int,
+                         hour: Int)
 
 /**
  * Exports a window of data to a bucket.
@@ -65,40 +54,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   val exportSchema = {
     // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
     //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
-    val fields = new mutable.ArrayBuffer[StructField](3 + downsamplerSettings.exportPathSpecPairs.size)
+    val fields = new mutable.ArrayBuffer[StructField](11)
     fields.append(
-      StructField("LABELS", StringType),
-      StructField("TIMESTAMP", LongType),
-      StructField("VALUE", DoubleType)
+      StructField("workspace", StringType),
+      StructField("namespace", StringType),
+      StructField("metric", StringType),
+      StructField("labels", StringType),
+      StructField("epoch_timestamp", LongType),
+      StructField("timestamp", TimestampType),
+      StructField("value", DoubleType),
+      StructField("year", IntegerType),
+      StructField("month", IntegerType),
+      StructField("day", IntegerType),
+      StructField("hour", IntegerType)
     )
-    // append all partitioning columns as strings
-    fields.appendAll(downsamplerSettings.exportPathSpecPairs.map(f => StructField(f._1, StringType)))
     StructType(fields)
-  }
-  val partitionByNames = {
-    val cols = new mutable.ArrayBuffer[String](downsamplerSettings.exportPathSpecPairs.size)
-    cols.appendAll(downsamplerSettings.exportPathSpecPairs.map(_._1))
-    cols
-  }
-
-  // One for each name; "template" because these still contain the {{}} notation to be replaced.
-  var partitionByValuesTemplate: Seq[String] = Nil
-  // The indices of partitionByValuesTemplate that contain {{}} notation to be replaced.
-  var partitionByValuesIndicesWithTemplate: Set[Int] = Set.empty
-
-  // Replace <<>> template notation with formatted dates.
-  {
-    val date = new Date(userStartTime)
-    partitionByValuesTemplate = downsamplerSettings.exportPathSpecPairs.map(_._2)
-      // replace the <<>> strings with dates
-      .map{ pathSpecString =>
-        DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
-          val dateFormatter = new SimpleDateFormat(matcher.group(1))
-          dateFormatter.format(date)
-        })}
-    partitionByValuesIndicesWithTemplate = partitionByValuesTemplate.zipWithIndex.filter { case (label, i) =>
-      LABEL_REGEX_MATCHER.findFirstIn(label).isDefined
-    }.map(_._2).toSet
   }
 
   /**
@@ -116,7 +86,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    */
   def makeExportAddress(exportKey: Seq[String]): String = {
     val replaceRegex = "\\$([0-9]+)".r
-    replaceRegex.replaceAllIn(downsamplerSettings.exportDestinationFormat, matcher => {
+    replaceRegex.replaceAllIn(downsamplerSettings.exportDestinationPath, matcher => {
       // Replace e.g. $0 with the 0th index of the export key.
       val index = matcher.group(1).toInt
       exportKey(index)
@@ -180,7 +150,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
       .flatMap { case (part, partKeyMap, rule) =>
-        getExportDatas(part, partKeyMap, rule.get)
+        getExportData(part, partKeyMap, rule.get)
       }
       .map { exportData =>
         numRowsExportPrepped.increment()
@@ -193,29 +163,61 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    * The result Row *must* match this.exportSchema.
    */
   private def exportDataToRow(exportData: ExportRowData): Row = {
-    val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
+    val dataSeq = new mutable.ArrayBuffer[Any](this.exportSchema.fields.length)
     dataSeq.append(
-      exportData.labelString,
-      exportData.timestamp / 1000,
-      exportData.value
+      exportData.workspace,
+      exportData.namespace,
+      exportData.metric,
+      exportData.labels,
+      exportData.epoch_timestamp,
+      exportData.timestamp,
+      exportData.value,
+      exportData.year,
+      exportData.month,
+      exportData.day,
+      exportData.hour
     )
-    dataSeq.appendAll(exportData.partitionStrings)
     Row.fromSeq(dataSeq)
   }
 
-  /**
-   * Returns the column values used to partition the data.
-   * Value order should match the order of this.partitionByCols.
-   */
-  def getPartitionByValues(partKeyMap: collection.Map[String, String]): Iterator[String] = {
-    partitionByValuesTemplate.iterator.zipWithIndex.map{ case (value, i) =>
-      if (partitionByValuesIndicesWithTemplate.contains(i)) {
-        LABEL_REGEX_MATCHER.replaceAllIn(partitionByValuesTemplate(i), matcher => partKeyMap(matcher.group(1)))
-      } else {
-        value
-      }
-    }
+  def writeDataToIcebergTable(spark: SparkSession,
+                              settings: DownsamplerSettings,
+                              tablePath: String,
+                              table: String,
+                              rdd: RDD[Row]): Unit = {
+    spark.sql(sqlCreateDatabase(settings.exportDatabase))
+    spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, table, tablePath))
+    spark.createDataFrame(rdd, this.exportSchema)
+      .write
+      .format(settings.exportFormat)
+      .mode(SaveMode.Append)
+      .insertInto(s"${settings.exportDatabase}.${table}")
   }
+
+  private def sqlCreateDatabase(database: String) =
+    s"""
+       |CREATE DATABASE IF NOT EXISTS $database
+       |""".stripMargin
+
+  private def sqlCreateTable(catalog: String, database: String, table: String, tablePath: String) =
+    s"""
+       |CREATE TABLE IF NOT EXISTS $catalog.$database.$table (
+       | workspace string,
+       | namespace string,
+       | metric string,
+       | labels map<string, string>,
+       | epoch_timestamp long,
+       | timestamp timestamp,
+       | value double,
+       | year int,
+       | month int,
+       | day int,
+       | hour int
+       | )
+       | USING iceberg
+       | PARTITIONED BY (year, month, day, namespace, metric)
+       | LOCATION $tablePath
+       |""".stripMargin
 
   def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
     keyToRules.find { case (key, rules) =>
@@ -238,16 +240,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
 
-  private def mergeLabelStrings(left: String, right: String): String = {
-    left.substring(0, left.size - 1) + "," + right.substring(1)
-  }
-
   // scalastyle:off method.length
   /**
    * Returns data about a single row to export.
    * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
    */
-  private def getExportDatas(partition: ReadablePartition,
+  private def getExportData(partition: ReadablePartition,
                              partKeyMap: mutable.Map[String, String],
                              rule: ExportRule): Iterator[ExportRowData] = {
     // Pseudo-struct for convenience.
@@ -276,11 +274,10 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
     val tupleIter = columns(valueCol).columnType match {
       case DoubleColumn =>
-        val labelString = BatchExporter.makeLabelString(partKeyMap)
         rangeInfoIter.flatMap{ info =>
           val doubleIter = info.valueIter.asDoubleIt
           (info.irowStart to info.irowEnd).iterator.map{ _ =>
-            (partKeyMap, labelString, info.timestampIter.next, doubleIter.next)
+            (partKeyMap, info.timestampIter.next, doubleIter.next)
           }
         }
       case HistogramColumn =>
@@ -298,7 +295,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
         // make labelString without __name__; will be replaced with _bucket-suffixed name
         partKeyMap.remove("__name__")
-        val baseLabelString = BatchExporter.makeLabelString(partKeyMap)
         partKeyMap.put("__name__", nameWithoutBucket)
 
         rangeInfoIter.flatMap{ info =>
@@ -313,8 +309,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
               }
               val bucketMapping = Map("__name__" -> nameWithBucket, "le" -> bucketTopString)
               val bucketLabels = partKeyMap ++ bucketMapping
-              val labelString = mergeLabelStrings(baseLabelString, BatchExporter.makeLabelString(bucketMapping))
-              (bucketLabels, labelString, timestamp, hist.bucketValue(i))
+              (bucketLabels, timestamp, hist.bucketValue(i))
             }
           }
         }
@@ -329,11 +324,18 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       numPartitionsExportPrepped.increment()
     }
 
-    val dropLabelSet = rule.dropLabels.toSet
-    tupleIter.map{ case (pkeyMapWithBucket, labelString, timestamp, value) =>
-      // NOTE: partition without histogram-adjusted labels, since we want the original metric name.
-      val partitionByValues = getPartitionByValues(partKeyMap)
-      ExportRowData(pkeyMapWithBucket, labelString, timestamp, value, partitionByValues, dropLabelSet)
+    tupleIter.map{ case (labels, epoch_timestamp, value) =>
+      val workspace = labels("_ws_")
+      val namespace = labels("_ns_")
+      val metric = labels("__name__")
+      // to compute YYYY, MM, dd, hh
+      // to compute readable timestamp from unix timestamp
+      val timestamp = Instant.ofEpochMilli(epoch_timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime()
+      val year = timestamp.getYear()
+      val month = timestamp.getMonthValue()
+      val day = timestamp.getDayOfMonth()
+      val hour = timestamp.getHour()
+      ExportRowData(workspace, namespace, metric, labels, epoch_timestamp, timestamp, value, year, month, day, hour)
     }
   }
   // scalastyle:on method.length
