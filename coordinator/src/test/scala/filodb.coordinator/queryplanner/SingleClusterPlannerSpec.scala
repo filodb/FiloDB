@@ -9,7 +9,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, _}
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex, NotEquals}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -19,12 +19,37 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.core.query.Filter.NotEquals
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
+
 
 import scala.concurrent.duration._
+
+object SingleClusterPlannerSpec {
+
+  def validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(lp: MultiSchemaPartitionsExec)
+  : Unit = {
+    // checking for NOT `_count` instead of _bucket, because we remove the the _bucket suffix for histogram queries
+    val metricName = lp.filters.find(x => x.column == lp.metricColumn).head.filter.valuesStrings.head.toString
+    val isBucketQuery = !(metricName.endsWith("_count") || metricName.endsWith("_total"))
+    // f1 is a bucket query with le filter. When le filter is applied, we add an additional rangeVectorTransformer
+    // to select the required bucket. This is not the case with histogram queries with _count, _sum, _min, _max suffix
+    // since these values are stored outside of histogram buckets and don't have le filters
+    if (isBucketQuery) {
+      lp.rangeVectorTransformers.size shouldEqual 3
+      lp.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      lp.rangeVectorTransformers(1).isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+      lp.rangeVectorTransformers(2).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+    else {
+      lp.rangeVectorTransformers.size shouldEqual 2
+      lp.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      lp.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+  }
+}
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
@@ -118,9 +143,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+        SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
       }
     }
   }
@@ -140,9 +164,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         l2.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
         l2.children.foreach { l3 =>
           l3.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-          l3.rangeVectorTransformers.size shouldEqual 2
-          l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-          l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+          val l3Exec = l3.asInstanceOf[MultiSchemaPartitionsExec]
+          SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l3Exec)
         }
       }
     }
@@ -416,7 +439,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("__name__", Equals("name")),
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
-        ), qContext, start, end, useTargetSchemaForShards = true)
+        ), qContext, start, end)
     } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 
@@ -1881,9 +1904,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+        SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
       }
     }
   }
@@ -2200,6 +2222,54 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       shouldEqual(true)
     multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
       isInstanceOf[StaticFuncArgs] shouldEqual(true)
+  }
+
+  it("should add le label filter correctly for histogram query with PeriodicSeriesWithWindowing logical plan") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(rate(my_hist_bucket{job="prometheus",le="0.5"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist") shouldEqual true
+    // le filter should be removed
+    multiSchemaPartitionsExec.filters.filter(_.column == "le").isEmpty shouldEqual true
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).isInstanceOf[InstantVectorFunctionMapper].
+      shouldEqual(true)
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      isInstanceOf[StaticFuncArgs] shouldEqual (true)
+
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      asInstanceOf[StaticFuncArgs].scalar shouldEqual 0.5
+
+    val expected =
+      """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(700,1000,10000))
+        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(0.5,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(0.5,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)"""
+        .stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
+  it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should NOT be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_bucket_counter") shouldEqual true
   }
 
   it("should convert rate histogram bucket query") {
@@ -2529,5 +2599,149 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // When these schemas are reduced, a SchemaMismatch should not be thrown.
     var reduced = concat.reduceSchemas(ResultSchema.empty, qres1.resultSchema)
     reduced = concat.reduceSchemas(reduced, qres2.resultSchema)
+  }
+
+  it ("should correctly determine when target-schema changes") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("app", EqualsRegex("foo|bar")))
+    val isTschemaChanging = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.isTargetSchemaChanging(filters, startMs, endMs, qContext)
+    }
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    isTschemaChanging(none) shouldEqual false
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello")))
+    isTschemaChanging(unchanging) shouldEqual false
+
+    val unchangingMultiple = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello", "goodbye")))
+    isTschemaChanging(unchangingMultiple) shouldEqual false
+
+    val unchangingDifferent = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(TargetSchemaChange(0, Seq("hello")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(unchangingDifferent) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("hello")))
+    isTschemaChanging(firstTschema) shouldEqual true
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(startMs + 1000, Seq("goodbye")),
+    )
+    isTschemaChanging(tschemaChanges) shouldEqual true
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("hello")),
+      TargetSchemaChange(endMs + 1000, Seq("goodbye")),
+    )
+    isTschemaChanging(tschemaChangesAfter) shouldEqual false
+
+    val oneChanges = (filters: Seq[ColumnFilter]) => {
+      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
+        Seq(
+          TargetSchemaChange(0, Seq("hello")),
+          TargetSchemaChange(startMs + 1000, Seq("goodbye")))
+      } else {
+        Seq(TargetSchemaChange(0, Seq("goodbye")))
+      }
+    }
+    isTschemaChanging(oneChanges) shouldEqual true
+  }
+
+  it("should correctly determine when to use target-schema to find shards") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(ColumnFilter("job", Equals("foo")))
+    val useTschemaForShards = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.useTargetSchemaForShards(filters, startMs, endMs, qContext)
+    }
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    useTschemaForShards(none) shouldEqual false
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    useTschemaForShards(unchanging) shouldEqual true
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    useTschemaForShards(unchangingWrongCol) shouldEqual false
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    useTschemaForShards(firstTschema) shouldEqual false
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChanges) shouldEqual false
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    useTschemaForShards(tschemaChangesAfter) shouldEqual true
+  }
+
+  it ("should correctly identify shards to query") {
+    val qContext = QueryContext(promQlQueryParams)
+    val startMs = 1000 * promQlQueryParams.startSecs
+    val endMs = 1000 * promQlQueryParams.endSecs
+    val filters = Seq(
+      ColumnFilter("job", Equals("foo")),
+      ColumnFilter("__name__", Equals("my_metric")),
+      ColumnFilter("label1", Equals("value1"))
+    )
+    val shardKvPairs = dataset.options.shardKeyColumns.map{col =>
+      (col, filters.find(_.column == col).get.filter.valuesStrings.head.toString)
+    }
+    val shardsFromValues = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
+      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
+      val scp = new SingleClusterPlanner(
+        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
+      scp.shardsFromValues(shardKvPairs, filters, qContext, startMs, endMs)
+    }
+
+    // Only one shard should be returned when a target-schema can be applied.
+    // Otherwise, two shards are returned.
+
+    val none = (filters: Seq[ColumnFilter]) => Nil
+    shardsFromValues(none).size shouldEqual 2
+
+    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
+    shardsFromValues(unchanging).size shouldEqual 1
+
+    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
+    shardsFromValues(unchangingWrongCol).size shouldEqual 2
+
+    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
+    shardsFromValues(firstTschema).size shouldEqual 2
+
+    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(startMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChanges).size shouldEqual 2
+
+    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
+      TargetSchemaChange(0, Seq("job")),
+      TargetSchemaChange(endMs + 1000, Seq("job")),
+    )
+    shardsFromValues(tschemaChangesAfter).size shouldEqual 1
   }
 }

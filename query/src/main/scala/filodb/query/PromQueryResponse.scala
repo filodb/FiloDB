@@ -67,9 +67,6 @@ final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, coun
 final case class LabelCardinalitySampl(metric: Map[String, String],
                                        cardinality: Seq[Map[String, String]]) extends MetadataSampl
 
-final case class TsCardinalitiesSampl(group: Map[String, String],
-                                      cardinality: Map[String, Int]) extends MetadataSampl
-
 /**
  * @param group map of shardKeyPrefix and its values. Key includes - _ws_, _ns_, __name__
  * @param cardinality map of string and int (cardinality count). Key includes - active, shortTerm, longTerm

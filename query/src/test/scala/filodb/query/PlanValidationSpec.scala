@@ -1,11 +1,13 @@
 package filodb.query
 
+import com.typesafe.scalalogging.StrictLogging
 import org.scalatest.matchers.should.Matchers
 import filodb.query.exec.ExecPlan
 
+
 import scala.collection.mutable
 
-trait PlanValidationSpec extends Matchers {
+trait PlanValidationSpec extends Matchers with StrictLogging {
 
   private def getIndent(line: String): Int = {
     line.prefixLength(c => c == '-')
@@ -20,7 +22,7 @@ trait PlanValidationSpec extends Matchers {
   /**
    * Prints the same tree for all logically-identical plans.
    */
-  private def sortTree(planString: String): Unit = {
+  private def sortTree(planString: String): String = {
     // Returns the index to resume reading from "lines" and a sorted string tree.
     def helper(lines: Seq[String], index: Int): (Int, String) = {
       // Recursively build a list of child strings, then sort and concatenate.
@@ -52,14 +54,25 @@ trait PlanValidationSpec extends Matchers {
   def validatePlan(plan: ExecPlan,
                    expected: String,
                    sort: Boolean = false): Unit = {
+    val originalPlanString = plan.printTree()
     val (planString, expectedString) = {
-      val denoisedPlan = removeNoise(plan.printTree())
+      val denoisedPlan = removeNoise(originalPlanString)
       val denoisedExpected = removeNoise(expected)
       if (sort) {
         (sortTree(denoisedPlan), sortTree(denoisedExpected))
       } else {
         (denoisedPlan, denoisedExpected)
       }
+    }
+    if (planString != expectedString) {
+      logger.error(
+        s"""======== PLAN VALIDATION FAILED ========
+           |~~~~~~~~~~~~~~~ EXPECTED ~~~~~~~~~~~~~~~
+           |$expected
+           |~~~~~~~~~~~~~~~~ ACTUAL ~~~~~~~~~~~~~~~~
+           |$originalPlanString
+           |""".stripMargin
+      )
     }
     planString shouldEqual expectedString
   }

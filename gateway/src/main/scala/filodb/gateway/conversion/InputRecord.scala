@@ -89,6 +89,55 @@ object InputRecord {
 
 
   /**
+   * Writes an otel-style increasing histogram record, along with the sum, count, min and max
+   */
+  def writeOtelHistRecord(builder: RecordBuilder,
+                          metric: String,
+                          tags: Map[String, String],
+                          timestamp: Long,
+                          kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+        false
+      case ("count", v) => count = v
+        false
+      case ("min", v) => min = v
+        false
+      case ("max", v) => max = v
+        false
+      case other => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+
+    if (sortedBuckets.nonEmpty) {
+      // Built up custom histogram objects and scheme, then encode
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+      // Now, write out histogram
+      builder.startNewRecord(otelHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addBlob(hist.serialize())
+
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
+  }
+
+  /**
    * Writes a Prometheus-style increasing histogram record, along with the sum and count,
    * using the efficient prom-histogram schema, storing the entire histogram together for efficiency.
    * The list of key-values should have "sum", "count", and bucket tops as keys, in any order.
@@ -124,6 +173,55 @@ object InputRecord {
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
+  }
+
+  /**
+   * Writes a delta non-increasing histogram record, along with the sum, count, min and max
+   */
+  def writeDeltaHistRecordMinMax(builder: RecordBuilder,
+                           metric: String,
+                           tags: Map[String, String],
+                           timestamp: Long,
+                           kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+        false
+      case ("count", v) => count = v
+        false
+      case ("min", v) => min = v
+        false
+      case ("max", v) => max = v
+        false
+      case other => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+
+    if (sortedBuckets.nonEmpty) {
+      // Built up custom histogram objects and scheme, then encode
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+      // Now, write out histogram
+      builder.startNewRecord(deltaHistogramMinMax)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addDouble(min)
+      builder.addDouble(max)
       builder.addBlob(hist.serialize())
 
       builder.addString(metric)

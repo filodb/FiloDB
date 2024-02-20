@@ -67,32 +67,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
       else response.data.head match {
         case _: MetadataMapSampl         => mapTypeQueryResponse(response, id)
         case _: LabelCardinalitySampl    => mapLabelCardinalityResponse(response, id)
-        case _: TsCardinalitiesSampl     => mapTsCardinalitiesResponse(response, id)
         case _: TsCardinalitiesSamplV2   => mapTsCardinalitiesResponseV2(response, id)
         case _                           => labelsQueryResponse(response, id)
       }
-  }
-
-  private def mapTsCardinalitiesResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
-    import NoCloseCursor._
-    import TsCardinalities._
-    import TsCardExec._
-
-    val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
-
-    val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSampl]]
-      .map { ts =>
-        val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
-        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("total"))
-        CardRowReader(prefixToGroup(prefix), counts)
-      }
-    val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
-    // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
-    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext), dummyQueryStats)
-
-    // NOTE: We are using the RESULT_SCHEMA definitions to determine the iteration of shardKeyPrefix in v1 result.
-    // Hence, we are sending the older result schema which was used for V1 Cardinality API
-    QueryResult(id, RESULT_SCHEMA_V1, Seq(srv))
   }
 
   /**

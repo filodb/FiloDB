@@ -6,9 +6,15 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
+import filodb.core.query.Filter.Equals
+import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
+import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
+import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
+import filodb.query.exec.InternalRangeFunction.Last
+
 
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
@@ -32,7 +38,17 @@ trait  DefaultPlanner {
       vectors
     }
 
-    def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
+    def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
+      rangeSelector match {
+        case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
+        case AllChunksSelector => AllChunkScan
+        case WriteBufferSelector => WriteBufferChunkScan
+        case InMemoryChunksSelector => InMemoryChunkScan
+        case x@_ => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
+      }
+    }
+
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
 
 
     def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
@@ -85,13 +101,121 @@ trait  DefaultPlanner {
         case lp: ScalarBinaryOperation       => this.materializeScalarBinaryOperation(qContext, lp, forceInProcess)
         case lp: SubqueryWithWindowing       => this.materializeSubqueryWithWindowing(qContext, lp, forceInProcess)
         case lp: TopLevelSubquery            => this.materializeTopLevelSubquery(qContext, lp, forceInProcess)
+        case lp: PeriodicSeries              => this.materializePeriodicSeries(qContext, lp, forceInProcess)
+        case lp: PeriodicSeriesWithWindowing =>
+                                              this.materializePeriodicSeriesWithWindowing(qContext, lp, forceInProcess)
         case _: RawSeries                   |
              _: RawChunkMeta                |
-             _: PeriodicSeries              |
-             _: PeriodicSeriesWithWindowing |
              _: MetadataQueryPlan           |
              _: TsCardinalities              => throw new IllegalArgumentException("Unsupported operation")
     }
+
+
+  private[queryplanner] def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
+                                                     lp: PeriodicSeriesWithWindowing,
+                                                     forceInProcess: Boolean): PlanResult = {
+    val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
+      removeBucket(Right(lp))._3.right.get
+    } else lp
+
+    val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
+    val rawSource = logicalPlanWithoutBucket.series.isRaw && (logicalPlanWithoutBucket.series match {
+      case r: RawSeries   => !r.supportsRemoteDataCall
+      case _              => true
+    })   // the series is raw and supports raw export, its going to yield an iterator
+
+    /* Last function is used to get the latest value in the window for absent_over_time
+    If no data is present AbsentFunctionMapper will return range vector with value 1 */
+
+    val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
+    else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
+
+    val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
+    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
+      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
+      logicalPlanWithoutBucket.stepMultipleNotationUsed,
+      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource = rawSource)))
+    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
+        AggregateClause.byOpt(Seq("job")))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
+      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
+        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
+          logicalPlanWithoutBucket.endMs / 1000), qContext)
+    } else series
+  }
+
+  private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]):
+              (Option[String], Option[String], Either[PeriodicSeries, PeriodicSeriesWithWindowing])= {
+    val rawSeries = lp match {
+      case Right(value) => value.series
+      case Left(value) => value.rawSeries
+    }
+
+    rawSeries match {
+      case rawSeriesLp: RawSeries =>
+
+        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+          map(_.filter.valuesStrings.head.toString)
+        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
+
+        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
+        else {
+          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
+          if (!nameFilter.get.endsWith("_bucket")) {
+            (nameFilter, leFilter, lp)
+          }
+          else {
+            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
+            val newLp =
+              if (lp.isLeft)
+                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+              else
+                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+            (nameFilter, leFilter, newLp)
+          }
+        }
+      case _ => (None, None, lp)
+    }
+  }
+
+  private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
+                                lp: PeriodicSeries,
+                                forceInProcess: Boolean): PlanResult = {
+
+    // Convert to FiloDB histogram by removing le label and bucket prefix
+    // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
+    // with _sum/_count as suffix
+    val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
+    if (queryConfig.translatePromToFilodbHistogram) {
+      val result = removeBucket(Left(lp))
+      (result._1, result._2, result._3.left.get)
+
+    } else (None, None, lp)
+
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
+    val rawSource = lpWithoutBucket.rawSeries.isRaw && (lpWithoutBucket.rawSeries match {
+      case r: RawSeries => !r.supportsRemoteDataCall
+      case _ => true
+    })
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
+      window = None, functionId = None, qContext, stepMultipleNotationUsed = false, funcParams = Nil,
+      lp.offsetMs, rawSource = rawSource)))
+
+    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
+        lp.endMs / 1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
+    }
+    rawSeries
+  }
 
     def materializeApplyInstantFunction(qContext: QueryContext,
                                         lp: ApplyInstantFunction,
@@ -524,5 +648,102 @@ object PlannerUtil extends StrictLogging {
     val rnd = ThreadLocalRandom.current()
     childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
    }
+  }
+
+  //scalastyle:off method.length
+  def rewritePlanWithRemoteRawExport(lp: LogicalPlan,
+                                     rangeSelector: IntervalSelector,
+                                     additionalLookbackMs: Long = 0): LogicalPlan =
+    lp match {
+      case lp: ApplyInstantFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+          rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]))
+      case lp: ApplyInstantFunctionRaw =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[RawSeries],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]))
+      case lp: Aggregate =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: BinaryJoin =>
+        lp.copy(lhs = rewritePlanWithRemoteRawExport(lp.lhs, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan],
+          rhs = rewritePlanWithRemoteRawExport(lp.rhs, rangeSelector, additionalLookbackMs)
+            .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarVectorBinaryOperation =>
+        lp.copy(scalarArg = rewritePlanWithRemoteRawExport(lp.scalarArg, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[ScalarPlan],
+          vector = rewritePlanWithRemoteRawExport(lp.vector, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplyMiscellaneousFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplySortFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarVaryingDoublePlan =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]))
+      case lp: ScalarTimeBasedPlan => lp.copy(
+        rangeParams = lp.rangeParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
+      case lp: VectorPlan =>
+        lp.copy(scalars = rewritePlanWithRemoteRawExport(lp.scalars, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[ScalarPlan])
+      case lp: ScalarFixedDoublePlan => lp.copy(timeStepParams =
+        lp.timeStepParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
+      case lp: ApplyAbsentFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ApplyLimitFunction =>
+        lp.copy(vectors = rewritePlanWithRemoteRawExport(lp.vectors, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[PeriodicSeriesPlan])
+      case lp: ScalarBinaryOperation => lp.copy(
+        rangeParams = lp.rangeParams.copy(startSecs = rangeSelector.from / 1000L, endSecs = rangeSelector.to / 1000L))
+      case lp: SubqueryWithWindowing =>
+        lp.copy(innerPeriodicSeries =
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, rangeSelector, additionalLookbackMs)
+            .asInstanceOf[PeriodicSeriesPlan],
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]))
+      case lp: TopLevelSubquery =>
+        lp.copy(innerPeriodicSeries =
+          rewritePlanWithRemoteRawExport(lp.innerPeriodicSeries, rangeSelector,
+            additionalLookbackMs = additionalLookbackMs).asInstanceOf[PeriodicSeriesPlan])
+      case lp: RawSeries =>
+        // IMPORTANT: When we export raw data over remote data call, offset does not mean anything, instead
+        // do a raw lookback of original lookback + offset and set offset to 0
+        val newLookback = lp.lookbackMs.getOrElse(0L) + lp.offsetMs.getOrElse(0L) + additionalLookbackMs
+        lp.copy(supportsRemoteDataCall = true, rangeSelector = rangeSelector,
+          lookbackMs = if (newLookback == 0) None else Some(newLookback), offsetMs = None)
+      case lp: RawChunkMeta =>  lp.copy(rangeSelector = rangeSelector)
+      case lp: PeriodicSeries =>
+        lp.copy(rawSeries = rewritePlanWithRemoteRawExport(lp.rawSeries, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[RawSeriesLikePlan], startMs = rangeSelector.from, endMs = rangeSelector.to)
+      case lp: PeriodicSeriesWithWindowing =>
+        lp.copy(
+          startMs = rangeSelector.from,
+          endMs = rangeSelector.to,
+          functionArgs = lp.functionArgs.map(
+            rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]),
+          series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookbackMs)
+          .asInstanceOf[RawSeriesLikePlan])
+      // wont bother rewriting and adjusting the start and end for metadata calls
+      case lp: MetadataQueryPlan => lp
+      case lp: TsCardinalities => lp
+    }
+    //scalastyle:on method.length
+
+  /**
+   * Replaces the last occurence of '_bucket' string from the given input
+   * @param metricName Metric Name
+   * @return updated metric name without the last occurence of _bucket
+   */
+  def replaceLastBucketOccurenceStringFromMetricName(metricName: String): String = {
+    metricName.replaceAll("_bucket$", "")
   }
 }
