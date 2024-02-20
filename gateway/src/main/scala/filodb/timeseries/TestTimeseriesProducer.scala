@@ -246,7 +246,7 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      if (histSchema == Schemas.deltaHistogramMinMax || histSchema == Schemas.promHistogramMinMax) {
+      if (histSchema == Schemas.deltaHistogramMinMax || histSchema == Schemas.otelHistogram) {
         val minVal = buckets.min.toDouble
         val maxVal = buckets.max.toDouble
         new MetricTagInputRecord(Seq(timestamp, sum, count, minVal, maxVal, hist), metric, tags, histSchema)

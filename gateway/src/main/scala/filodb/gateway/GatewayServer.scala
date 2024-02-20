@@ -28,8 +28,8 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, deltaHistogramMinMax, gauge, promHistogram,
-  promHistogramMinMax}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, deltaHistogramMinMax, gauge, otelHistogram,
+  promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -80,8 +80,8 @@ object GatewayServer extends StrictLogging {
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
     val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
-    val genHistMinMaxData = toggle(noshort = true,
-              descrYes = "Generate prom-histogram-min-max schema test data and exit")
+    val genOtelHistData = toggle(noshort = true,
+              descrYes = "Generate otel-histogram schema test data and exit")
     val genDeltaHistMinMaxData = toggle(noshort = true,
               descrYes = "Generate delta-histogram-min-max-schema test data and exit")
     val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
@@ -138,17 +138,17 @@ object GatewayServer extends StrictLogging {
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
     val genCounterData = userOpts.genCounterData.getOrElse(false)
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
-    val genHistMinMaxData = userOpts.genHistMinMaxData.getOrElse(false)
+    val genOtelHistData = userOpts.genOtelHistData.getOrElse(false)
     val genDeltaHistMinMaxData = userOpts.genDeltaHistMinMaxData.getOrElse(false)
 
     if (genHist || genGaugeData || genDeltaHist
-          || genCounterData || genDeltaCounterData || genDeltaHistMinMaxData || genHistMinMaxData) {
+          || genCounterData || genDeltaCounterData || genDeltaHistMinMaxData || genOtelHistData) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
       val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
-                   else if (genHistMinMaxData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
-                                                  promHistogramMinMax)
+                   else if (genOtelHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
+                                                  otelHistogram)
                    else if (genDeltaHistMinMaxData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
                                                   deltaHistogramMinMax)
                    else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
@@ -170,7 +170,7 @@ object GatewayServer extends StrictLogging {
       }
       Thread sleep 10000
       TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
-        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genHistMinMaxData, genDeltaHistMinMaxData,
+        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genOtelHistData, genDeltaHistMinMaxData,
         userOpts.publishIntervalSecs())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)

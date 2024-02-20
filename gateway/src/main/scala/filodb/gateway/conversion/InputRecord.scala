@@ -89,9 +89,9 @@ object InputRecord {
 
 
   /**
-   * Writes a Prometheus-style increasing histogram record, along with the sum, count, min and max
+   * Writes an otel-style increasing histogram record, along with the sum, count, min and max
    */
-  def writePromHistRecordMinMax(builder: RecordBuilder,
+  def writeOtelHistRecord(builder: RecordBuilder,
                           metric: String,
                           tags: Map[String, String],
                           timestamp: Long,
@@ -123,7 +123,7 @@ object InputRecord {
       val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
 
       // Now, write out histogram
-      builder.startNewRecord(promHistogramMinMax)
+      builder.startNewRecord(otelHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)

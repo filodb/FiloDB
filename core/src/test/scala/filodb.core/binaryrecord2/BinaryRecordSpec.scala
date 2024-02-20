@@ -678,7 +678,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     }
   }
 
-  it("should trim metric name for _bucket _sum _count _min _max") {
+  it("should trim metric name for _bucket _sum _count") {
     val options1 = schema1.options
     val metricName = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_bucket")
     metricName shouldEqual "heap_usage"
@@ -689,23 +689,17 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     val metricName3 = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_count")
     metricName3 shouldEqual "heap_usage"
 
-    val metricName4 = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_min")
-    metricName4 shouldEqual "heap_usage"
-
-    val metricName5 = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_max")
-    metricName5 shouldEqual "heap_usage"
-
     val timeseriesDataset = Dataset.make("timeseries",
       Seq("tags:map"),
       Seq("timestamp:ts", "value:double"),
       Seq.empty,
       None,
       DatasetOptions(Seq("__name__", "job"), "__name__", false, Map("dummy" -> Seq("_bucket")))).get
-    val metricName6 = RecordBuilder.trimShardColumn(timeseriesDataset.options, "__name__", "heap_usage_bucket")
-    metricName6 shouldEqual "heap_usage_bucket"
+    val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset.options, "__name__", "heap_usage_bucket")
+    metricName4 shouldEqual "heap_usage_bucket"
 
-    val metricName7 = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_sum_count")
-    metricName7 shouldEqual "heap_usage_sum"
+    val metricName5 = RecordBuilder.trimShardColumn(options1, "__name__", "heap_usage_sum_count")
+    metricName5 shouldEqual "heap_usage_sum"
   }
 
   it("should correctly ignore metric labels when calculating a target-schema shard hash") {

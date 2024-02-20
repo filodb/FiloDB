@@ -78,7 +78,7 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  it("should writePromHistRecordMinMax to BR and be able to deserialize it") {
+  it("should otelHistogram to BR and be able to deserialize it") {
     val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
     val expected = LongHistogram(CustomBuckets(buckets), counts)
 
@@ -87,8 +87,8 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       case (b, c) => b.toString -> c.toDouble
     }.toSeq
     // 1 - sum/count at end
-    InputRecord.writePromHistRecordMinMax(builder2, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
-    builder2.allContainers.head.iterate(Schemas.promHistogramMinMax.ingestionSchema).foreach { row =>
+    InputRecord.writeOtelHistRecord(builder2, metric, baseTags, 100000L, bucketKVs ++ sumCountMinMaxKVs)
+    builder2.allContainers.head.iterate(Schemas.otelHistogram.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getDouble(3) shouldEqual min
