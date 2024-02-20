@@ -64,14 +64,14 @@ object TestTimeseriesProducer extends StrictLogging {
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
                    genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
-                   genPromCounter: Boolean, genHistMinMax: Boolean, genDeltaHistMinMax: Boolean,
+                   genPromCounter: Boolean, genOtelHist: Boolean, genDeltaHistMinMax: Boolean,
                    publishIntervalSec: Int): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
 
     val metricName = if (genGauge) "heap_usage0"
-                      else if (genHist || genHistMinMax) "http_request_latency"
+                      else if (genHist || genOtelHist) "http_request_latency"
                       else if (genDeltaHist || genDeltaHistMinMax) "http_request_latency_delta"
                       else if (genPromCounter) "heap_usage_counter0"
                       else "heap_usage_delta0"
