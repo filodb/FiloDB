@@ -80,13 +80,13 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 
-  @transient lazy val exportDestinationPath = downsamplerConfig.as[String]("data-export.destination-path")
-
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 
   @transient lazy val exportKeyToRules = {
     val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
       val key = group.as[Seq[String]]("key")
+      val table = group.as[String]("table")
+      val tablePath = group.as[String]("table-path")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
         val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
           Parser.parseQuery(s"{${group.mkString(",")}}")
@@ -99,7 +99,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      (key -> rules)
+      key -> ExportTableConfig(table, tablePath, rules)
     }
     assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
       "export rule group keys must be unique")

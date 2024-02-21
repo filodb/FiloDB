@@ -24,6 +24,9 @@ case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       blockFilterGroups: Seq[Seq[ColumnFilter]],
                       dropLabels: Seq[String])
 
+case class ExportTableConfig(tableName: String,
+                             tablePath: String,
+                             exportRules: Seq[ExportRule])
 /**
  * All info needed to output a result Spark Row.
  */
@@ -78,19 +81,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    */
   def getRowIndex(fieldName: String): Option[Int] = {
     exportSchema.zipWithIndex.find(_._1.name == fieldName).map(_._2)
-  }
-
-  /**
-   * Returns the configured exportDestinationFormat with all $i (e.g. $0, $1, $2, etc)
-   * substrings replaced with the ith string of the argument export key.
-   */
-  def makeExportAddress(exportKey: Seq[String]): String = {
-    val replaceRegex = "\\$([0-9]+)".r
-    replaceRegex.replaceAllIn(downsamplerSettings.exportDestinationPath, matcher => {
-      // Replace e.g. $0 with the 0th index of the export key.
-      val index = matcher.group(1).toInt
-      exportKey(index)
-    })
   }
 
   // Unused, but keeping here for convenience if needed later.
@@ -182,16 +172,17 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   def writeDataToIcebergTable(spark: SparkSession,
                               settings: DownsamplerSettings,
-                              tablePath: String,
                               table: String,
+                              tablePath: String,
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
     spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, table, tablePath))
+    // covert rdd to dataframe and write to table in append mode
     spark.createDataFrame(rdd, this.exportSchema)
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
-      .insertInto(s"${settings.exportDatabase}.${table}")
+      .insertInto(s"${settings.exportDatabase}.$table")
   }
 
   private def sqlCreateDatabase(database: String) =
@@ -220,13 +211,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        |""".stripMargin
 
   def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
-    keyToRules.find { case (key, rules) =>
+    keyToRules.find { case (key, exportTableConfig) =>
       // find the group with a key that matches these label-values
       downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
         partKeyMap.get(label).contains(key(i))
       }
-    }.flatMap { case (key, rules) =>
-      rules.takeWhile{ rule =>
+    }.flatMap { case (key, exportTableConfig) =>
+      exportTableConfig.exportRules.takeWhile{ rule =>
         // step through rules while we still haven't matched a "block" filter
         !rule.blockFilterGroups.exists { filterGroup =>
           matchAllFilters(filterGroup, partKeyMap)

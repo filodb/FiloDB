@@ -1,47 +1,46 @@
 package filodb.downsampler
 
-import java.io.File
-import java.time.Instant
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import scala.concurrent.Await
-import scala.concurrent.duration._
 import com.typesafe.config.{Config, ConfigException, ConfigFactory}
+import filodb.cardbuster.CardinalityBuster
+import filodb.core.GlobalScheduler._
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats, DownsampledTimeSeriesStore, OffHeapMemory}
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.memstore._
+import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.query.Filter.Equals
+import filodb.core.query._
+import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
+import filodb.core.{DatasetRef, MachineMetricsData}
+import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
+import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
+import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
+import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
+import filodb.query.exec._
+import filodb.query.{QueryError, QueryResult}
+import kamon.metric
+import kamon.metric.Metric.Settings
+import kamon.metric.{Histogram, Metric}
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.apache.commons.io.FileUtils
 import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-import filodb.cardbuster.CardinalityBuster
-import filodb.core.GlobalScheduler._
-import filodb.core.{DatasetRef, MachineMetricsData}
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
-import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats, DownsampledTimeSeriesStore, OffHeapMemory}
-import filodb.core.memstore.{DownsampleIndexBootstrapper, PagedReadablePartition, PartKeyLuceneIndex, TimeSeriesPartition, TimeSeriesShardInfo}
-import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.metadata.{Dataset, Schema, Schemas}
-import filodb.core.query._
-import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
-import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
-import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
-import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
-import filodb.query.{QueryError, QueryResult}
-import filodb.query.exec._
-import kamon.metric.Metric.Settings
-import kamon.metric
-import kamon.metric.{Histogram, Metric}
-import kamon.tag.TagSet
-import org.apache.commons.io.FileUtils
 
-
+import java.io.File
 import java.time
+import java.time.Instant
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import scala.collection.mutable
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 /**
   * Spec tests downsampling round trip.
@@ -52,17 +51,20 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
-  val exportToFile = None  // Some("file:///path/to/dir/$0")
+  val exportToFile = None  // Some("s3a://<bucket>/<directory>/<catalog>/<database>/ws-foo")
   val exportConf =
     s"""{
        |  "filodb": { "downsampler": { "data-export": {
        |    "enabled": ${exportToFile.isDefined},
+       |    "catalog": "",
+       |    "database": "",
        |    "key-labels": [],
-       |    "destination-path": "${exportToFile.getOrElse("")}",
        |    "format": "iceberg",
        |    "groups": [
        |      {
        |        "key": [],
+       |        "table": "",
+       |        "table-path": "${exportToFile.getOrElse("")}",
        |        "rules": [
        |          {
        |            "allow-filters": [],
@@ -159,7 +161,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         """
           |    filodb.downsampler.data-export {
           |      enabled = true
-          |      destination-path = "s3a://<bucket>/<directory>/<catalog>/<database>"
           |    }
           |""".stripMargin
       ))
@@ -181,6 +182,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a",
         |          rules = [
         |            {
         |              allow-filters = []
@@ -201,6 +204,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = [
@@ -226,6 +231,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = [
@@ -255,6 +262,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = [
@@ -280,6 +289,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a", "l2a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = []
@@ -300,6 +311,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = []
@@ -310,6 +323,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        },
         |        {
         |          key = ["l1b"]
+        |          table = "l1b"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1b"
         |          rules = [
         |            {
         |              allow-filters = []
@@ -330,6 +345,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
         |          rules = [
         |            {
         |              allow-filters = [["l3=\"l3a\""]]
@@ -383,23 +400,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
       }
     }
-  }
-
-  it ("should correctly generate export address from labels") {
-    val testConf = ConfigFactory.parseString(
-        """
-          |    filodb.downsampler.data-export {
-          |      enabled = true
-          |      key-labels = ["l1", "l2"]
-          |      destination-path = "s3a://bucket/directory/catalog/database/$0/$1"
-          |    }
-          |""".stripMargin
-      ).withFallback(conf)
-
-    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
-
-    batchExporter.makeExportAddress(Seq("l1a", "l2a")) shouldEqual "s3a://bucket/directory/catalog/database/l1a/l2a"
   }
 
   it ("should write untyped data to cassandra") {
