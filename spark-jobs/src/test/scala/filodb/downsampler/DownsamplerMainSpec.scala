@@ -51,7 +51,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
-  val exportToFile = None  // Some("s3a://<bucket>/<directory>/<catalog>/<database>/ws-foo")
+  val exportToFile = None  // Some("s3a://bucket/directory/catalog/database/table")
   val exportConf =
     s"""{
        |  "filodb": { "downsampler": { "data-export": {
