@@ -88,24 +88,23 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
    */
   private def exportForKey(rdd: RDD[Seq[PagedReadablePartition]],
                            exportKey: Seq[String],
-                           table: String,
-                           tablePath: String,
+                           exportTableConfig: ExportTableConfig,
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
     val exportStartMs = System.currentTimeMillis()
 
-    val rowKeyIndices = settings.exportRuleKey.map(colName => {
-      val index = batchExporter.getRowIndex(colName)
+    val columnKeyIndices = settings.exportRuleKey.map(colName => {
+      val index = batchExporter.getColumnIndex(colName)
       assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
       index.get
     })
 
     val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_)).filter{ row =>
-      val rowKey = rowKeyIndices.map(row.get(_).toString)
+      val rowKey = columnKeyIndices.map(row.get(_).toString)
       rowKey == exportKey
     }
     // write filteredRowRdd to iceberg table
-    batchExporter.writeDataToIcebergTable(sparkSession, settings, table, tablePath, filteredRowRdd)
+    batchExporter.writeDataToIcebergTable(sparkSession, settings, exportTableConfig, filteredRowRdd)
 
     val exportEndMs = System.currentTimeMillis()
     exportLatency.record(exportEndMs - exportStartMs)
@@ -201,15 +200,14 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     if (settings.exportIsEnabled && settings.exportKeyToRules.nonEmpty) {
       val exportKeys = settings.exportKeyToRules.keys.toSeq
-      val tables = settings.exportKeyToRules.values.map(_.tableName).toSeq
-      val tablePaths = settings.exportKeyToRules.values.map(_.tablePath).toSeq
+      val exportTableConfigs = settings.exportKeyToRules.values.toSeq
       val exportTasks = {
         // downsample the data as the first key is exported
         val headTask = Seq(() =>
-          exportForKey(rddWithDs, exportKeys.head, tables.head, tablePaths.head, batchExporter, spark))
+          exportForKey(rddWithDs, exportKeys.head, exportTableConfigs.head, batchExporter, spark))
         // export all remaining keys without the downsample step
         val tailTasks = exportKeys.tail.zip(Stream from 1).map { case (key, i) => () =>
-          exportForKey(rdd, key, tables(i), tablePaths(i), batchExporter, spark)}
+          exportForKey(rdd, key, exportTableConfigs(i), batchExporter, spark)}
         headTask ++ tailTasks
       }
       // export/downsample RDDs in parallel

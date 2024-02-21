@@ -17,6 +17,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
+import filodb.downsampler.chunk.ExportSchemaConstants.{METRIC, NAME, NAMESPACE, WORKSPACE}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
 
@@ -79,7 +80,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
    *   of each exported row.
    */
-  def getRowIndex(fieldName: String): Option[Int] = {
+  def getColumnIndex(fieldName: String): Option[Int] = {
     exportSchema.zipWithIndex.find(_._1.name == fieldName).map(_._2)
   }
 
@@ -131,8 +132,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           val pairMap = new mutable.HashMap[String, String]()
           pairMap ++= pairs
           // replace _metric_ label name with __name__
-          pairMap("__name__") = pairMap("_metric_")
-          pairMap.remove("_metric_")
+          pairMap(NAME) = pairMap(METRIC)
+          pairMap.remove(METRIC)
           pairMap
         }
         val rule = getRuleIfShouldExport(partKeyMap)
@@ -172,17 +173,16 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   def writeDataToIcebergTable(spark: SparkSession,
                               settings: DownsamplerSettings,
-                              table: String,
-                              tablePath: String,
+                              exportTableConfig: ExportTableConfig,
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
-    spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, table, tablePath))
+    spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, exportTableConfig))
     // covert rdd to dataframe and write to table in append mode
     spark.createDataFrame(rdd, this.exportSchema)
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
-      .insertInto(s"${settings.exportDatabase}.$table")
+      .insertInto(s"${settings.exportDatabase}.${exportTableConfig.tableName}")
   }
 
   private def sqlCreateDatabase(database: String) =
@@ -190,9 +190,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        |CREATE DATABASE IF NOT EXISTS $database
        |""".stripMargin
 
-  private def sqlCreateTable(catalog: String, database: String, table: String, tablePath: String) =
+  private def sqlCreateTable(catalog: String, database: String, exportTableConfig: ExportTableConfig) = {
     s"""
-       |CREATE TABLE IF NOT EXISTS $catalog.$database.$table (
+       |CREATE TABLE IF NOT EXISTS $catalog.$database.${exportTableConfig.tableName} (
        | workspace string,
        | namespace string,
        | metric string,
@@ -207,8 +207,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        | )
        | USING iceberg
        | PARTITIONED BY (year, month, day, namespace, metric)
-       | LOCATION $tablePath
+       | LOCATION ${exportTableConfig.tablePath}
        |""".stripMargin
+  }
 
   def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
     keyToRules.find { case (key, exportTableConfig) =>
@@ -237,8 +238,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
    */
   private def getExportData(partition: ReadablePartition,
-                             partKeyMap: mutable.Map[String, String],
-                             rule: ExportRule): Iterator[ExportRowData] = {
+                            partKeyMap: mutable.Map[String, String],
+                            rule: ExportRule): Iterator[ExportRowData] = {
     // Pseudo-struct for convenience.
     case class RangeInfo(irowStart: Int,
                          irowEnd: Int,
@@ -316,9 +317,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
 
     tupleIter.map{ case (labels, epoch_timestamp, value) =>
-      val workspace = labels("_ws_")
-      val namespace = labels("_ns_")
-      val metric = labels("__name__")
+      val workspace = labels(WORKSPACE)
+      val namespace = labels(NAMESPACE)
+      val metric = labels(NAME)
       // to compute YYYY, MM, dd, hh
       // to compute readable timestamp from unix timestamp
       val timestamp = Instant.ofEpochMilli(epoch_timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime()
