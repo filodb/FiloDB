@@ -65,6 +65,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |        "key": [],
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
+       |        "label-column-mapping": [
+       |         "_ws_", "workspace",
+       |         "_ns_", "namespace"
+       |        ]
+       |        "partition-by-columns": ["namespace"]
        |        "rules": [
        |          {
        |            "allow-filters": [],
@@ -183,7 +188,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a",
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a",
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -205,7 +215,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -232,7 +247,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -263,7 +283,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -290,7 +315,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a", "l2a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -312,7 +342,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -325,6 +360,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          key = ["l1b"]
         |          table = "l1b"
         |          table-path: "s3a://bucket/directory/catalog/database/l1b"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -346,7 +386,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        {
         |          key = ["l1a"]
         |          table = "l1a"
-        |          table-path: "s3a://bucket/directory/catalog/database/l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [["l3=\"l3a\""]]

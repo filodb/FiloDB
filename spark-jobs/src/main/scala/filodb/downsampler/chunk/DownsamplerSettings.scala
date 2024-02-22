@@ -11,7 +11,6 @@ import filodb.downsampler.DownsamplerContext
 import filodb.prometheus.ast.InstantExpression
 import filodb.prometheus.parse.Parser
 
-
 /**
  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
  * from the spark application driver.
@@ -87,6 +86,9 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       val key = group.as[Seq[String]]("key")
       val table = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
+      val labelColumnMapping = group.as[Seq[String]]("label-column-mapping")
+        .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
+      val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
         val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
           Parser.parseQuery(s"{${group.mkString(",")}}")
@@ -99,7 +101,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      key -> ExportTableConfig(table, tablePath, rules)
+      key -> ExportTableConfig(table, tablePath, rules, labelColumnMapping, partitionByCols)
     }
     assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
       "export rule group keys must be unique")

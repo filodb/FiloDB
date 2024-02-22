@@ -6,8 +6,7 @@ import java.time.{Instant, LocalDateTime, ZoneId}
 import kamon.Kamon
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
-import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType,
-                                   TimestampType}
+import org.apache.spark.sql.types._
 import scala.collection.mutable
 
 import filodb.core.binaryrecord2.RecordSchema
@@ -17,7 +16,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.ExportSchemaConstants.{METRIC, NAME, NAMESPACE, WORKSPACE}
+import filodb.downsampler.chunk.ExportConstants._
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
 
@@ -27,13 +26,13 @@ case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
 
 case class ExportTableConfig(tableName: String,
                              tablePath: String,
-                             exportRules: Seq[ExportRule])
+                             exportRules: Seq[ExportRule],
+                             labelColumnMapping: Seq[(String, String)],
+                             partitionByCols: Seq[String])
 /**
  * All info needed to output a result Spark Row.
  */
-case class ExportRowData(workspace: String,
-                         namespace: String,
-                         metric: String,
+case class ExportRowData(metric: String,
                          labels: collection.Map[String, String],
                          epoch_timestamp: Long,
                          timestamp: LocalDateTime,
@@ -55,33 +54,18 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   @transient lazy val numRowsExportPrepped = Kamon.counter("num-rows-export-prepped").withoutTags()
 
   val keyToRules = downsamplerSettings.exportKeyToRules
-  val exportSchema = {
-    // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
-    //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
-    val fields = new mutable.ArrayBuffer[StructField](11)
-    fields.append(
-      StructField("workspace", StringType),
-      StructField("namespace", StringType),
-      StructField("metric", StringType),
-      StructField("labels", StringType),
-      StructField("epoch_timestamp", LongType),
-      StructField("timestamp", TimestampType),
-      StructField("value", DoubleType),
-      StructField("year", IntegerType),
-      StructField("month", IntegerType),
-      StructField("day", IntegerType),
-      StructField("hour", IntegerType)
-    )
-    StructType(fields)
-  }
 
   /**
    * Returns the index of a column in the export schema.
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
    *   of each exported row.
    */
-  def getColumnIndex(fieldName: String): Option[Int] = {
-    exportSchema.zipWithIndex.find(_._1.name == fieldName).map(_._2)
+  def getColumnIndex(colName: String, exportTableConfig: ExportTableConfig): Option[Int] = {
+    // check if fieldName is from dynamic schema
+    // if yes, then get the col name for that label from dynamic schema else search for fieldName
+    val dynamicColName = exportTableConfig.labelColumnMapping.find(_._1 == colName)
+    val fieldName = if (dynamicColName.isEmpty) colName else dynamicColName.get
+    getExportSchema(exportTableConfig).zipWithIndex.find(_._1.name == fieldName).map(_._2)
   }
 
   // Unused, but keeping here for convenience if needed later.
@@ -120,7 +104,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   /**
    * Returns the Spark Rows to be exported.
    */
-  def getExportRows(readablePartitions: Seq[ReadablePartition]): Iterator[Row] = {
+  def getExportRows(readablePartitions: Seq[ReadablePartition], exportTableConfig: ExportTableConfig): Iterator[Row] = {
     readablePartitions
       .iterator
       .map { part =>
@@ -132,8 +116,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           val pairMap = new mutable.HashMap[String, String]()
           pairMap ++= pairs
           // replace _metric_ label name with __name__
-          pairMap(NAME) = pairMap(METRIC)
-          pairMap.remove(METRIC)
+          pairMap(LABEL_NAME) = pairMap(LABEL_METRIC)
+          pairMap.remove(LABEL_METRIC)
           pairMap
         }
         val rule = getRuleIfShouldExport(partKeyMap)
@@ -145,19 +129,49 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       }
       .map { exportData =>
         numRowsExportPrepped.increment()
-        exportDataToRow(exportData)
+        exportDataToRow(exportData, exportTableConfig)
       }
   }
 
   /**
-   * Converts an ExportData to a Spark Row.
-   * The result Row *must* match this.exportSchema.
+   * Constructs dynamic exportSchema as per ExportTableConfig.
+   * final schema is a combination of columns defined in conf file plus some
+   * additional standardized columns
    */
-  private def exportDataToRow(exportData: ExportRowData): Row = {
-    val dataSeq = new mutable.ArrayBuffer[Any](this.exportSchema.fields.length)
+  def getExportSchema(exportTableConfig: ExportTableConfig): StructType = {
+    val exportSchema = {
+      // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
+      //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
+      val fields = new mutable.ArrayBuffer[StructField](exportTableConfig.labelColumnMapping.length + 9)
+      // append all dynamic columns as StringType from conf
+      exportTableConfig.labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
+      // append all fixed columns
+      fields.append(
+        StructField(COL_METRIC, StringType),
+        StructField(COL_LABELS, StringType),
+        StructField(COL_EPOCH_TIMESTAMP, LongType),
+        StructField(COL_TIMESTAMP, TimestampType),
+        StructField(COL_VALUE, DoubleType),
+        StructField(COL_YEAR, IntegerType),
+        StructField(COL_MONTH, IntegerType),
+        StructField(COL_DAY, IntegerType),
+        StructField(COL_HOUR, IntegerType)
+      )
+      StructType(fields)
+    }
+    exportSchema
+  }
+
+  /**
+   * Converts an ExportData to a Spark Row.
+   * The result Row *must* match exportSchema.
+   */
+  private def exportDataToRow(exportData: ExportRowData, exportTableConfig: ExportTableConfig): Row = {
+    val dataSeq = new mutable.ArrayBuffer[Any](getExportSchema(exportTableConfig).fields.length + 9)
+    // append all dynamic column values
+    exportTableConfig.labelColumnMapping.foreach {pair => dataSeq.append(exportData.labels.get(pair._1))}
+    // append all fixed column values
     dataSeq.append(
-      exportData.workspace,
-      exportData.namespace,
       exportData.metric,
       exportData.labels,
       exportData.epoch_timestamp,
@@ -177,8 +191,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
     spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, exportTableConfig))
-    // covert rdd to dataframe and write to table in append mode
-    spark.createDataFrame(rdd, this.exportSchema)
+    spark.createDataFrame(rdd, getExportSchema(exportTableConfig))
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
@@ -191,10 +204,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        |""".stripMargin
 
   private def sqlCreateTable(catalog: String, database: String, exportTableConfig: ExportTableConfig) = {
+    // create dynamic col names with type to append to create table statement
+    val dynamicColNames = exportTableConfig.labelColumnMapping.map(pair => pair._2 + " string").mkString(", ")
+    val partitionColNames = exportTableConfig.partitionByCols.mkString(", ")
     s"""
        |CREATE TABLE IF NOT EXISTS $catalog.$database.${exportTableConfig.tableName} (
-       | workspace string,
-       | namespace string,
+       | $dynamicColNames,
        | metric string,
        | labels map<string, string>,
        | epoch_timestamp long,
@@ -206,7 +221,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        | hour int
        | )
        | USING iceberg
-       | PARTITIONED BY (year, month, day, namespace, metric)
+       | PARTITIONED BY (year, month, day, $partitionColNames, metric)
        | LOCATION ${exportTableConfig.tablePath}
        |""".stripMargin
   }
@@ -282,12 +297,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
         //    my_histo_bucket{l1=v1, l2=v2, le=+Inf} 26
 
-        val nameWithoutBucket = partKeyMap("__name__")
+        val nameWithoutBucket = partKeyMap(LABEL_NAME)
         val nameWithBucket = nameWithoutBucket + "_bucket"
 
         // make labelString without __name__; will be replaced with _bucket-suffixed name
-        partKeyMap.remove("__name__")
-        partKeyMap.put("__name__", nameWithoutBucket)
+        partKeyMap.remove(LABEL_NAME)
+        partKeyMap.put(LABEL_NAME, nameWithoutBucket)
 
         rangeInfoIter.flatMap{ info =>
           val histIter = info.valueIter.asHistIt
@@ -299,7 +314,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                 val raw = hist.bucketTop(i)
                 if (raw.isPosInfinity) "+Inf" else raw.toString
               }
-              val bucketMapping = Map("__name__" -> nameWithBucket, "le" -> bucketTopString)
+              val bucketMapping = Map(LABEL_NAME -> nameWithBucket, LABEL_LE -> bucketTopString)
               val bucketLabels = partKeyMap ++ bucketMapping
               (bucketLabels, timestamp, hist.bucketValue(i))
             }
@@ -317,9 +332,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
 
     tupleIter.map{ case (labels, epoch_timestamp, value) =>
-      val workspace = labels(WORKSPACE)
-      val namespace = labels(NAMESPACE)
-      val metric = labels(NAME)
+      val metric = labels(LABEL_NAME)
       // to compute YYYY, MM, dd, hh
       // to compute readable timestamp from unix timestamp
       val timestamp = Instant.ofEpochMilli(epoch_timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime()
@@ -327,7 +340,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       val month = timestamp.getMonthValue()
       val day = timestamp.getDayOfMonth()
       val hour = timestamp.getHour()
-      ExportRowData(workspace, namespace, metric, labels, epoch_timestamp, timestamp, value, year, month, day, hour)
+      ExportRowData(metric, labels, epoch_timestamp, timestamp, value, year, month, day, hour)
     }
   }
   // scalastyle:on method.length
