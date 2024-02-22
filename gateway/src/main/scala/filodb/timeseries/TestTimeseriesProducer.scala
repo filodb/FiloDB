@@ -64,14 +64,15 @@ object TestTimeseriesProducer extends StrictLogging {
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
                    genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
-                   genPromCounter: Boolean, publishIntervalSec: Int): Unit = {
+                   genPromCounter: Boolean, genOtelHist: Boolean, genDeltaHistMinMax: Boolean,
+                   publishIntervalSec: Int): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
 
     val metricName = if (genGauge) "heap_usage0"
-                      else if (genHist) "http_request_latency"
-                      else if (genDeltaHist) "http_request_latency_delta"
+                      else if (genHist || genOtelHist) "http_request_latency"
+                      else if (genDeltaHist || genDeltaHistMinMax) "http_request_latency_delta"
                       else if (genPromCounter) "heap_usage_counter0"
                       else "heap_usage_delta0"
 
@@ -206,7 +207,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val numBuckets = 10
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
     var buckets = new Array[Long](numBuckets)
-    val metric = if (Schemas.deltaHistogram == histSchema) {
+    val metric = if (Schemas.deltaHistogram == histSchema || Schemas.deltaHistogramMinMax == histSchema) {
                   "http_request_latency_delta"
                  } else {
                   "http_request_latency"
@@ -228,7 +229,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       // reset buckets for delta histograms
-      if (Schemas.deltaHistogram == histSchema && prevTimestamp != timestamp) {
+      if ( (Schemas.deltaHistogram == histSchema || Schemas.deltaHistogramMinMax == histSchema )
+          && prevTimestamp != timestamp) {
         prevTimestamp = timestamp
         buckets = new Array[Long](numBuckets)
       }
@@ -244,7 +246,14 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)
+      if (histSchema == Schemas.deltaHistogramMinMax || histSchema == Schemas.otelHistogram) {
+        val minVal = buckets.min.toDouble
+        val maxVal = buckets.max.toDouble
+        new MetricTagInputRecord(Seq(timestamp, sum, count, minVal, maxVal, hist), metric, tags, histSchema)
+      }
+      else {
+        new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)
+      }
     }
   }
 }

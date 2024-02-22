@@ -27,7 +27,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
   def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -66,7 +66,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId, plan.execPlan.planId,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -82,12 +82,12 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
         })
       } else {
         ResultActor.subject
-            .doOnSubscribe(Task.eval {
-              target.tell(plan.execPlan, ResultActor.resultActor)
-              qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
-            })
-           .filter(_.planId == plan.execPlan.planId)
-           .takeWhileInclusive(!_.isLast)
+          .doOnSubscribe(Task.eval {
+            target.tell(plan.execPlan, ResultActor.resultActor)
+            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
+          })
+         .filter(_.planId == plan.execPlan.planId)
+         .takeWhileInclusive(!_.isLast)
         // TODO timeout query if response stream not completed in time
       }
     }

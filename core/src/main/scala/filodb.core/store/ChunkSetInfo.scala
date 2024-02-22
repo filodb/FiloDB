@@ -343,8 +343,14 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
   override def nextInfoReader: ChunkSetInfoReader = {
     val reader = base.nextInfoReader
     var bytesRead = 0
+    var bucketsFactor = 1
     columnIDs.foreach { c =>
       bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(c), reader.vectorAddress(c))
+      if (BinaryVector.majorVectorType(reader.vectorAccessor(c), reader.vectorAddress(c))
+                    == WireFormat.VECTORTYPE_HISTOGRAM) {
+        // since histogram has several buckets, include a factor when counting samples
+        bucketsFactor = 20 // TODO fixed to avoid performance issues in opening hist vector here. Make it better later.
+      }
     }
 
     // Why two counters ?
@@ -359,10 +365,9 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
       throw QueryLimitException(exMessage, queryId)
     }
 
-
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
-    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows)
+    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows * bucketsFactor)
     reader
   }
   override def nextInfo: ChunkSetInfo = {

@@ -27,7 +27,8 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
   protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
                                  schemas: Observable[(ResultSchema, Int)],
                                  querySession: QuerySession): Observable[RangeVector] = {
-    val firstSchema = schemas.map(_._1).firstOptionL.map(_.getOrElse(ResultSchema.empty))
+    // find first non-empty result schema. If all of them are empty, then return empty
+    val firstSchema = schemas.findL(!_._1.isEmpty).map(_.map(_._1).getOrElse(ResultSchema.empty))
     val results = childResponses.flatMap(_._1)
     reduce(results, firstSchema, querySession)
   }

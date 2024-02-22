@@ -19,8 +19,6 @@ object PromCirceSupport {
     // Where are these used? added to make compiler happy
     case l @ LabelCardinalitySampl(group, cardinality)  =>
       Json.fromValues(Seq(group.asJson, cardinality.asJson))
-    case t @ TsCardinalitiesSampl(group, cardinality) =>
-      Json.fromValues(Seq(group.asJson, cardinality.asJson))
     case a @ TsCardinalitiesSamplV2(group, cardinality, dataset, _type) =>
         Json.fromValues(Seq(group.asJson, cardinality.asJson, dataset.asJson, _type.asJson))
   }
@@ -59,22 +57,13 @@ object PromCirceSupport {
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
         } else if (c.downField("group").focus.nonEmpty) {
-            // V2 Cardinality API also has a dataset field. So we are using it to distinguish
-            // between the TsCardinalitiesSamplV2 vs TsCardinalitiesSampl response
-            if (c.downField("dataset").focus.nonEmpty) {
-              for {
-                group <- c.get[Map[String, String]]("group")
-                card <- c.get[Map[String, Int]]("cardinality")
-                dataset <- c.get[String]("dataset")
-                _type <- c.get[String]("_type")
-              } yield TsCardinalitiesSamplV2(group, card, dataset, _type)
-            }
-            else {
-              for {
-                group <- c.get[Map[String, String]]("group")
-                card <- c.get[Map[String, Int]]("cardinality")
-              } yield TsCardinalitiesSampl(group, card)
-            }
+          // This is for TsCardinalities response
+          for {
+            group <- c.get[Map[String, String]]("group")
+            card <- c.get[Map[String, Int]]("cardinality")
+            dataset <- c.get[String]("dataset")
+            _type <- c.get[String]("_type")
+          } yield TsCardinalitiesSamplV2(group, card, dataset, _type)
         } else {
           throw new IllegalArgumentException("could not decode any expected cardinality-related field")
         }

@@ -17,7 +17,7 @@ import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
-import filodb.query.exec._
+import filodb.query.exec.{MultiSchemaPartitionsExec, _}
 
 class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
@@ -139,9 +139,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
         l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
         l1.children.foreach { l2 =>
           l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-          l2.rangeVectorTransformers.size shouldEqual 2
-          l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-          l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+          val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+          SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
         }
       }
     }
@@ -169,9 +168,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
           l2.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
           l2.children.foreach { l3 =>
             l3.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-            l3.rangeVectorTransformers.size shouldEqual 2
-            l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-            l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+            val l3Exec = l3.asInstanceOf[MultiSchemaPartitionsExec]
+            SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l3Exec)
           }
         }
       }
@@ -372,13 +370,11 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
         l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
         l1.children.foreach { l2 =>
           l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-          l2.rangeVectorTransformers.size shouldEqual 2
-          l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-          l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+          val l2Exec = l2.asInstanceOf[MultiSchemaPartitionsExec]
+          SingleClusterPlannerSpec.validateRangeVectorTransformersForPeriodicSeriesWithWindowingLogicalPlan(l2Exec)
         }
       }
     }
-
   }
 
   it("should generate SplitExec wrapper with appropriate splits " +

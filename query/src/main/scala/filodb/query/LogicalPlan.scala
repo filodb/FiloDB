@@ -101,6 +101,7 @@ case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Long, to: Long) extends RangeSelector
 
+
 /**
   * Concrete logical plan to query for raw data in a given range
   * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
@@ -111,7 +112,8 @@ case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
                      columns: Seq[String],
                      lookbackMs: Option[Long] = None,
-                     offsetMs: Option[Long] = None) extends RawSeriesLikePlan {
+                     offsetMs: Option[Long] = None,
+                     supportsRemoteDataCall: Boolean = false) extends RawSeriesLikePlan {
   override def isRaw: Boolean = true
 
   override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = {
@@ -183,7 +185,6 @@ object TsCardinalities {
  */
 case class TsCardinalities(shardKeyPrefix: Seq[String],
                            numGroupByFields: Int,
-                           version: Int = 1,
                            datasets: Seq[String] = Seq(),
                            userDatasets: String = "",
                            overrideClusterName: String = "") extends LogicalPlan {
