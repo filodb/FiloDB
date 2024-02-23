@@ -203,12 +203,12 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       val exportKeyToRules = settings.exportKeyToRules.map(f => (f._1, f._2)).toSeq
       val exportTasks = {
         // downsample the data as the first key is exported
-        val headTask = Seq(() =>
+        val firstExportTaskWithDs = Seq(() =>
           exportForKey(rddWithDs, exportKeyToRules.head._1, exportKeyToRules.head._2, batchExporter, spark))
         // export all remaining keys without the downsample step
-        val tailTasks = exportKeyToRules.tail.map{spec => () =>
+        val remainingExportTasksWithoutDs = exportKeyToRules.tail.map{spec => () =>
           exportForKey(rdd, spec._1, spec._2, batchExporter, spark)}
-        headTask ++ tailTasks
+        firstExportTaskWithDs ++ remainingExportTasksWithoutDs
       }
       // export/downsample RDDs in parallel
       exportTasks.par.foreach(_.apply())
