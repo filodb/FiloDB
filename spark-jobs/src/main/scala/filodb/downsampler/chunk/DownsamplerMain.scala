@@ -2,18 +2,20 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
+
+
+import java.util.concurrent.ForkJoinPool
+import scala.collection.parallel.ForkJoinTaskSupport
 
 /**
  * Implement this trait and provide its fully-qualified name as the downsampler config:
@@ -201,6 +203,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     if (settings.exportIsEnabled && settings.exportKeyToRules.nonEmpty) {
       // to ensure order, store all key, value pairs in a sequence
       val exportKeyToRules = settings.exportKeyToRules.map(f => (f._1, f._2)).toSeq
+      // Used to process tasks in parallel. Allows configurable parallelism.
+      val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
       val exportTasks = {
         // downsample the data as the first key is exported
         val firstExportTaskWithDs = Seq(() =>
@@ -208,10 +212,13 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         // export all remaining keys without the downsample step
         val remainingExportTasksWithoutDs = exportKeyToRules.tail.map{spec => () =>
           exportForKey(rdd, spec._1, spec._2, batchExporter, spark)}
-        firstExportTaskWithDs ++ remainingExportTasksWithoutDs
+        // create a parallel sequence of tasks
+        (firstExportTaskWithDs ++ remainingExportTasksWithoutDs).par
       }
+      // applies the configured parallelism
+      exportTasks.tasksupport = taskSupport
       // export/downsample RDDs in parallel
-      exportTasks.par.foreach(_.apply())
+      exportTasks.foreach(_.apply())
     } else {
       // Just invoke the DS step.
       rddWithDs.foreach(_ => {})
