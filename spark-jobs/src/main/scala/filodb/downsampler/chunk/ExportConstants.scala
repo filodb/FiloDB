@@ -4,7 +4,7 @@ package filodb.downsampler.chunk
  * Iceberg Table columns derived from specific key labels from labels map
  */
 object ExportConstants {
-  // labels keys in timeseries
+  // labels keys in time series
   val LABEL_NAME = "__name__"
   val LABEL_METRIC = "_metric_"
   val LABEL_LE = "le"

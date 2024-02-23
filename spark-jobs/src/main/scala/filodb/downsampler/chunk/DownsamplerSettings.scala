@@ -1,13 +1,16 @@
 package filodb.downsampler.chunk
 
+import scala.collection.mutable
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
+import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.ExportConstants._
 import filodb.prometheus.ast.InstantExpression
 import filodb.prometheus.parse.Parser
 
@@ -84,10 +87,33 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
   @transient lazy val exportKeyToRules = {
     val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
       val key = group.as[Seq[String]]("key")
-      val table = group.as[String]("table")
+      val tableName = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
       val labelColumnMapping = group.as[Seq[String]]("label-column-mapping")
         .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
+      // Constructs dynamic exportSchema as per ExportTableConfig.
+      // final schema is a combination of columns defined in conf file plus some
+      // additional standardized columns
+      val tableSchema = {
+        // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
+        //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
+        val fields = new mutable.ArrayBuffer[StructField](labelColumnMapping.length + 9)
+        // append all dynamic columns as StringType from conf
+        labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
+        // append all fixed columns
+        fields.append(
+          StructField(COL_METRIC, StringType),
+          StructField(COL_LABELS, StringType),
+          StructField(COL_EPOCH_TIMESTAMP, LongType),
+          StructField(COL_TIMESTAMP, TimestampType),
+          StructField(COL_VALUE, DoubleType),
+          StructField(COL_YEAR, IntegerType),
+          StructField(COL_MONTH, IntegerType),
+          StructField(COL_DAY, IntegerType),
+          StructField(COL_HOUR, IntegerType)
+        )
+        StructType(fields)
+      }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
         val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
@@ -101,7 +127,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      key -> ExportTableConfig(table, tablePath, rules, labelColumnMapping, partitionByCols)
+      key -> ExportTableConfig(tableName, tableSchema, tablePath, rules, labelColumnMapping, partitionByCols)
     }
     assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
       "export rule group keys must be unique")

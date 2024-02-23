@@ -32,6 +32,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.apache.spark.sql.types._
 
 import java.io.File
 import java.time
@@ -445,6 +446,101 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
       }
     }
+  }
+
+  it("should give correct export-column index of column name") {
+    val testConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      key-labels = [
+        |      "_ws_",
+        |      "_ns_",
+        |      "metric",
+        |      "labels",
+        |      "epoch_timestamp",
+        |      "timestamp",
+        |      "value",
+        |      "year",
+        |      "month",
+        |      "day",
+        |      "hour"]
+        |      groups = [
+        |        {
+        |          key = ["my_ws"]
+        |          table = "my_ws"
+        |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
+        |      ]
+        |    }
+        |""".stripMargin
+    ).withFallback(conf)
+
+    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
+    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
+    val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
+    dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
+      batchExporter.getColumnIndex(colName, pairExportKeyTableConfig._2).get shouldEqual i}
+  }
+
+  it("should give correct export schema") {
+    val testConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      key-labels = ["_ws_"]
+        |      groups = [
+        |        {
+        |          key = ["my_ws"]
+        |          table = "my_ws"
+        |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
+        |      ]
+        |    }
+        |""".stripMargin
+    ).withFallback(conf)
+
+    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
+    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
+    val exportSchema = {
+      val fields = new scala.collection.mutable.ArrayBuffer[StructField](11)
+      fields.append(
+        StructField("workspace", StringType),
+        StructField("namespace", StringType),
+        StructField("metric", StringType),
+        StructField("labels", StringType),
+        StructField("epoch_timestamp", LongType),
+        StructField("timestamp", TimestampType),
+        StructField("value", DoubleType),
+        StructField("year", IntegerType),
+        StructField("month", IntegerType),
+        StructField("day", IntegerType),
+        StructField("hour", IntegerType))
+      StructType(fields)
+    }
+    pairExportKeyTableConfig._2.tableSchema shouldEqual exportSchema
   }
 
   it ("should write untyped data to cassandra") {

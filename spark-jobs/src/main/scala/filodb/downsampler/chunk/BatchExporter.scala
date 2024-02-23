@@ -6,7 +6,7 @@ import java.time.{Instant, LocalDateTime, ZoneId}
 import kamon.Kamon
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.types.StructType
 import scala.collection.mutable
 
 import filodb.core.binaryrecord2.RecordSchema
@@ -25,6 +25,7 @@ case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       dropLabels: Seq[String])
 
 case class ExportTableConfig(tableName: String,
+                             tableSchema: StructType,
                              tablePath: String,
                              exportRules: Seq[ExportRule],
                              labelColumnMapping: Seq[(String, String)],
@@ -64,8 +65,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     // check if fieldName is from dynamic schema
     // if yes, then get the col name for that label from dynamic schema else search for fieldName
     val dynamicColName = exportTableConfig.labelColumnMapping.find(_._1 == colName)
-    val fieldName = if (dynamicColName.isEmpty) colName else dynamicColName.get
-    getExportSchema(exportTableConfig).zipWithIndex.find(_._1.name == fieldName).map(_._2)
+    val fieldName = if (dynamicColName.isEmpty) colName else dynamicColName.get._2
+    exportTableConfig.tableSchema.fieldNames.zipWithIndex.find(_._1 == fieldName).map(_._2)
   }
 
   // Unused, but keeping here for convenience if needed later.
@@ -134,40 +135,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   /**
-   * Constructs dynamic exportSchema as per ExportTableConfig.
-   * final schema is a combination of columns defined in conf file plus some
-   * additional standardized columns
-   */
-  def getExportSchema(exportTableConfig: ExportTableConfig): StructType = {
-    val exportSchema = {
-      // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
-      //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
-      val fields = new mutable.ArrayBuffer[StructField](exportTableConfig.labelColumnMapping.length + 9)
-      // append all dynamic columns as StringType from conf
-      exportTableConfig.labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
-      // append all fixed columns
-      fields.append(
-        StructField(COL_METRIC, StringType),
-        StructField(COL_LABELS, StringType),
-        StructField(COL_EPOCH_TIMESTAMP, LongType),
-        StructField(COL_TIMESTAMP, TimestampType),
-        StructField(COL_VALUE, DoubleType),
-        StructField(COL_YEAR, IntegerType),
-        StructField(COL_MONTH, IntegerType),
-        StructField(COL_DAY, IntegerType),
-        StructField(COL_HOUR, IntegerType)
-      )
-      StructType(fields)
-    }
-    exportSchema
-  }
-
-  /**
    * Converts an ExportData to a Spark Row.
    * The result Row *must* match exportSchema.
    */
   private def exportDataToRow(exportData: ExportRowData, exportTableConfig: ExportTableConfig): Row = {
-    val dataSeq = new mutable.ArrayBuffer[Any](getExportSchema(exportTableConfig).fields.length + 9)
+    val dataSeq = new mutable.ArrayBuffer[Any](exportTableConfig.tableSchema.fields.length)
     // append all dynamic column values
     exportTableConfig.labelColumnMapping.foreach {pair => dataSeq.append(exportData.labels.get(pair._1))}
     // append all fixed column values
@@ -191,7 +163,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
     spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, exportTableConfig))
-    spark.createDataFrame(rdd, getExportSchema(exportTableConfig))
+    spark.createDataFrame(rdd, exportTableConfig.tableSchema)
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
