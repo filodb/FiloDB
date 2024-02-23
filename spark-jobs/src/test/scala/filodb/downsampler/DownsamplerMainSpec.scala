@@ -1,47 +1,47 @@
 package filodb.downsampler
 
-import java.io.File
-import java.time.Instant
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import scala.concurrent.Await
-import scala.concurrent.duration._
 import com.typesafe.config.{Config, ConfigException, ConfigFactory}
+import filodb.cardbuster.CardinalityBuster
+import filodb.core.GlobalScheduler._
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats, DownsampledTimeSeriesStore, OffHeapMemory}
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.memstore._
+import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.query.Filter.Equals
+import filodb.core.query._
+import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
+import filodb.core.{DatasetRef, MachineMetricsData}
+import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
+import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
+import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
+import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
+import filodb.query.exec._
+import filodb.query.{QueryError, QueryResult}
+import kamon.metric
+import kamon.metric.Metric.Settings
+import kamon.metric.{Histogram, Metric}
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.apache.commons.io.FileUtils
 import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-import filodb.cardbuster.CardinalityBuster
-import filodb.core.GlobalScheduler._
-import filodb.core.{DatasetRef, MachineMetricsData}
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
-import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats, DownsampledTimeSeriesStore, OffHeapMemory}
-import filodb.core.memstore.{DownsampleIndexBootstrapper, PagedReadablePartition, PartKeyLuceneIndex, TimeSeriesPartition, TimeSeriesShardInfo}
-import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.metadata.{Dataset, Schema, Schemas}
-import filodb.core.query._
-import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
-import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
-import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
-import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
-import filodb.query.{QueryError, QueryResult}
-import filodb.query.exec._
-import kamon.metric.Metric.Settings
-import kamon.metric
-import kamon.metric.{Histogram, Metric}
-import kamon.tag.TagSet
-import org.apache.commons.io.FileUtils
+import org.apache.spark.sql.types._
 
-
+import java.io.File
 import java.time
+import java.time.Instant
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import scala.collection.mutable
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 /**
   * Spec tests downsampling round trip.
@@ -52,21 +52,25 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
-  val exportToFile = None  // Some("file:///path/to/dir/$0")
+  val exportToFile = None  // Some("s3a://bucket/directory/catalog/database/table")
   val exportConf =
     s"""{
        |  "filodb": { "downsampler": { "data-export": {
        |    "enabled": ${exportToFile.isDefined},
+       |    "catalog": "",
+       |    "database": "",
        |    "key-labels": [],
-       |    "destination-format": "${exportToFile.getOrElse("")}",
-       |    "format": "csv",
-       |    "options": {
-       |      "header": true,
-       |      "escape": "\\"",
-       |    }
+       |    "format": "iceberg",
        |    "groups": [
        |      {
        |        "key": [],
+       |        "table": "",
+       |        "table-path": "${exportToFile.getOrElse("")}",
+       |        "label-column-mapping": [
+       |         "_ws_", "workspace",
+       |         "_ns_", "namespace"
+       |        ]
+       |        "partition-by-columns": ["namespace"]
        |        "rules": [
        |          {
        |            "allow-filters": [],
@@ -75,12 +79,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |          }
        |        ]
        |      }
-       |    ],
-       |    "path-spec": [
-       |      "year", "<<YYYY>>",
-       |      "month", "<<M>>",
-       |      "day", "<<d>>",
-       |      "_metric_", "{{__name__}}"
        |    ]
        |  }}}
        |}
@@ -169,12 +167,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         """
           |    filodb.downsampler.data-export {
           |      enabled = true
-          |      bucket = "file:///dummy-bucket"
-          |      path-spec = ["unused"]
-          |      save-mode = "error"
-          |      options = {
-          |        "header": "true"
-          |      }
           |    }
           |""".stripMargin
       ))
@@ -196,6 +188,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a",
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -216,6 +215,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -241,6 +247,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -270,6 +283,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [
@@ -295,6 +315,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a", "l2a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -315,6 +342,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -325,6 +359,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |        },
         |        {
         |          key = ["l1b"]
+        |          table = "l1b"
+        |          table-path: "s3a://bucket/directory/catalog/database/l1b"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = []
@@ -345,6 +386,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      groups = [
         |        {
         |          key = ["l1a"]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
         |          rules = [
         |            {
         |              allow-filters = [["l3=\"l3a\""]]
@@ -400,135 +448,99 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }
   }
 
-  it ("should correctly generate export address from labels") {
-    val testConf = ConfigFactory.parseString(
-        """
-          |    filodb.downsampler.data-export {
-          |      enabled = true
-          |      key-labels = ["l1", "l2"]
-          |      destination-format = "address/foo/bar/$0/$1"
-          |    }
-          |""".stripMargin
-      ).withFallback(conf)
-
-    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
-
-    batchExporter.makeExportAddress(Seq("l1a", "l2a")) shouldEqual "address/foo/bar/l1a/l2a"
-  }
-
-  it ("should give correct export-row index of column name") {
+  it("should give correct export-column index of column name") {
     val testConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
-        |      key-labels = ["l1", "l2"]
-        |      path-spec: [
-        |        year, "<<YYYY>>",
-        |        month, "<<M>>",
-        |        day, "<<d>>",
-        |        _metric_, "{{__name__}}"
+        |      key-labels = [
+        |      "_ws_",
+        |      "_ns_",
+        |      "metric",
+        |      "labels",
+        |      "epoch_timestamp",
+        |      "timestamp",
+        |      "value",
+        |      "year",
+        |      "month",
+        |      "day",
+        |      "hour"]
+        |      groups = [
+        |        {
+        |          key = ["my_ws"]
+        |          table = "my_ws"
+        |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
         |      ]
         |    }
         |""".stripMargin
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
-    batchExporter.getRowIndex("year").get shouldEqual 3
-    batchExporter.getRowIndex("month").get shouldEqual 4
-    batchExporter.getRowIndex("day").get shouldEqual 5
-    batchExporter.getRowIndex("_metric_").get shouldEqual 6
-
+    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
+    val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
+    dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
+      batchExporter.getColumnIndex(colName, pairExportKeyTableConfig._2).get shouldEqual i}
   }
 
-  it ("should correctly generate export path names") {
-    val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
-
-    val conf = ConfigFactory.parseString(
+  it("should give correct export schema") {
+    val testConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
-        |      key-labels = ["unused"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = []
-        |      path-spec = [
-        |        "api",     "v1",
-        |        "l1",      "{{l1}}-foo",
-        |        "year",    "bar-<<YYYY>>-baz",
-        |        "month",   "hello-<<MM>>"
-        |        "day",     "day-<<dd>>"
-        |        "l2-woah", "{{l2}}-goodbye"
+        |      key-labels = ["_ws_"]
+        |      groups = [
+        |        {
+        |          key = ["my_ws"]
+        |          table = "my_ws"
+        |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace",
+        |            "_ns_", "namespace"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
         |      ]
         |    }
         |""".stripMargin
-    )
+    ).withFallback(conf)
 
-    val userTimeStart = 1663804760913L
-    val labels = Map("l1" -> "l1val", "l2" -> "l2val", "l3" -> "l3val")
-    val expected =
-      Seq("v1", "l1val-foo", "bar-2022-baz", "hello-09", "day-21", "l2val-goodbye")
-
-    val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)),
-                                          userTimeStart, userTimeStart + 123456)
-    batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
-  }
-
-  it("should correctly escape quotes and commas in a label's value prior to export") {
-    val inputOutputPairs = Seq(
-      // empty string
-      "" -> """{"key":""}""",
-      // no quotes
-      """ abc """ -> """{"key":" abc "}""",
-      // ======= DOUBLE QUOTES =======
-      // single double-quote
-      """ " """ -> """{"key":" \" "}""",
-      // double-quote pair
-      """ "" """ -> """{"key":" \"\" "}""",
-      // escaped quote
-      """ \" """ -> """{"key":" \\\" "}""",
-      // double-escaped quote
-      """ \\" """ -> """{"key":" \\\\\" "}""",
-      // double-escaped quote pair
-      """ \\"" """ -> """{"key":" \\\\\"\" "}""",
-      // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """{"key":" \"foo\\\" \" \"\"\\\"\"\\ bar \"baz\" "}""",
-      // ======= SINGLE QUOTES =======
-      // single single-quote
-      """ ' """ -> """{"key":" ' "}""",
-      // single-quote pair
-      """ '' """ -> """{"key":" '' "}""",
-      // escaped quote
-      """ \' """ -> """{"key":" \\' "}""",
-      // double-escaped quote
-      """ \\' """ -> """{"key":" \\\\' "}""",
-      // double-escaped quote pair
-      """ \\'' """ -> """{"key":" \\\\'' "}""",
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
-      // ======= COMMAS =======
-      // single comma
-      """ , """ -> """{"key":" , "}""",
-      // comma pair
-      """ ,, """ -> """{"key":" ,, "}""",
-      // escaped comma
-      """ \, """ -> """{"key":" \\, "}""",
-      // double-escaped comma
-      """ \\, """ -> """{"key":" \\\\, "}""",
-      // double-escaped comma pair
-      """ \\,, """ -> """{"key":" \\\\,, "}""",
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """{"key":" 'foo\\' ' ''\\''\\ bar 'baz' "}""",
-      // ======= COMBINATIONS =======
-      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """{"key":" 'foo\\\" ' \"'\\'\"\\ bar 'baz\" "}""",
-      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """{"key":" 'foo\\\" ' ,, \"'\\'\"\\ bar 'baz\" \\, "}""",
-      """ ["foo","ba'r:1234"] """ -> """{"key":" [\"foo\",\"ba'r:1234\"] "}""",
-      """ "foo,bar:1234" """ -> """{"key":" \"foo,bar:1234\" "}"""
-    )
-    for ((value, expected) <- inputOutputPairs) {
-      val map = Map("key" -> value)
-      BatchExporter.makeLabelString(map) shouldEqual expected
+    val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
+    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
+    val exportSchema = {
+      val fields = new scala.collection.mutable.ArrayBuffer[StructField](11)
+      fields.append(
+        StructField("workspace", StringType),
+        StructField("namespace", StringType),
+        StructField("metric", StringType),
+        StructField("labels", StringType),
+        StructField("epoch_timestamp", LongType),
+        StructField("timestamp", TimestampType),
+        StructField("value", DoubleType),
+        StructField("year", IntegerType),
+        StructField("month", IntegerType),
+        StructField("day", IntegerType),
+        StructField("hour", IntegerType))
+      StructType(fields)
     }
+    pairExportKeyTableConfig._2.tableSchema shouldEqual exportSchema
   }
 
   it ("should write untyped data to cassandra") {

@@ -7,7 +7,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SparkSession}
+import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
@@ -88,29 +88,24 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
    */
   private def exportForKey(rdd: RDD[Seq[PagedReadablePartition]],
                            exportKey: Seq[String],
+                           exportTableConfig: ExportTableConfig,
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
     val exportStartMs = System.currentTimeMillis()
-
-    val rowKeyIndices = settings.exportRuleKey.map(colName => {
-      val index = batchExporter.getRowIndex(colName)
+    val columnKeyIndices = settings.exportRuleKey.map(colName => {
+      val index = batchExporter.getColumnIndex(colName, exportTableConfig)
       assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
       index.get
     })
 
-    val saveAddress = batchExporter.makeExportAddress(exportKey)
-    val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_)).filter{ row =>
-      val rowKey = rowKeyIndices.map(row.get(_).toString)
+    val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig)).filter{ row =>
+      val rowKey = columnKeyIndices.map(row.get(_).toString)
       rowKey == exportKey
     }
 
-    sparkSession.createDataFrame(filteredRowRdd, batchExporter.exportSchema)
-      .write
-      .format(settings.exportFormat)
-      .mode(settings.exportSaveMode)
-      .options(settings.exportOptions)
-      .partitionBy(batchExporter.partitionByNames: _*)
-      .save(saveAddress)
+    // write filteredRowRdd to iceberg table
+    batchExporter.writeDataToIcebergTable(sparkSession, settings, exportTableConfig, filteredRowRdd)
+
     val exportEndMs = System.currentTimeMillis()
     exportLatency.record(exportEndMs - exportStartMs)
   }
@@ -204,12 +199,15 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     } else rdd
 
     if (settings.exportIsEnabled && settings.exportKeyToRules.nonEmpty) {
-      val exportKeys = settings.exportKeyToRules.keys.toSeq
+      // to ensure order, store all key, value pairs in a sequence
+      val exportKeyToRules = settings.exportKeyToRules.map(f => (f._1, f._2)).toSeq
       val exportTasks = {
         // downsample the data as the first key is exported
-        val headTask = Seq(() => exportForKey(rddWithDs, exportKeys.head, batchExporter, spark))
+        val headTask = Seq(() =>
+          exportForKey(rddWithDs, exportKeyToRules.head._1, exportKeyToRules.head._2, batchExporter, spark))
         // export all remaining keys without the downsample step
-        val tailTasks = exportKeys.tail.map(key => () => exportForKey(rdd, key, batchExporter, spark))
+        val tailTasks = exportKeyToRules.tail.map{spec => () =>
+          exportForKey(rdd, spec._1, spec._2, batchExporter, spark)}
         headTask ++ tailTasks
       }
       // export/downsample RDDs in parallel
