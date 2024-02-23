@@ -89,6 +89,10 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       val key = group.as[Seq[String]]("key")
       val tableName = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
+      // label-column-mapping is defined like this in conf file ["_ws_", "workspace", "_ns_", "namespace"]
+      // below creates Seq[(_ws_,workspace), (_ns_,namespace)] ["_ws_", "workspace", "_ns_", "namespace"]
+      // above means _ws_ label key in time series will be used to populate column workspace
+      // Similarly, _ns_ label key in time series will be used to populate column namespace
       val labelColumnMapping = group.as[Seq[String]]("label-column-mapping")
         .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
       // Constructs dynamic exportSchema as per ExportTableConfig.
@@ -97,6 +101,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       val tableSchema = {
         // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
         //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
+        // fields size = 9 (fixed standard number of columns in Iceberg Table)
+        // + no. of dynamic cols in labelColumnMapping.length
         val fields = new mutable.ArrayBuffer[StructField](labelColumnMapping.length + 9)
         // append all dynamic columns as StringType from conf
         labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
