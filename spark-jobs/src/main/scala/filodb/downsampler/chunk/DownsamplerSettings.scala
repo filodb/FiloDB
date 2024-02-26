@@ -1,16 +1,18 @@
 package filodb.downsampler.chunk
 
+import scala.collection.mutable
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
+import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.ExportConstants._
 import filodb.prometheus.ast.InstantExpression
 import filodb.prometheus.parse.Parser
-
 
 /**
  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
@@ -76,17 +78,51 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportIsEnabled = downsamplerConfig.getBoolean("data-export.enabled")
 
+  @transient lazy val exportParallelism = downsamplerConfig.getInt("data-export.parallelism")
+
   @transient lazy val sparkSessionFactoryClass = downsamplerConfig.getString("spark-session-factory")
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
-
-  @transient lazy val exportBucket = downsamplerConfig.as[String]("data-export.bucket")
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 
   @transient lazy val exportKeyToRules = {
     val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
       val key = group.as[Seq[String]]("key")
+      val tableName = group.as[String]("table")
+      val tablePath = group.as[String]("table-path")
+      // label-column-mapping is defined like this in conf file ["_ws_", "workspace", "_ns_", "namespace"]
+      // below creates Seq[(_ws_,workspace), (_ns_,namespace)] ["_ws_", "workspace", "_ns_", "namespace"]
+      // above means _ws_ label key in time series will be used to populate column workspace
+      // Similarly, _ns_ label key in time series will be used to populate column namespace
+      val labelColumnMapping = group.as[Seq[String]]("label-column-mapping")
+        .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
+      // Constructs dynamic exportSchema as per ExportTableConfig.
+      // final schema is a combination of columns defined in conf file plus some
+      // additional standardized columns
+      val tableSchema = {
+        // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
+        //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
+        // fields size = 9 (fixed standard number of columns in Iceberg Table)
+        // + no. of dynamic cols in labelColumnMapping.length
+        val fields = new mutable.ArrayBuffer[StructField](labelColumnMapping.length + 9)
+        // append all dynamic columns as StringType from conf
+        labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
+        // append all fixed columns
+        fields.append(
+          StructField(COL_METRIC, StringType),
+          StructField(COL_LABELS, StringType),
+          StructField(COL_EPOCH_TIMESTAMP, LongType),
+          StructField(COL_TIMESTAMP, TimestampType),
+          StructField(COL_VALUE, DoubleType),
+          StructField(COL_YEAR, IntegerType),
+          StructField(COL_MONTH, IntegerType),
+          StructField(COL_DAY, IntegerType),
+          StructField(COL_HOUR, IntegerType)
+        )
+        StructType(fields)
+      }
+      val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
         val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
           Parser.parseQuery(s"{${group.mkString(",")}}")
@@ -99,22 +135,18 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      (key -> rules)
+      key -> ExportTableConfig(tableName, tableSchema, tablePath, rules, labelColumnMapping, partitionByCols)
     }
     assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
       "export rule group keys must be unique")
     keyRulesPairs.toMap
   }
 
-  @transient lazy val exportPathSpecPairs =
-    downsamplerConfig.as[Seq[String]]("data-export.path-spec")
-      .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
-
-  @transient lazy val exportOptions = downsamplerConfig.as[Map[String, String]]("data-export.options")
-
-  @transient lazy val exportSaveMode = downsamplerConfig.getString("data-export.save-mode")
-
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
+
+  @transient lazy val exportCatalog = downsamplerConfig.getString("data-export.catalog")
+
+  @transient lazy val exportDatabase = downsamplerConfig.getString("data-export.database")
 
   /**
    * Two conditions should satisfy for eligibility:

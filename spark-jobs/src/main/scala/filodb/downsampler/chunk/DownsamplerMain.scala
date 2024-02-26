@@ -2,10 +2,14 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ForkJoinPool
+
+import scala.collection.parallel.ForkJoinTaskSupport
 
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
@@ -75,6 +79,40 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   lazy val exportLatency =
     Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
+  /**
+   * Exports an RDD for a specific export key.
+   *   (1) Create the export destination address from the key.
+   *   (2) Generate all rows to be exported from the argument RDD.
+   *   (3) Filter for only rows relevant to the export key.
+   *   (4) Write the filtered rows to the destination address.
+   * NOTE: the export schema is required to define a column for each field of an export key.
+   *   E.g. if a key is defined as [foo, bar], then the result rows must contain a column
+   *   for each of "foo" and "bar".
+   */
+  private def exportForKey(rdd: RDD[Seq[PagedReadablePartition]],
+                           exportKey: Seq[String],
+                           exportTableConfig: ExportTableConfig,
+                           batchExporter: BatchExporter,
+                           sparkSession: SparkSession): Unit = {
+    val exportStartMs = System.currentTimeMillis()
+    val columnKeyIndices = settings.exportRuleKey.map(colName => {
+      val index = batchExporter.getColumnIndex(colName, exportTableConfig)
+      assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
+      index.get
+    })
+
+    val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig)).filter{ row =>
+      val rowKey = columnKeyIndices.map(row.get(_).toString)
+      rowKey == exportKey
+    }
+
+    // write filteredRowRdd to iceberg table
+    batchExporter.writeDataToIcebergTable(sparkSession, settings, exportTableConfig, filteredRowRdd)
+
+    val exportEndMs = System.currentTimeMillis()
+    exportLatency.record(exportEndMs - exportStartMs)
+  }
+
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
@@ -143,40 +181,48 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
           cassFetchSize = settings.cassFetchSize)
         batchIter
       }
-      .flatMap { rawPartsBatch =>
+      .map { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
-        val readablePartsBatch = rawPartsBatch.map{ rawPart =>
+        rawPartsBatch.map{ rawPart =>
           val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
-        // Downsample the data (this step does not contribute the the RDD).
-        if (settings.chunkDownsamplerIsEnabled) {
-          batchDownsampler.downsampleBatch(readablePartsBatch)
-        }
-        // Generate the data for the RDD.
-        if (settings.exportIsEnabled) {
-          batchExporter.getExportRows(readablePartsBatch)
-        } else Iterator.empty
       }
 
-    // Export the data produced by "getExportRows" above.
-    if (settings.exportIsEnabled) {
-      val exportStartMs = System.currentTimeMillis()
-      // NOTE: toDF(partitionCols: _*) seems buggy
-      spark.createDataFrame(rdd, batchExporter.exportSchema)
-        .write
-        .format(settings.exportFormat)
-        .mode(settings.exportSaveMode)
-        .options(settings.exportOptions)
-        .partitionBy(batchExporter.partitionByNames: _*)
-        .save(settings.exportBucket)
-      val exportEndMs = System.currentTimeMillis()
-      exportLatency.record(exportEndMs - exportStartMs)
+    val rddWithDs = if (settings.chunkDownsamplerIsEnabled) {
+      // Downsample the data.
+      // NOTE: this step returns each row of the RDD as-is; it does NOT return downsampled data.
+      rdd.map{ part =>
+        batchDownsampler.downsampleBatch(part)
+        part
+      }
+    } else rdd
+
+    if (settings.exportIsEnabled && settings.exportKeyToRules.nonEmpty) {
+      // to ensure order, store all key, value pairs in a sequence
+      val exportKeyToRules = settings.exportKeyToRules.map(f => (f._1, f._2)).toSeq
+      // Used to process tasks in parallel. Allows configurable parallelism.
+      val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
+      val exportTasks = {
+        // downsample the data as the first key is exported
+        val firstExportTaskWithDs = Seq(() =>
+          exportForKey(rddWithDs, exportKeyToRules.head._1, exportKeyToRules.head._2, batchExporter, spark))
+        // export all remaining keys without the downsample step
+        val remainingExportTasksWithoutDs = exportKeyToRules.tail.map{spec => () =>
+          exportForKey(rdd, spec._1, spec._2, batchExporter, spark)}
+        // create a parallel sequence of tasks
+        (firstExportTaskWithDs ++ remainingExportTasksWithoutDs).par
+      }
+      // applies the configured parallelism
+      exportTasks.tasksupport = taskSupport
+      // export/downsample RDDs in parallel
+      exportTasks.foreach(_.apply())
     } else {
-      rdd.foreach(_ => {})
+      // Just invoke the DS step.
+      rddWithDs.foreach(_ => {})
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
