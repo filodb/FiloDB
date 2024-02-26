@@ -28,7 +28,7 @@ case class ExportTableConfig(tableName: String,
                              tableSchema: StructType,
                              tablePath: String,
                              exportRules: Seq[ExportRule],
-                             labelColumnMapping: Seq[(String, String)],
+                             labelColumnMapping: Seq[(String, String, String, String)],
                              partitionByCols: Seq[String])
 /**
  * All info needed to output a result Spark Row.
@@ -177,20 +177,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   private def sqlCreateTable(catalog: String, database: String, exportTableConfig: ExportTableConfig) = {
     // create dynamic col names with type to append to create table statement
-    val dynamicColNames = exportTableConfig.labelColumnMapping.map(pair => pair._2 + " string").mkString(", ")
+    val dynamicColNames = exportTableConfig.labelColumnMapping.map(pair =>
+      pair._2 + " string " + pair._4).mkString(", ")
     val partitionColNames = exportTableConfig.partitionByCols.mkString(", ")
     s"""
        |CREATE TABLE IF NOT EXISTS $catalog.$database.${exportTableConfig.tableName} (
        | $dynamicColNames,
-       | metric string,
+       | metric string NOT NULL,
        | labels map<string, string>,
-       | epoch_timestamp long,
-       | timestamp timestamp,
+       | epoch_timestamp long NOT NULL,
+       | timestamp timestamp NOT NULL,
        | value double,
-       | year int,
-       | month int,
-       | day int,
-       | hour int
+       | year int NOT NULL,
+       | month int NOT NULL,
+       | day int NOT NULL,
+       | hour int NOT NULL
        | )
        | USING iceberg
        | PARTITIONED BY (year, month, day, $partitionColNames, metric)
