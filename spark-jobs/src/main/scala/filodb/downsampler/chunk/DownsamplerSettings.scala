@@ -110,7 +110,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         // append all dynamic columns as StringType from conf
         labelColumnMapping.foreach { pair =>
           if (pair._3 == "NOT NULL")
-            fields.append(StructField(pair._2, StringType, false)) else
+            fields.append(StructField(pair._2, StringType, false))
+          else
             fields.append(StructField(pair._2, StringType, true))
         }
         // append all fixed columns
