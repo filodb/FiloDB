@@ -3,16 +3,17 @@ package filodb.coordinator.v2
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.collection.mutable
-import scala.concurrent.Future
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
-
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import kamon.tag.TagSet
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
+import scala.collection.mutable
+import scala.concurrent.Future
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
@@ -23,6 +24,10 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
                             (implicit ec: Scheduler) extends StrictLogging {
 
   private val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
+
+  // default tags
+  val tags = Map("source" -> "FiloDbClusterDiscovery")
+  val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed").withTags(TagSet.from(tags))
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -99,7 +104,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val empty = CurrentShardSnapshot(ref, new ShardMapper(numShards))
     def fut = (nca ? GetShardMapScatter(ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
     Observable.fromFuture(fut).onErrorHandle { e =>
-      logger.error(s"Saw exception on askShardSnapshot: $e")
+      logger.error(s"[ClusterV2] Saw exception on askShardSnapshot: $e")
       empty
     }
   }
@@ -110,7 +115,19 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val acc = new ShardMapper(numShards)
     val snapshots = for {
       nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
-      ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout).recover{case _=> ActorRef.noSender})
+      ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout)
+        .recover {
+          // recovering with ActorRef.noSender
+          case e =>
+            // log the exception we got while trying to resolve and emit metric
+            // TODO: Ask on how it is published, and how it gets common values like host, tsdb partition etc.
+            logger.error(s"[ClusterV2] Actor Resolve Failed ! actor: ${nca.toString()}", e)
+            actorResolvedFailedCounter
+              .withTag("dataset", ref.dataset)
+              .withTag("actor", nca.toString())
+              .increment()
+            ActorRef.noSender
+        })
       if ncaRef != ActorRef.noSender
       snapshot <- askShardSnapshot(ncaRef, ref, numShards, timeout)
     } yield {
@@ -122,7 +139,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()
   def registerDatasetForDiscovery(dataset: DatasetRef, numShards: Int): Unit = {
     require(failureDetectionInterval.toMillis > 5000, "failure detection interval should be > 5s")
-    logger.info(s"Starting discovery pipeline for $dataset")
+    logger.info(s"[ClusterV2] Starting discovery pipeline for $dataset")
     datasetToMapper.put(dataset, new ShardMapper(numShards))
     val fut = for {
       _ <- Observable.intervalWithFixedDelay(failureDetectionInterval)
