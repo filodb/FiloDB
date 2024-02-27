@@ -28,8 +28,9 @@ case class ExportTableConfig(tableName: String,
                              tableSchema: StructType,
                              tablePath: String,
                              exportRules: Seq[ExportRule],
-                             labelColumnMapping: Seq[(String, String)],
+                             labelColumnMapping: Seq[(String, String, String)],
                              partitionByCols: Seq[String])
+
 /**
  * All info needed to output a result Spark Row.
  */
@@ -59,7 +60,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   /**
    * Returns the index of a column in the export schema.
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
-   *   of each exported row.
+   * of each exported row.
    */
   def getColumnIndex(colName: String, exportTableConfig: ExportTableConfig): Option[Int] = {
     // check if fieldName is from dynamic schema
@@ -79,7 +80,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   /**
    * Returns an iterator of a single column of the argument partition's chunk.
-   * @param iCol the index of the column to iterate.
+   *
+   * @param iCol      the index of the column to iterate.
    * @param iRowStart the index of the row to begin iteration from.
    */
   private def getChunkColIter(partition: ReadablePartition,
@@ -96,7 +98,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    */
   private def matchAllFilters(filters: Seq[ColumnFilter],
                               labels: collection.Map[String, String]): Boolean = {
-    filters.forall( filt =>
+    filters.forall(filt =>
       labels.get(filt.column)
         .exists(value => filt.filter.filterFunc(value))
     )
@@ -141,7 +143,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   private def exportDataToRow(exportData: ExportRowData, exportTableConfig: ExportTableConfig): Row = {
     val dataSeq = new mutable.ArrayBuffer[Any](exportTableConfig.tableSchema.fields.length)
     // append all dynamic column values
-    exportTableConfig.labelColumnMapping.foreach {pair => dataSeq.append(exportData.labels.get(pair._1))}
+    exportTableConfig.labelColumnMapping.foreach { pair => dataSeq.append(exportData.labels.get(pair._1)) }
     // append all fixed column values
     dataSeq.append(
       exportData.metric,
@@ -177,20 +179,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   private def sqlCreateTable(catalog: String, database: String, exportTableConfig: ExportTableConfig) = {
     // create dynamic col names with type to append to create table statement
-    val dynamicColNames = exportTableConfig.labelColumnMapping.map(pair => pair._2 + " string").mkString(", ")
+    val dynamicColNames = exportTableConfig.labelColumnMapping.map(pair =>
+      pair._2 + " string " + pair._3).mkString(", ")
     val partitionColNames = exportTableConfig.partitionByCols.mkString(", ")
     s"""
        |CREATE TABLE IF NOT EXISTS $catalog.$database.${exportTableConfig.tableName} (
        | $dynamicColNames,
-       | metric string,
+       | metric string NOT NULL,
        | labels map<string, string>,
-       | epoch_timestamp long,
-       | timestamp timestamp,
+       | epoch_timestamp long NOT NULL,
+       | timestamp timestamp NOT NULL,
        | value double,
-       | year int,
-       | month int,
-       | day int,
-       | hour int
+       | year int NOT NULL,
+       | month int NOT NULL,
+       | day int NOT NULL,
+       | hour int NOT NULL
        | )
        | USING iceberg
        | PARTITIONED BY (year, month, day, $partitionColNames, metric)
@@ -205,7 +208,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         partKeyMap.get(label).contains(key(i))
       }
     }.flatMap { case (key, exportTableConfig) =>
-      exportTableConfig.exportRules.takeWhile{ rule =>
+      exportTableConfig.exportRules.takeWhile { rule =>
         // step through rules while we still haven't matched a "block" filter
         !rule.blockFilterGroups.exists { filterGroup =>
           matchAllFilters(filterGroup, partKeyMap)
@@ -220,6 +223,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   // scalastyle:off method.length
+
   /**
    * Returns data about a single row to export.
    * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
@@ -237,10 +241,10 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     downsamplerSettings.exportDropLabels.foreach(drop => partKeyMap.remove(drop))
     rule.dropLabels.foreach(drop => partKeyMap.remove(drop))
 
-    val timestampCol = 0  // FIXME: need a more dynamic (but efficient) solution
+    val timestampCol = 0 // FIXME: need a more dynamic (but efficient) solution
     val columns = partition.schema.data.columns
     val valueCol = columns.indexWhere(_.name == partition.schema.data.valueColName)
-    val rangeInfoIter = getChunkRangeIter(partition, userStartTime, userEndTime).map{ chunkRange =>
+    val rangeInfoIter = getChunkRangeIter(partition, userStartTime, userEndTime).map { chunkRange =>
       val infoReader = chunkRange.chunkSetInfoReader
       val irowStart = chunkRange.istartRow
       val irowEnd = chunkRange.iendRow
@@ -253,9 +257,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
     val tupleIter = columns(valueCol).columnType match {
       case DoubleColumn =>
-        rangeInfoIter.flatMap{ info =>
+        rangeInfoIter.flatMap { info =>
           val doubleIter = info.valueIter.asDoubleIt
-          (info.irowStart to info.irowEnd).iterator.map{ _ =>
+          (info.irowStart to info.irowEnd).iterator.map { _ =>
             (partKeyMap, info.timestampIter.next, doubleIter.next)
           }
         }
@@ -276,12 +280,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         partKeyMap.remove(LABEL_NAME)
         partKeyMap.put(LABEL_NAME, nameWithoutBucket)
 
-        rangeInfoIter.flatMap{ info =>
+        rangeInfoIter.flatMap { info =>
           val histIter = info.valueIter.asHistIt
-          (info.irowStart to info.irowEnd).iterator.flatMap{ _ =>
+          (info.irowStart to info.irowEnd).iterator.flatMap { _ =>
             val hist = histIter.next()
             val timestamp = info.timestampIter.next
-            (0 until hist.numBuckets).iterator.map{ i =>
+            (0 until hist.numBuckets).iterator.map { i =>
               val bucketTopString = {
                 val raw = hist.bucketTop(i)
                 if (raw.isPosInfinity) "+Inf" else raw.toString
@@ -303,7 +307,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       numPartitionsExportPrepped.increment()
     }
 
-    tupleIter.map{ case (labels, epoch_timestamp, value) =>
+    tupleIter.map { case (labels, epoch_timestamp, value) =>
       val metric = labels(LABEL_NAME)
       // to compute YYYY, MM, dd, hh
       // to compute readable timestamp from unix timestamp

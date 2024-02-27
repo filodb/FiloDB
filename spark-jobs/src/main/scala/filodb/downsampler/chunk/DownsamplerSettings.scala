@@ -26,7 +26,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val downsamplerConfig = {
     val conf = filodbConfig.getConfig("downsampler")
-    DownsamplerContext.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
+    DownsamplerContext.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}")
     conf
   }
 
@@ -95,8 +95,9 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       // below creates Seq[(_ws_,workspace), (_ns_,namespace)] ["_ws_", "workspace", "_ns_", "namespace"]
       // above means _ws_ label key in time series will be used to populate column workspace
       // Similarly, _ns_ label key in time series will be used to populate column namespace
+      // # 3rd param NOT NULL, specifies column can be NULL or NOT NULL
       val labelColumnMapping = group.as[Seq[String]]("label-column-mapping")
-        .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
+        .sliding(3, 3).map(seq => (seq.apply(0), seq.apply(1), seq.apply(2))).toSeq
       // Constructs dynamic exportSchema as per ExportTableConfig.
       // final schema is a combination of columns defined in conf file plus some
       // additional standardized columns
@@ -107,28 +108,33 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         // + no. of dynamic cols in labelColumnMapping.length
         val fields = new mutable.ArrayBuffer[StructField](labelColumnMapping.length + 9)
         // append all dynamic columns as StringType from conf
-        labelColumnMapping.foreach { pair => fields.append(StructField(pair._2, StringType)) }
+        labelColumnMapping.foreach { pair =>
+          if (pair._3 == "NOT NULL")
+            fields.append(StructField(pair._2, StringType, false))
+          else
+            fields.append(StructField(pair._2, StringType, true))
+        }
         // append all fixed columns
         fields.append(
-          StructField(COL_METRIC, StringType),
+          StructField(COL_METRIC, StringType, false),
           StructField(COL_LABELS, StringType),
-          StructField(COL_EPOCH_TIMESTAMP, LongType),
-          StructField(COL_TIMESTAMP, TimestampType),
+          StructField(COL_EPOCH_TIMESTAMP, LongType, false),
+          StructField(COL_TIMESTAMP, TimestampType, false),
           StructField(COL_VALUE, DoubleType),
-          StructField(COL_YEAR, IntegerType),
-          StructField(COL_MONTH, IntegerType),
-          StructField(COL_DAY, IntegerType),
-          StructField(COL_HOUR, IntegerType)
+          StructField(COL_YEAR, IntegerType, false),
+          StructField(COL_MONTH, IntegerType, false),
+          StructField(COL_DAY, IntegerType, false),
+          StructField(COL_HOUR, IntegerType, false)
         )
         StructType(fields)
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
-        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
+        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map { group =>
           Parser.parseQuery(s"{${group.mkString(",")}}")
             .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
         }
-        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map{ group =>
+        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map { group =>
           Parser.parseQuery(s"{${group.mkString(",")}}")
             .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
         }
