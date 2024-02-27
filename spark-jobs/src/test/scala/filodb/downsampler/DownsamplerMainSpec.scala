@@ -67,8 +67,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
        |        "label-column-mapping": [
-       |         "_ws_", "workspace", "false", "NOT NULL",
-       |         "_ns_", "namespace", "false", "NOT NULL"
+       |         "_ws_", "workspace", "NOT NULL",
+       |         "_ns_", "namespace", "NOT NULL"
        |        ]
        |        "partition-by-columns": ["namespace"]
        |        "rules": [
@@ -191,8 +191,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a",
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -218,8 +218,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -250,8 +250,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -286,8 +286,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -318,8 +318,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -345,8 +345,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -362,8 +362,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1b"
         |          table-path: "s3a://bucket/directory/catalog/database/l1b"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -389,8 +389,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -470,8 +470,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
@@ -505,8 +505,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
-        |            "_ws_", "workspace", "false", "NOT NULL",
-        |            "_ns_", "namespace", "false", "NOT NULL"
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
         |          ]
         |          partition-by-columns = ["namespace"]
         |          rules = [
