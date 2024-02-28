@@ -1,6 +1,8 @@
 package filodb.coordinator
 
-import filodb.core.DatasetRef
+import akka.actor.Props
+import com.typesafe.config.ConfigFactory
+import filodb.core.{DatasetRef, GdeltTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext}
 import filodb.core.store.AllChunkScan
@@ -8,19 +10,16 @@ import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.coordinator.ProtoConverters._
+import filodb.core.binaryrecord2.RecordBuilder
 
 import java.util.concurrent.TimeUnit
 
 class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
+
   val qContext = QueryContext()
   val now = System.currentTimeMillis()
   val timeout = akka.util.Timeout(10L, TimeUnit.SECONDS);
-//  val f = ActorSystemHolder.system.actorSelection("mypath").resolveOne()(timeout);
-//  val ar: akka.actor.ActorRef = Await.result(f, Duration(60L, TimeUnit.SECONDS))
-//  val actorDispatcher = ActorPlanDispatcher(
-//    ar, "clusterName"
-//  )
   val filters = Seq(ColumnFilter("_ws_", filodb.core.query.Filter.Equals("demo")),
     ColumnFilter("_ns_", filodb.core.query.Filter.Equals("App-0")),
     ColumnFilter("_metric_", filodb.core.query.Filter.Equals("http_req_total")),
@@ -72,5 +71,50 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), inProcessDispatcher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan.toProto.fromProto shouldEqual execPlan
+  }
+
+  it("should convert PartKeyLuceneIndexRecord to proto and back") {
+    val dataset6 = filodb.core.GdeltTestData.dataset6
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+
+    // Add the first ten keys and row numbers
+    val pkrs = GdeltTestData.partKeyFromRecords(dataset6, GdeltTestData.records(dataset6, GdeltTestData.readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = dataset6.partKeySchema.asByteArray(filodb.memory.format.UnsafeUtils.ZeroPointer, addr)
+      val pklir = filodb.core.memstore.PartKeyLuceneIndexRecord(pk, i, i + 10)
+      val pklir2 = pklir.toProto.fromProto
+      pklir.partKey shouldEqual pklir2.partKey
+      pklir.startTime shouldEqual pklir2.startTime
+      pklir.endTime shouldEqual pklir2.endTime
+    }
+  }
+
+  object DummyActor {
+    def props: Props =
+      Props(new DummyActor)
+  }
+
+  class DummyActor extends akka.actor.Actor {
+    override def receive: Receive = {
+      case "" => Unit
+    }
+  }
+
+  it("should convert ActorPlanDispatcher to proto and back") {
+    val config = ConfigFactory.load()
+    val ownActorSystem = ActorSystemHolder.system == null
+    val system = if (ownActorSystem)
+      ActorSystemHolder.createActorSystem("testActorSystem", config)
+    else
+      ActorSystemHolder.system
+    try {
+      val actorRef = system.actorOf(DummyActor.props)
+      val dispatcher = ActorPlanDispatcher(actorRef, "testCluster")
+      dispatcher shouldEqual dispatcher.toProto.fromProto
+    } finally {
+      if (ownActorSystem) {
+        ActorSystemHolder.terminateActorSystem()
+      }
+    }
   }
 }
