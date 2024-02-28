@@ -15,4 +15,15 @@ object ActorSystemHolder {
     system
   }
 
+  /**
+   *  This is to be used in unit tests.
+   *  Allows a unit test to create its own ActorSystem
+   *  in case if one does not exist and terminate it later.
+   */
+  def terminateActorSystem() : Unit = {
+    system.terminate()
+    // scalastyle:off null
+    system = null
+  }
+
 }

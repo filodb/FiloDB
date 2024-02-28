@@ -1,13 +1,11 @@
 package filodb.coordinator
 
-import java.util.concurrent.TimeUnit
-
-import scala.collection.JavaConverters._
-import scala.concurrent.Await
-import scala.concurrent.duration.{Duration, FiniteDuration}
-
+import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
+import java.util.concurrent.TimeUnit
+import scala.collection.JavaConverters._
+import scala.concurrent.duration.FiniteDuration
 
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
@@ -1009,7 +1007,7 @@ object ProtoConverters {
         case ExecPlans.InternalRangeFunction.RESETS => InternalRangeFunction.Resets
         case ExecPlans.InternalRangeFunction.STD_DEV_OVER_TIME => InternalRangeFunction.StdDevOverTime
         case ExecPlans.InternalRangeFunction.STD_VAR_OVER_TIME => InternalRangeFunction.StdVarOverTime
-        case ExecPlans.InternalRangeFunction.SUM_OVER_TIME => InternalRangeFunction.SumAndMaxOverTime
+        case ExecPlans.InternalRangeFunction.SUM_OVER_TIME => InternalRangeFunction.SumOverTime
         case ExecPlans.InternalRangeFunction.LAST => InternalRangeFunction.Last
         case ExecPlans.InternalRangeFunction.LAST_OVER_TIME => InternalRangeFunction.LastOverTime
         case ExecPlans.InternalRangeFunction.AVG_WITH_SUM_AND_COUNT_OVER_TIME =>
@@ -1296,22 +1294,17 @@ object ProtoConverters {
     def toProto(): ExecPlans.ActorPlanDispatcher = {
       val builder = ExecPlans.ActorPlanDispatcher.newBuilder()
       builder.setPlanDispatcher(apd.asInstanceOf[filodb.query.exec.PlanDispatcher].toProto)
-      builder.setActorPath(apd.target.path.toSerializationFormat)
+      builder.setActorPath(akka.serialization.Serialization.serializedActorPath(apd.target))
       builder.build()
     }
   }
 
   implicit class ActorPlanDispatcherFromProtoConverter(apd: ExecPlans.ActorPlanDispatcher) {
     def fromProto: ActorPlanDispatcher = {
-      // target: ActorRef, clusterName: String
-      val timeout = akka.util.Timeout(10L, TimeUnit.SECONDS);
-      val f = ActorSystemHolder.system.actorSelection(apd.getActorPath).resolveOne()(timeout);
-      // HERE we wait for 60 seconds for the actorref to be resolved:
-      // 1) too long?
-      // 2) should it be done somehow in parallel/asynchronously?
-      val ar: akka.actor.ActorRef = Await.result(f, Duration(60L, TimeUnit.SECONDS))
+      val serialization = SerializationExtension(ActorSystemHolder.system)
+      val deserializedActorRef = serialization.system.provider.resolveActorRef(apd.getActorPath)
       val dispatcher = ActorPlanDispatcher(
-        ar, apd.getPlanDispatcher.getClusterName
+        deserializedActorRef, apd.getPlanDispatcher.getClusterName
       )
       dispatcher
     }
@@ -2124,7 +2117,7 @@ object ProtoConverters {
       builder.build()
       bje.on.foreach(onSeq => onSeq.foreach(on => builder.addOn(on)))
       bje.ignoring.foreach(ignoring => builder.addIgnoring(ignoring))
-      bje.include.foreach(include => builder.addIgnoring(include))
+      bje.include.foreach(include => builder.addInclude(include))
       builder.setMetricColumn(bje.metricColumn)
       bje.outputRvRange.foreach(orr => builder.setOutputRvRange(orr.toProto))
       builder.build()
@@ -2142,8 +2135,8 @@ object ProtoConverters {
         bje.getRhsList.asScala.toSeq.map(c => c.fromProto)
       val on = bje.getOnList.asScala.toSeq
       val onOption = if (on.isEmpty) None else Option(on)
-      val ignoring = bje.getIgnoringList.asScala.toSeq
-      val include = bje.getIncludeList.asScala.toSeq
+      val ignoring = bje.getIgnoringList.asScala.toList
+      val include = bje.getIncludeList.asScala.toList
       val outputRvRange =
         if (bje.hasOutputRvRange) Option(bje.getOutputRvRange.fromProto) else None
 
