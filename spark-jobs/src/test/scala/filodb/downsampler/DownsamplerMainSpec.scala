@@ -530,7 +530,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         StructField("workspace", StringType, false),
         StructField("namespace", StringType, false),
         StructField("metric", StringType, false),
-        StructField("labels", StringType),
+        StructField("labels", MapType(StringType, StringType)),
         StructField("epoch_timestamp", LongType, false),
         StructField("timestamp", TimestampType, false),
         StructField("value", DoubleType),
