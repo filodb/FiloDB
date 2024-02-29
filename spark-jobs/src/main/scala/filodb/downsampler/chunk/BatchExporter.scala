@@ -1,7 +1,7 @@
 package filodb.downsampler.chunk
 
 import java.security.MessageDigest
-import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.{Instant, ZoneId}
 
 import kamon.Kamon
 import org.apache.spark.rdd.RDD
@@ -37,7 +37,7 @@ case class ExportTableConfig(tableName: String,
 case class ExportRowData(metric: String,
                          labels: collection.Map[String, String],
                          epoch_timestamp: Long,
-                         timestamp: LocalDateTime,
+                         timestamp: java.sql.Timestamp,
                          value: Double,
                          year: Int,
                          month: Int,
@@ -54,6 +54,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   @transient lazy val numPartitionsExportPrepped = Kamon.counter("num-partitions-export-prepped").withoutTags()
 
   @transient lazy val numRowsExportPrepped = Kamon.counter("num-rows-export-prepped").withoutTags()
+
+  @transient lazy val numRowExportPrepErrors = Kamon.counter("num-row-export-prep-errors").withoutTags()
 
   val keyToRules = downsamplerSettings.exportKeyToRules
 
@@ -131,9 +133,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         getExportData(part, partKeyMap, rule.get)
       }
       .map { exportData =>
-        numRowsExportPrepped.increment()
-        exportDataToRow(exportData, exportTableConfig)
+        try {
+          val row = exportDataToRow(exportData, exportTableConfig)
+          numRowsExportPrepped.increment()
+          Some(row)
+        } catch {
+          case t: Throwable =>
+            if (downsamplerSettings.logAllRowErrors) {
+              DownsamplerContext.dsLogger.error(s"error during exportDataToRow: $exportData", t)
+            }
+            numRowExportPrepErrors.increment()
+            None
+        }
       }
+      .filter(_.isDefined)
+      .map(_.get)
   }
 
   /**
@@ -143,7 +157,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   private def exportDataToRow(exportData: ExportRowData, exportTableConfig: ExportTableConfig): Row = {
     val dataSeq = new mutable.ArrayBuffer[Any](exportTableConfig.tableSchema.fields.length)
     // append all dynamic column values
-    exportTableConfig.labelColumnMapping.foreach { pair => dataSeq.append(exportData.labels.get(pair._1)) }
+    exportTableConfig.labelColumnMapping.foreach { pair =>
+      val labelValue = exportData.labels.get(pair._1)
+      assert(labelValue.isDefined, s"${pair._1} label was expected but not found: ${exportData.labels}")
+      dataSeq.append(labelValue.get)
+    }
     // append all fixed column values
     dataSeq.append(
       exportData.metric,
@@ -311,11 +329,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       val metric = labels(LABEL_NAME)
       // to compute YYYY, MM, dd, hh
       // to compute readable timestamp from unix timestamp
-      val timestamp = Instant.ofEpochMilli(epoch_timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime()
-      val year = timestamp.getYear()
-      val month = timestamp.getMonthValue()
-      val day = timestamp.getDayOfMonth()
-      val hour = timestamp.getHour()
+      val dateTime = Instant.ofEpochMilli(epoch_timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime()
+      val timestamp = java.sql.Timestamp.valueOf(dateTime)
+      val year = dateTime.getYear()
+      val month = dateTime.getMonthValue()
+      val day = dateTime.getDayOfMonth()
+      val hour = dateTime.getHour()
       ExportRowData(metric, labels, epoch_timestamp, timestamp, value, year, month, day, hour)
     }
   }

@@ -154,6 +154,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportDatabase = downsamplerConfig.getString("data-export.database")
 
+  @transient lazy val logAllRowErrors = downsamplerConfig.getBoolean("data-export.log-all-row-errors")
+
   /**
    * Two conditions should satisfy for eligibility:
    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
