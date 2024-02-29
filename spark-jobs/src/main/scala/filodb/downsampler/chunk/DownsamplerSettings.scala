@@ -117,7 +117,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         // append all fixed columns
         fields.append(
           StructField(COL_METRIC, StringType, false),
-          StructField(COL_LABELS, StringType),
+          StructField(COL_LABELS, MapType(StringType, StringType)),
           StructField(COL_EPOCH_TIMESTAMP, LongType, false),
           StructField(COL_TIMESTAMP, TimestampType, false),
           StructField(COL_VALUE, DoubleType),
