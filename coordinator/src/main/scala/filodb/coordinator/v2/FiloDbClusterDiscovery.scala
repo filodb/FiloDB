@@ -8,7 +8,6 @@ import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import kamon.tag.TagSet
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import scala.collection.mutable
@@ -25,11 +24,13 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   private val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
 
-  // default tags
-  val tags = Map("source" -> "FiloDbClusterDiscovery")
-  val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed").withTags(TagSet.from(tags))
-  val clusterDiscoveryCounter = Kamon.counter("filodb-cluster-discovery").withTags(TagSet.from(tags))
-  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards").withTags(TagSet.from(tags))
+
+  // Metric to track actor resolve failures
+  val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed")
+  // Metric to track cluster discovery runs
+  val clusterDiscoveryCounter = Kamon.counter("filodb-cluster-discovery")
+  // Metric to track if we have unassigned shards on a given pod
+  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards")
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -122,7 +123,6 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
           // recovering with ActorRef.noSender
           case e =>
             // log the exception we got while trying to resolve and emit metric
-            // TODO: Ask on how it is published, and how it gets common values like host, tsdb partition etc.
             logger.error(s"[ClusterV2] Actor Resolve Failed ! actor: ${nca.toString()}", e)
             actorResolvedFailedCounter
               .withTag("dataset", ref.dataset)
