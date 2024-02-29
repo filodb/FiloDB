@@ -130,6 +130,20 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     res = LogicalPlanParser.convertToQuery(lp)
     // Converted query has time in seconds
     res shouldEqual "topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @1000)))"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m])) and " +
+      "topk(2, sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @start())))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "(sum(rate(http_requests_total{job=\"app\"}[300s]))" +
+      " and topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @1000))))"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m: 1m] @100))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "sum(rate(http_requests_total{job=\"app\"}[300s:60s] @100))"
   }
 
   it("should generate range query from LogicalPlan having @modifier") {
@@ -183,6 +197,20 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     res = LogicalPlanParser.convertToQuery(lp)
     // Converted query has time in seconds
     res shouldEqual "topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @5000)))"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m])) and " +
+      "topk(2, sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @start())))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "(sum(rate(http_requests_total{job=\"app\"}[300s]))" +
+      " and topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @2000))))"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m: 1m] @100))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "sum(rate(http_requests_total{job=\"app\"}[300s:60s] @100))"
   }
 
   it("do not need @modifier time range is changed.") {
