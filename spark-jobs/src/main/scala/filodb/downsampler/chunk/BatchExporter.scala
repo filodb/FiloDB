@@ -37,6 +37,8 @@ case class ExportTableConfig(tableName: String,
 case class ExportRowData(metric: String,
                          labels: collection.Map[String, String],
                          epoch_timestamp: Long,
+                         // IMPORTANT: a Spark-compatible value must be used here (something
+                         //   like LocalDateTime will throw exceptions).
                          timestamp: java.sql.Timestamp,
                          value: Double,
                          year: Int,
