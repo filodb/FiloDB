@@ -59,15 +59,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |    "enabled": ${exportToFile.isDefined},
        |    "catalog": "",
        |    "database": "",
-       |    "key-labels": [],
        |    "format": "iceberg",
+       |    "key-labels": [_ns_],
        |    "groups": [
        |      {
-       |        "key": [],
+       |        "key": [my_ns],
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
        |        "label-column-mapping": [
-       |         "_ws_", "workspace", "NOT NULL",
        |         "_ns_", "namespace", "NOT NULL"
        |        ]
        |        "partition-by-columns": ["namespace"]
