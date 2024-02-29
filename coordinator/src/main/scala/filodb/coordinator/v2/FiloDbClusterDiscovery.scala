@@ -28,6 +28,8 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   // default tags
   val tags = Map("source" -> "FiloDbClusterDiscovery")
   val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed").withTags(TagSet.from(tags))
+  val clusterDiscoveryCounter = Kamon.counter("filodb-cluster-discovery").withTags(TagSet.from(tags))
+  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards").withTags(TagSet.from(tags))
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -146,6 +148,13 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
       mapper <- reduceMappersFromAllNodes(dataset, numShards, failureDetectionInterval - 5.seconds)
     } {
       datasetToMapper.put(dataset, mapper)
+      clusterDiscoveryCounter.withTag("dataset", dataset.dataset).increment()
+      val unassignedShardsCount = mapper.unassignedShards.length.toDouble
+      if (unassignedShardsCount > 0.0) {
+        logger.error(s"[ClusterV2] Unassigned Shards > 0 !! Dataset: ${dataset.dataset} " +
+          s"Shards Mapping is: ${mapper.prettyPrint} ")
+      }
+      unassignedShardsGauge.withTag("dataset", dataset.dataset).update(unassignedShardsCount)
     }
     discoveryJobs += (dataset -> fut)
   }
