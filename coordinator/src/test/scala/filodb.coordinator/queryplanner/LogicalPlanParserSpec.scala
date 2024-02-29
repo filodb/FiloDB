@@ -2,10 +2,9 @@ package filodb.coordinator.queryplanner
 
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.SeriesKeysByFilters
+import filodb.query.{IntervalSelector, RawSeries, SeriesKeysByFilters}
 
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
@@ -78,6 +77,122 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val res = LogicalPlanParser.convertToQuery(lp)
     // Converted query has time in seconds
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
+  }
+
+  it("should generate query from LogicalPlan having @modifier") {
+    var query = "http_requests_total{job=\"app\"} offset 5m @start()"
+    var lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    var res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "http_requests_total{job=\"app\"} offset 300s @1000"
+
+    query = "topk(1, http_requests_total{job=\"app\"}offset 5m @start())"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "topk(1.0,http_requests_total{job=\"app\"} offset 300s @1000)"
+
+    query = "http_requests_total{job=\"app\"} and topk(1, http_requests_total{job=\"app\"}offset 5m @start())"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "(http_requests_total{job=\"app\"} and topk(1.0,http_requests_total{job=\"app\"} offset 300s @1000))"
+
+    query = "scalar(topk(1, http_requests_total{job=\"app\"}offset 5m @start()))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "scalar(topk(1.0,http_requests_total{job=\"app\"} offset 300s @1000))"
+
+    query = "ln(topk(1, http_requests_total{job=\"app\"}offset 5m @start()))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "ln(topk(1.0,http_requests_total{job=\"app\"} offset 300s @1000))"
+
+    query = "rate(http_requests_total{job=\"app\"}[5m] offset 5m @1000)"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "rate(http_requests_total{job=\"app\"}[300s] offset 300s @1000)"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @1000))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @1000))"
+
+    query = "topk(2, sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @start())))"
+    lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @1000)))"
+  }
+
+  it("should generate range query from LogicalPlan having @modifier") {
+    var query = "http_requests_total{job=\"app\"} offset 5m @start()"
+    var lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    var res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "http_requests_total{job=\"app\"} offset 300s @2000"
+
+    query = "topk(1, http_requests_total{job=\"app\"}offset 5m @start())"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "topk(1.0,http_requests_total{job=\"app\"} offset 300s @2000)"
+
+    query = "http_requests_total{job=\"app\"} and topk(1, http_requests_total{job=\"app\"}offset 5m @start())"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "(http_requests_total{job=\"app\"} and topk(1.0,http_requests_total{job=\"app\"} offset 300s @2000))"
+
+    query = "scalar(topk(1, http_requests_total{job=\"app\"}offset 5m @start()))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "scalar(topk(1.0,http_requests_total{job=\"app\"} offset 300s @2000))"
+
+    query = "ln(topk(1, http_requests_total{job=\"app\"}offset 5m @start()))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual
+      "ln(topk(1.0,http_requests_total{job=\"app\"} offset 300s @2000))"
+
+    query = "rate(http_requests_total{job=\"app\"}[5m] offset 5m @2000)"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "rate(http_requests_total{job=\"app\"}[300s] offset 300s @2000)"
+
+    query = "sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @2000))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @2000))"
+
+    query = "topk(2, sum(rate(http_requests_total{job=\"app\"}[5m] offset 5m @end())))"
+    lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
+    res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "topk(2.0,sum(rate(http_requests_total{job=\"app\"}[300s] offset 300s @5000)))"
+  }
+
+  it("do not need @modifier time range is changed.") {
+    val query = "http_requests_total{job=\"app\"}[5m] offset 5m @500"
+    val lp = Parser.queryToLogicalPlan(query, 10000, 1000)
+    // the selector time is changed to [500s, 500s]
+    lp.asInstanceOf[RawSeries].rangeSelector shouldEqual IntervalSelector(500000, 500000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual "http_requests_total{job=\"app\"}[300s] offset 300s"
   }
 
   it("should generate query from SubqueryWithWindowing having offset") {
