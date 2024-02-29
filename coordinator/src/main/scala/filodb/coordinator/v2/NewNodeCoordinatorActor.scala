@@ -45,10 +45,10 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
   private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
-  logger.info(s"Initializing NodeCoordActor at ${self.path}")
+  logger.info(s"[ClusterV2] Initializing NodeCoordActor at ${self.path}")
 
   private def initialize(): Unit = {
-    logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
+    logger.debug(s"[ClusterV2] Initializing stream configs: ${settings.streamConfigs}")
     settings.streamConfigs.foreach { config =>
       val dataset = settings.datasetFromStream(config)
       val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
@@ -69,7 +69,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     queryActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
-    logger.info(s"Initializing dataset ${dataset.ref}")
+    logger.info(s"[ClusterV2] Initializing dataset ${dataset.ref}")
     ingestionConfigs.put(dataset.ref, ingestConfig)
     localShardMaps.put(dataset.ref, new ShardMapper(ingestConfig.numShards))
     shardStats.put(dataset.ref, new ShardHealthStats(dataset.ref))
@@ -100,9 +100,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     localShardMaps.get(event.ref).foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
-          logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
+          logger.error(s"[ClusterV2] updateFromShardEvent error for dataset=${event.ref} " +
+            s"event $event. Mapper now: $mapper", l)
         case Success(_) =>
-          logger.debug(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
+          logger.debug(s"[ClusterV2] updateFromShardEvent success for dataset=${event.ref} " +
+            s"event $event. Mapper now: $mapper")
       }
       // update metrics
       shardStats(event.ref).update(mapper, skipUnassigned = true)
@@ -140,17 +142,17 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
               else storeConf.diskTTLSeconds * 1000
     def earliestTimestampFn = System.currentTimeMillis() - ttl
     def clusterShardMapperFn = clusterDiscovery.shardMapper(dataset.ref)
-    logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
+    logger.info(s"[ClusterV2] Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
     val queryRef = context.actorOf(QueryActor.props(memStore, dataset, schemas,
                                                     clusterShardMapperFn, earliestTimestampFn))
     queryActors(ref) = queryRef
 
-    logger.info(s"Coordinator set up for ingestion and querying for $ref.")
+    logger.info(s"[ClusterV2] Coordinator set up for ingestion and querying for $ref.")
   }
 
   private def startTenantIngestionMetering(): Unit = {
     if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
-      logger.info(s"Starting tenant level ingestion cardinality metering...")
+      logger.info(s"[ClusterV2] Starting tenant level ingestion cardinality metering...")
       val inst = TenantIngestionMetering(
         settings,
         dsIterProducer = () => { localShardMaps.keysIterator },
@@ -174,7 +176,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     case ev: ShardEvent => try {
       updateFromShardEvent(ev)
     } catch { case e: Exception =>
-      logger.error(s"Error occurred when processing message $ev", e)
+      logger.error(s"[ClusterV2] Error occurred when processing message $ev", e)
     }
 
     // requested from CLI and HTTP API
@@ -182,7 +184,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       try {
         sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
       } catch { case e: Exception =>
-        logger.error(s"Error occurred when processing message $g", e)
+        logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
       }
 
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
@@ -190,14 +192,14 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       try {
         sender() ! CurrentShardSnapshot(g.ref, localShardMaps(g.ref))
       } catch { case e: Exception =>
-        logger.error(s"Error occurred when processing message $g", e)
+        logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
       }
 
     case ListRegisteredDatasets =>
       try {
         sender() ! localShardMaps.keys.toSeq
       } catch { case e: Exception =>
-        logger.error(s"Error occurred when processing message ListRegisteredDatasets", e)
+        logger.error(s"[ClusterV2] Error occurred when processing message ListRegisteredDatasets", e)
       }
 
     case LocalShardsHealthRequest =>
@@ -209,7 +211,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         }.toSeq
         sender() ! resp
       } catch { case e: Exception =>
-        logger.error(s"Error occurred when processing message LocalShardsHealthRequest", e)
+        logger.error(s"[ClusterV2] Error occurred when processing message LocalShardsHealthRequest", e)
       }
 
   }

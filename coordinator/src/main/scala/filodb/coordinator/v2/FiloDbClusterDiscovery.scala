@@ -3,16 +3,16 @@ package filodb.coordinator.v2
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.collection.mutable
-import scala.concurrent.Future
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
-
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
+import scala.collection.mutable
+import scala.concurrent.Future
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
@@ -23,6 +23,14 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
                             (implicit ec: Scheduler) extends StrictLogging {
 
   private val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
+
+
+  // Metric to track actor resolve failures
+  val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed")
+  // Metric to track cluster discovery runs
+  val clusterDiscoveryCounter = Kamon.counter("filodb-cluster-discovery")
+  // Metric to track if we have unassigned shards on a given pod
+  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards")
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -99,7 +107,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val empty = CurrentShardSnapshot(ref, new ShardMapper(numShards))
     def fut = (nca ? GetShardMapScatter(ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
     Observable.fromFuture(fut).onErrorHandle { e =>
-      logger.error(s"Saw exception on askShardSnapshot: $e")
+      logger.error(s"[ClusterV2] Saw exception on askShardSnapshot!", e)
       empty
     }
   }
@@ -110,7 +118,18 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val acc = new ShardMapper(numShards)
     val snapshots = for {
       nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
-      ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout).recover{case _=> ActorRef.noSender})
+      ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout)
+        .recover {
+          // recovering with ActorRef.noSender
+          case e =>
+            // log the exception we got while trying to resolve and emit metric
+            logger.error(s"[ClusterV2] Actor Resolve Failed ! actor: ${nca.toString()}", e)
+            actorResolvedFailedCounter
+              .withTag("dataset", ref.dataset)
+              .withTag("actor", nca.toString())
+              .increment()
+            ActorRef.noSender
+        })
       if ncaRef != ActorRef.noSender
       snapshot <- askShardSnapshot(ncaRef, ref, numShards, timeout)
     } yield {
@@ -122,13 +141,20 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()
   def registerDatasetForDiscovery(dataset: DatasetRef, numShards: Int): Unit = {
     require(failureDetectionInterval.toMillis > 5000, "failure detection interval should be > 5s")
-    logger.info(s"Starting discovery pipeline for $dataset")
+    logger.info(s"[ClusterV2] Starting discovery pipeline for $dataset")
     datasetToMapper.put(dataset, new ShardMapper(numShards))
     val fut = for {
       _ <- Observable.intervalWithFixedDelay(failureDetectionInterval)
       mapper <- reduceMappersFromAllNodes(dataset, numShards, failureDetectionInterval - 5.seconds)
     } {
       datasetToMapper.put(dataset, mapper)
+      clusterDiscoveryCounter.withTag("dataset", dataset.dataset).increment()
+      val unassignedShardsCount = mapper.unassignedShards.length.toDouble
+      if (unassignedShardsCount > 0.0) {
+        logger.error(s"[ClusterV2] Unassigned Shards > 0 !! Dataset: ${dataset.dataset} " +
+          s"Shards Mapping is: ${mapper.prettyPrint} ")
+      }
+      unassignedShardsGauge.withTag("dataset", dataset.dataset).update(unassignedShardsCount)
     }
     discoveryJobs += (dataset -> fut)
   }

@@ -40,7 +40,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {
         Task.eval({
-          qLogger.warn(s"Creating partial result as shard is not available")
+          qLogger.warn(s"Target Actor is ActorRef.noSender ! Creating partial result as shard is not available")
           emptyPartialResult
         })
       } else {
