@@ -197,7 +197,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        | )
        | USING iceberg
        | PARTITIONED BY (year, month, day, $partitionColNames, metric)
-       | LOCATION ${exportTableConfig.tablePath}
+       | LOCATION '${exportTableConfig.tablePath}'
        |""".stripMargin
   }
 
