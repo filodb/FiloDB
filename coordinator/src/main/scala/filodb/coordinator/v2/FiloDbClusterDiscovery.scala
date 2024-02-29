@@ -107,7 +107,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val empty = CurrentShardSnapshot(ref, new ShardMapper(numShards))
     def fut = (nca ? GetShardMapScatter(ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
     Observable.fromFuture(fut).onErrorHandle { e =>
-      logger.error(s"[ClusterV2] Saw exception on askShardSnapshot: $e")
+      logger.error(s"[ClusterV2] Saw exception on askShardSnapshot!", e)
       empty
     }
   }
