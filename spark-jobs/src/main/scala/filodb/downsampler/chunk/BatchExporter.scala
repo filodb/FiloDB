@@ -189,6 +189,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
+      .options(settings.exportOptions)
       .insertInto(s"${settings.exportDatabase}.${exportTableConfig.tableName}")
   }
 

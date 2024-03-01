@@ -150,6 +150,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
 
+  @transient lazy val exportOptions = downsamplerConfig.as[Map[String, String]]("data-export.options")
+
   @transient lazy val exportCatalog = downsamplerConfig.getString("data-export.catalog")
 
   @transient lazy val exportDatabase = downsamplerConfig.getString("data-export.database")
