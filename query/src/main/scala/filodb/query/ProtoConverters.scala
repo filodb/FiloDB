@@ -227,6 +227,7 @@ object ProtoConverters {
       builder.setProcessFailure(pp.processFailure)
       builder.setProcessMultiPartition(pp.processMultiPartition)
       builder.setAllowPartialResults(pp.allowPartialResults)
+      builder.setUseProtoExecPlans(pp.useProtoExecPlans)
       builder.build()
     }
   }
@@ -254,7 +255,8 @@ object ProtoConverters {
         processFailure = if (gpp.hasProcessFailure) gpp.getProcessFailure else pp.processFailure,
         processMultiPartition = if (gpp.hasProcessMultiPartition) gpp.getProcessMultiPartition
         else pp.processMultiPartition,
-        allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults
+        allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults,
+        useProtoExecPlans = if (gpp.hasUseProtoExecPlans) gpp.getUseProtoExecPlans else false
       )
     }
   }
