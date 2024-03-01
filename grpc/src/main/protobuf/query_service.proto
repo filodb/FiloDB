@@ -46,6 +46,7 @@ message PlannerParams {
     optional bool processMultiPartition    = 13;
     optional bool allowPartialResults      = 14;
     optional bool histogramMap             = 15;
+    optional bool useProtoExecPlans        = 16;
 }
 
 message Request {

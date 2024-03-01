@@ -11,10 +11,11 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
+import filodb.coordinator.client.QueryCommands.ProtoExecPlan
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
+import filodb.query.{QueryCommand, QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 
@@ -23,6 +24,19 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
  * using Akka Actors.
  */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
+
+  def getCaseClassOrProtoExecPlan(execPlan: filodb.query.exec.ExecPlan): QueryCommand = {
+    val doProto = execPlan.queryContext.plannerParams.useProtoExecPlans
+    val ep =
+      if (doProto) {
+        import filodb.coordinator.ProtoConverters._
+        val protoPlan = execPlan.toExecPlanContainerProto
+        ProtoExecPlan(execPlan.dataset, protoPlan.toByteArray, execPlan.submitTime)
+      } else {
+        execPlan
+      }
+    ep
+  }
 
   def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
@@ -44,7 +58,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           emptyPartialResult
         })
       } else {
-        val fut = (target ? plan.execPlan) (t).map {
+        val message = getCaseClassOrProtoExecPlan(plan.execPlan)
+        val fut = (target ? message) (t).map {
           case resp: QueryResponse => resp
           case e => throw new IllegalStateException(s"Received bad response $e")
         }
@@ -83,7 +98,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       } else {
         ResultActor.subject
           .doOnSubscribe(Task.eval {
-            target.tell(plan.execPlan, ResultActor.resultActor)
+            target.tell(getCaseClassOrProtoExecPlan(plan.execPlan), ResultActor.resultActor)
             qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
           })
          .filter(_.planId == plan.execPlan.planId)
