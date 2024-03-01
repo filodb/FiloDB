@@ -60,6 +60,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |    "catalog": "",
        |    "database": "",
        |    "format": "iceberg",
+       |    "options": {
+       |        "distribution-mode": "none",
+       |     }
        |    "key-labels": [_ns_],
        |    "groups": [
        |      {
