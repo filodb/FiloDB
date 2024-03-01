@@ -256,7 +256,7 @@ object ProtoConverters {
         processMultiPartition = if (gpp.hasProcessMultiPartition) gpp.getProcessMultiPartition
         else pp.processMultiPartition,
         allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults,
-        useProtoExecPlans = if (gpp.hasUseProtoExecPlans) gpp.getUseProtoExecPlans else false
+        useProtoExecPlans = if (gpp.hasUseProtoExecPlans) gpp.getUseProtoExecPlans else pp.useProtoExecPlans
       )
     }
   }
