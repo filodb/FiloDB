@@ -185,8 +185,14 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
     spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, exportTableConfig))
-    spark.createDataFrame(rdd, exportTableConfig.tableSchema)
-      .write
+    val partitionColNames = exportTableConfig.partitionByCols.mkString(", ")
+    var df = spark.createDataFrame(rdd, exportTableConfig.tableSchema)
+    // distribution mode: none, does not request any shuffles or sort to be performed automatically by Spark.
+    // Because no work is done automatically by Spark, the data must be manually sorted by partition value.
+    // The data must be sorted either within each spark task, or globally within the entire dataset.
+    // A global sort will minimize the number of output files.
+    df = df.sortWithinPartitions("year", "month", "day", ${partitionColNames}, "metric")
+    df.write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
       .options(settings.exportOptions)
