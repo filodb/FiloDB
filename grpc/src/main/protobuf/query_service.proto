@@ -31,21 +31,24 @@ message PerQueryLimits {
 }
 
 message PlannerParams {
-    optional string applicationId          = 1;
-    optional uint32 queryTimeoutMillis     = 2;
-    optional PerQueryLimits enforcedLimits = 3;
-    optional PerQueryLimits warnLimits     = 4;
-    optional string queryOrigin            = 5;
-    optional string queryOriginId          = 6;
-    optional string queryPrincipal         = 7;
-    optional bool timeSplitEnabled         = 8;
-    optional uint64 minTimeRangeForSplitMs = 9;
-    optional uint64 splitSizeMs            = 10;
-    optional bool skipAggregatePresent     = 11;
-    optional bool processFailure           = 12;
-    optional bool processMultiPartition    = 13;
-    optional bool allowPartialResults      = 14;
-    optional bool histogramMap             = 15;
+    optional string applicationId                   = 1;
+    optional uint32 queryTimeoutMillis              = 2;
+    optional PerQueryLimits enforcedLimits          = 3;
+    optional PerQueryLimits warnLimits              = 4;
+    optional string queryOrigin                     = 5;
+    optional string queryOriginId                   = 6;
+    optional string queryPrincipal                  = 7;
+    optional bool timeSplitEnabled                  = 8;
+    optional uint64 minTimeRangeForSplitMs          = 9;
+    optional uint64 splitSizeMs                     = 10;
+    optional bool skipAggregatePresent              = 11;
+    optional bool processFailure                    = 12;
+    optional bool processMultiPartition             = 13;
+    optional bool allowPartialResults               = 14;
+    optional bool histogramMap                      = 15;
+    optional bool useProtoExecPlans                 = 16;
+    optional bool reduceShardKeyRegexFanout         = 17;
+    optional uint32 maxShardKeyRegexFanoutBatchSize = 18;
 }
 
 message Request {
