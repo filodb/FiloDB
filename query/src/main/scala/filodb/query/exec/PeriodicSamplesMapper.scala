@@ -4,6 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
+import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
@@ -196,6 +197,10 @@ final case class PeriodicSamplesMapper(startMs: Long,
   }
 }
 
+object FiloQueryConfig {
+  val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive_range")
+}
+
 /**
  * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
  * to compute each window as fast as possible on multiple rows at a time.
@@ -213,7 +218,8 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.
   private lazy val windowIt = {
-    val it = new WindowedChunkIterator(rv, start, step, end, window, querySession.qContext)
+    val it = new WindowedChunkIterator(rv, start, step, end, window, querySession.qContext,
+      isInclusiveRange = FiloQueryConfig.isInclusiveRange)
     // Need to hold the shared lock explicitly, because the window iterator needs to
     // pre-fetch chunks to determine the window. This pre-fetching can force the internal
     // iterator to close, which would release the lock too soon.
@@ -378,7 +384,8 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
     // cur is inside current window
-    cur.timestamp >= curWindowStart
+    val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart + 1
+    cur.timestamp >= windowStart
   }
 
   /**
@@ -390,7 +397,8 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     * @param curWindowStart start time of the current window
     */
   private def shouldRemoveWindowHead(curWindowStart: Long): Boolean = {
-    (!windowQueue.isEmpty) && windowQueue.head.timestamp < curWindowStart
+    val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart - 1
+    (!windowQueue.isEmpty) && windowQueue.head.timestamp < windowStart
   }
 }
 
