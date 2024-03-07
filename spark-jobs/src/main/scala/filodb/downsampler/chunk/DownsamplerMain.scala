@@ -76,10 +76,10 @@ object DownsamplerMain extends App {
 
 class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
-  lazy val exportLatency =
+  @transient lazy val exportLatency =
     Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
-  lazy val numRowsExported = Kamon.counter("num-rows-exported").withoutTags()
+  @transient lazy val numRowsExported = Kamon.counter("num-rows-exported").withoutTags()
 
   /**
    * Exports an RDD for a specific export key.
