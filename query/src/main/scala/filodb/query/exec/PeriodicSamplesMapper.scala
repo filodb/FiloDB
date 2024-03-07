@@ -198,7 +198,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
 }
 
 object FiloQueryConfig {
-  val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive_range")
+  val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive-range")
 }
 
 /**

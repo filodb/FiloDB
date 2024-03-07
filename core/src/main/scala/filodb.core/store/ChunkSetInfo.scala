@@ -456,8 +456,8 @@ extends Iterator[ChunkSetInfoReader] {
     // advance window pointers and reset read index
     if (curWindowEnd == -1L) {
       curWindowEnd = start
-      val windowStart = if (isInclusiveRange) window else window - 1
-      curWindowStart = start - Math.max(windowStart, 0)  // window cannot be below 0, ie start should never be > end
+      val windowDuration = if (isInclusiveRange) window else window - 1
+      curWindowStart = start - Math.max(windowDuration, 0)  // window cannot be below 0, ie start should never be > end
     } else {
       curWindowEnd += step
       curWindowStart += step
