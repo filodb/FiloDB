@@ -5,6 +5,7 @@ import spire.syntax.cfor._
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
 import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.query.exec.FiloQueryConfig
 
 object RateFunctions {
 
@@ -188,8 +189,12 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit = {
     if (highestTime > lowestTime) {
       // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
+      val curWindowStart = if (FiloQueryConfig.isInclusiveRange)
+                             windowStart
+                           else
+                             windowStart - 1
       val result = RateFunctions.extrapolatedRate(
-                     windowStart, windowEnd, numSamples,
+                    curWindowStart, windowEnd, numSamples,
                      lowestTime, lowestValue,
                      highestTime, highestValue,
                      isCounter, isRate)
@@ -284,9 +289,15 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
       // TODO: handle case where schemas are different and we need to interpolate schemas
       if (highestValue.buckets == lowestValue.buckets) {
         val rateArray = new Array[Double](lowestValue.numBuckets)
+
+        val curWindowStart = if (FiloQueryConfig.isInclusiveRange)
+                                windowStart
+                             else
+                                windowStart - 1
+
         cforRange { 0 until rateArray.size } { b =>
           rateArray(b) = RateFunctions.extrapolatedRate(
-                           windowStart, windowEnd, numSamples,
+                          curWindowStart, windowEnd, numSamples,
                            lowestTime, lowestValue.bucketValue(b),
                            highestTime, highestValue.bucketValue(b),
                            isCounter, isRate)
@@ -329,8 +340,14 @@ class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
                                 endRowNum: Int): Unit =
     sumFunc.addTimeDoubleChunks(doubleVectAcc, doubleVect, doubleReader, startRowNum, endRowNum)
 
-  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
-    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart)) * 1000)
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit = {
+    val curWindowStart = if (FiloQueryConfig.isInclusiveRange)
+                            windowStart
+                         else
+                            windowStart - 1
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (curWindowStart)) * 1000)
+  }
+
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
 }
 
@@ -346,8 +363,13 @@ class RateOverDeltaChunkedFunctionL extends ChunkedLongRangeFunction {
                               endRowNum: Int): Unit =
     sumFunc.addTimeChunks(longVectAcc, longVect, longReader, startRowNum, endRowNum)
 
-  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
-    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart)) * 1000)
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit = {
+    val curWindowStart = if (FiloQueryConfig.isInclusiveRange)
+                            windowStart
+                         else
+                            windowStart - 1
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (curWindowStart)) * 1000)
+  }
 
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
 }
@@ -377,4 +399,3 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
 
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
 }
-
