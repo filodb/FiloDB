@@ -1,16 +1,15 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.{Seq, mutable}
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.TargetSchemaProvider
 import filodb.core.query.{ColumnFilter, QueryContext, QueryUtils, RangeParams}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
+import filodb.query.AggregateClause.ClauseType
 import filodb.query._
 
 object LogicalPlanUtils extends StrictLogging {
@@ -463,6 +462,33 @@ object LogicalPlanUtils extends StrictLogging {
       Some(referenceSchema.get)
     } else {
       None
+    }
+  }
+
+  /**
+   * Returns true iff any root/nested Aggregate clause drops any of the argument labels.
+   * "Drop" here means the clause guarantees the label will not appear in the result
+   *   (unless it is e.g. later re-added with label_replace).
+   */
+  def aggregationsDropAnyLabel(plan: LogicalPlan, labels: Set[String]): Boolean = {
+    plan match {
+      case agg: Aggregate =>
+        val labelIsDropped = agg.clauseOpt match {
+          case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
+            // if any label isn't in the 'by' clause, the label is dropped.
+            labels.exists(!clauseLabels.contains(_))
+          case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
+            // if any label is in the 'without' clause, the label is dropped.
+            clauseLabels.exists(labels.contains)
+          case _ => false
+        }
+        if (labelIsDropped) {
+          return true
+        }
+        aggregationsDropAnyLabel(agg.vectors, labels)
+      case nl: NonLeafLogicalPlan =>
+        nl.children.exists(aggregationsDropAnyLabel(_, labels))
+      case _ => false
     }
   }
 
