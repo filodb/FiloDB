@@ -8,11 +8,12 @@ import filodb.coordinator.ActorSystemHolder.system
 import filodb.query.Query.qLogger
 import filodb.query.StreamQueryResponse
 
-
 object ResultActor {
-  def props(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryResponse]): Props =
+  def props(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryResponse]): Props = {
     Props(classOf[ResultActor], subject)
-  lazy val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.Publish)(QueryScheduler.queryScheduler)
+  }
+
+  lazy val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.publish)(QueryScheduler.queryScheduler)
   lazy val resultActor = system.actorOf(Props(new ResultActor(subject)))
 }
 
@@ -22,7 +23,7 @@ class ResultActor(subject: ConcurrentSubject[StreamQueryResponse, StreamQueryRes
     case q: StreamQueryResponse =>
       try {
         subject.onNext(q)
-        qLogger.debug(s"Result Actor got ${q.getClass} as response from ${sender()}")
+        qLogger.debug(s"Result Actor got ${q.getClass.getSimpleName} for plan ${q.planId}")
       } catch {
         case e: Throwable =>
           qLogger.error(s"Exception when processing $q", e)

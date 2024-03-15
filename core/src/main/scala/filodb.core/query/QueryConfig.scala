@@ -1,9 +1,13 @@
 package filodb.core.query
 
-import scala.concurrent.duration.FiniteDuration
+import java.util.concurrent.TimeUnit
+
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
+
+
 
 object QueryConfig {
   val DefaultVectorsLimit = 150
@@ -23,6 +27,22 @@ object QueryConfig {
     val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
     val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
     val numRvsPerResultMessage = queryConfig.getInt("num-rvs-per-result-message")
+
+    val supportRemoteRawExport = queryConfig.getBoolean("routing.enable-remote-raw-exports")
+    val  enableApproximatelyEqualCheckInStitch =
+      queryConfig.getBoolean("routing.enable-approximate-equals-in-stitch")
+    val maxRemoteRawExportTimeRange =
+      FiniteDuration(
+        queryConfig.getDuration("routing.max-time-range-remote-raw-export").toMillis, TimeUnit.MILLISECONDS)
+    val periodOfUncertaintyMs = queryConfig.getDuration("routing.period-of-uncertainty-ms").toMillis
+
+    val rc = RoutingConfig(
+      supportRemoteRawExport,
+      maxRemoteRawExportTimeRange,
+      enableApproximatelyEqualCheckInStitch,
+      periodOfUncertaintyMs
+      )
+
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
@@ -32,7 +52,7 @@ object QueryConfig {
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides)
+      containerOverrides, rc)
   }
 
   import scala.concurrent.duration._
@@ -57,6 +77,12 @@ object QueryConfig {
                                              Map("filodb-query-exec-aggregate-large-container" -> 65536,
                                                   "filodb-query-exec-metadataexec"             -> 8192))
 }
+case class RoutingConfig(
+                          supportRemoteRawExport: Boolean                = false,
+                          maxRemoteRawExportTimeRange: FiniteDuration    = 3 days,
+                          enableApproximatelyEqualCheckInStitch: Boolean = true,
+                          periodOfUncertaintyMs: Long                    = (5 minutes).toMillis
+                        )
 
 case class QueryConfig(askTimeout: FiniteDuration,
                        staleSampleAfterMs: Long,
@@ -75,4 +101,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        allowPartialResultsMetadataQuery: Boolean = true,
                        grpcPartitionsDenyList: Set[String] = Set.empty,
                        plannerSelector: Option[String] = None,
-                       recordContainerOverrides: Map[String, Int] = Map.empty)
+                       recordContainerOverrides: Map[String, Int] = Map.empty,
+                       routingConfig: RoutingConfig               = RoutingConfig())

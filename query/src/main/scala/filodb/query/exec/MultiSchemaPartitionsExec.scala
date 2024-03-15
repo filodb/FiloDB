@@ -67,8 +67,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
     /*
      * As part of Histogram query compatibility with Prometheus format histograms, we
-     * remove _sum & _count suffix from metric name here. _bucket & le are already removed in SingleClusterPlanner.
-     * We remove the suffix only when partition lookup does not return any results
+     * remove _sum, _count, _min, _max suffix from metric name here. _bucket & le are already
+     * removed in SingleClusterPlanner. We remove the suffix only when partition lookup does not return any results
      */
     if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram &&
         colName.isEmpty && metricName.isDefined) {
@@ -76,6 +76,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
       else if (metricName.get.endsWith("_count"))
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, querySession)
+      else if (metricName.get.endsWith("_min"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "min", source, querySession)
+      else if (metricName.get.endsWith("_max"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "max", source, querySession)
       else (lookupRes, newColName)
 
       lookupRes = res._1

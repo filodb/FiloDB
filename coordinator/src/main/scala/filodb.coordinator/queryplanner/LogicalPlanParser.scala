@@ -16,6 +16,7 @@ object QueryConstants {
   val ClosingCurlyBraces = "}"
   val Space = " "
   val Offset = "offset"
+  val At = "@"
   val OpeningRoundBracket = "("
   val ClosingRoundBracket = ")"
   val OpeningSquareBracket = "["
@@ -64,7 +65,8 @@ object LogicalPlanParser {
 
   private def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
     // Queries like sum(foo) should not have window even though stale lookback is present
-    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries, false)}"
+    val at = periodicSeries.atMs.fold("")(atMs => s" $At${atMs / 1000}")
+    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries, false)}$at"
   }
 
   private def aggregateToQuery(lp: Aggregate): String = {
@@ -129,12 +131,13 @@ object LogicalPlanParser {
     val addWindow = if (lp.function.equals(Timestamp)) false else true
     val rawSeries = rawSeriesLikeToQuery(lp.series, addWindow)
     val prefix = lp.function.entryName + OpeningRoundBracket
-    if (lp.functionArgs.isEmpty) s"$prefix$rawSeries$ClosingRoundBracket"
+    val at = lp.atMs.fold("")(atMs => s" $At${atMs / 1000}")
+    if (lp.functionArgs.isEmpty) s"$prefix$rawSeries$at$ClosingRoundBracket"
     else {
       if (lp.function.equals(QuantileOverTime))
         s"$prefix${functionArgsToQuery(lp.functionArgs.head)}$Comma$rawSeries$ClosingRoundBracket"
       else
-        s"$prefix$rawSeries$Comma${lp.functionArgs.map(functionArgsToQuery(_)).mkString(Comma)}" +
+        s"$prefix$rawSeries$at$Comma${lp.functionArgs.map(functionArgsToQuery(_)).mkString(Comma)}" +
           s"$ClosingRoundBracket"
     }
   }
@@ -183,7 +186,8 @@ object LogicalPlanParser {
     val sqClause =
       s"${OpeningSquareBracket}${sqww.subqueryWindowMs/1000}s:${sqww.subqueryStepMs/1000}s$ClosingSquareBracket"
     val offset = sqww.offsetMs.fold("")(offsetMs => s" offset ${offsetMs/1000}s")
-    val suffix = s"$sqClause$offset$ClosingRoundBracket"
+    val at = sqww.atMs.fold("")(atMs => s" $At${atMs / 1000}")
+    val suffix = s"$sqClause$offset$at$ClosingRoundBracket"
     if (sqww.functionArgs.isEmpty) s"$prefix$periodicSeriesQuery$suffix"
     else {
       s"$prefix${functionArgsToQuery(sqww.functionArgs.head)}$Comma$periodicSeriesQuery$suffix"
@@ -193,9 +197,10 @@ object LogicalPlanParser {
   private def topLevelSubqueryToQuery(tlsq: TopLevelSubquery): String = {
     val periodicSeriesQuery = convertToQuery(tlsq.innerPeriodicSeries)
     val offset = tlsq.originalOffsetMs.fold("")(offsetMs => s" offset ${offsetMs/1000}s")
+    val at = tlsq.atMs.fold("")(atMs => s" $At${atMs / 1000}")
     val sqClause =
       s"${OpeningSquareBracket}${(tlsq.orginalLookbackMs)/1000}s:${tlsq.stepMs/1000}s$ClosingSquareBracket"
-    s"${periodicSeriesQuery}${sqClause}${offset}"
+    s"$periodicSeriesQuery$sqClause$offset$at"
   }
 
   def metadataMatchToQuery(lp: MetadataQueryPlan): String = {
