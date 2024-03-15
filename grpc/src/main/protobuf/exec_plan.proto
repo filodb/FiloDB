@@ -1,0 +1,902 @@
+syntax="proto3";
+
+package filodb.grpc;
+
+//import "google/protobuf/timestamp.proto";
+option java_outer_classname = "ExecPlans";
+option java_generate_equals_and_hash = true;
+import "query_service.proto";
+import "range_vector.proto";
+
+message DatasetRef {
+  string dataset           = 1;
+  optional string database = 2;
+}
+
+message Filter {
+  string operatorString           = 1;
+  repeated string valueStrings    = 2;
+}
+
+message FilterContainer {
+  oneof filter {
+    FilterEquals filterEquals = 2;
+    FilterNotEquals filterNotEquals = 3;
+    FilterEqualsRegex filterEqualsRegex = 4;
+    FilterNotEqualsRegex filterNotEqualsRegex = 5;
+    FilterIn filterIn = 6;
+    FilterAnd filterAnd = 7;
+  }
+}
+
+message FilterEquals {
+  Filter filter = 1;
+}
+
+message FilterNotEquals {
+  Filter filter = 1;
+}
+
+message FilterEqualsRegex {
+  Filter filter = 1;
+}
+
+message FilterNotEqualsRegex {
+  Filter filter = 1;
+}
+
+message FilterIn {
+  Filter filter = 1;
+}
+
+message FilterAnd {
+  Filter filter = 1;
+  FilterContainer left = 2;
+  FilterContainer right = 3;
+}
+
+message ColumnFilter {
+  string column  = 1;
+  FilterContainer filter = 2;
+}
+
+//message PromQlQueryParams {
+//  string promQl                   = 1;
+//  int64 startSecs                 = 2;
+//  int64 stepSecs                  = 3;
+//  int64 endSecs                   = 4;
+//  optional string remoteQueryPath = 5;
+//  bool verbose                    = 6;
+//}
+
+message QueryContext {
+  //TODO
+  // should we implement PromQlQueryParams and UnavailablePromQlQueryParams
+  QueryParams origQueryParams        = 1;
+  string queryId                     = 2;
+  int64 submitTime                   = 3; // duplicate with LeafExecPlan?
+  // TODO
+  // PlannerParams are not exactly the same as Scala PlannerParams
+  // it is missing:
+  //   spread, spreadOverride, shardOverrides, and targetSchemaProviderOverride
+  // and it has the following properties missing in Scala PlannerParams:
+  //   histogramMap
+  PlannerParams plannerParams        = 4;
+  map<string, string> traceInfo      = 5;
+}
+
+message ChunkDownsampler {
+  repeated int32 inputColIds = 1;
+}
+
+message TimeDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message LastValueHDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message HistSumDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message AvgDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message AvgScDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message LastValueDDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message MinDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message SumDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message AvgAcDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message MaxDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message CountDownsampler {
+  ChunkDownsampler chunkDownsampler = 1;
+}
+
+message ChunkDownsamplerContainer {
+  oneof chunkDownsampler {
+    TimeDownsampler timeDownsampler             =  1;
+    LastValueHDownsampler lastValueHDownampler  =  2;
+    HistSumDownsampler histSumDownsampler       =  3;
+    AvgDownsampler avgDownsampler               =  4;
+    AvgScDownsampler avgScDownsampler           =  5;
+    LastValueDDownsampler lastValueDDownsampler =  6;
+    MinDownsampler minDownsampler               =  7;
+    SumDownsampler sumDownsampler               =  8;
+    AvgAcDownsampler avgAcDownsampler           =  9;
+    MaxDownsampler maxDownsampler               = 10;
+    CountDownsampler countDownsampler           = 11;
+  }
+}
+
+message DownsamplePeriodMarker {
+ int32 inputColId = 1;
+}
+
+message CounterDownsamplePeriodMarker {
+  DownsamplePeriodMarker downsamplePeriodMarker = 1;
+}
+
+message TimeDownsamplePeriodMarker {
+  DownsamplePeriodMarker downsamplePeriodMarker = 1;
+}
+
+message DownsamplePeriodMarkerContainer {
+  oneof downsamplePeriodMarker {
+    CounterDownsamplePeriodMarker counterDownsamplePeriodMarker = 1;
+    TimeDownsamplePeriodMarker timeDownsamplePeriodMarker       = 2;
+  }
+}
+
+message PartKeyLuceneIndexRecord {
+  bytes partKey   = 1;
+  int64 startTime = 2;
+  int64 endTime   = 3;
+}
+
+// probably don't need this one, as we should not be sending it
+// over the wire?
+message PartLookupResult {
+  int32 shard                                 = 1;
+  ChunkScanMethod chunkMethod                 = 2;
+  repeated int32 partsInMemory                = 3;
+  optional int32 firstSchemaID                = 4;
+  map<int32,int64> partIdsMemTimeGap          = 5;
+  repeated int32 partIdsNotInMemory           = 6;
+  repeated PartKeyLuceneIndexRecord pkRecords = 7;
+  int64 dataBytesScannedCtr                   = 8;
+}
+
+message DataSchema {
+  string name                                                     = 1;
+  repeated ColumnContainer columns                                = 2;
+  repeated ChunkDownsamplerContainer downsamplers                 = 3;
+  int32 hash                                                      = 4;
+  int32 valueColumn                                               = 5;
+  optional string downsampleSchema                                = 6;
+  DownsamplePeriodMarkerContainer downsamplePeriodMarker          = 7;
+}
+
+message Schema {
+  PartitionSchema partition  = 1;
+  DataSchema data            = 2;
+  optional Schema downsample = 3;
+}
+
+message PlanDispatcher {
+  string clusterName                 = 1;
+  bool isLocalCall                   = 2;
+}
+
+message ActorPlanDispatcher {
+  PlanDispatcher planDispatcher      = 1;
+  string actorPath                   = 2;
+}
+
+message InProcessPlanDispatcher {
+  QueryConfig queryConfig            = 1;
+}
+
+message PlanDispatcherContainer {
+  oneof dispatcher  {
+    ActorPlanDispatcher actorPlanDispatcher                        = 1;
+    InProcessPlanDispatcher inProcessPlanDispatcher                = 2;
+  }
+
+}
+
+message QueryConfig {
+  int64 askTimeoutSeconds                    = 1;
+  int64 staleSampleAfterMs                   = 2;
+  int64 minStepMs                            = 3;
+  int32 fastReduceMaxWindows                 = 4;
+  string parser                              = 5;
+  bool translatePromToFilodbHistogram        = 6;
+  bool fasterRateEnabled                     = 7;
+  optional string partitionName              = 8;
+  optional int64 remoteHttpTimeoutMs          = 9;
+  optional string remoteHttpEndpoint         = 10;
+  optional string remoteGrpcEndpoint         = 11;
+  int32 numRvsPerResultMessage               = 12;
+  bool enforceResultByteLimit                = 13;
+  bool allowPartialResultsRangeQuery         = 14;
+  bool allowPartialResultsMetadataQuery      = 15;
+  repeated string grpcPartitionsDenyList     = 16;
+  optional string plannerSelector            = 17;
+  map<string,int32> recordContainerOverrides = 18;
+}
+
+enum ChunkScanType {
+  ALL_CHUNKS_SCAN = 0;
+  IN_MEMORY_CHUNK_SCAN = 1;
+  WRITE_BUFFER_CHUNK_SCAN = 2;
+  TIME_RANGE_CHUNK_SCAN = 3;
+}
+
+message ChunkScanMethod {
+  int64 startTime         = 1;
+  int64 endTime           = 2;
+  ChunkScanType method    = 3;
+}
+
+//message RvRange {
+//  int64 startMs   = 1;
+//  int64 stepMs    = 2;
+//  int64 endMs     = 3;
+//}
+
+enum AggregationOperator {
+  TOP_K           =  0;
+  COUNT_VALUES    =  1;
+  COUNT           =  2;
+  GROUP           =  3;
+  BOTTOM_K        =  4;
+  MIN             =  5;
+  AVG             =  6;
+  SUM             =  7;
+  STDDEV          =  8;
+  STDVAR          =  9;
+  QUANTILE        = 10;
+  MAX             = 11;
+}
+
+message AggregateParameter {
+  oneof aggregateParameter {
+    int64 longParameter    = 1;
+    int32 intParameter     = 2;
+    double doubleParameter = 3;
+    string stringParameter = 4;
+  }
+}
+
+message AggregateClause {
+  AggregateClauseType clauseType = 1;
+  repeated string labels         = 2;
+}
+
+enum AggregateClauseType {
+  BY      = 0;
+  WITHOUT = 1;
+}
+
+//message RvRange {
+//  int64 startMs   = 1;
+//  int64 stepMs    = 2;
+//  int64 endMs     = 3;
+//}
+
+//message RangeParams {
+//  int64 startSecs   = 1;
+//  int64 stepSecs    = 2;
+//  int64 endSecs     = 3;
+//}
+
+message ExecPlanFuncArgs {
+  ExecPlanContainer execPlan = 1;
+  RangeParams timeStepParams = 2;
+}
+
+message TimeFuncArgs {
+  RangeParams timeStepParms = 1;
+}
+
+message StaticFuncArgs {
+  double scalar = 1;
+  RangeParams timeStepParams =2;
+}
+
+message FuncArgs {
+  oneof funcArgType {
+    ExecPlanFuncArgs execPlanFuncArgs = 1;
+    TimeFuncArgs timeFuncArgs         = 2;
+    StaticFuncArgs staticFuncArgs     = 3;
+  }
+}
+
+enum TypedFieldExtractor {
+  INT           = 0;
+  FLOAT         = 1;
+  HISTOGRAM     = 2;
+  DATE_TIME     = 3;
+  DOUBLE        = 4;
+  WRAPPED       = 5;
+  TIMESTAMP     = 6;
+  OBJECT        = 7;
+  UTF8_STRING   = 8;
+  LONG          = 9;
+  BOOLEAN      = 10;
+  STRING       = 11;
+}
+
+message ComputedColumn {
+  int32 id                       = 1;
+  string expr                    = 2;
+  string dataset                 = 3;
+  ColumnType columnType          = 4;
+  repeated int32 sourceIndices   = 5;
+  TypedFieldExtractor extractor  = 6;
+}
+
+message DataColumn {
+  int32 id                  = 1;
+  string name               = 2;
+  ColumnType columnType     = 3;
+  map<string,string> params = 4;
+}
+
+message RepeatedString {
+  repeated string strings = 1;
+}
+
+message StringTuple {
+  string fieldOne = 1;
+  string fieldTwo = 2;
+}
+
+message DatasetOptions {
+  repeated string shardKeyColumns                             = 1;
+  string metricColumn                                         = 2;
+  bool hasDownsampledData                                     = 3;
+  map<string, RepeatedString> ignoreShardKeyColumnSuffixes    = 4;
+  repeated string ignoreTagsOnPartitionKeyHash                = 5;
+  repeated StringTuple copyTags                               = 6;
+  map<string, RepeatedString> multiColumFacets                = 7;
+}
+
+message ColumnContainer {
+  oneof column {
+    DataColumn        dataColumn = 1;
+    ComputedColumn computedColumn = 2;
+  }
+}
+
+message PartitionSchema {
+  repeated ColumnContainer columns = 1;
+  repeated string predefinedKeys   = 2;
+  DatasetOptions options           = 3;
+}
+
+enum InstantFunctionId {
+  ABS                      = 0;
+  CEIL                     = 1;
+  CLAMP_MAX                = 2;
+  CLAMP_MIN                = 3;
+  EXP                      = 4;
+  FLOOR                    = 5;
+  HISTOGRAM_QUANTILE       = 6;
+  HISTOGRAM_MAX_QUANTILE   = 7;
+  HISTOGRAM_BUCKET         = 8;
+  LN                       = 9;
+  LOG10                   = 10;
+  LOG2                    = 11;
+  ROUND                   = 12;
+  SGN                     = 13;
+  SQRT                    = 14;
+  DAYS_IN_MONTH           = 15;
+  DAY_OF_MONTH            = 16;
+  DAY_OF_WEEK             = 17;
+  HOUR                    = 18;
+  MINUTE                  = 19;
+  MONTH                   = 20;
+  YEAR                    = 21;
+  OR_VECTOR_DOUBLE        = 22;
+}
+
+enum ScalarFunctionId {
+  SCALAR_FI         = 0;
+  TIME_FI           = 1;
+  DAYS_IN_MONTH_FI  = 2;
+  DAY_OF_MONTH_FI   = 3;
+  DAY_OF_WEEK_FI    = 4;
+  HOUR_FI           = 5;
+  MINUTE_FI         = 6;
+  MONTH_FI          = 7;
+  YEAR_FI           = 8;
+}
+
+enum InternalRangeFunction {
+    AVG_OVER_TIME         =  0;
+    CHANGES               =  1;
+    COUNT_OVER_TIME       =  2;
+    DELTA                 =  3;
+    DERIV                 =  4;
+    HOLT_WINTERS          =  6;
+    ZSCORE                =  7;
+    IDELTA                =  8;
+    INCREASE              =  9;
+    IRATE                 = 10;
+    MAX_OVER_TIME         = 11;
+    MIN_OVER_TIME         = 12;
+    PREDICT_LINEAR        = 13;
+    QUANTILE_OVER_TIME    = 14;
+    RATE                  = 15;
+    RESETS                = 16;
+    STD_DEV_OVER_TIME     = 17;
+    STD_VAR_OVER_TIME     = 18;
+    SUM_OVER_TIME         = 19;
+    LAST                  = 20;
+    LAST_OVER_TIME        = 21;
+    AVG_WITH_SUM_AND_COUNT_OVER_TIME = 22;
+    SUM_AND_MAX_OVER_TIME = 23;
+    LAST_SAMPLE_HIST_MAX  = 24;
+    TIME_STAMP            = 25;
+    ABSENT_OVER_TIME      = 26;
+    PRESENT_OVER_TIME     = 27;
+}
+
+enum SortFunctionId {
+  SORT      = 0;
+  SORT_DESC = 1;
+}
+
+enum MiscellaneousFunctionId {
+  LABEL_REPLACE        = 0;
+  LABEL_JOIN           = 1;
+  HIST_TO_PROM_VECTORS = 2;
+}
+
+enum BinaryOperator {
+  SUB      =  0;
+  ADD      =  1;
+  MUL      =  2;
+  MOD      =  3;
+  DIV      =  4;
+  POW      =  5;
+  LAND     =  6;
+  LOR      =  7;
+  LUNLESS  =  8;
+  EQL      =  9;
+  NEQ      = 10;
+  LTE      = 11;
+  LSS      = 12;
+  GTE      = 13;
+  GTR      = 14;
+  EQL_BOOL = 15;
+  NEQ_BOOL = 16;
+  LTE_BOOL = 17;
+  LSS_BOOL = 18;
+  GTE_BOOL = 19;
+  GTR_BOOL = 20;
+  EQL_REGEX = 21;
+  NEQ_REGEX = 22;
+}
+
+enum Cardinality {
+  ONE_TO_ONE   = 0;
+  ONE_TO_MANY  = 1;
+  MANY_TO_ONE  = 2;
+  MANY_TO_MANY = 3;
+}
+
+
+//
+// RangeVectorTransformers
+//
+message StitchRvsMapper {
+  optional RvRange outputRvRange = 1;
+}
+
+message AggregateMapReduce {
+  AggregationOperator aggrOp             = 1;
+  repeated AggregateParameter aggrParams = 2;
+  optional AggregateClause clauseOpt     = 3;
+  repeated FuncArgs        funcParams     = 4;
+}
+
+message HistToPromSeriesMapper {
+  PartitionSchema sch = 1;
+}
+
+message LabelCardinalityPresenter {
+  repeated FuncArgs funcParams = 1;
+}
+
+message HistogramQuantileMapper {
+  repeated FuncArgs funcParams = 1;
+}
+
+message InstantVectorFunctionMapper {
+  InstantFunctionId function   = 1;
+  repeated FuncArgs funcParams = 2;
+}
+
+message PeriodicSamplesMapper {
+  int64 startMs                             =  1;
+  int64 stepMs                              =  2;
+  int64 endMs                               =  3;
+  optional int64 window                     =  4;
+  optional InternalRangeFunction functionId =  5;
+  QueryContext queryContext                 =  6;
+  bool stepMultipleNotationUsed             =  7;
+  repeated FuncArgs funcParams               =  8;
+  optional int64 offsetMs                   =  9;
+  bool rawSource                            = 10;
+  bool leftInclusiveWindow                  = 11;
+}
+
+message SortFunctionMapper {
+  SortFunctionId function = 1;
+}
+
+message MiscellaneousFunctionMapper {
+  MiscellaneousFunctionId function      = 1;
+  repeated string funcStringParam       = 2;
+  repeated FuncArgs funcParams          = 3;
+}
+
+message LimitFunctionMapper {
+  int32 limitToApply = 1;
+}
+
+message ScalarOperationMapper {
+  BinaryOperator operator      = 1;
+  bool scalarOnLhs             = 2;
+  repeated FuncArgs funcParams = 3;
+}
+
+message ScalarFunctionMapper {
+  ScalarFunctionId function  = 1;
+  RangeParams timeStepParams = 2;
+}
+
+message VectorFunctionMapper {
+
+}
+
+message AggregatePresenter {
+  AggregationOperator aggrOp             = 1;
+  repeated AggregateParameter aggrParams = 2;
+  RangeParams rangeParams                = 3;
+  repeated FuncArgs funcParams           = 4;
+}
+
+message AbsentFunctionMapper {
+  repeated ColumnFilter columnFilter = 1;
+  RangeParams  rangeParams           = 2;
+  string metricColumn                = 3;
+}
+
+message RangeVectorTransformerContainer {
+  oneof rangeVectorTransfomer {
+    StitchRvsMapper stitchRvsMapper                         =  1;
+    AggregateMapReduce aggregateMapReduce                   =  2;
+    HistToPromSeriesMapper histToPromSeriesMapper           =  3;
+    LabelCardinalityPresenter labelCardinalityPresenter     =  4;
+    HistogramQuantileMapper histogramQuantileMapper         =  5;
+    InstantVectorFunctionMapper InstantVectorFunctionMapper =  6;
+    PeriodicSamplesMapper periodicSamplesMapper             =  7;
+    SortFunctionMapper sortFunctionMapper                   =  8;
+    MiscellaneousFunctionMapper miscellaneousFunctionMapper =  9;
+    LimitFunctionMapper  limitFunctionMapper                = 10;
+    ScalarOperationMapper scalarOperationMapper             = 11;
+    ScalarFunctionMapper scalarFunctionMapper               = 12;
+    VectorFunctionMapper vectorFunctionMapper               = 13;
+    AggregatePresenter aggregatePresenter                   = 14;
+    AbsentFunctionMapper AbsentFunctionMapper               = 15;
+  }
+}
+
+
+
+
+//
+// Execution Plans
+//
+message QueryCommand {
+  int64 submitTime  = 1;
+  DatasetRef datasetRef    = 2;
+
+}
+
+message ExecPlan {
+  string planId                                                    = 1;
+  QueryContext queryContext                                        = 2;
+  bool enforceSampleLimit                                          = 3;
+  QueryCommand queryCommand                                        = 4;
+  PlanDispatcherContainer dispatcher                               = 5;
+  repeated RangeVectorTransformerContainer rangeVectorTransformers = 6;
+}
+
+message LeafExecPlan {
+  ExecPlan execPlan = 1;
+  int64 submitTime  = 2;
+
+}
+
+message NonLeafExecPlan {
+  ExecPlan execPlan = 1;
+  repeated ExecPlanContainer children = 2;
+
+}
+
+//
+// non leaf exec plans
+//
+
+message LabelCardinalityReduceExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+
+message MultiPartitionDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message LocalPartitionDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message SplitLocalPartitionDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message LocalPartitionReduceAggregateExec {
+  NonLeafExecPlan nonLeafExecPlan        = 1;
+  AggregationOperator aggrOp             = 2;
+  repeated AggregateParameter aggrParams = 3;
+}
+
+message MultiPartitionReduceAggregateExec {
+  NonLeafExecPlan nonLeafExecPlan        = 1;
+  AggregationOperator aggrOp             = 2;
+  repeated AggregateParameter aggrParams = 3;
+}
+
+message BinaryJoinExec {
+  NonLeafExecPlan nonLeafExecPlan =  1;
+  repeated ExecPlanContainer lhs  =  2;
+  repeated ExecPlanContainer rhs  =  3;
+  BinaryOperator binaryOp         =  4;
+  Cardinality cardinality         =  5;
+  repeated string on              =  6;
+  repeated string ignoring        =  7;
+  repeated string include         =  8;
+  string metricColumn             =  9;
+  optional RvRange outputRvRange  = 10;
+}
+
+message TsCardReduceExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message StitchRvsExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+  optional RvRange outputRvRange  = 2;
+}
+
+message SetOperatorExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+  repeated ExecPlanContainer lhs  = 2;
+  repeated ExecPlanContainer rhs  = 3;
+  BinaryOperator binaryOp         = 4;
+  repeated string on              = 5;
+  repeated string ignoring        = 6;
+  string metricColumn             = 7;
+  optional RvRange outputRvRange  = 8;
+}
+
+message LabelValuesDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message PartKeysDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+message LabelNamesDistConcatExec {
+  NonLeafExecPlan nonLeafExecPlan = 1;
+}
+
+//
+// leaf exec plans
+//
+
+// RemoteExec plans are NOT implemented
+// because:
+// 1) currently RemoteExec plans are not serialized and sent over the network
+//    to a remote FiloDB node to be executed. The plans are always executed
+//    on a query server to send the workload to a remote partition or DR data
+//    center. We never plan for a remote partition and let the remote query
+//    server to do its own planning.
+// 2) in the future if we get rid of proxying and hierarchy of planners
+//    (in both meanings of the word: (a) making special cases of downsample vs
+//    raw, rr and downsample/raw, partition 1 vs partition 2, etc (b) forwarding
+//    queries to "local planners", ie when planning of a query is not done
+//    on one physical pod/node but delegated to a query server dedicated to
+//    a particular partition owning the data and which has local knowledge of
+//    shard health), we would not need to have a RemoteExec plan because we
+//    i) would not send PromQL to remote partitions but instead send the
+//    actual serialized execution plans ii) planning would be done once and
+//    no further re-planning of a query would be needed.
+
+message LabelNamesExec {
+  LeafExecPlan leafExecPlan     = 1;
+  int32 shard                   = 2;
+  repeated ColumnFilter filters = 3;
+  int64 startMs                 = 4;
+  int64 endMs                   = 5;
+}
+
+message EmptyResultExec {
+  LeafExecPlan leafExecPlan     = 1;
+}
+
+message PartKeysExec {
+  LeafExecPlan leafExecPlan      = 1;
+  int32 shard                    = 2;
+  repeated ColumnFilter filters  = 3;
+  bool fetchFirstLastSampleTimes = 4;
+  int64 start                    = 5;
+  int64 end                      = 6;
+}
+
+message LabelValuesExec {
+  LeafExecPlan leafExecPlan      = 1;
+  int32 shard                    = 2;
+  repeated ColumnFilter filters  = 3;
+  repeated string columns        = 4;
+  int64 startMs                  = 5;
+  int64 endMs                    = 6;
+}
+
+message LabelCardinalityExec {
+  LeafExecPlan leafExecPlan      = 1;
+  int32 shard                    = 2;
+  repeated ColumnFilter filters  = 3;
+  int64 startMs                  = 4;
+  int64 endMs                    = 5;
+}
+
+message SelectChunkInfosExec {
+  LeafExecPlan leafExecPlan       = 1;
+  int32 shard                     = 2;
+  repeated ColumnFilter filters   = 3;
+  ChunkScanMethod chunkScanMethod = 4;
+  optional string schema          = 5;
+  optional string colName         = 6;
+}
+
+message MultiSchemaPartitionsExec {
+  LeafExecPlan leafExecPlan     = 1;
+  int32 shard                   = 2;
+  repeated ColumnFilter filters = 3;
+  ChunkScanMethod chunkMethod   = 4;
+  string metricColumn           = 5;
+  optional string schema        = 6;
+  optional string colName       = 7;
+}
+
+message ScalarBinaryOperationExec {
+  LeafExecPlan leafExecPlan     = 1;
+  RangeParams params            = 2;
+  oneof lhs {
+    double doubleValueLhs                                   = 3;
+    ScalarBinaryOperationExec scalarBinaryOperationExecLhs = 4;
+  }
+  oneof rhs {
+    double doubleValueRhs                                   = 5;
+    ScalarBinaryOperationExec scalarBinaryOperationExecRhs = 6;
+  }
+  BinaryOperator operator = 7;
+}
+
+message ScalarFixedDoubleExec {
+  LeafExecPlan leafExecPlan = 1;
+  RangeParams params        = 2;
+  double value              = 3;
+}
+
+message TsCardExec {
+  LeafExecPlan leafExecPlan      = 1;
+  int32 shard                    = 2;
+  repeated string shardKeyPrefix = 3;
+  int32 numGroupByFields         = 4;
+  string clusterName             = 5;
+}
+
+message TimeScalarGeneratorExec {
+  LeafExecPlan leafExecPlan    = 1;
+  RangeParams params           = 2;
+  ScalarFunctionId function    = 3;
+}
+
+// probably don't need this one?
+message SelectRawPartitionsExec {
+  LeafExecPlan leafExecPlan             = 1;
+  optional Schema dataSchema            = 2;
+  optional PartLookupResult lookupRes   = 3;
+  bool filterSchemas                    = 4;
+  repeated int32 colIds                 = 5;
+  string planId                         = 6;
+}
+
+// remote exec plans don't need to be implemented because we will never send current kinds
+// of remote exec plans using Akka messaging
+//message RemoteExecPlan {
+//  string queryEndpoint                 = 1;
+//  int64 requestTimeoutMs               = 2;
+//  map<string,string> urlParams         = 3;
+//  PromQlQueryParams promQlQueryParams  = 4;
+//  string args                          = 5;
+//  int32 limit                          = 6;
+//}
+//
+//message PromQlRemoteExec {
+//  RemoteExecPlan remoteExec       = 1;
+//  LeafExecPlan leafExecPlan       = 2;
+//  QueryContext queryContext       = 3;
+//}
+
+
+message ExecPlanContainer {
+  oneof execPlan {
+    // non leaf plans
+    LabelCardinalityReduceExec labelCardinalityReduceExec = 1;
+    MultiPartitionDistConcatExec multiPartitionDistConcatExec = 2;
+    LocalPartitionDistConcatExec localPartitionDistConcatExec = 3;
+    SplitLocalPartitionDistConcatExec splitLocalPartitionDistConcatExec = 4;
+    LocalPartitionReduceAggregateExec localPartitionReduceAggregateExec = 5;
+    MultiPartitionReduceAggregateExec multiPartitionReduceAggregateExec = 6;
+    BinaryJoinExec binaryJoinExec = 7;
+    TsCardReduceExec tsCardReduceExec = 8;
+    StitchRvsExec stitchRvsExec = 9;
+    SetOperatorExec setOperatorExec = 10;
+    LabelValuesDistConcatExec labelValuesDistConcatExec = 11;
+    PartKeysDistConcatExec partKeysDistConcatExec = 12;
+    LabelNamesDistConcatExec labelNamesDistConcatExec = 13;
+
+    //leaf plans
+    LabelNamesExec labelNamesExec = 20;
+    EmptyResultExec emptyResultExec = 21;
+    PartKeysExec partKeysExec = 22;
+    LabelValuesExec labelValuesExec = 23;
+    LabelCardinalityExec labelCardinalityExec = 24;
+    SelectChunkInfosExec selectChunkInfosExec = 25;
+    MultiSchemaPartitionsExec multiSchemaPartitionsExec = 26;
+    ScalarBinaryOperationExec scalarBinaryOperatinExec = 27;
+    ScalarFixedDoubleExec scalarFixedDoubleExec = 28;
+    TsCardExec tsCardExec = 29;
+    TimeScalarGeneratorExec timeScalarGeneratorExec = 30;
+    SelectRawPartitionsExec selectRawPartitionsExec = 31;
+  }
+}

@@ -97,8 +97,10 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // Routes are created according to offset but logical plan should have time without offset.
           // Offset logic is handled in ExecPlan
           localPlanner.materialize(
-            copyLogicalPlanWithUpdatedTimeRange(rootLogicalPlan, TimeRange(timeRange.startMs + offsetMs.max,
-              timeRange.endMs + offsetMs.min)), qContext)
+            copyLogicalPlanWithUpdatedSeconds(rootLogicalPlan,
+              (timeRange.startMs + offsetMs.max) / 1000,
+              (timeRange.endMs + offsetMs.min) / 1000),
+            qContext)
         }
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get

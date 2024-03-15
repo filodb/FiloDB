@@ -284,6 +284,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                            filodbConfig.getBoolean("memstore.index-faceting-enabled-shard-key-labels")
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
+  private val disableIndexCaching = filodbConfig.getBoolean("memstore.disable-index-caching")
+
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -311,7 +313,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part,
     indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
-    storeConfig.diskTTLSeconds * 1000)
+    storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
 
   private val cardTracker: CardinalityTracker = initCardTracker()
 
@@ -879,6 +881,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
         ingested += ingestConsumer.numActuallyIngested
         _offset = offset
+      }
+      else {
+        // Adding this log line to debug the shard stuck in recovery scenario(s)
+        logger.error(s"[Container Empty] record-offset: ${offset} last-ingested-offset: ${_offset}")
       }
     } else {
       shardStats.oldContainers.increment()

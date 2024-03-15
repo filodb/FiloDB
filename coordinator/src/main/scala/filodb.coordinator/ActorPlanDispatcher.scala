@@ -11,10 +11,11 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
+import filodb.coordinator.client.QueryCommands.ProtoExecPlan
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
+import filodb.query.{QueryCommand, QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 
@@ -24,10 +25,23 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
  */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
+  def getCaseClassOrProtoExecPlan(execPlan: filodb.query.exec.ExecPlan): QueryCommand = {
+    val doProto = execPlan.queryContext.plannerParams.useProtoExecPlans
+    val ep =
+      if (doProto) {
+        import filodb.coordinator.ProtoConverters._
+        val protoPlan = execPlan.toExecPlanContainerProto
+        ProtoExecPlan(execPlan.dataset, protoPlan.toByteArray, execPlan.submitTime)
+      } else {
+        execPlan
+      }
+    ep
+  }
+
   def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -40,11 +54,12 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {
         Task.eval({
-          qLogger.warn(s"Creating partial result as shard is not available")
+          qLogger.warn(s"Target Actor is ActorRef.noSender ! Creating partial result as shard is not available")
           emptyPartialResult
         })
       } else {
-        val fut = (target ? plan.execPlan) (t).map {
+        val message = getCaseClassOrProtoExecPlan(plan.execPlan)
+        val fut = (target ? message) (t).map {
           case resp: QueryResponse => resp
           case e => throw new IllegalStateException(s"Received bad response $e")
         }
@@ -66,7 +81,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
     lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId, plan.execPlan.planId,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -82,12 +97,12 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
         })
       } else {
         ResultActor.subject
-            .doOnSubscribe(Task.eval {
-              target.tell(plan.execPlan, ResultActor.resultActor)
-              qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
-            })
-           .filter(_.planId == plan.execPlan.planId)
-           .takeWhileInclusive(!_.isLast)
+          .doOnSubscribe(Task.eval {
+            target.tell(getCaseClassOrProtoExecPlan(plan.execPlan), ResultActor.resultActor)
+            qLogger.debug(s"DISPATCHING ${plan.execPlan.planId}")
+          })
+         .filter(_.planId == plan.execPlan.planId)
+         .takeWhileInclusive(!_.isLast)
         // TODO timeout query if response stream not completed in time
       }
     }

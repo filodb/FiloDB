@@ -343,8 +343,14 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
   override def nextInfoReader: ChunkSetInfoReader = {
     val reader = base.nextInfoReader
     var bytesRead = 0
+    var bucketsFactor = 1
     columnIDs.foreach { c =>
       bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(c), reader.vectorAddress(c))
+      if (BinaryVector.majorVectorType(reader.vectorAccessor(c), reader.vectorAddress(c))
+                    == WireFormat.VECTORTYPE_HISTOGRAM) {
+        // since histogram has several buckets, include a factor when counting samples
+        bucketsFactor = 20 // TODO fixed to avoid performance issues in opening hist vector here. Make it better later.
+      }
     }
 
     // Why two counters ?
@@ -359,10 +365,9 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
       throw QueryLimitException(exMessage, queryId)
     }
 
-
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
-    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows)
+    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows * bucketsFactor)
     reader
   }
   override def nextInfo: ChunkSetInfo = {
@@ -430,7 +435,8 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader])
+                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader],
+                            isInclusiveRange: Boolean = true)
 extends Iterator[ChunkSetInfoReader] {
   require(step > 0, s"Adjusted step $step not > 0")
   private val infos = rv.chunkInfos(start - window, end)
@@ -450,7 +456,8 @@ extends Iterator[ChunkSetInfoReader] {
     // advance window pointers and reset read index
     if (curWindowEnd == -1L) {
       curWindowEnd = start
-      curWindowStart = start - Math.max(window, 0)  // window cannot be below 0, ie start should never be > end
+      val windowDuration = if (isInclusiveRange) window else window - 1
+      curWindowStart = start - Math.max(windowDuration, 0)  // window cannot be below 0, ie start should never be > end
     } else {
       curWindowEnd += step
       curWindowStart += step

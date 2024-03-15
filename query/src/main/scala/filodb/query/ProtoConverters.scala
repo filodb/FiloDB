@@ -122,10 +122,10 @@ object ProtoConverters {
     def fromProto: RvRange = RvRange(rvrProto.getStartMs, rvrProto.getStep, rvrProto.getEndMs)
   }
 
-  implicit class ColumnInfoToProtoConversion(ci: ColumnInfo) {
-    def toProto: ProtoRangeVector.ColumnInfo = {
-      val builder = ProtoRangeVector.ColumnInfo.newBuilder()
-      val grpcColType = ci.colType match {
+  // ColumnType
+  implicit class ColumnTypeToProtoConverter(ct: filodb.core.metadata.Column.ColumnType) {
+    def toProto: ProtoRangeVector.ColumnType = {
+      val grpcColType = ct match {
         case IntColumn => ProtoRangeVector.ColumnType.IntColumn
         case LongColumn => ProtoRangeVector.ColumnType.LongColumn
         case DoubleColumn => ProtoRangeVector.ColumnType.DoubleColumn
@@ -135,15 +135,14 @@ object ProtoConverters {
         case BinaryRecordColumn => ProtoRangeVector.ColumnType.BinaryRecordColumn
         case HistogramColumn => ProtoRangeVector.ColumnType.HistogramColumn
       }
-      builder.setColumnType(grpcColType)
-      builder.setName(ci.name)
-      builder.build()
+
+      grpcColType
     }
   }
 
-  implicit class ColumnInfoFromProtoConversion(ci: ProtoRangeVector.ColumnInfo) {
-    def fromProto: ColumnInfo = {
-      val colType = ci.getColumnType match {
+  implicit class ColumnTypeFromProtoConverter(ct: ProtoRangeVector.ColumnType) {
+    def fromProto: filodb.core.metadata.Column.ColumnType = {
+      val colType = ct match {
         case ProtoRangeVector.ColumnType.IntColumn => IntColumn
         case ProtoRangeVector.ColumnType.LongColumn => LongColumn
         case ProtoRangeVector.ColumnType.DoubleColumn => DoubleColumn
@@ -155,6 +154,23 @@ object ProtoConverters {
         case ProtoRangeVector.ColumnType.UNRECOGNIZED =>
           throw new IllegalStateException("Unrecognized colType found")
       }
+      colType
+    }
+  }
+
+  implicit class ColumnInfoToProtoConversion(ci: ColumnInfo) {
+    def toProto: ProtoRangeVector.ColumnInfo = {
+      val builder = ProtoRangeVector.ColumnInfo.newBuilder()
+      val grpcColType = ci.colType.toProto
+      builder.setColumnType(grpcColType)
+      builder.setName(ci.name)
+      builder.build()
+    }
+  }
+
+  implicit class ColumnInfoFromProtoConversion(ci: ProtoRangeVector.ColumnInfo) {
+    def fromProto: ColumnInfo = {
+      val colType = ci.getColumnType.fromProto
       ColumnInfo(ci.getName, colType)
     }
   }
@@ -211,6 +227,9 @@ object ProtoConverters {
       builder.setProcessFailure(pp.processFailure)
       builder.setProcessMultiPartition(pp.processMultiPartition)
       builder.setAllowPartialResults(pp.allowPartialResults)
+      builder.setUseProtoExecPlans(pp.useProtoExecPlans)
+      builder.setReduceShardKeyRegexFanout(pp.reduceShardKeyRegexFanout)
+      builder.setMaxShardKeyRegexFanoutBatchSize(pp.maxShardKeyRegexFanoutBatchSize)
       builder.build()
     }
   }
@@ -238,7 +257,12 @@ object ProtoConverters {
         processFailure = if (gpp.hasProcessFailure) gpp.getProcessFailure else pp.processFailure,
         processMultiPartition = if (gpp.hasProcessMultiPartition) gpp.getProcessMultiPartition
         else pp.processMultiPartition,
-        allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults
+        allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults,
+        useProtoExecPlans = if (gpp.hasUseProtoExecPlans) gpp.getUseProtoExecPlans else pp.useProtoExecPlans,
+        reduceShardKeyRegexFanout = if (gpp.hasReduceShardKeyRegexFanout) gpp.getReduceShardKeyRegexFanout
+        else pp.reduceShardKeyRegexFanout,
+        maxShardKeyRegexFanoutBatchSize = if (gpp.hasMaxShardKeyRegexFanoutBatchSize)
+          gpp.getMaxShardKeyRegexFanoutBatchSize else pp.maxShardKeyRegexFanoutBatchSize
       )
     }
   }

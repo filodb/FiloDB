@@ -113,7 +113,9 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     DownsamplerContext.dsLogger.info(s"Index Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr doFullMigration=$doFullMigration")
     val jobCompleted = Kamon.counter("index-migration-completed").withTag("downsamplePeriod", downsamplePeriodStr)
+    val jobCompletedNoTags = Kamon.counter("index-migration-completed-success").withoutTags()
     jobCompleted.increment()
+    jobCompletedNoTags.increment()
 
     if (!doFullMigration) {
       val downsampleHourStartGauge = Kamon.gauge("index-downsampler-period-start-hour")

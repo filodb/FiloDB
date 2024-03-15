@@ -27,8 +27,9 @@ import filodb.core.query.QuerySession
 import filodb.core.query.QueryStats
 import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
+import filodb.grpc.ExecPlans.ExecPlanContainer
 import filodb.query._
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PlanDispatcher}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
@@ -87,9 +88,9 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
-  private val uncaughtExceptions = Kamon.counter("queryactor-uncaught-exceptions").withTags(TagSet.from(tags))
   private val numRejectedPlans = Kamon.counter("circuit-breaker-num-rejected-plans").withTags(TagSet.from(tags))
 
+  private val streamResultsEnabled = config.getBoolean("filodb.query.streaming-query-results-enabled")
   private val circuitBreakerEnabled = config.getBoolean("filodb.query.circuit-breaker.enabled")
   private val circuitBreakerNumFailures = config.getInt("filodb.query.circuit-breaker.open-when-num-failures")
   private val circuitBreakerResetTimeout = config.as[FiniteDuration]("filodb.query.circuit-breaker.reset-timeout")
@@ -117,7 +118,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext,
                                         queryConfig,
-                                        streamingDispatch = PlanDispatcher.streamingResultsEnabled,
+                                        streamingDispatch = streamResultsEnabled,
                                         catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
 
@@ -218,7 +219,7 @@ final class QueryActor(memStore: TimeSeriesStore,
       lpRequests.increment()
       try {
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-        if (PlanDispatcher.streamingResultsEnabled) {
+        if (streamResultsEnabled) {
           val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
           queryengine.Utils.streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
             case Success(resp) => replyTo ! resp
@@ -235,8 +236,6 @@ final class QueryActor(memStore: TimeSeriesStore,
       }
     }
   }
-
-
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
@@ -293,12 +292,20 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
+  def execProtoExecPlan(pep: ProtoExecPlan, replyTo: ActorRef): Unit = {
+    import filodb.coordinator.ProtoConverters._
+    val c = ExecPlanContainer.parseFrom(pep.serializedExecPlan)
+    val plan: ExecPlan = c.fromProto()
+    execPhysicalPlan2(plan, replyTo)
+  }
+
   def receive: Receive = {
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: ExecPlan               => execPhysicalPlan2(q, sender())
+    case q: ProtoExecPlan          => execProtoExecPlan(q, sender())
     case q: GetTopkCardinality     => execTopkCardinalityQuery(q, sender())
 
     case GetIndexNames(ref, limit, _) =>

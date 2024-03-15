@@ -154,7 +154,10 @@ case class PlannerParams(applicationId: String = "filodb",
                          skipAggregatePresent: Boolean = false,
                          processFailure: Boolean = true,
                          processMultiPartition: Boolean = false,
-                         allowPartialResults: Boolean = false)
+                         allowPartialResults: Boolean = false,
+                         reduceShardKeyRegexFanout: Boolean = true,
+                         maxShardKeyRegexFanoutBatchSize: Int = 10,
+                         useProtoExecPlans: Boolean = false)
 
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =

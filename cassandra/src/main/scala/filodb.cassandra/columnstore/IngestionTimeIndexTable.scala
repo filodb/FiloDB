@@ -42,6 +42,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
     s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteIndexCql = session.prepare(
     s"DELETE FROM $tableString WHERE partition=? AND ingestion_time=? AND start_time=?")
