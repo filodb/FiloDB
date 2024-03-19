@@ -4,6 +4,8 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.query._
 import ProtoConverters._
+import QueryResponseConverter._
+
 import akka.pattern.AskTimeoutException
 import filodb.core.QueryTimeoutException
 import filodb.core.binaryrecord2.RecordSchema
@@ -348,6 +350,33 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     // Throwable is not constructed to the same type as original
     deser.t.getMessage shouldEqual err.t.getMessage
 
+  }
+
+  it("should preserve the order of rvs when deserializing it to big response") {
+
+    val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
+      ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
+
+    val keysMap = Map("key1".utf8 -> "val1".utf8,
+      "key2".utf8 -> "val2".utf8)
+    val key = CustomRangeVectorKey(keysMap)
+    val rvs = (0 to 10).map(
+      x => toRv(Seq((100, x)), key, RvRange(100, 1, 100))
+    )
+
+    val builder = SerializedRangeVector.newBuilder()
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)))
+
+    val streamingResponse = QueryResult("test", resultSchema,
+      rvs.map(rv => SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", QueryStats()))
+    ).toStreamingResponse(
+      QueryConfig.unitTestingQueryConfig.copy(numRvsPerResultMessage = 3)).map(_.toProto)
+    val deserializedQueryResponse = streamingResponse.toIterator.toQueryResponse.asInstanceOf[QueryResult]
+    // This deserializedQueryResponse should have the same order for the Rvs as the original
+
+    deserializedQueryResponse.result.map(
+      rv => rv.asInstanceOf[SerializedRangeVector].rows.next().getDouble(1).toInt) shouldEqual (0 to 10).toList
   }
 
   it ("should stream Iterator[StreamingResponse] to a QueryResponse in multiple cases") {
