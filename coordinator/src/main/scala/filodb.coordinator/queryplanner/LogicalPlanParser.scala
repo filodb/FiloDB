@@ -166,8 +166,12 @@ object LogicalPlanParser {
 
   def miscellaneousFnToQuery(lp: ApplyMiscellaneousFunction): String = {
     val prefix = s"${lp.function.entryName}$OpeningRoundBracket${convertToQuery(lp.vectors)}"
-    if(lp.stringArgs.isEmpty) s"$prefix$ClosingRoundBracket"
-    else s"$prefix$Comma${lp.stringArgs.map(Quotes + _ + Quotes).mkString(Comma)}$ClosingRoundBracket"
+    if (lp.stringArgs.isEmpty) {
+      s"$prefix$ClosingRoundBracket"
+    } else {
+      val escapedArgs = lp.stringArgs.map(Quotes + StringEscapeUtils.escapeJava(_) + Quotes)
+      s"$prefix$Comma${escapedArgs.mkString(Comma)}$ClosingRoundBracket"
+    }
   }
 
   def scalarVaryingDoubleToQuery(lp: ScalarVaryingDoublePlan): String = {
