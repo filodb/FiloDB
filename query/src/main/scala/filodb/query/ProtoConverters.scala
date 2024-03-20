@@ -655,7 +655,7 @@ object ProtoConverters {
         (
           "",
           ResultSchema.empty,
-          List.empty[SerializableRangeVector],
+          Seq.empty[SerializableRangeVector],
           QueryStats(),
           QueryWarnings(),
           false, Option.empty[String], Option.empty[Throwable]
@@ -665,7 +665,7 @@ object ProtoConverters {
           if (response.hasBody) {
               val body = response.getBody
               (id, schema,
-                body.getResultList.asScala.map(_.fromProto).toList::: rvs, stats, warnings, isPartial, partialReason, t)
+                rvs ++ body.getResultList.asScala.map(_.fromProto).toList, stats, warnings, isPartial, partialReason, t)
           } else if (response.hasFooter) {
             val footer = response.getFooter
             (
