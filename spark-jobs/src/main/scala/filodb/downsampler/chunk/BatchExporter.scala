@@ -161,8 +161,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     // append all dynamic column values
     exportTableConfig.labelColumnMapping.foreach { pair =>
       val labelValue = exportData.labels.get(pair._1)
-      assert(labelValue.isDefined, s"${pair._1} label was expected but not found: ${exportData.labels}")
-      dataSeq.append(labelValue.get)
+      dataSeq.append(labelValue.getOrElse(""))
     }
     // append all fixed column values
     dataSeq.append(
