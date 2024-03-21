@@ -86,9 +86,6 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 
-  @transient lazy val exportDefaultDynamicColumnValue =
-    downsamplerConfig.as[String]("data-export.default-dynamic-column-value")
-
   @transient lazy val exportKeyToRules = {
     val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
       val key = group.as[Seq[String]]("key")
