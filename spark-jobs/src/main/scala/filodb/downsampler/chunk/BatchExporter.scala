@@ -166,7 +166,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       }
       dataSeq.append(result)
     }
-
     // append all fixed column values
     dataSeq.append(
       exportData.metric,
