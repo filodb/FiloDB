@@ -162,7 +162,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     exportTableConfig.labelColumnMapping.foreach { pair =>
       val result = exportData.labels.get(pair._1) match {
         case Some(labelValue) => labelValue
-        case None => null
+        case None => None
       }
       dataSeq.append(result)
     }
