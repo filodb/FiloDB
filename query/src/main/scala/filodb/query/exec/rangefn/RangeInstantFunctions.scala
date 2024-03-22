@@ -139,10 +139,12 @@ object IRatePeriodicFunction extends RangeFunction {
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    //If there is only one sample, default the smple interval to 60 seconds
+    if (window.size < 1) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN) // cannot calculate result without at least 1 sample
+    //If there is only one sample, default the sample interval to 60 seconds
     var sampledInterval: Double = 60
+    lastFunc.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
     if (window.size >= 2) {
-      lastFunc.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
       val prevSampleRow = window(window.size - 2)
       sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
     }
