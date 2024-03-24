@@ -160,9 +160,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     val dataSeq = new mutable.ArrayBuffer[Any](exportTableConfig.tableSchema.fields.length)
     // append all dynamic column values
     exportTableConfig.labelColumnMapping.foreach { pair =>
-      val labelValue = exportData.labels.get(pair._1)
-      assert(labelValue.isDefined, s"${pair._1} label was expected but not found: ${exportData.labels}")
-      dataSeq.append(labelValue.get)
+      // scalastyle:off null
+      val result = exportData.labels.get(pair._1) match {
+        case Some(labelValue) => labelValue
+        case None => null
+      }
+      // scalastyle:on null
+      dataSeq.append(result)
     }
     // append all fixed column values
     dataSeq.append(
