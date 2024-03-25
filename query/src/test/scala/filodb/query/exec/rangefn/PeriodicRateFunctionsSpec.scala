@@ -148,6 +148,34 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     Math.abs(toEmit.value - expected) should be < errorOk
   }
 
+  it("irate over period-counters should work as expected there are 2 samples in the window") {
+    val startTs = 8132569L
+    val endTs = 8142822L
+    val prevSample = qDelta(qDelta.size - 2)
+    val expected = (qDelta.last.value) / (qDelta.last.timestamp - prevSample.timestamp) * 1000
+    val toEmit = new TransientRow
+    IRatePeriodicFunction.apply(startTs, endTs, deltaDCounterWindow, toEmit, queryConfig)
+    Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
+  it("irate over period-counters should work when there is only one sample in the window") {
+    val startTs =  8152860L
+    val endTs = 8162999L
+    val irateDelta = new IndexedArrayQueue[TransientRow]()
+    deltaCounterSamples.foreach { case (t, v) =>
+      if (t >= startTs && t <= endTs) {
+        val s = new TransientRow(t, v)
+        irateDelta.add(s)
+      }
+    }
+    val irateDCounterWindow = new QueueBasedWindow(irateDelta)
+    val size = irateDCounterWindow.size
+    val expected = (irateDelta.last.value) / 60 * 1000
+    val toEmit = new TransientRow
+    IRatePeriodicFunction.apply(startTs, endTs, irateDCounterWindow, toEmit, queryConfig)
+    Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
   it ("increase over period-counters should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs = 8163070L
