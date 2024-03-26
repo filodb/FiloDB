@@ -1,22 +1,19 @@
 package filodb.query.exec.rangefn
 
 import java.util.concurrent.TimeUnit
-
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.MetricsTestData
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query._
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query.{QueryResult, ScalarFunctionId, exec}
-import filodb.query.exec.{InProcessPlanDispatcher, TimeScalarGeneratorExec}
+import filodb.query.{BinaryOperator, QueryResult, ScalarFunctionId, exec}
+import filodb.query.exec.{InProcessPlanDispatcher, ScalarBinaryOperationExec, ScalarOperationMapper, TimeFuncArgs, TimeScalarGeneratorExec}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -185,5 +182,39 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
           (1583683300000L,0.0), (1583683400000L,0.0)).sameElements(res) shouldEqual(true)
       }
     }
+  }
+
+  it("should generate a plan that simply multiplies 60 times 60") {
+
+    val execPlan = ScalarBinaryOperationExec(QueryContext(),
+      timeseriesDataset.ref,
+      RangeParams(1583682900, 100, 1583683400),
+      lhs = Left(60),
+      rhs = Left(60),
+      operator = BinaryOperator.MUL,
+      dispatcher = inProcessDispatcher)
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult]
+    val res = resp.result.head.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+    List((1583682900000L, 3600.0), (1583683000000L, 3600.0), (1583683100000L, 3600.0), (1583683200000L, 3600.0),
+      (1583683300000L, 3600.0), (1583683400000L, 3600.0)).sameElements(res) shouldEqual (true)
+  }
+
+  it("should generate a plan that subtracts 3600 from time") {
+    val range = RangeParams(3600, 100, 4100)
+    val execPlan = ScalarBinaryOperationExec(QueryContext(),
+      timeseriesDataset.ref,
+      range,
+      lhs = Left(60),
+      rhs = Left(60),
+      operator = BinaryOperator.MUL,
+      dispatcher = inProcessDispatcher)
+    execPlan.addRangeVectorTransformer(
+      ScalarOperationMapper(operator =  BinaryOperator.SUB,
+      scalarOnLhs = true,
+      funcParams =  Seq(TimeFuncArgs(range))))
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult]
+    val res = resp.result.head.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    List((3600000L, 0.0), (3700000L, 100.0), (3800000L, 200.0), (3900000L, 300.0),
+      (4000000L, 400.0), (4100000L, 500.0)).sameElements(res) shouldEqual (true)
   }
 }
