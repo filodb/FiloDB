@@ -148,7 +148,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     Math.abs(toEmit.value - expected) should be < errorOk
   }
 
-  it("irate over period-counters should work as expected there are 2 samples in the window") {
+  it("irate over period-counters should work as expected when there are 2 samples in the window") {
     val startTs = 8132569L
     val endTs = 8142822L
     val prevSample = qDelta(qDelta.size - 2)
