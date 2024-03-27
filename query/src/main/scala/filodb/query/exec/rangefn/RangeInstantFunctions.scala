@@ -141,6 +141,7 @@ object IRatePeriodicFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     if (window.size < 1) {
       sampleToEmit.setValues(endTimestamp, Double.NaN) // cannot calculate result without at least 1 sample
+      return
     }
     //If there is only one sample, default the sample interval to 60 seconds
     var sampledInterval: Double = 60
