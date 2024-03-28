@@ -3,12 +3,14 @@ package filodb.core.memstore
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
+
 import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types, Utils}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
@@ -94,7 +96,9 @@ extends TimeSeriesStore with StrictLogging {
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
 
     // adding an additional check to verify if the partition is same as mentioned in query context
-    require()
+    require(isCorrectPartitionForCardinalityQuery(queryContext, FILODB_PARTITION),
+      s"[TsCardinalities] Query not routed to correct partition! " +
+      s"Expected: ${queryContext.traceInfo}  | Actual: ${FILODB_PARTITION}")
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala

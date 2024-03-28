@@ -206,7 +206,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
    * @param queryContext QueryContext containing traceInfo of the originating partition
    * @return
    */
-  def isQueryForTheGivenPartition(queryContext: QueryContext, filodbPartition: String): Boolean = {
+  def isCorrectPartitionForCardinalityQuery(queryContext: QueryContext, filodbPartition: String): Boolean = {
     if (
       queryContext.traceInfo.contains(FILODB_PARTITION_KEY) &&
         (!queryContext.traceInfo.get(FILODB_PARTITION_KEY).isEmpty) &&
