@@ -91,11 +91,11 @@ object InputRecord {
   /**
    * Writes an otel-style increasing histogram record, along with the sum, count, min and max
    */
-  def writeOtelHistRecord(builder: RecordBuilder,
-                          metric: String,
-                          tags: Map[String, String],
-                          timestamp: Long,
-                          kvs: Seq[(String, Double)]): Unit = {
+  def writeOtelCumulativeHistRecord(builder: RecordBuilder,
+                                    metric: String,
+                                    tags: Map[String, String],
+                                    timestamp: Long,
+                                    kvs: Seq[(String, Double)]): Unit = {
     var sum = Double.NaN
     var count = Double.NaN
     var min = Double.NaN
@@ -123,7 +123,7 @@ object InputRecord {
       val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
 
       // Now, write out histogram
-      builder.startNewRecord(otelHistogram)
+      builder.startNewRecord(otelCumulativeHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
@@ -184,11 +184,11 @@ object InputRecord {
   /**
    * Writes a delta non-increasing histogram record, along with the sum, count, min and max
    */
-  def writeDeltaHistRecordMinMax(builder: RecordBuilder,
-                           metric: String,
-                           tags: Map[String, String],
-                           timestamp: Long,
-                           kvs: Seq[(String, Double)]): Unit = {
+  def writeOtelDeltaHistRecord(builder: RecordBuilder,
+                               metric: String,
+                               tags: Map[String, String],
+                               timestamp: Long,
+                               kvs: Seq[(String, Double)]): Unit = {
     var sum = Double.NaN
     var count = Double.NaN
     var min = Double.NaN
@@ -216,7 +216,7 @@ object InputRecord {
       val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
 
       // Now, write out histogram
-      builder.startNewRecord(deltaHistogramMinMax)
+      builder.startNewRecord(otelDeltaHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
