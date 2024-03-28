@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableException}
+import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -73,7 +73,7 @@ extends TimeSeriesStore with StrictLogging {
     }
   }
 
-  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+  def scanTsCardinalities(queryContext: QueryContext, ref: DatasetRef, shards: Seq[Int],
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
     datasets.get(ref).toSeq
       .flatMap { ts =>

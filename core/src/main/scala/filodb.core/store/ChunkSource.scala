@@ -198,7 +198,26 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     }
   }
 
-  def scanTsCardinalities(ref: DatasetRef, shard: Seq[Int],
+  val FILODB_PARTITION_KEY = "partition"
+
+  /**
+   * Additional check to ensure the query is for the given filodb partition
+   *
+   * @param queryContext QueryContext containing traceInfo of the originating partition
+   * @return
+   */
+  def isQueryForTheGivenPartition(queryContext: QueryContext, filodbPartition: String): Boolean = {
+    if (
+      queryContext.traceInfo.contains(FILODB_PARTITION_KEY) &&
+        (!queryContext.traceInfo.get(FILODB_PARTITION_KEY).isEmpty) &&
+        (queryContext.traceInfo.get(FILODB_PARTITION_KEY) != filodbPartition)
+    ) {
+      return false
+    }
+    true
+  }
+
+  def scanTsCardinalities(queryContext: QueryContext, ref: DatasetRef, shard: Seq[Int],
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord]
 
 }

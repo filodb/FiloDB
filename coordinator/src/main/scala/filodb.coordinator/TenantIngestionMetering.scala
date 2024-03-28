@@ -14,7 +14,9 @@ import monix.execution.Scheduler.Implicits.{global => scheduler}
 import filodb.coordinator.client.Client
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
+import filodb.core.query.QueryContext
 import filodb.query.{QueryError, QueryResult, TsCardinalities}
+import filodb.query.exec.TsCardExec._
 
 /**
  * Periodically queries a node for all namespace cardinalities.
@@ -38,6 +40,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
   private val SCHED_DELAY = ASK_TIMEOUT  // time between all jobs after the first
 
   private val CLUSTER_TYPE = settings.config.getString("cluster-type")
+  private val FILODB_PARTITION = settings.config.getString("partition")
 
   private val METRIC_ACTIVE = "tsdb_metering_active_timeseries"
   private val METRIC_TOTAL = "tsdb_metering_total_timeseries"
@@ -54,18 +57,29 @@ case class TenantIngestionMetering(settings: FilodbSettings,
       () => queryAndSchedulePublish())
   }
 
+  private def getQueryContextForMetering(): QueryContext = {
+    if (FILODB_PARTITION.isEmpty) QueryContext()
+    else {
+      val traceInfoMap = Map( FILODB_PARTITION_KEY -> FILODB_PARTITION)
+      QueryContext(traceInfo = traceInfoMap)
+    }
+  }
+
   /**
    * For each dataset, ask a Coordinator with a TsCardinalities LogicalPlan.
    * Schedules a job to publish the Coordinator's response.
    */
   private def queryAndSchedulePublish() : Unit = {
-    import filodb.query.exec.TsCardExec._
     val numGroupByFields = 2  // group cardinalities at the second level (i.e. ws & ns)
     val prefix = Nil  // query for cardinalities regardless of first-level name (i.e. ws name)
     dsIterProducer().foreach { dsRef =>
       val fut = Client.asyncAsk(
         coordActorProducer(),
-        LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields, overrideClusterName = CLUSTER_TYPE)),
+        LogicalPlan2Query(
+          dsRef,
+          TsCardinalities(prefix, numGroupByFields, overrideClusterName = CLUSTER_TYPE),
+          getQueryContextForMetering()
+        ),
         ASK_TIMEOUT)
       fut.onComplete {
         case Success(QueryResult(_, _, rv, _, _, _, _)) =>
