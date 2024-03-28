@@ -108,7 +108,7 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
   }
 
   def initColStore(colStore: CassandraColumnStore, datasetRef: DatasetRef) = {
-    colStore.initialize(datasetRef, 1).futureValue
+    colStore.initialize(datasetRef, 1, ConfigFactory.empty).futureValue
     colStore.truncate(datasetRef, 1).futureValue
   }
 

@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
+import com.typesafe.config.ConfigFactory
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
@@ -93,7 +94,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                             datasetObj: Dataset,
                             numShards: Int): Unit = {
     (for {
-      resp2 <- memStore.store.initialize(datasetObj.ref, numShards) if resp2 == Success
+      resp2 <- memStore.store.initialize(datasetObj.ref, numShards, ConfigFactory.empty()) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
@@ -107,11 +108,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
-    memStore.store.initialize(dataset.ref, ingestConfig.numShards)
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
     // if downsampling is enabled, then initialize downsample datasets
     ingestConfig.downsampleConfig
                 .downsampleDatasetRefs(dataset.ref.dataset)
-                .foreach { downsampleDataset => memStore.store.initialize(downsampleDataset, ingestConfig.numShards) }
+                .foreach { downsampleDataset => memStore.store.initialize(downsampleDataset,
+                  ingestConfig.numShards, ingestConfig.resources) }
 
     setupDataset( dataset,
                   ingestConfig.storeConfig,

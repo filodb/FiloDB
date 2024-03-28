@@ -65,7 +65,9 @@ class ChunkCopier(conf: SparkConf) {
   val isDownsampleCopy = conf.getBoolean("spark.filodb.chunks.copier.is.downsample.copy", false)
 
   val datasetName = conf.get("spark.filodb.chunks.copier.dataset")
+  val sourceDatasetConfig = datasetConfig(sourceConfig, datasetName)
   val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
+
   val datasetRef = if (isDownsampleCopy) {
     val downsampleResolution = Duration(conf.get("spark.filodb.chunks.copier.dataset.downsample.resolution"))
     DatasetRef(s"${datasetName}_ds_${downsampleResolution.toMinutes}")
@@ -109,6 +111,15 @@ class ChunkCopier(conf: SparkConf) {
   val targetCassandraColStore = new CassandraColumnStore(
     targetConfig, readSched, targetSession, isDownsampleCopy)(writeSched)
 
+  def getDatasetCassConfig(datasetConfig: Config): Config = {
+    if (datasetConfig.hasPath("cassandra"))
+      datasetConfig.getConfig("cassandra")
+    else
+      ConfigFactory.empty
+  }
+
+  sourceCassandraColStore.initialize(datasetRef, -1, getDatasetCassConfig(sourceDatasetConfig))
+  targetCassandraColStore.initialize(datasetRef, -1, getDatasetCassConfig(targetDatasetConfig))
   private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
   private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)

@@ -42,7 +42,7 @@ if [ ! -f standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar ]; the
     sbt standalone/assembly
 fi
 
-FIXED_JAVA_OPTS="-Xmx2G -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=conf/logback-dev.xml "
+FIXED_JAVA_OPTS="-Xmx2G -Dconfig.file=$CONFIG -Dlogback.configurationFile=conf/logback-dev.xml "
 
 echo "Starting FiloDB standalone server ..."
 echo "Java Opts Used: $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS"

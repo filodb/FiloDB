@@ -76,11 +76,12 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     clusterDiscovery.registerDatasetForDiscovery(dataset.ref, ingestConfig.numShards)
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
-    memStore.store.initialize(dataset.ref, ingestConfig.numShards)
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
     // if downsampling is enabled, then initialize downsample datasets
     ingestConfig.downsampleConfig
                 .downsampleDatasetRefs(dataset.ref.dataset)
-                .foreach { downsampleDataset => memStore.store.initialize(downsampleDataset, ingestConfig.numShards) }
+                  .foreach { downsampleDataset =>
+                    memStore.store.initialize(downsampleDataset, ingestConfig.numShards, ingestConfig.resources) }
 
     setupDataset( dataset,
                   ingestConfig.storeConfig, ingestConfig.numShards,

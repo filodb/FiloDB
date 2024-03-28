@@ -1,11 +1,11 @@
 package filodb.cassandra
 
+import com.typesafe.config.ConfigFactory
+
 import scala.concurrent.duration._
-
 import monix.reactive.Observable
-
 import filodb.core._
-import filodb.core.memstore.{TimeSeriesMemStore}
+import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.Schemas
 import filodb.core.store.{FilteredPartitionScan, InMemoryChunkScan}
 import filodb.memory.format.UnsafeUtils
@@ -25,7 +25,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
-    columnStore.initialize(dataset1.ref, numShards).futureValue
+    columnStore.initialize(dataset1.ref, numShards, ConfigFactory.empty).futureValue
   }
 
   before {
