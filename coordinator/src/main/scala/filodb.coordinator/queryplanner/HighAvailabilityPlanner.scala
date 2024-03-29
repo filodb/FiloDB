@@ -223,9 +223,11 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     def dispatchExecutionPlan(plan: ExecPlanWithClientParams, remainingTime: Long, sched: Scheduler):
     Task[QueryResponse] = {
       val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
-
+      // We only dispatch the child of ExecPlan, we expect the type of plan to be dispatched
+      // by GrpcPlanDispatcher is GenericRemoteExec
+      val genericRemoteExec = plan.execPlan.asInstanceOf[GenericRemoteExec]
       import filodb.coordinator.ProtoConverters._
-      val protoPlan = plan.execPlan.toExecPlanContainerProto
+      val protoPlan = genericRemoteExec.execPlan.toExecPlanContainerProto
 
       val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
       val observableResponse: Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
