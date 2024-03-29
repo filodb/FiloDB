@@ -27,7 +27,7 @@ import filodb.core.query.QuerySession
 import filodb.core.query.QueryStats
 import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
-import filodb.grpc.ExecPlans.ExecPlanContainer
+import filodb.grpc.GrpcMultiPartitionQueryService.ExecPlanContainer
 import filodb.query._
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
 
