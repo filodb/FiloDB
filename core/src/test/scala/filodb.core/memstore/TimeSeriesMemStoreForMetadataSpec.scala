@@ -132,4 +132,18 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
       QueryContext(traceInfo = traceInfo1),timeseriesDataset.ref,Seq(1,2,3),Seq("testws","testns"),3)
   }
 
+  it("should not throw error when partition match for scanTsCardinalities") {
+    val traceInfo1 = Map(memStore.FILODB_PARTITION_KEY -> "test-partition")
+    noException should be thrownBy memStore.scanTsCardinalities(
+      QueryContext(traceInfo = traceInfo1), timeseriesDataset.ref, Seq(1, 2, 3), Seq("testws", "testns"), 3)
+
+    noException should be thrownBy memStore.scanTsCardinalities(
+      QueryContext(), timeseriesDataset.ref, Seq(1, 2, 3), Seq("testws", "testns"), 3)
+  }
+
+  it("should not throw error when empty QueryContext() for scanTsCardinalities") {
+    noException should be thrownBy memStore.scanTsCardinalities(
+      QueryContext(), timeseriesDataset.ref, Seq(1, 2, 3), Seq("testws", "testns"), 3)
+  }
+
 }
