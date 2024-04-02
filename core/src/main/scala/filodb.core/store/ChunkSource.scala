@@ -198,7 +198,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     }
   }
 
-  val FILODB_PARTITION_KEY = "partition"
+  val FILODB_PARTITION_KEY = "filodb.partition"
 
   /**
    * Additional check to ensure the query is for the given filodb partition
@@ -209,8 +209,8 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   def isCorrectPartitionForCardinalityQuery(queryContext: QueryContext, filodbPartition: String): Boolean = {
     if (
       queryContext.traceInfo.contains(FILODB_PARTITION_KEY) &&
-        (!queryContext.traceInfo.get(FILODB_PARTITION_KEY).isEmpty) &&
-        (queryContext.traceInfo.get(FILODB_PARTITION_KEY) != filodbPartition)
+        (!queryContext.traceInfo.get(FILODB_PARTITION_KEY).get.isEmpty) &&
+        (queryContext.traceInfo.get(FILODB_PARTITION_KEY).get != filodbPartition)
     ) {
       return false
     }

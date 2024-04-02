@@ -8,7 +8,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -101,6 +101,35 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
 
     metadata.hasNext shouldEqual true
     metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)
+  }
+
+  it ("should return expected values for isCorrectPartitionForCardinalityQuery") {
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(),"") shouldEqual true
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(),"partition1") shouldEqual true
+    val traceInfo = Map(memStore.FILODB_PARTITION_KEY -> "partition1")
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo),
+      "partition1") shouldEqual true
+
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo),
+      "partition2") shouldEqual false
+
+    val traceInfo2 = Map("randomKey" -> "partition1")
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo2),
+      "partition1") shouldEqual true
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo2),
+      "") shouldEqual true
+
+    val traceInfo3 = Map(memStore.FILODB_PARTITION_KEY -> "")
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo2),
+      "partition1") shouldEqual true
+    memStore.isCorrectPartitionForCardinalityQuery(QueryContext(traceInfo = traceInfo2),
+      "") shouldEqual true
+  }
+
+  it ("should throw assertion error when partition doesn't match for scanTsCardinalities") {
+    val traceInfo1 = Map(memStore.FILODB_PARTITION_KEY -> "test-partition2")
+    the[IllegalArgumentException] thrownBy  memStore.scanTsCardinalities(
+      QueryContext(traceInfo = traceInfo1),timeseriesDataset.ref,Seq(1,2,3),Seq("testws","testns"),3)
   }
 
 }

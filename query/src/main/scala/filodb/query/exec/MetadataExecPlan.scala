@@ -1,11 +1,13 @@
 package filodb.query.exec
 
 import scala.collection.mutable
+
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
+
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.TimeSeriesStore
@@ -20,7 +22,7 @@ import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
-import filodb.query.exec.TsCardExec.{FILODB_PARTITION_KEY, MAX_RESULT_SIZE}
+import filodb.query.exec.TsCardExec.MAX_RESULT_SIZE
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -470,7 +472,7 @@ final case object TsCardExec {
   val PREFIX_DELIM = ","
 
   // key in query context traceInfo map. Used for checking if the query is intended for the given filodb partition
-  val FILODB_PARTITION_KEY = "partition"
+  val FILODB_PARTITION_KEY = "filodb.partition"
 
   /**
    * V2 schema version of QueryResult for TSCardinalities query. One more additional column `longterm` is added
