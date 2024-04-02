@@ -15,7 +15,7 @@ import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types, Utils}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QuerySession, ServiceUnavailableException}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -39,6 +39,7 @@ extends TimeSeriesStore with StrictLogging {
 
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureNmmHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
+  private val FILODB_PARTITION = filodbConfig.getString("partition")
 
   private val partEvictionPolicy = evictionPolicy.getOrElse(
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
@@ -91,8 +92,13 @@ extends TimeSeriesStore with StrictLogging {
     }
   }
 
-  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+  def scanTsCardinalities(queryContext: QueryContext, ref: DatasetRef, shards: Seq[Int],
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+
+    // adding an additional check to verify if the partition is same as mentioned in query context
+    require(isCorrectPartitionForCardinalityQuery(queryContext, FILODB_PARTITION),
+      s"[TsCardinalities] Query not routed to correct partition! " +
+      s"Expected: ${queryContext.traceInfo}  | Actual: ${FILODB_PARTITION}")
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala

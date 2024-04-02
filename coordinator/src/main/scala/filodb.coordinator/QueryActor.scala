@@ -271,7 +271,7 @@ final class QueryActor(memStore: TimeSeriesStore,
       }
     }.reverse
     try {
-      val cards = memStore.scanTsCardinalities(q.dataset, q.shards, q.shardKeyPrefix, q.depth)
+      val cards = memStore.scanTsCardinalities(QueryContext(), q.dataset, q.shards, q.shardKeyPrefix, q.depth)
       val heap = mutable.PriorityQueue[CardinalityRecord]()
       cards.foreach { card =>
           heap.enqueue(card)

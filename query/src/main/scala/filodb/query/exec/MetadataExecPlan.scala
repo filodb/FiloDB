@@ -471,6 +471,9 @@ final case object TsCardExec {
 
   val PREFIX_DELIM = ","
 
+  // key in query context traceInfo map. Used for checking if the query is intended for the given filodb partition
+  val FILODB_PARTITION_KEY = "filodb.partition"
+
   /**
    * V2 schema version of QueryResult for TSCardinalities query. One more additional column `longterm` is added
    * to represent the cardinality count of downsample clusters
@@ -572,11 +575,12 @@ final case class TsCardExec(queryContext: QueryContext,
 
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
+
     val rvs = source match {
       case tsMemStore: TimeSeriesStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
-            dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
+            queryContext, dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map { card =>
             val groupKey = prefixToGroupWithDataset(card.prefix, dataset.dataset)
             // NOTE: cardinality data from downsample cluster is stored as total count in CardinalityStore. But for the
