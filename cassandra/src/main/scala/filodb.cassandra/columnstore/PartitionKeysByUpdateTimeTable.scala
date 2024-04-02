@@ -44,6 +44,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
     s"SELECT * FROM $tableString " +
     s"WHERE shard = ? AND epochHour = ? AND split = ? ")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
 
   def writePartKey(shard: Int, updateHour: Long, split: Int,
