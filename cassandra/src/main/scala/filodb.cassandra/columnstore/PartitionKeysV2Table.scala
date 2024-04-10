@@ -47,8 +47,9 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
 
   private lazy val scanCql = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
-      s"WHERE shard = ? and bucket = ?"
-  ).setConsistencyLevel(readConsistencyLevel)
+      s"WHERE shard = ? and bucket = ?")
+    .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
@@ -57,23 +58,27 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
       s"endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND startTime >= ? AND startTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readCql = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE shard = ? and bucket = ? and partKey = ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
