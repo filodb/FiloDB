@@ -64,13 +64,14 @@ object AntlrParser extends StrictLogging {
         return expr
       }
     } catch {
-      case e: ParseCancellationException => {}
-      case exc: Throwable => exc.printStackTrace
+      case e: ParseCancellationException => println(e.getMessage)
+      case regexException: RegexLengthLimitException => errors.append(regexException.getMessage)
+      case exc: Throwable => exc.printStackTrace()
     }
 
     var msg = "Cannot parse [" + query + "]"
     if (errors.length() != 0) {
-      msg = msg + " because " + errors.toString
+      msg = msg + "\n because" + errors.toString
     }
     throw new IllegalArgumentException(msg)
   }
