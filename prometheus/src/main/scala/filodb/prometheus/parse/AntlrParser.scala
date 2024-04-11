@@ -64,7 +64,7 @@ object AntlrParser extends StrictLogging {
         return expr
       }
     } catch {
-      case e: ParseCancellationException => println(e.getMessage)
+      case e: ParseCancellationException => {}
       case regexException: RegexLengthLimitException => errors.append(regexException.getMessage)
       case exc: Throwable => exc.printStackTrace()
     }
