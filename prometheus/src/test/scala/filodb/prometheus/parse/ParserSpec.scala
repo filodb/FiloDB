@@ -81,6 +81,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     lp.toString shouldEqual queryToLpString._2
   }
 
+  it("Parse error when regex is too long filter query") {
+    val exception = parseError(s"""last_over_time(http_requests_total{label=~"${"toolong" * 1024}.*"}[5m])""")
+    exception.getMessage.contains("Regular expression filters should be <=") shouldEqual true
+  }
+
   it("parse basic scalar expressions") {
     parseSuccessfully("-5")
     parseSuccessfully("+5")
