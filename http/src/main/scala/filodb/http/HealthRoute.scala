@@ -52,7 +52,7 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
     // Adding a simple liveness endpoint to check if the FiloDB instance is reachable or not
     path ("__liveness") {
       get {
-        complete(StatusCodes.Success)
+        complete(httpLiveness("UP"))
       }
     }
   }
