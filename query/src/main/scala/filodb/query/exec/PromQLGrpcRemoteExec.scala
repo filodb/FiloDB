@@ -49,10 +49,12 @@ trait GrpcRemoteExec extends RemoteExec {
         val span = Kamon.currentSpan()
         // Dont finish span since this code didnt create it
         Kamon.runWithSpan(span, finishSpan = false) {
-            sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
+            Task.eval {
+                val fut = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse).runToFuture
+                awaitResponseAndApplyTransformers(fut, querySession, source)
+            }
         }
     }
-
 
     override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +

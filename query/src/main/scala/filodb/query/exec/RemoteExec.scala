@@ -3,8 +3,8 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.{Duration, FiniteDuration, MILLISECONDS}
 import scala.sys.ShutdownHookThread
 
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
@@ -16,6 +16,7 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
@@ -47,6 +48,29 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
 
+  private def applyTransformers(resp: QueryResponse,
+                                  querySession: QuerySession,
+                                  source: ChunkSource,
+                                  timeoutMs: Long)(implicit sched: Scheduler): QueryResponse = {
+    resp match {
+      case qr: QueryResult =>
+        val (obs, schema) =
+          applyTransformers(Observable.fromIterable(qr.result), qr.resultSchema, querySession, source)
+        val rvs = Await.result(obs.toListL.runToFuture, Duration(timeoutMs, TimeUnit.MILLISECONDS))
+        qr.copy(result = rvs, resultSchema = schema)
+      case qe: QueryError => qe
+    }
+  }
+
+  protected def awaitResponseAndApplyTransformers(fut: Future[QueryResponse],
+                                                  querySession: QuerySession,
+                                                  source: ChunkSource)(implicit sched: Scheduler) = {
+    val startMs = System.currentTimeMillis()
+    val qresp = Await.result(fut, Duration(requestTimeoutMs, MILLISECONDS))
+    val remainingMs = requestTimeoutMs - (System.currentTimeMillis() - startMs)
+    applyTransformers(qresp, querySession, source, remainingMs)
+  }
+
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
@@ -60,7 +84,10 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     val span = Kamon.currentSpan()
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+      Task.eval {
+        val fut = sendHttpRequest(span, requestTimeoutMs)
+        awaitResponseAndApplyTransformers(fut, querySession, source)
+      }
     }
   }
 

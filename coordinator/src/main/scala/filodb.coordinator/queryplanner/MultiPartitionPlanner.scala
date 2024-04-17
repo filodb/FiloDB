@@ -487,8 +487,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
     val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
-      val childPlan = materialize(aggregate.vectors, queryContext)
-      addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
+      val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
+      addAggregator(aggregate, queryContext, childPlanRes)
     } else {
       val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val (partitions, _, _, _) = resolvePartitionsAndRoutingKeys(aggregate, queryParams)
@@ -766,16 +766,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = this.materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = this.materialize(logicalPlan.rhs, rhsQueryContext)
+    val lhsPlanRes = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
+    val rhsPlanRes = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
+      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), lhsPlanRes.plans, rhsPlanRes.plans,
+        logicalPlan.operator, logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     else
-      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
         logicalPlan.cardinality, logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,

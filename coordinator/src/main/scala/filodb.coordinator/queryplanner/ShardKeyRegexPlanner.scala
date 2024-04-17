@@ -390,16 +390,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
       // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
 
-      val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
-      val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+      val lhsPlanRes = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
+      val rhsPlanRes = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
       val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-        SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        SetOperatorExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
           logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
           rvRangeFromPlan(logicalPlan))
       else
-        BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
           logicalPlan.cardinality,
           logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
@@ -429,12 +429,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
     // using the wrapped planner
     val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
-      val childPlan = materialize(aggregate.vectors, queryContext)
+      val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
       // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
       // use the same dispatcher
-      addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
+      addAggregator(aggregate, queryContext, childPlanRes)
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
