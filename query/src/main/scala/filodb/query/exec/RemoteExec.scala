@@ -48,6 +48,11 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
 
+  /**
+   * Applies all {@link RangeVectorTransformer}s to a remote response.
+   * FIXME: This is needed because RemoteExec plans override the default ExecPlan::execute()
+   *   logic; if possible, this override should eventually be removed.
+   */
   protected def applyTransformers(resp: QueryResponse,
                                   querySession: QuerySession,
                                   source: ChunkSource,
