@@ -6,18 +6,19 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
 import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId, PlanValidationSpec, SortFunctionId, TsCardinalities}
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, isRegex}
 import filodb.prometheus.parse.Parser
 import filodb.query.InstantFunctionId.{Exp, HistogramQuantile, Ln}
 import filodb.query.exec._
 import filodb.query.AggregationOperator._
+
+
 import scala.language.postfixOps
 
 class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -491,9 +492,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       """test1{_ws_ = "demo", _ns_ = "App-0"} +
         | test2{_ws_ = "demo", _ns_ =~ "App.*"}""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
-      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-2"))))
+      if (shardColumnFilters.find(_.column == "_ns_").exists(f => isRegex(f.filter))) {
+        Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+          ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+          ColumnFilter("_ns_", Equals("App-2"))))
+      } else {
+        Seq(shardColumnFilters)
+      }
     }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))

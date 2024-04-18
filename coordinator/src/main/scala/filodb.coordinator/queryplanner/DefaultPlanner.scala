@@ -342,6 +342,14 @@ trait  DefaultPlanner {
         }.toList
       } else toReduceLevel.plans
 
+   /*
+    * NOTE: this LocalPartitionReduceAggregateExec wrapper is always created even when toReduceLevel2
+    *   contains only one plan; this may artificially bloat QueryStats. However, ExecPlans currently
+    *   offer no simple method to update their dispatchers, and forceRootDispatcher here must be
+    *   honored to support target-schema pushdowns (see materializeWithPushdown in the SingleClusterPlanner).
+    *   Given that the work required to allow dispatcher updates and/or rework pushdown logic is nontrivial
+    *   and the QueryStats bloat given by unnecessary aggregation plans is likely small, the fix is skipped for now.
+    */
     val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
