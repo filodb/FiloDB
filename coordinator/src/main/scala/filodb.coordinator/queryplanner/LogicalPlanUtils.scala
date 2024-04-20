@@ -490,14 +490,6 @@ object LogicalPlanUtils extends StrictLogging {
       case BinaryJoin(_, _, _, _, on, _, _) => on.getOrElse(Nil)
     }
 
-    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
-    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
-    //  a few files / tests, so we'll save it for a separate PR.
-    // val clauseCols = bj.on
-    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
-    //   return true
-    // }
-
     val tschema = sameRawSeriesTargetSchemaColumns(plan, targetSchemaProvider, getShardKeyFilters)
     if (tschema.isEmpty) {
       return false
@@ -566,7 +558,8 @@ object LogicalPlanUtils extends StrictLogging {
       case sc: ScalarPlan => Some(Set.empty)  // since "None" will prevent optimization for all parent plans
       case _ => None
     }
-    helper(lp)
+    // Require that all raw-series selectors are configured with the same target-schema columns.
+    if (sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider, getShardKeyFilters).isDefined) helper(lp) else None
   }
   // scalastyle:on method.length
   // scalastyle:on cyclomatic.complexity

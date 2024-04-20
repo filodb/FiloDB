@@ -1,17 +1,15 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ConcurrentHashMap
-
 import scala.collection.concurrent.{Map => ConcurrentMap}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
-
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
+import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, QueryUtils, RangeParams, RvRange}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
@@ -56,7 +54,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                             val queryConfig: QueryConfig,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
-                            new ConcurrentHashMap[String, ManagedChannel]().asScala)
+                            new ConcurrentHashMap[String, ManagedChannel]().asScala,
+                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) with StrictLogging {
 
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -68,6 +67,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
   val datasetMetricColumn: String = dataset.options.metricColumn
+
+  private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
+    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
+  }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       // Pseudo code for the materialize
@@ -483,10 +486,37 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
   }
 
+  /**
+   * Returns true iff the argument Aggregation can be pushed down.
+   * More specifically, this means that it is correct to materialize the entire plan
+   * with a lower-level planner and aggregate again across all returned plans.
+   */
+  protected def canPushdownAggregate(agg: Aggregate, qContext: QueryContext): Boolean = {
+    // Always safe to pushdown if no nested joins/aggregations.
+    if (!LogicalPlanUtils.hasDescendantAggregateOrJoin(agg.vectors)) {
+      return true
+    }
+    // Check if target-schema applies. If it does, instead require only that non-shard-key target-schema labels
+    //   are present, since shard-key target-schema labels are implicit in each clause.
+    val canTschemaPushdown = getPushdownKeys(agg.vectors, targetSchemaProvider(qContext),
+      dataset.options.nonMetricShardColumns,
+      rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns).toSet,
+      rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)).isDefined
+    val labels = if (canTschemaPushdown) {
+      val tschemaLabels =
+        LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(agg.vectors, targetSchemaProvider(qContext),
+          rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns))
+      tschemaLabels.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
+    } else {
+      dataset.options.nonMetricShardColumns
+    }
+    LogicalPlanUtils.treePreservesLabels(agg.vectors, labels)
+  }
+
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val plan = if (!LogicalPlanUtils.treePreservesLabels(aggregate.vectors, dataset.options.nonMetricShardColumns)) {
+    val plan = if (!canPushdownAggregate(aggregate, queryContext)) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       addAggregator(aggregate, queryContext, childPlanRes)
     } else {

@@ -971,7 +971,20 @@ class SingleClusterPlanner(val dataset: Dataset,
                                    lp: Aggregate,
                                    forceInProcess: Boolean = false,
                                    forceDispatcher: Option[PlanDispatcher] = None): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    val canPushdownInner = !LogicalPlanUtils.hasDescendantAggregateOrJoin(lp.vectors) ||
+      getPushdownShards(qContext, lp.vectors).isDefined
+    var toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    if (!canPushdownInner) {
+      val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans)
+      val plan = if (toReduceLevel1.needsStitch) {
+        StitchRvsExec(qContext, dispatcher, outputRvRange = None, children = toReduceLevel1.plans)
+      } else if (toReduceLevel1.plans.size > 1) {
+        LocalPartitionDistConcatExec(qContext, dispatcher, toReduceLevel1.plans)
+      } else {
+        toReduceLevel1.plans.head
+      }
+      toReduceLevel1 = PlanResult(Seq(plan))
+    }
     val reducer = addAggregator(lp, qContext, toReduceLevel1, forceDispatcher)
     PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }

@@ -432,11 +432,18 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     //   series (in this case: label1=A). To prevent this, we can pushdown only when the inner vector
     //   tree preserves shard-key labels.
 
+    // Always safe to pushdown if no nested joins/aggregations.
+    if (!LogicalPlanUtils.hasDescendantAggregateOrJoin(agg.vectors)) {
+      return true
+    }
+
     // Check if target-schema applies. If it does, instead require only that non-shard-key target-schema labels
     //   are present, since shard-key target-schema labels are implicit in each clause.
-    val tschema = LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(agg, targetSchemaProvider(qContext), getShardKeys)
-    val labels = if (tschema.isDefined) {
-      tschema.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
+    val canTschemaPushdown = getPushdownKeys(qContext, agg.vectors).isDefined
+    val labels = if (canTschemaPushdown) {
+      val tschemaLabels =
+        LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(agg.vectors, targetSchemaProvider(qContext), getShardKeys)
+      tschemaLabels.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
     } else {
       dataset.options.nonMetricShardColumns
     }
