@@ -1,16 +1,15 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.{Seq, mutable}
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.TargetSchemaProvider
 import filodb.core.query.{ColumnFilter, QueryContext, QueryUtils, RangeParams}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
+import filodb.query.AggregateClause.ClauseType
 import filodb.query._
 
 object LogicalPlanUtils extends StrictLogging {
@@ -42,6 +41,24 @@ object LogicalPlanUtils extends StrictLogging {
     case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregateOrJoin(_))
     case _                            => false
   }
+
+  /**
+   * Returns true iff the argument aggregation type is always safe to pushdown.
+   */
+  def shouldAlwaysPushdownAggregate(agg: Aggregate): Boolean = agg.operator match {
+    case AggregationOperator.Sum |
+         AggregationOperator.Min |
+         AggregationOperator.Max |
+         AggregationOperator.Group |
+         AggregationOperator.BottomK |
+         AggregationOperator.TopK => true
+    case AggregationOperator.Avg |
+         AggregationOperator.Quantile |
+         AggregationOperator.Stdvar |
+         AggregationOperator.Stddev |
+         AggregationOperator.Count => false
+  }
+
   /**
     * Retrieve start and end time from LogicalPlan
     */
