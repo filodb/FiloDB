@@ -486,10 +486,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
   }
 
+  /**
+   * Retuns an occupied Option iff the plan can be pushed-down according to the set of labels.
+   */
   private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
     val canTschemaPushdown = getPushdownKeys(lp, targetSchemaProvider(qContext),
       dataset.options.nonMetricShardColumns,
-      rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns).toSet,
+      rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns).map(_.toSet).toSet,
       rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)).isDefined
     if (canTschemaPushdown) {
       LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext),

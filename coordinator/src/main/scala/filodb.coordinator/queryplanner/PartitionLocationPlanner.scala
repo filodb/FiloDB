@@ -97,6 +97,8 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
    * Returns true iff the argument Aggregation can be pushed down.
    * More specifically, this means that it is correct to materialize the entire plan
    * with a lower-level planner and aggregate again across all returned plans.
+   *
+   * @param innerTschemaLabels occupied iff the inner plan can be pushed-down according to the set of labels.
    */
   protected def canPushdownAggregate(agg: Aggregate, innerTschemaLabels: Option[Seq[String]]): Boolean = {
     // We can pushdown when shard-key labels are preserved throughout the entire inner subtree.

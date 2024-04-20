@@ -410,6 +410,9 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
+  /**
+   * Retuns an occupied Option iff the plan can be pushed-down according to the set of labels.
+   */
   private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
     val canTschemaPushdown = getPushdownKeys(qContext, lp).isDefined
     if (canTschemaPushdown) {
