@@ -486,7 +486,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
+    val plan = if (!canPushdownAggregate(aggregate)) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       addAggregator(aggregate, queryContext, childPlanRes)
     } else {

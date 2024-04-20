@@ -56,7 +56,25 @@ object LogicalPlanUtils extends StrictLogging {
          AggregationOperator.Quantile |
          AggregationOperator.Stdvar |
          AggregationOperator.Stddev |
+         AggregationOperator.CountValues |
          AggregationOperator.Count => false
+  }
+
+  def treePreservesLabels(lp: LogicalPlan, labels: Seq[String]): Boolean = lp match {
+    case agg: Aggregate =>
+      val clausePreservesLabels = agg.clauseOpt match {
+        case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
+          labels.forall(clauseLabels.contains(_))
+        case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
+          labels.forall(!clauseLabels.contains(_))
+        case _ => labels.isEmpty
+      }
+      if (!clausePreservesLabels) {
+        return false
+      }
+      treePreservesLabels(agg.vectors, labels)
+    case nl: NonLeafLogicalPlan => nl.children.forall(treePreservesLabels(_, labels))
+    case _ => true
   }
 
   /**

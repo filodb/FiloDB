@@ -1,11 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import filodb.coordinator.queryplanner.LogicalPlanUtils.{canPushdownAggregate, getLookBackMillis}
+import filodb.coordinator.queryplanner.LogicalPlanUtils.getLookBackMillis
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryUtils}
+import filodb.core.query.{PromQlQueryParams, QueryUtils}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.query.AggregateClause.ClauseType
-import filodb.query.{Aggregate, AggregateClause, LogicalPlan, NonLeafLogicalPlan, RawSeries}
+import filodb.query.{Aggregate, LogicalPlan}
 import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
 
 /**
@@ -18,63 +17,14 @@ import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
  *   and materialize accordingly.
  */
 abstract class PartitionLocationPlanner(dataset: Dataset,
-                                        partitionLocationProvider: PartitionLocationProvider,
-                                        shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]])
+                                        partitionLocationProvider: PartitionLocationProvider)
   extends QueryPlanner with DefaultPlanner {
 
-  private def treePreservesLabels(lp: LogicalPlan, labels: Seq[String]): Boolean = lp match {
-    case agg: Aggregate =>
-      val clausePreservesLabels = agg.clauseOpt match {
-        case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
-          labels.forall(clauseLabels.contains(_))
-        case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
-          labels.forall(!clauseLabels.contains(_))
-        case _ => labels.isEmpty
-      }
-      if (!clausePreservesLabels) {
-        return false
-      }
-      treePreservesLabels(agg.vectors, labels)
-    case nl: NonLeafLogicalPlan => nl.children.forall(treePreservesLabels(_, labels))
-  }
-
-  private def getShardKeyLabelsIfTODO(lp: LogicalPlan): Option[Seq[Map[String, String]]] = lp match {
-    case rs: RawSeries =>
-      val res = LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)
-        .flatMap(shardKeyMatcher(_))
-        .map { colFilters =>
-          colFilters.map { colFilter =>
-            val value = colFilter.filter match {
-              case Equals(value) => value.toString
-              case _ => throw new IllegalArgumentException("TODO")
-            }
-            colFilter.column -> value
-          }.toMap
-        }.distinct
-      Some(res)
-    case agg: Aggregate =>
-      val inner = getShardKeyLabelsIfTODO(agg.vectors)
-      if (inner.isEmpty) {
-        return None
-      }
-      val keyLabels = dataset.options.nonMetricShardColumns
-      val clausePreservesLabels = agg.clauseOpt match {
-        case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
-          keyLabels.forall(clauseLabels.contains(_))
-        case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
-          keyLabels.forall(!clauseLabels.contains(_))
-        case _ => false
-      }
-      if (clausePreservesLabels) inner else None
-    case np: NonLeafLogicalPlan =>
-
-
-  }
   protected def canPushdownAggregate(agg: Aggregate): Boolean = {
     if (LogicalPlanUtils.shouldAlwaysPushdownAggregate(agg)) {
       return true
     }
-    getShardKeyLabelsIfTODO(agg).nonEmpty
+    LogicalPlanUtils.treePreservesLabels(agg.vectors, dataset.options.nonMetricShardColumns)
   }
 
   // scalastyle:off method.length
