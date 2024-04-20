@@ -421,13 +421,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       return pushdownKeys.get
     }
 
-    // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
-    // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
-    // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual
-    // partitions may not give the correct answer, we should push down the sum to multiple partitions, perform a reduce
-    // locally and then run count on the results. The following implementation checks for descendant aggregates, if
-    // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
-    // using the wrapped planner
     val plan = if (!canPushdownAggregate(aggregate)) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will

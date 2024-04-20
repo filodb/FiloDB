@@ -4,8 +4,7 @@ import filodb.coordinator.queryplanner.LogicalPlanUtils.getLookBackMillis
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryUtils}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.query.AggregateClause.ClauseType
-import filodb.query.{Aggregate, AggregateClause, AggregationOperator, LogicalPlan, NonLeafLogicalPlan}
+import filodb.query.{Aggregate, LogicalPlan}
 import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
 
 /**
@@ -20,72 +19,6 @@ import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
 abstract class PartitionLocationPlanner(dataset: Dataset,
                                         partitionLocationProvider: PartitionLocationProvider)
   extends QueryPlanner with DefaultPlanner {
-
-  /**
-   * Returns true iff the argument aggregation type is always safe to pushdown.
-   * For example, consider a possible execution plan for the following query:
-   * // sum(group(foo{shardKey=".*"}) by (label1))
-   * Sum                        // label1=A -> 5; label1=B -> 3
-   * Sum(Group(local_data))   // label1=A -> 1
-   * Sum(Group(remote_data))  // label1=A -> 4; label1=B -> 3
-   * Even if each of the children return series that account for the same label1 values,
-   * the result will be correct.
-   *
-   * However, consider:
-   * // count(group(foo{shardKey=".*"}) by (label1))
-   * Sum
-   * Sum(Group(local_data))
-   * Sum(Group(remote_data))
-   *
-   */
-  def shouldAlwaysPushdownAggregate(agg: Aggregate): Boolean = agg.operator match {
-    case AggregationOperator.Sum |
-         AggregationOperator.Min |
-         AggregationOperator.Max |
-         AggregationOperator.BottomK |
-         AggregationOperator.TopK => true
-    case AggregationOperator.Avg |
-         AggregationOperator.Group |
-         AggregationOperator.Quantile |
-         AggregationOperator.Stdvar |
-         AggregationOperator.Stddev |
-         AggregationOperator.CountValues |
-         AggregationOperator.Count => false
-  }
-
-  private def canPushdown(lp: LogicalPlan): Option[Boolean] = lp match {
-    case agg: Aggregate =>
-      val innerRes = canPushdown(agg.vectors)
-      if (innerRes.isEmpty) {
-        return None
-      }
-      val keyLabels = dataset.options.nonMetricShardColumns
-      lazy val clausePreservesLabels = agg.clauseOpt match {
-        case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
-          keyLabels.forall(clauseLabels.contains(_))
-        case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
-          keyLabels.forall(!clauseLabels.contains(_))
-        case _ => false
-      }
-      if (shouldAlwaysPushdownAggregate(agg)) {
-        Some(innerRes.get && clausePreservesLabels)
-      } else if (innerRes.get && clausePreservesLabels) {
-        Some(true)
-      } else {
-        None
-      }
-    case nl: NonLeafLogicalPlan => nl.children.map(canPushdown).foldLeft(Some(true)){case (res, next) =>
-      if (res.isEmpty || next.isEmpty) {
-        return None
-      }
-      return Some(res.get && next.get)
-    }
-    case _ => Some(true)
-  }
-
-  protected def canPushdownAggregate(agg: Aggregate): Boolean = {
-    canPushdown(agg).isDefined
-  }
 
   // scalastyle:off method.length
   /**
@@ -159,4 +92,28 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
       case _: PromQlRemoteExec => false
       case _ => true
     }
+
+  /**
+   * Returns true iff the argument Aggregation can be pushed down.
+   * More specifically, this means that it is correct to materialize the entire plan
+   *   with a lower-level planner and aggregate again across all returned plans.
+   */
+  protected def canPushdownAggregate(agg: Aggregate): Boolean = {
+    // We can pushdown when shard-key labels are preserved throughout the entire inner subtree.
+    // For example, consider:
+    //   sum(max(foo{shardKeyLabel=~".*"}) by (label1))
+    // If this data lives on two partitions, this might have its pushdown-optimized execution planned as:
+    //   Sum                   // 6
+    //     Sum                 // 5
+    //       Max(local_data)   // label1=A -> 3, labelB -> 2
+    //     Sum                 // 1
+    //       Max(remote_data)  // label1=A -> 1
+    // If this data had instead lived on one partition, the materialized plan might have been:
+    //   Sum                 // 5
+    //     Max(local_data)   // label1=A -> 3, labelB -> 2
+    // This discrepancy happens because aggregation occurs across values that account for the same
+    //   series (in this case: label1=A). To prevent this, we can pushdown only when the inner vector
+    //   tree preserves shard-key labels.
+    LogicalPlanUtils.treePreservesLabels(agg.vectors, dataset.options.nonMetricShardColumns)
+  }
 }
