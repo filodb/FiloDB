@@ -1,16 +1,18 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{Seq, mutable}
+import scala.collection.{mutable, Seq}
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.TargetSchemaProvider
 import filodb.core.query.{ColumnFilter, QueryContext, QueryUtils, RangeParams}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.AggregateClause.ClauseType
 import filodb.query._
+import filodb.query.AggregateClause.ClauseType
 
 object LogicalPlanUtils extends StrictLogging {
 
