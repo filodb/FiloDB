@@ -4,7 +4,7 @@ import filodb.coordinator.queryplanner.LogicalPlanUtils.getLookBackMillis
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryUtils}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.query.LogicalPlan
+import filodb.query.{Aggregate, LogicalPlan}
 import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
 
 /**
@@ -92,4 +92,41 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
       case _: PromQlRemoteExec => false
       case _ => true
     }
+
+  /**
+   * Returns true iff the argument Aggregation can be pushed down.
+   * More specifically, this means that it is correct to materialize the entire plan
+   * with a lower-level planner and aggregate again across all returned plans.
+   */
+  protected def canPushdownAggregate(agg: Aggregate, innerTschemaLabels: Option[Seq[String]]): Boolean = {
+    // We can pushdown when shard-key labels are preserved throughout the entire inner subtree.
+    // For example, consider:
+    //   sum(max(foo{shardKeyLabel=~".*"}) by (label1))
+    // If this data lives on two partitions, this might have its pushdown-optimized execution planned as:
+    //   Sum                   // 6
+    //     Sum                 // 5
+    //       Max(local_data)   // label1=A -> 3, labelB -> 2
+    //     Sum                 // 1
+    //       Max(remote_data)  // label1=A -> 1
+    // If this data had instead lived on one partition, the materialized plan might have been:
+    //   Sum                 // 5
+    //     Max(local_data)   // label1=A -> 3, labelB -> 2
+    // This discrepancy happens because aggregation occurs across values that account for the same
+    //   series (in this case: label1=A). To prevent this, we can pushdown only when the inner vector
+    //   tree preserves shard-key labels.
+
+    // Always safe to pushdown if no nested joins/aggregations.
+    if (!LogicalPlanUtils.hasDescendantAggregateOrJoin(agg.vectors)) {
+      return true
+    }
+
+    // If a tschema applies, instead require only that non-shard-key target-schema labels
+    //   are present, since shard-key target-schema labels are implicit in each clause.
+    val labels = if (innerTschemaLabels.isDefined) {
+      innerTschemaLabels.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
+    } else {
+      dataset.options.nonMetricShardColumns
+    }
+    LogicalPlanUtils.treePreservesLabels(agg.vectors, labels)
+  }
 }

@@ -486,37 +486,22 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
   }
 
-  /**
-   * Returns true iff the argument Aggregation can be pushed down.
-   * More specifically, this means that it is correct to materialize the entire plan
-   * with a lower-level planner and aggregate again across all returned plans.
-   */
-  protected def canPushdownAggregate(agg: Aggregate, qContext: QueryContext): Boolean = {
-    // Always safe to pushdown if no nested joins/aggregations.
-    if (!LogicalPlanUtils.hasDescendantAggregateOrJoin(agg.vectors)) {
-      return true
-    }
-    // Check if target-schema applies. If it does, instead require only that non-shard-key target-schema labels
-    //   are present, since shard-key target-schema labels are implicit in each clause.
-    val canTschemaPushdown = getPushdownKeys(agg.vectors, targetSchemaProvider(qContext),
+  private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
+    val canTschemaPushdown = getPushdownKeys(lp, targetSchemaProvider(qContext),
       dataset.options.nonMetricShardColumns,
       rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns).toSet,
       rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)).isDefined
-    val labels = if (canTschemaPushdown) {
-      val tschemaLabels =
-        LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(agg.vectors, targetSchemaProvider(qContext),
-          rs => getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns))
-      tschemaLabels.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
-    } else {
-      dataset.options.nonMetricShardColumns
-    }
-    LogicalPlanUtils.treePreservesLabels(agg.vectors, labels)
+    if (canTschemaPushdown) {
+      LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext),
+        rs => LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns))
+    } else None
   }
 
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val plan = if (!canPushdownAggregate(aggregate, queryContext)) {
+    val canPushdown = canPushdownAggregate(aggregate, getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext))
+    val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       addAggregator(aggregate, queryContext, childPlanRes)
     } else {
