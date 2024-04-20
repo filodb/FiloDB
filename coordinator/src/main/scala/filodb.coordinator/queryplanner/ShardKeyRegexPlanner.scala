@@ -410,6 +410,39 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
+  /**
+   * Returns true iff the argument Aggregation can be pushed down.
+   * More specifically, this means that it is correct to materialize the entire plan
+   * with a lower-level planner and aggregate again across all returned plans.
+   */
+  protected def canPushdownAggregate(agg: Aggregate, qContext: QueryContext): Boolean = {
+    // We can pushdown when shard-key labels are preserved throughout the entire inner subtree.
+    // For example, consider:
+    //   sum(max(foo{shardKeyLabel=~".*"}) by (label1))
+    // If this data lives on two partitions, this might have its pushdown-optimized execution planned as:
+    //   Sum                   // 6
+    //     Sum                 // 5
+    //       Max(local_data)   // label1=A -> 3, labelB -> 2
+    //     Sum                 // 1
+    //       Max(remote_data)  // label1=A -> 1
+    // If this data had instead lived on one partition, the materialized plan might have been:
+    //   Sum                 // 5
+    //     Max(local_data)   // label1=A -> 3, labelB -> 2
+    // This discrepancy happens because aggregation occurs across values that account for the same
+    //   series (in this case: label1=A). To prevent this, we can pushdown only when the inner vector
+    //   tree preserves shard-key labels.
+
+    // Check if target-schema applies. If it does, instead require only that non-shard-key target-schema labels
+    //   are present, since shard-key target-schema labels are implicit in each clause.
+    val tschema = LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(agg, targetSchemaProvider(qContext), getShardKeys)
+    val labels = if (tschema.isDefined) {
+      tschema.get.filter(!dataset.options.nonMetricShardColumns.contains(_))
+    } else {
+      dataset.options.nonMetricShardColumns
+    }
+    LogicalPlanUtils.treePreservesLabels(agg.vectors, labels)
+  }
+
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
@@ -421,7 +454,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       return pushdownKeys.get
     }
 
-    val plan = if (!canPushdownAggregate(aggregate)) {
+    val plan = if (!canPushdownAggregate(aggregate, queryContext)) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
