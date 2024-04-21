@@ -431,9 +431,14 @@ object LogicalPlanUtils extends StrictLogging {
   : Option[Seq[String]] = {
     // compose a stream of Options for each RawSeries--
     //   the options contain a target-schema iff it is defined and unchanging.
-    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
+    val rawSeries = LogicalPlan.findLeafLogicalPlans(plan)
       .filter(_.isInstanceOf[RawSeries])
-      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
+      .map(_.asInstanceOf[RawSeries])
+    if (rawSeries.exists(!_.rangeSelector.isInstanceOf[IntervalSelector])) {
+      // Cannot handle RawSeries without IntervalSelector.
+      return None
+    }
+    val rsTschemaOpts = rawSeries.flatMap{ rs =>
         val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
         val rawShardKeyFilters = getShardKeyFilters(rs)
         // The filters might contain pipe-concatenated EqualsRegex values.
