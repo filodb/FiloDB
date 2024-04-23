@@ -6,7 +6,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.LogicalPlan
+import filodb.query.{LogicalPlan, ScalarFixedDoublePlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -107,8 +107,8 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
         Seq("A", "C"), Seq("A", "D"), Seq("B", "C"), Seq("B", "D")))
     )
     val shouldErrorQueries = Seq(
-      """foo{label1=~"A|B", label2=~"C|D."}""",  // non-pipe regex chars
-      """foo{label1=~"A|B", label2!~"C|D"}"""    // non-equals[regex] filter
+      """foo{label1=~"A|B", label2=~"C|D."}""", // non-pipe regex chars
+      """foo{label1=~"A|B", label2!~"C|D"}""" // non-equals[regex] filter
     )
     for ((query, expected) <- queryExpectedPairs) {
       val plan = Parser.queryToLogicalPlan(query, 100, 10)
@@ -116,7 +116,7 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
       // make sure all filters are Equals
       res.foreach(_.foreach(_.filter.isInstanceOf[Equals] shouldEqual true))
       // make sure all values are as expected
-      res.map{ group =>
+      res.map { group =>
         group.sortBy(_.column).map(_.filter.valuesStrings.head)
       }.toSet shouldEqual expected
     }
@@ -127,5 +127,19 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
         LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(plan, shardKeyLabels)
       }
     }
+  }
+
+  it ("getColumnFilterGroupWithLogical plans should return result as expected") {
+    val timeParamsSec = TimeStepParams(1000, 10, 10000)
+    val query1 = """sum(count_over_time((test_metric{_ws_="test-ws", _ns_="test-ns", usecase="test"} > 20000)[21600s:])) or vector(0)"""
+    val lp = Parser.queryRangeToLogicalPlan(query1, timeParamsSec)
+    val columnGroupWithPlan = LogicalPlan.getColumnFilterGroupWithLogicalPlan(lp)
+    val scalarPlansCount = columnGroupWithPlan.count(x => x.logicalPlan == ScalarFixedDoublePlan)
+    scalarPlansCount shouldEqual 2
+    val query2 = """rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[5m]) * 1000"""
+    val lp2 = Parser.queryRangeToLogicalPlan(query2, timeParamsSec)
+    val columnGroupWithPlan2 = LogicalPlan.getColumnFilterGroupWithLogicalPlan(lp2)
+    val scalarPlansCount2 = columnGroupWithPlan2.count(x => x.logicalPlan == ScalarFixedDoublePlan)
+    scalarPlansCount2 shouldEqual 1
   }
 }
