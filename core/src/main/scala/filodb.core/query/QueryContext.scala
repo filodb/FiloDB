@@ -157,7 +157,8 @@ case class PlannerParams(applicationId: String = "filodb",
                          allowPartialResults: Boolean = false,
                          reduceShardKeyRegexFanout: Boolean = true,
                          maxShardKeyRegexFanoutBatchSize: Int = 10,
-                         useProtoExecPlans: Boolean = false)
+                         useProtoExecPlans: Boolean = false,
+                         allowNestedAggregatePushdown: Boolean = true)
 
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =

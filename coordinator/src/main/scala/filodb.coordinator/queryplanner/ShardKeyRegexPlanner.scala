@@ -431,7 +431,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       return pushdownKeys.get
     }
 
-    val canPushdown = canPushdownAggregate(aggregate, getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext))
+    val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
+    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will

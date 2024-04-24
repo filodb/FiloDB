@@ -2,7 +2,7 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils.getLookBackMillis
 import filodb.core.metadata.Dataset
-import filodb.core.query.{PromQlQueryParams, QueryUtils}
+import filodb.core.query.{PromQlQueryParams, QueryContext, QueryUtils}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.query.{Aggregate, LogicalPlan}
 import filodb.query.exec.{ExecPlan, PromQlRemoteExec}
@@ -100,7 +100,9 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
    *
    * @param innerTschemaLabels occupied iff the inner plan can be pushed-down according to the set of labels.
    */
-  protected def canPushdownAggregate(agg: Aggregate, innerTschemaLabels: Option[Seq[String]]): Boolean = {
+  protected def canPushdownAggregate(agg: Aggregate,
+                                     innerTschemaLabels: Option[Seq[String]],
+                                     qContext: QueryContext): Boolean = {
     // We can pushdown when shard-key labels are preserved throughout the entire inner subtree.
     // For example, consider:
     //   sum(max(foo{shardKeyLabel=~".*"}) by (label1))
@@ -120,6 +122,11 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
     // Always safe to pushdown if no nested joins/aggregations.
     if (!LogicalPlanUtils.hasDescendantAggregateOrJoin(agg.vectors)) {
       return true
+    }
+
+    // Prevent further pushdown according to the PlannerParams.
+    if (!qContext.plannerParams.allowNestedAggregatePushdown) {
+      return false
     }
 
     // If a tschema applies, instead require only that non-shard-key target-schema labels
