@@ -573,7 +573,9 @@ object LogicalPlanUtils extends StrictLogging {
 
   /**
    * Returns true iff the entire plan tree preserves the argument label set.
-   * In other words, no aggregation "aggregates away" any of the argument labels.
+   * In other words:
+   *   - no aggregation "aggregates away" any of the argument labels.
+   *   - no scalar() wraps any selector.
    */
   def treePreservesLabels(lp: LogicalPlan, labels: Seq[String]): Boolean = lp match {
     case agg: Aggregate =>
@@ -588,6 +590,7 @@ object LogicalPlanUtils extends StrictLogging {
         return false
       }
       treePreservesLabels(agg.vectors, labels)
+    case _: ScalarVaryingDoublePlan => false
     case nl: NonLeafLogicalPlan => nl.children.forall(treePreservesLabels(_, labels))
     case _ => true
   }

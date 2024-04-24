@@ -58,4 +58,34 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
     }
     getResult(differentCols) shouldEqual None
   }
+
+  it ("should correctly determine whether-or-not a plan preserves labels") {
+    val queryTimestep = 100
+    val queryStep = 10
+    val labelsToPreserve = Seq("pLabel1", "pLabel2")
+    val preservedQueries = Seq(
+      """foo{labelA="hello"}""",
+      """sum(foo{labelA="hello"}) without (labelB)""",
+      """sum(foo{labelA="hello"}) by (pLabel1, pLabel2)""",
+      """sum(foo{labelA="hello"}) by (pLabel1, pLabel2) + foo{labelA="hello"}""",
+      """sum(foo{labelA="hello"}) by (pLabel1, pLabel2) + sum(foo{labelA="hello"}) by (pLabel1, pLabel2)""",
+      """0.5 * sum(foo{labelA="hello"}) by (pLabel1, pLabel2)"""
+    )
+    val unpreservedQueries = Seq(
+      """sum(foo{labelA="hello"}) without (pLabel1)""",
+      """sum(foo{labelA="hello"}) by (pLabel1)""",
+      """sum(foo{labelA="hello"}) by (pLabel1) + foo{labelA="hello"}""",
+      """sum(foo{labelA="hello"}) by (pLabel1, pLabel2) + sum(foo{labelA="hello"}) by (pLabel1)""",
+      """0.5 * sum(foo{labelA="hello"}) by (pLabel1)""",
+      """sum(foo{labelA="hello"}) by (pLabel1, pLabel2) + scalar(foo{labelA="hello"})"""
+    )
+    for (query <- preservedQueries) {
+      val plan = Parser.queryToLogicalPlan(query, queryTimestep, queryStep)
+      LogicalPlanUtils.treePreservesLabels(plan, labelsToPreserve) shouldEqual true
+    }
+    for (query <- unpreservedQueries) {
+      val plan = Parser.queryToLogicalPlan(query, queryTimestep, queryStep)
+      LogicalPlanUtils.treePreservesLabels(plan, labelsToPreserve) shouldEqual false
+    }
+  }
 }
