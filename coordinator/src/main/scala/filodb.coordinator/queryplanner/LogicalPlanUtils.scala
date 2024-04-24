@@ -594,4 +594,35 @@ object LogicalPlanUtils extends StrictLogging {
     case nl: NonLeafLogicalPlan => nl.children.forall(treePreservesLabels(_, labels))
     case _ => true
   }
+
+  /**
+   * Returns the concrete sets of Equals non-metric shard-key filters defined by the
+   *   argument plan's Equals and pipe-concatenated EqualsRegex filters.
+   *
+   * Example: [{A=~1|2, B=1}, {A=1, B=2}] -> [{A=1, B=1}, {A=2, B=1}, {A=1, B=2}]
+   *
+   * @param lp should contain only Equals and pipe-concatenated EqualsRegex filters.
+   */
+  def resolvePipeConcatenatedShardKeyFilters(lp: LogicalPlan,
+                                             nonMetricShardKeyCols: Seq[String]): Seq[Seq[ColumnFilter]] = {
+    LogicalPlan.getNonMetricShardKeyFilters(lp, nonMetricShardKeyCols)
+      .flatMap { group =>
+        val keyToValues = group.map { filter =>
+          val values = filter match {
+            case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
+              QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
+            case ColumnFilter(col, equals: Equals) =>
+              Seq(equals.value.toString)
+            case _ => throw new IllegalArgumentException("unexpected filter: " + filter)
+          }
+          (filter.column, values)
+        }.toMap
+        QueryUtils.makeAllKeyValueCombos(keyToValues).map { shardKeyMap =>
+          // Convert to set of Equals-only ColumnFilters.
+          shardKeyMap.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSet
+        }
+      }
+      .distinct
+      .map(_.toSeq)
+  }
 }
