@@ -88,4 +88,44 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
       LogicalPlanUtils.treePreservesLabels(plan, labelsToPreserve) shouldEqual false
     }
   }
+
+  it("should correctly resolve pipe-concatenated shard-key filters") {
+    val shardKeyLabels = Seq("label1", "label2")
+    // Each sequence describes the expected values of label1 and label2 filters, respectively.
+    val queryExpectedPairs = Seq(
+      ("""foo{label1=~"A|B", label2=~"C|D"}""", Set(
+        Seq("A", "C"), Seq("A", "D"), Seq("B", "C"), Seq("B", "D"))),
+      ("""foo{label1=~"A", label2=~"C|D"}""", Set(
+        Seq("A", "C"), Seq("A", "D"))),
+      ("""foo{label1="A", label2=~"C|D"}""", Set(
+        Seq("A", "C"), Seq("A", "D"))),
+      ("""foo{label1="A", label2=~"C|D", label3="shouldIgnore"}""", Set(
+        Seq("A", "C"), Seq("A", "D"))),
+      ("""sum(foo{label1=~"A|B", label2=~"C|D"})""", Set(
+        Seq("A", "C"), Seq("A", "D"), Seq("B", "C"), Seq("B", "D"))),
+      ("""sum(foo{label1=~"A|B", label2=~"C|D"}) + sum(foo{label1=~"A|B", label2=~"C|D"})""", Set(
+        Seq("A", "C"), Seq("A", "D"), Seq("B", "C"), Seq("B", "D")))
+    )
+    val shouldErrorQueries = Seq(
+      """foo{label1=~"A|B", label2=~"C|D."}""",  // non-pipe regex chars
+      """foo{label1=~"A|B", label2!~"C|D"}"""    // non-equals[regex] filter
+    )
+    for ((query, expected) <- queryExpectedPairs) {
+      val plan = Parser.queryToLogicalPlan(query, 100, 10)
+      val res = LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(plan, shardKeyLabels)
+      // make sure all filters are Equals
+      res.foreach(_.foreach(_.filter.isInstanceOf[Equals] shouldEqual true))
+      // make sure all values are as expected
+      res.map{ group =>
+        group.sortBy(_.column).map(_.filter.valuesStrings.head)
+      }.toSet shouldEqual expected
+    }
+
+    for (query <- shouldErrorQueries) {
+      val plan = Parser.queryToLogicalPlan(query, 100, 10)
+      intercept[IllegalArgumentException] {
+        LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(plan, shardKeyLabels)
+      }
+    }
+  }
 }
