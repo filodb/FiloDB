@@ -671,8 +671,6 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
-case class ColumnFilterListWithLogicalPlan(columnFilterSet: Set[ColumnFilter], logicalPlan: Any)
-
 object LogicalPlan {
   /**
     * Get leaf Logical Plans
@@ -764,30 +762,35 @@ object LogicalPlan {
   }
 
   /**
-   * Given a LogicalPlan, the function finds a Seq of all Child nodes, and returns a Set of ColumnFilters and the
-   * associated logical plan for each of the Leaf node
+   * Given a LogicalPlan, the function finds a Seq of all Child nodes,and returns a Set of ColumnFilters.
+   * It filters out the column filter group for all the scalar leaf plans
    *
    * @param logicalPlan the root LogicalPlan
    * @return Seq[ColumnFilterListWithLogicalPlan], Seq has size same as the number of leaf nodes
    */
-  def getColumnFilterGroupWithLogicalPlan(logicalPlan: LogicalPlan): Seq[ColumnFilterListWithLogicalPlan] = {
+  def getColumnFilterGroupFilteringLeafScalarPlans(logicalPlan: LogicalPlan): Seq[Set[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
-        case lp: LabelValues => ColumnFilterListWithLogicalPlan(lp.filters toSet, LabelValues)
-        case lp: LabelNames => ColumnFilterListWithLogicalPlan(lp.filters toSet, LabelNames)
-        case lp: RawSeries => ColumnFilterListWithLogicalPlan(lp.filters toSet, RawSeries)
-        case lp: RawChunkMeta => ColumnFilterListWithLogicalPlan(lp.filters toSet, RawChunkMeta)
-        case lp: SeriesKeysByFilters => ColumnFilterListWithLogicalPlan(lp.filters toSet, SeriesKeysByFilters)
-        case lp: LabelCardinality => ColumnFilterListWithLogicalPlan(lp.filters.toSet, LabelCardinality)
-        case lp: TsCardinalities => ColumnFilterListWithLogicalPlan(lp.filters.toSet, TsCardinalities)
-        case _: ScalarTimeBasedPlan => ColumnFilterListWithLogicalPlan(Set.empty[ColumnFilter], ScalarTimeBasedPlan)
-        case _: ScalarFixedDoublePlan => ColumnFilterListWithLogicalPlan(Set.empty[ColumnFilter], ScalarFixedDoublePlan)
-        case _: ScalarBinaryOperation => ColumnFilterListWithLogicalPlan(Set.empty[ColumnFilter], ScalarBinaryOperation)
+        case lp: LabelValues => (lp.filters toSet, true)
+        case lp: LabelNames => (lp.filters toSet, true)
+        case lp: RawSeries => (lp.filters toSet, true)
+        case lp: RawChunkMeta => (lp.filters toSet, true)
+        case lp: SeriesKeysByFilters => (lp.filters toSet, true)
+        case lp: LabelCardinality => (lp.filters.toSet, true)
+        case lp: TsCardinalities => (lp.filters.toSet, true)
+        case _: ScalarTimeBasedPlan => (Set.empty[ColumnFilter], false)
+        case _: ScalarFixedDoublePlan => (Set.empty[ColumnFilter], false)
+        case _: ScalarBinaryOperation => (Set.empty[ColumnFilter], false)
         case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
     } match {
-      case groupSeq: Seq[ColumnFilterListWithLogicalPlan] =>
-        if (groupSeq.isEmpty || groupSeq.forall( x => x.columnFilterSet.isEmpty)) Seq.empty else groupSeq
+      case groupSeq: Seq[(Set[ColumnFilter], Boolean)] =>
+        if (groupSeq.isEmpty || groupSeq.forall( x => x._1.isEmpty)) Seq.empty else {
+          // filter out the scalar plans with empty column filter group
+          // and only include the column filter of raw leaf plans
+          groupSeq.filter(y => y._2)
+            .map(x => x._1)
+        }
       case _ => Seq.empty
     }
   }

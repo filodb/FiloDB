@@ -6,7 +6,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, ScalarFixedDoublePlan}
+import filodb.query.LogicalPlan
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -132,14 +132,27 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
   it ("getColumnFilterGroupWithLogical plans should return result as expected") {
     val timeParamsSec = TimeStepParams(1000, 10, 10000)
     val query1 = """sum(count_over_time((test_metric{_ws_="test-ws", _ns_="test-ns", usecase="test"} > 20000)[21600s:])) or vector(0)"""
-    val lp = Parser.queryRangeToLogicalPlan(query1, timeParamsSec)
-    val columnGroupWithPlan = LogicalPlan.getColumnFilterGroupWithLogicalPlan(lp)
-    val scalarPlansCount = columnGroupWithPlan.count(x => x.logicalPlan == ScalarFixedDoublePlan)
-    scalarPlansCount shouldEqual 2
-    val query2 = """rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[5m]) * 1000"""
-    val lp2 = Parser.queryRangeToLogicalPlan(query2, timeParamsSec)
-    val columnGroupWithPlan2 = LogicalPlan.getColumnFilterGroupWithLogicalPlan(lp2)
-    val scalarPlansCount2 = columnGroupWithPlan2.count(x => x.logicalPlan == ScalarFixedDoublePlan)
-    scalarPlansCount2 shouldEqual 1
+    val query2 = """sum(count_over_time((test_metric{_ws_="test-ws", _ns_="test-ns", usecase="test"} > 20000)[21600s:])) or vector(0) or sum(count_over_time((test_metric{_ws_="wrong_ws", _ns_="wrong-ns", usecase="test"} > 20000)[21600s:]))"""
+    val query3 = """rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[5m]) * 1000"""
+
+    def getColumnFilterWithAndWithoutScalarCount(query: String) : (Int, Int) = {
+      val lp = Parser.queryRangeToLogicalPlan(query, timeParamsSec)
+      val columnGroups = LogicalPlan.getColumnFilterGroup(lp)
+      val columnGroupsWithoutScalar = LogicalPlan.getColumnFilterGroupFilteringLeafScalarPlans(lp)
+      val scalarPlansCount = columnGroups.count(x => x.isEmpty)
+      val scalarPlansWithoutCount = columnGroupsWithoutScalar.count(x => x.isEmpty)
+      (scalarPlansCount, scalarPlansWithoutCount)
+    }
+    var counts = getColumnFilterWithAndWithoutScalarCount(query1)
+    counts._1 shouldEqual 2
+    counts._2 shouldEqual 0
+
+    counts = getColumnFilterWithAndWithoutScalarCount(query2)
+    counts._1 shouldEqual 3
+    counts._2 shouldEqual 0
+
+    counts = getColumnFilterWithAndWithoutScalarCount(query3)
+    counts._1 shouldEqual 1
+    counts._2 shouldEqual 0
   }
 }
