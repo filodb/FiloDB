@@ -107,8 +107,8 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
         Seq("A", "C"), Seq("A", "D"), Seq("B", "C"), Seq("B", "D")))
     )
     val shouldErrorQueries = Seq(
-      """foo{label1=~"A|B", label2=~"C|D."}""",  // non-pipe regex chars
-      """foo{label1=~"A|B", label2!~"C|D"}"""    // non-equals[regex] filter
+      """foo{label1=~"A|B", label2=~"C|D."}""", // non-pipe regex chars
+      """foo{label1=~"A|B", label2!~"C|D"}""" // non-equals[regex] filter
     )
     for ((query, expected) <- queryExpectedPairs) {
       val plan = Parser.queryToLogicalPlan(query, 100, 10)
@@ -116,7 +116,7 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
       // make sure all filters are Equals
       res.foreach(_.foreach(_.filter.isInstanceOf[Equals] shouldEqual true))
       // make sure all values are as expected
-      res.map{ group =>
+      res.map { group =>
         group.sortBy(_.column).map(_.filter.valuesStrings.head)
       }.toSet shouldEqual expected
     }
@@ -127,5 +127,32 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
         LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(plan, shardKeyLabels)
       }
     }
+  }
+
+  it ("getColumnFilterGroupWithLogical plans should return result as expected") {
+    val timeParamsSec = TimeStepParams(1000, 10, 10000)
+    val query1 = """sum(count_over_time((test_metric{_ws_="test-ws", _ns_="test-ns", usecase="test"} > 20000)[21600s:])) or vector(0)"""
+    val query2 = """sum(count_over_time((test_metric{_ws_="test-ws", _ns_="test-ns", usecase="test"} > 20000)[21600s:])) or vector(0) or sum(count_over_time((test_metric{_ws_="wrong_ws", _ns_="wrong-ns", usecase="test"} > 20000)[21600s:]))"""
+    val query3 = """rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[5m]) * 1000"""
+
+    def getColumnFilterWithAndWithoutScalarCount(query: String) : (Int, Int) = {
+      val lp = Parser.queryRangeToLogicalPlan(query, timeParamsSec)
+      val columnGroups = LogicalPlan.getColumnFilterGroup(lp)
+      val columnGroupsWithoutScalar = LogicalPlan.getColumnFilterGroupFilteringLeafScalarPlans(lp)
+      val scalarPlansCount = columnGroups.count(x => x.isEmpty)
+      val scalarPlansWithoutCount = columnGroupsWithoutScalar.count(x => x.isEmpty)
+      (scalarPlansCount, scalarPlansWithoutCount)
+    }
+    var counts = getColumnFilterWithAndWithoutScalarCount(query1)
+    counts._1 shouldEqual 2
+    counts._2 shouldEqual 0
+
+    counts = getColumnFilterWithAndWithoutScalarCount(query2)
+    counts._1 shouldEqual 3
+    counts._2 shouldEqual 0
+
+    counts = getColumnFilterWithAndWithoutScalarCount(query3)
+    counts._1 shouldEqual 1
+    counts._2 shouldEqual 0
   }
 }
