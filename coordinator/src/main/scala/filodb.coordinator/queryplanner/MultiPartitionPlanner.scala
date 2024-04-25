@@ -12,6 +12,7 @@ import io.grpc.ManagedChannel
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
+import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, QueryUtils, RangeParams, RvRange}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
@@ -56,7 +57,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                             val queryConfig: QueryConfig,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
-                            new ConcurrentHashMap[String, ManagedChannel]().asScala)
+                            new ConcurrentHashMap[String, ManagedChannel]().asScala,
+                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) with StrictLogging {
 
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -68,6 +70,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
   val datasetMetricColumn: String = dataset.options.metricColumn
+
+  private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
+    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
+  }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       // Pseudo code for the materialize
@@ -483,10 +489,26 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
   }
 
+  /**
+   * Retuns an occupied Option iff the plan can be pushed-down according to the set of labels.
+   */
+  private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
+    val nonMetricShardKeyCols = dataset.options.nonMetricShardColumns
+    val canTschemaPushdown = getPushdownKeys(lp, targetSchemaProvider(qContext), nonMetricShardKeyCols,
+      rs => LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(rs, nonMetricShardKeyCols).map(_.toSet).toSet,
+      rs => LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(rs, nonMetricShardKeyCols)).isDefined
+    if (canTschemaPushdown) {
+      LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext),
+        rs => LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns))
+    } else None
+  }
+
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
+    val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
+    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels, queryContext)
+    val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
       addAggregator(aggregate, queryContext, childPlanRes)
     } else {
@@ -559,7 +581,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       )
     }
     lazy val hasMoreThanOneNonMetricShardKey =
-      getNonMetricShardKeyFilters(splitLeafPlan, dataset.options.nonMetricShardColumns)
+      LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(splitLeafPlan, dataset.options.nonMetricShardColumns)
         .filter(_.nonEmpty).distinct.size > 1
     if (hasMoreThanOneNonMetricShardKey) {
       throw new BadQueryException( baseErrorMessage +

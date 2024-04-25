@@ -410,6 +410,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
+  /**
+   * Retuns an occupied Option iff the plan can be pushed-down according to the set of labels.
+   */
+  private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
+    val canTschemaPushdown = getPushdownKeys(qContext, lp).isDefined
+    if (canTschemaPushdown) {
+        LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext), getShardKeys)
+    } else None
+  }
+
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
@@ -421,16 +431,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       return pushdownKeys.get
     }
 
-    // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
-    // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
-    // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual
-    // partitions may not give the correct answer, we should push down the sum to multiple partitions, perform a reduce
-    // locally and then run count on the results. The following implementation checks for descendant aggregates, if
-    // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
-    // using the wrapped planner
-    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
+    val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
+    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels, queryContext)
+    val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
-      // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
+      // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
       // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
       // use the same dispatcher
