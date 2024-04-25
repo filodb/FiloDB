@@ -50,6 +50,7 @@ object Submodules {
       commonSettings,
       name := "filodb-core",
       scalacOptions += "-language:postfixOps",
+      assemblySettings,
       libraryDependencies ++= coreDeps
     )
 
@@ -78,6 +79,7 @@ object Submodules {
       publishArtifact in (Compile, packageDoc) := false,
       publishArtifact in packageDoc := false,
       sources in (Compile, doc) := Seq.empty,
+      assemblySettings,
       libraryDependencies ++= promDeps
     )
 
@@ -88,6 +90,7 @@ object Submodules {
       libraryDependencies ++= queryDeps,
       commonSettings,
       scalacOptions += "-language:postfixOps",
+      assemblySettings,
       name := "filodb-query"
     )
 
@@ -107,6 +110,7 @@ object Submodules {
       commonSettings,
       name := "filodb-cli",
       libraryDependencies ++= cliDeps,
+      assemblySettings,
       cliAssemblySettings
     )
 

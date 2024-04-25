@@ -129,7 +129,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   }
 
   def truncateColStore(colStore: CassandraColumnStore, dataset: Dataset): Unit = {
-    colStore.initialize(dataset.ref, numOfShards).futureValue
+    colStore.initialize(dataset.ref, numOfShards, ConfigFactory.empty).futureValue
     colStore.truncate(dataset.ref, numOfShards).futureValue
   }
 

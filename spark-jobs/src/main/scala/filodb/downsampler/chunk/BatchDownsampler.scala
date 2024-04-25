@@ -350,6 +350,8 @@ class BatchDownsampler(settings: DownsamplerSettings,
     @volatile var numChunks = 0
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
+      downsampleCassandraColStore.initialize(downsampleRefsByRes(res), -1,
+        settings.rawDatasetIngestionConfig.resources)
       // FIXME if listener in chunkset below is not copied + overridden to no-op, we get a SEGV because
       // of a bug in either monix's mapAsync or cassandra driver where the future is completed prematurely.
       // This causes a race condition between free memory and chunkInfo.id access in updateFlushedId.
