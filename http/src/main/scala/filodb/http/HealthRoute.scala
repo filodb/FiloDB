@@ -1,7 +1,5 @@
 package filodb.http
 
-import scala.concurrent.duration.DurationInt
-
 import akka.actor.ActorRef
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
@@ -27,6 +25,23 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
                                          ShardStatusRecovery.getClass,
                                          ShardStatusAssigned.getClass)
 
+  private val livenessShardEvents = Seq(
+    IngestionStarted.getClass,
+    RecoveryStarted.getClass,
+    RecoveryInProgress.getClass)
+
+  private val livenessShardStatuses = Seq(ShardStatusActive.getClass, ShardStatusRecovery.getClass)
+
+  def checkIfAllShardsLiveClusterV1(shardEvents: collection.Map[DatasetRef, Seq[ShardEvent]]): Boolean = {
+    shardEvents.values.flatten.forall(
+      shardEvent => livenessShardEvents.contains(shardEvent.getClass))
+  }
+
+  def checkIfAllShardsLiveClusterV2(shardHealthSeq: Seq[DatasetShardHealth]): Boolean = {
+    shardHealthSeq.forall(
+      shardHealth => livenessShardStatuses.contains(shardHealth.status.getClass))
+  }
+
   val route = {
     // Returns the local dataset/shard status as JSON
     path ("__health") {
@@ -42,7 +57,7 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
               }
           }
         } else {
-          onSuccess(asyncAsk(coordinatorActor, StatusActor.GetCurrentEvents, 60.seconds)) {
+          onSuccess(asyncAsk(coordinatorActor, StatusActor.GetCurrentEvents, settings.queryAskTimeout)) {
             case m: collection.Map[DatasetRef, Seq[ShardEvent]]@unchecked =>
               complete(httpList(m.toSeq.map { case (ref, ev) => DatasetEvents(ref.toString, ev.map(_.toString)) }))
           }
@@ -52,7 +67,29 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
     // Adding a simple liveness endpoint to check if the FiloDB instance is reachable or not
     path ("__liveness") {
       get {
-        complete(httpLiveness("UP"))
+        if (v2ClusterEnabled) {
+          onSuccess(asyncAsk(coordinatorActor, LocalShardsHealthRequest, settings.queryAskTimeout)) {
+            case m: Seq[DatasetShardHealth]@unchecked =>
+              if (checkIfAllShardsLiveClusterV2(m)) {
+                complete(httpLiveness("UP"))
+              }
+              else {
+                logger.error(s"Liveness check for node failed ! ShardStatus: $m")
+                complete(httpLiveness("DOWN"))
+              }
+          }
+        } else {
+          onSuccess(asyncAsk(coordinatorActor, StatusActor.GetCurrentEvents, settings.queryAskTimeout)) {
+            case m: collection.Map[DatasetRef, Seq[ShardEvent]]@unchecked =>
+              if (checkIfAllShardsLiveClusterV1(m)) {
+                complete(httpLiveness("UP"))
+              }
+              else {
+                logger.error(s"Liveness check for node failed ! ShardStatus: $m")
+                complete(httpLiveness("DOWN"))
+              }
+          }
+        }
       }
     }
   }
