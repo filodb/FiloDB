@@ -25,21 +25,19 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
                                          ShardStatusRecovery.getClass,
                                          ShardStatusAssigned.getClass)
 
-  private val livenessShardEvents = Seq(
-    IngestionStarted.getClass,
-    RecoveryStarted.getClass,
-    RecoveryInProgress.getClass)
-
-  private val livenessShardStatuses = Seq(ShardStatusActive.getClass, ShardStatusRecovery.getClass)
-
   def checkIfAllShardsLiveClusterV1(shardEvents: collection.Map[DatasetRef, Seq[ShardEvent]]): Boolean = {
-    shardEvents.values.flatten.forall(
-      shardEvent => livenessShardEvents.contains(shardEvent.getClass))
+    shardEvents.values.flatten.forall {
+      case IngestionStarted(_, _, _) | RecoveryStarted(_, _, _, _) | RecoveryInProgress(_, _, _, _) => true
+      case _ => false
+    }
   }
 
   def checkIfAllShardsLiveClusterV2(shardHealthSeq: Seq[DatasetShardHealth]): Boolean = {
-    shardHealthSeq.forall(
-      shardHealth => livenessShardStatuses.contains(shardHealth.status.getClass))
+    val allShardStatus = shardHealthSeq.map(x => x.status)
+    allShardStatus.forall {
+      case ShardStatusActive | ShardStatusRecovery(_) => true
+      case _ => false
+    }
   }
 
   val route = {
@@ -64,7 +62,11 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
         }
       }
     } ~
-    // Adding a simple liveness endpoint to check if the FiloDB instance is reachable or not
+    // Adding a simple liveness endpoint to check if the FiloDB instance is reachable and if the kafka and cassandra
+    // connections are initialized correctly on startup. This will help us in detecting any connection issues to
+    // kafka and cassandra on startup.
+    // NOTE: We don't wait for bootstrap to finish or normal ingestion to start or shards to be active. As soon as
+    // ingestion or recovery is started, we consider the filodb pods to be live
     path ("__liveness") {
       get {
         if (v2ClusterEnabled) {
