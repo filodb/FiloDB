@@ -25,19 +25,49 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
                                          ShardStatusRecovery.getClass,
                                          ShardStatusAssigned.getClass)
 
+  /**
+   * @param shardEvents
+   * @return
+   */
   def checkIfAllShardsLiveClusterV1(shardEvents: collection.Map[DatasetRef, Seq[ShardEvent]]): Boolean = {
-    shardEvents.values.flatten.forall {
+    val allShardEvents = shardEvents.values.flatten.toSeq
+    // wait for the minimum amount of responses needed
+    if (allShardEvents.length < numResponsesNeededForLivenessCheck) {
+      return false
+    }
+    allShardEvents.forall {
       case IngestionStarted(_, _, _) | RecoveryStarted(_, _, _, _) | RecoveryInProgress(_, _, _, _) => true
       case _ => false
     }
   }
 
+  /**
+   * @param shardHealthSeq
+   * @return
+   */
   def checkIfAllShardsLiveClusterV2(shardHealthSeq: Seq[DatasetShardHealth]): Boolean = {
     val allShardStatus = shardHealthSeq.map(x => x.status)
+    // wait for the minimum amount of responses needed
+    if (allShardStatus.length < numResponsesNeededForLivenessCheck) {
+      return false
+    }
     allShardStatus.forall {
       case ShardStatusActive | ShardStatusRecovery(_) => true
       case _ => false
     }
+  }
+
+  /**
+   * Gets the total number of shards from all the dataset configs and calculates the
+   * number of responses needed for liveness check
+   * @return [Int] number of responses needed
+   */
+  lazy val numResponsesNeededForLivenessCheck : Int = {
+    var totalNumShards = 0
+    settings.filoSettings.streamConfigs.foreach { config =>
+      totalNumShards += config.getInt("num-shards")
+    }
+    totalNumShards / settings.filoSettings.minNumNodes.get
   }
 
   val route = {
