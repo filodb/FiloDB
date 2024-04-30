@@ -26,8 +26,11 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
                                          ShardStatusAssigned.getClass)
 
   /**
+   * Checks if the shardEvents are in active or recovery phase. If so, returns true else false.
+   * We also make sure that all the responses from the shards assigned to the local node is received before we
+   * continue with the liveness check
    * @param shardEvents
-   * @return
+   * @return true if all local shards are live else false
    */
   def checkIfAllShardsLiveClusterV1(shardEvents: collection.Map[DatasetRef, Seq[ShardEvent]]): Boolean = {
     val allShardEvents = shardEvents.values.flatten.toSeq
@@ -42,8 +45,11 @@ class HealthRoute(coordinatorActor: ActorRef, v2ClusterEnabled: Boolean, setting
   }
 
   /**
+   * Checks if the shard status are in active or recovery phase. If so, returns true else false
+   * We also make sure that all the responses from the shards assigned to the local node is received before we
+   * continue with the liveness check
    * @param shardHealthSeq
-   * @return
+   * @return true if all local shards are live else false
    */
   def checkIfAllShardsLiveClusterV2(shardHealthSeq: Seq[DatasetShardHealth]): Boolean = {
     val allShardStatus = shardHealthSeq.map(x => x.status)
