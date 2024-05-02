@@ -27,8 +27,8 @@ import filodb.memory.format.UnsafeUtils
  *   (1) only the least-significant prefix name is stored.
  *   (2) no shard ID is store
  */
-case class CardinalityValue(tsCount: Int, activeTsCount: Int,
-                            childrenCount: Int, childrenQuota: Int)
+case class CardinalityValue(tsCount: Long, activeTsCount: Long,
+                            childrenCount: Long, childrenQuota: Long)
 
 case object CardinalityValue {
   def toCardinalityRecord(card: CardinalityValue,
@@ -40,10 +40,10 @@ case object CardinalityValue {
 
 class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
-    output.writeInt(card.tsCount, true)
-    output.writeInt(card.activeTsCount, true)
-    output.writeInt(card.childrenCount, true)
-    output.writeInt(card.childrenQuota, true)
+    output.writeLong(card.tsCount, true)
+    output.writeLong(card.activeTsCount, true)
+    output.writeLong(card.childrenCount, true)
+    output.writeLong(card.childrenQuota, true)
   }
 
   def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
@@ -291,7 +291,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       // result reached MAX_RESULT_SIZE, but still more cardinalities
       if (it.isValid() && !complete) {
         // sum the remaining counts into these values
-        var tsCount, activeTsCount, childrenCount, childrenQuota = 0
+        var tsCount, activeTsCount, childrenCount, childrenQuota = 0L
         breakable {
           do {
             // note: the iterator is valid here on the first iteration

@@ -6,7 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 
-case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
+case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Long)
   extends RuntimeException
 
 /**
@@ -99,7 +99,7 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix,
-        CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+        CardinalityRecord(shard, prefix, CardinalityValue(0L, 0L, 0L, defaultChildrenQuota(i))))
 
       val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
         activeTsCount = old.value.activeTsCount + activeDelta,
