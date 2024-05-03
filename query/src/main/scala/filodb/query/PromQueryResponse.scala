@@ -76,6 +76,6 @@ final case class LabelCardinalitySampl(metric: Map[String, String],
  *              prometheus_rules_longterm, prometheus_rules_1m
  */
 final case class TsCardinalitiesSamplV2(group: Map[String, String],
-                                        cardinality: Map[String, Int],
+                                        cardinality: Map[String, Long],
                                         dataset: String,
                                         _type: String) extends MetadataSampl
