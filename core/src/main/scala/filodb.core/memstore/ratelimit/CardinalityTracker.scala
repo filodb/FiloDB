@@ -38,7 +38,7 @@ case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[Str
 class CardinalityTracker(ref: DatasetRef,
                          shard: Int,
                          shardKeyLen: Int,
-                         defaultChildrenQuota: Seq[Int],
+                         defaultChildrenQuota: Seq[Long],
                          val store: CardinalityStore,
                          quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol,
                          flushCount: Option[Int] = None) extends StrictLogging {

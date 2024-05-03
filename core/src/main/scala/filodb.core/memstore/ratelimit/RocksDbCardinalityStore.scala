@@ -47,8 +47,8 @@ class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   }
 
   def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
-    CardinalityValue(input.readInt(true), input.readInt(true),
-                    input.readInt(true), input.readInt(true))
+    CardinalityValue(input.readLong(true), input.readLong(true),
+                    input.readLong(true), input.readLong(true))
   }
 }
 
