@@ -60,7 +60,7 @@ object PromCirceSupport {
           // This is for TsCardinalities response
           for {
             group <- c.get[Map[String, String]]("group")
-            card <- c.get[Map[String, Int]]("cardinality")
+            card <- c.get[Map[String, Long]]("cardinality")
             dataset <- c.get[String]("dataset")
             _type <- c.get[String]("_type")
           } yield TsCardinalitiesSamplV2(group, card, dataset, _type)

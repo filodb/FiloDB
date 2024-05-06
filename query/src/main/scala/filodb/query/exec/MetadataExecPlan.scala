@@ -479,9 +479,9 @@ final case object TsCardExec {
    * to represent the cardinality count of downsample clusters
    */
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
-                                       ColumnInfo("active", ColumnType.IntColumn),
-                                       ColumnInfo("shortTerm", ColumnType.IntColumn),
-                                       ColumnInfo("longTerm", ColumnType.IntColumn)), 1)
+                                       ColumnInfo("active", ColumnType.LongColumn),
+                                       ColumnInfo("shortTerm", ColumnType.LongColumn),
+                                       ColumnInfo("longTerm", ColumnType.LongColumn)), 1)
 
   /**
    * @param prefix ShardKeyPrefix from the Cardinality Record
@@ -497,7 +497,7 @@ final case object TsCardExec {
    * @param shortTerm This is the 7 day running Cardinality Count
    * @param longTerm upto 6 month running Cardinality Count
    */
-  case class CardCounts(active: Int, shortTerm: Int, longTerm: Int = 0) {
+  case class CardCounts(active: Long, shortTerm: Long, longTerm: Long = 0) {
     if (shortTerm < active) {
       qLogger.warn(s"CardCounts created with total < active; shortTerm: $shortTerm, active: $active")
     }
@@ -511,13 +511,13 @@ final case object TsCardExec {
   case class CardRowReader(group: ZeroCopyUTF8String, counts: CardCounts) extends RowReader {
     override def notNull(columnNo: Int): Boolean = ???
     override def getBoolean(columnNo: Int): Boolean = ???
-    override def getInt(columnNo: Int): Int = columnNo match {
+    override def getInt(columnNo: Int): Int = ???
+    override def getLong(columnNo: Int): Long = columnNo match {
       case 1 => counts.active
       case 2 => counts.shortTerm
       case 3 => counts.longTerm
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
-    override def getLong(columnNo: Int): Long = ???
     override def getDouble(columnNo: Int): Double = ???
     override def getFloat(columnNo: Int): Float = ???
     override def getString(columnNo: Int): String = {
@@ -539,7 +539,7 @@ final case object TsCardExec {
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
-      val counts = CardCounts(rr.getInt(1), rr.getInt(2), rr.getInt(3))
+      val counts = CardCounts(rr.getLong(1), rr.getLong(2), rr.getLong(3))
       RowData(group, counts)
     }
   }
