@@ -242,7 +242,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @param childrenQuota maximum number of time series for this prefix
    * @return current CardinalityRecord for the prefix
    */
-  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Int): CardinalityRecord = {
+  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Long): CardinalityRecord = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 
