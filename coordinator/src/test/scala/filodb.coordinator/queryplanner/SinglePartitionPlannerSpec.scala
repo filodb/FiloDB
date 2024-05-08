@@ -53,7 +53,8 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  val highAvailabilityPlanner = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
+  val highAvailabilityPlanner = new HighAvailabilityPlanner(dsRef, localPlanner, localMapper, failureProvider, queryConfig,
+    workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
 
   class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
     override def queryContext: QueryContext = QueryContext()

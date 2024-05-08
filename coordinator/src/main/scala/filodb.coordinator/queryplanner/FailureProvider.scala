@@ -10,6 +10,10 @@ import filodb.core.DatasetRef
   */
 trait FailureProvider {
   def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange]
+
+  // The getFailures is mixing two issues: (1) can we query cluster (are we allowed) and (2)
+  // whether the shards are up or not. This one is strictly the first case.
+  def getFailures2(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = ???
 }
 
 object EmptyFailureProvider extends FailureProvider {

@@ -7,7 +7,7 @@ import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
-import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
+import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
@@ -139,6 +139,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     if (forceInProcess) {
       return inProcessPlanDispatcher
     }
+    queryContext.plannerParams.failoverMode match {
+      case LegacyFailoverMode => legacyDispatcherForShard(shard, queryContext)
+      case AllRemoteBuddyFailoverMode => allRemoteDispatcherForShard(shard, queryContext)
+      case ShardLevelFailoverMode => shardLevelFailoverDispatcherForShard(shard, queryContext)
+    }
+  }
+
+  private def legacyDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
@@ -148,6 +156,62 @@ class SingleClusterPlanner(val dataset: Dataset,
         throw new RuntimeException(s"Shard: $shard is not available")
     }
     ActorPlanDispatcher(targetActor, clusterName)
+  }
+
+  private def allRemoteDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
+    val remoteShardMapper =
+      queryContext.plannerParams.buddyShardMapper.getOrElse(throw new RuntimeException("Remote shard map unavailable"))
+    val shardInfo = remoteShardMapper.shards(shard)
+    if (!shardInfo.active) {
+      if (queryContext.plannerParams.allowPartialResults)
+        logger.debug(s"Shard: $shard is not available however query is proceeding as partial results is enabled")
+      else
+        throw new RuntimeException(s"Remote Buddy Shard: $shard is not available")
+    }
+    val dispatcher = RemoteActorPlanDispatcher(shardInfo.address, clusterName)
+    dispatcher
+  }
+
+  private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
+    val localShardMapper =
+      queryContext.plannerParams.localShardMapper.getOrElse(throw new RuntimeException("Local shard map unavailable"))
+    // the reason we check shard mapper from the query context as opposed to
+    // the regular shard mapper of the SingleClusterPlanner is because the former allows us to
+    // inject failures to test the code as well as verify shard level failover in production by
+    // providing parameter downShards, for example downShards=tsdb1/us-east-1a/raw/6,7,8
+    if (localShardMapper.shards(shard).active) {
+      val targetActor = shardMapperFunc.coordForShard(shard)
+      // this means that the shard went down in the split second after high availability took
+      // a snapshot of the shard state
+      if (targetActor == ActorRef.noSender) {
+        allRemoteDispatcherForShard(shard, queryContext)
+      } else {
+        ActorPlanDispatcher(targetActor, clusterName)
+      }
+    } else {
+      allRemoteDispatcherForShard(shard, queryContext)
+    }
+
+
+  }
+
+  private def makeBuddyExecPlanIfNeeded(qContext: QueryContext, ep: ExecPlan): ExecPlan = {
+    // if we use shard level failover mode and the dispatcher that we have
+    // received from dispatcherForShard call is a dispatcher for a remote buddy shard
+    // we need to wrap the execution plan in GenericRemoteExec
+    // GenericRemoteExec exists only because we cannot directly query the shards
+    // from a coordinator. GenericRemoteExec will pass it to a machine that can resolve
+    // ActorRef of a remote shard and dispatch to the appropriate actor.
+    val pp = qContext.plannerParams
+    if (
+      pp.failoverMode == ShardLevelFailoverMode &&
+      ep.dispatcher.isInstanceOf[RemoteActorPlanDispatcher]
+    ) {
+      GenericRemoteExec(
+        GrpcPlanDispatcher(pp.buddyGrpcEndpoint.get, pp.buddyGrpcTimeoutMs.get),
+        ep
+      )
+    } else ep
   }
 
   /**
@@ -587,7 +651,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         qContext.copy(plannerParams = shardOverridePlannerParams)
       }
       // force child plans to dispatch in-process (since they're all on the same shard)
-      lp match {
+      val eps = lp match {
         case bj: BinaryJoin =>
           materializeBinaryJoinNoPushdown(qContextWithShardOverride, bj,
             forceInProcess = true, forceDispatcher = Some(dispatcher)).plans
@@ -596,7 +660,8 @@ class SingleClusterPlanner(val dataset: Dataset,
             forceInProcess = true, forceDispatcher = Some(dispatcher)).plans
         case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
       }
-
+      val pp = qContext.plannerParams
+      eps.map(ep => makeBuddyExecPlanIfNeeded(qContext, ep))
     }
     PlanResult(plans)
   }
@@ -827,8 +892,27 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     val execPlans = shardsFromFilters(renamedFilters, qContext, startMs, endMs).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
-        toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
+      val ep = MultiSchemaPartitionsExec(
+        qContext, dispatcher, dsRef, shard, renamedFilters,
+        toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName
+      )
+      // if we use shard level failover mode and the dispatcher that we have
+      // received from dispatcherForShard call is a dispatcher for a remote buddy shard
+      // we need to wrap it in GenericRemoteExec
+      // GenericRemoteExec exists only because we cannot directly query the shards
+      // from a coordinator. GenericRemoteExec will pass it to a machine that can resolve
+      // ActorRef of a remote shard.
+      if (
+        qContext.plannerParams.failoverMode == ShardLevelFailoverMode &&
+          dispatcher.isInstanceOf[RemoteActorPlanDispatcher]
+      ) {
+        GenericRemoteExec(
+          GrpcPlanDispatcher(
+            qContext.plannerParams.buddyGrpcEndpoint.get,
+            qContext.plannerParams.buddyGrpcTimeoutMs.get),
+          ep
+        )
+      } else ep
     }
 
     // Stitch only if spread changes during the query-window.
@@ -856,7 +940,10 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs)
+      val ep = exec.LabelValuesExec(
+        qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs
+      )
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
     PlanResult(metaExec)
   }
@@ -893,8 +980,10 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+      val ep = exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
+
     PlanResult(metaExec)
   }
 
@@ -906,7 +995,8 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+      val ep = exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
     PlanResult(metaExec)
   }
@@ -922,7 +1012,10 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass)
+      val ep = exec.TsCardExec(
+        qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields, clusterNameToPass
+      )
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
     PlanResult(metaExec)
   }
@@ -955,8 +1048,11 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val metaExec = shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
-      SelectChunkInfosExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
-        schemaOpt, colName)
+      val ep = SelectChunkInfosExec(
+        qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
+        schemaOpt, colName
+      )
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
     PlanResult(metaExec)
   }

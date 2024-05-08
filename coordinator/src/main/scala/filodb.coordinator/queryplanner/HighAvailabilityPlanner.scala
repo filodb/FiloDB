@@ -1,25 +1,20 @@
 package filodb.coordinator.queryplanner
 
-import akka.util.Timeout
-import com.typesafe.scalalogging.StrictLogging
-import io.grpc.ManagedChannel
-import io.grpc.Metadata
-import io.grpc.stub.{MetadataUtils, StreamObserver}
-import java.net.InetAddress
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
-import monix.eval.Task
-import monix.execution.Scheduler
-import monix.reactive.{MulticastStrategy, Observable}
-import monix.reactive.subjects.ConcurrentSubject
+import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.concurrent.{Map => ConcurrentMap}
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
 
-import filodb.core.{DatasetRef, QueryTimeoutException}
+import com.typesafe.scalalogging.StrictLogging
+import io.grpc.ManagedChannel
+
+import filodb.coordinator.GrpcPlanDispatcher
+import filodb.coordinator.ShardMapper
+import filodb.core.DatasetRef
+import filodb.core.query.{ActiveShardMapper, DownPartition, PlannerParams, ShardLevelFailoverMode}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.core.store.ChunkSource
-import filodb.grpc.{GrpcCommonUtils, GrpcMultiPartitionQueryService, RemoteExecGrpc}
-import filodb.query.{LabelNames, LabelValues, LogicalPlan, QueryResponse, SeriesKeysByFilters, StreamQueryResponse}
+import filodb.grpc.GrpcCommonUtils
+import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 /**
@@ -35,11 +30,18 @@ import filodb.query.exec._
   */
 class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
+                              localShardMapperFunc: => ShardMapper,
                               failureProvider: FailureProvider,
                               queryConfig: QueryConfig,
                               remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                               channels: ConcurrentMap[String, ManagedChannel] =
-                              new ConcurrentHashMap[String, ManagedChannel]().asScala)
+                              new ConcurrentHashMap[String, ManagedChannel]().asScala,
+                              buddyShardMapperProvider: Option[ActiveShardMapperProvider] = None,
+                              workUnit: String,
+                              buddyWorkUnit: String,
+                              clusterName: String,
+                              useShardLevelFailover : Boolean
+                             )
   extends QueryPlanner with StrictLogging {
 
   import LogicalPlanUtils._
@@ -148,8 +150,43 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   }
   //scalastyle:on method.length
 
-  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
+  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    val origQueryParams = qContext.origQueryParams
+
+    val unroutableLogicalPlan = !logicalPlan.isRoutable
+    // We don't know the promql issued (unusual)
+    lazy val notPromQlQuery = !origQueryParams.isInstanceOf[PromQlQueryParams]
+    // This is a query that was part of failure routing
+    lazy val markedNotToBeFailedOver =
+      origQueryParams.isInstanceOf[PromQlQueryParams] && !qContext.plannerParams.processFailure
+    // TODO why would we ever care that there is only one time range
+    // keeping it "as is" for now
+    // Sub queries have different time ranges (unusual)
+    lazy val hasMultipleTimeRanges = !hasSingleTimeRange(logicalPlan)
+    // materializeLegacy uses getFailures call that mixes 2 issues:
+    // 1) shards down and
+    // 2) failures associated with a FiloDB cluster.
+    // FailureTimeRange marks a FiloDB cluster partitions/work_units/dataset/cluster_type
+    // having bad/non existent data, allowing to redirect traffic to the cluster that has data.
+    // The issue is that if we have shards down getFailures() will return a FailureTimeRange
+    // which conceptually is NOT correct. Supposed we have one shard down in us-east-xyz and one in us-west-zyx.
+    // We still can return the results for as long as the down shards are NOT overlapping but if we get
+    // two FailureTimeRanges from both of the work units, theoretically we should not respond to the query
+    // at all since we know that both clusters have corrupted/invalid/non existent data.
+    // Instead we should keep shards down and FailureTimeRanges information separate!
+    // Keeping the existing logic in place for now but allow one to switch to the new logic.
+    if (unroutableLogicalPlan || notPromQlQuery || markedNotToBeFailedOver || hasMultipleTimeRanges) {
+      localPlanner.materialize(logicalPlan, qContext)
+    } else if (useShardLevelFailover || qContext.plannerParams.failoverMode == ShardLevelFailoverMode) {
+      materializeShardLevelFailover(logicalPlan, qContext)
+    } else {
+      materializeLegacy(logicalPlan, qContext)
+    }
+
+  }
+
+  def materializeLegacy(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
@@ -160,16 +197,9 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.
     lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
       periodicSeriesTimeWithOffset.endMs)
-    lazy val failures = failureProvider.getFailures(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
-
+    val failures = failureProvider.getFailures(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
     val tsdbQueryParams = qContext.origQueryParams
-    if (!logicalPlan.isRoutable ||
-        !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
-        (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !qContext.plannerParams.processFailure) || // This is a query that was
-                                                                                 // part of failure routing
-        !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
-        failures.isEmpty) { // no failures in query time range
+    if (failures.isEmpty) { // no failures in query time range
       localPlanner.materialize(logicalPlan, qContext)
     } else {
       val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
@@ -187,102 +217,181 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     }
   }
 
-  case class GrpcPlanDispatcher(endpoint: String) extends PlanDispatcher {
-
-    val clusterName = InetAddress.getLocalHost().getHostName()
-
-    val requestTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
-
-    def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler):
-    Task[QueryResponse] = {
-      // "source" is unused (the param exists to support InProcessDispatcher).
-      val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-      val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
-
-      // Don't send if time left is very small
-      if (remainingTime < 1) {
-        Task.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
-      } else {
-        dispatchExecutionPlan(plan, remainingTime, sched)
-      }
-
+  // Shard level failover handles two distinct cases:
+  // CASE NUMBER_ONE
+  // EVERYTHING is executed remotely on the buddy cluster
+  // buddy remote cluster might still have shards down but we are not allowed to query local,
+  // hence, we still create a plan to query remote. If remote cluster has shards down,
+  // we should check if partial results are allowed, and if not FAIL immediately (without
+  // sending the query to the remote system and letting the remote system to resolve the issue)
+  // In that case remote shards should be used for both leaf plans and interim plans.
+  // ===============================
+  // | SingleClusterPlanner should:
+  // |  a) have explicit map of remote shards (can only by in QueryContext, unless we want to change
+  // |     QueryPlanner interface)
+  // |  b) should understand that we do shard level failover.
+  // |  c) should understand that local shards are not to be used, instead RemoteActorPlanDispatcher's
+  // |     need to be created, that on the other side will get converted to ActorPlanDispatcher.
+  // ===============================
+  // CASE NUMBER TWO
+  // We do mixed processing utilizing some remote and some local shards.
+  // Interim processing (non-leaf plans) is done locally, shards not available locally are queried remotely
+  // with push down of the transformers.
+  // SingleClusterPlanner will:
+  // 1) test if the query can be answered at all with the combination of local and remote
+  // 2) for leaf plans that need data which is not available locally,
+  //    create RemoteActorPlanDispatchers instead of ActorPlanDispatchers
+  //    with the actor path that is provided by QueryContext with a remote shard map
+  //    The plans need to be wrapped with GenericRemoteExec that is injected with GrpcRemoteDispatcher.
+  //    RemoteActorPlanDispatcher's on the remote side would create a corresponding
+  //    ActorPlanDispatcher's during the actual dispatch calls.
+  // 2) have access to remote shard map
+  // 3) interim processing (non leaf plans) is done by the local FiloDB nodes.
+  //    Ideally, the data that can be processed remotely should be processed remotely. Imagine an
+  //    unlikely case when there are about 50% of shards healthy locally and 50% remotely. If we
+  //    do all the interim work locally, our local nodes would have to work twice as hard, potentially
+  //    running out of memory. It's not trivial, however, to implement such planning and if we introduce
+  //    stateless nodes in the future, it won't be needed anyway. If, however, we want to distribute
+  //    the load as even as possible we could do use the following logic:
+  //          A) if healthy local shard count > healthy remote shards, just always use local shards
+  //          B) if healthy remote shard count > healthy local shards, just always use remote
+  //             in this case, REMOTE side would call on local shards (this shows how inefficient it
+  //             is to not be able to query shards directly from anywhere by a stateless query engine farm).
+  //    Since we don't do the above we might run into issue, if number of local shards is small,
+  //    it is especially bad if query has multi-level aggregation. If this becomes an issue we can
+  //    introduce a check requiring at least 50% local shards running, otherwise give up.
+  //    This might increase operational overhead (if we have a bunch of shards down it's better to
+  //    failover to a partition where we have more shards up as we might fail the queries that
+  //    theoretically could be resolved).
+  def materializeShardLevelFailover(
+    logicalPlan: LogicalPlan, qContext: QueryContext
+  ) : ExecPlan = {
+    val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+    val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
+    val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis.max,
+      periodicSeriesTime.endMs - offsetMillis.min)
+    val lookBackTime = getLookBackMillis(logicalPlan).max
+    // Time at which raw data would be retrieved which is used to get failures.
+    // It should have time with offset and lookback as we need raw data at time including offset and lookback.
+    val queryTimeRange = TimeRange(
+      periodicSeriesTimeWithOffset.startMs - lookBackTime,
+      periodicSeriesTimeWithOffset.endMs
+    )
+    val failures = failureProvider.getFailures2(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
+    // if failures is an empty collection, next statement will be true
+    val canQueryLocal = failures.forall(f => f.isRemote)
+    val canQueryRemote = failures.forall(f => !f.isRemote)
+    val cannotQueryLocal = !canQueryLocal
+    val cannotQueryRemote = !canQueryRemote
+    val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
+    val remoteActiveShardMapper = getRemoteActiveShardMapper(qContext.plannerParams)
+    if (cannotQueryLocal && cannotQueryRemote) {
+      // the only way this might happen is because one of the partitions is in maintenance
+      // and the other one has a mark saying that the partition has gap
+      // (or there was a bug in TR and both partitions are in maintenance... though who knows
+      // that might be ok, ie we might declare both partitions as unavailable for some weird reason)
+      throw new filodb.core.query.ServiceUnavailableException(
+        "Time range of the query is marked as unavailable by the FailureProvider"
+      )
+    } else if (cannotQueryLocal) {
+      // CASE NUMBER_ONE
+      materializeAllRemote(logicalPlan, qContext, remoteActiveShardMapper)  //CASE NUBER_ONE
+    } else if (cannotQueryRemote) {
+      // materialize local only
+      localPlanner.materialize(logicalPlan, qContext)
+    } else if (localActiveShardMapper.allShardsActive) {
+      localPlanner.materialize(logicalPlan, qContext)
+    } else if (remoteActiveShardMapper.allShardsActive) {
+      // CASE NUMBER_ONE
+      materializeAllRemote(logicalPlan, qContext, remoteActiveShardMapper)
+    } else {
+      // CASE NUMBER_TWO
+      materializeMixedLocalAndRemote(logicalPlan, qContext, localActiveShardMapper, remoteActiveShardMapper)
     }
-
-    // Even though this is NOT a streaming call, under the hood we use a streaming GRPC call
-    // PromQLGrpcServer.executePlan
-    // This is done so to unify executePlan() method with executeStreaming() method of PromQLGrpcServer.
-    // Method exec() of PromQLGrpcServer is not used by MultiPartition and HighAvailabilityPlanner's. One can see,
-    // for example, that method fromProto() of GrpcMultiPartitionQueryService.Response is never used
-    // in the code.
-    // executeStreaming() internally converts a non streaming QueryResponse to a GRPC streaming response and it's
-    // executeStreaming() that we use for MultiPartition and HighAvailabilityPlanner's.
-    // There are two reasons to use streaming GRPC API in a non streaming Scala API:
-    // 1) since we use execStreaming() as opposed to exec(), we want to continue utilize the same code path
-    // 2) we probably do not want to maintain both codepaths, ie we should deprecate exec()
-    // 3) both streaming and non streaming Scala API calls can use streaming GRPC calls.
-    def dispatchExecutionPlan(plan: ExecPlanWithClientParams, remainingTime: Long, sched: Scheduler):
-    Task[QueryResponse] = {
-      val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
-      // We only dispatch the child of ExecPlan, we expect the type of plan to be dispatched
-      // by GrpcPlanDispatcher is GenericRemoteExec
-      val genericRemoteExec = plan.execPlan.asInstanceOf[GenericRemoteExec]
-      import filodb.coordinator.ProtoConverters._
-      val protoPlan = genericRemoteExec.execPlan.toExecPlanContainerProto
-
-      val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
-      val observableResponse: Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
-        val subject =
-          ConcurrentSubject[GrpcMultiPartitionQueryService.StreamingResponse](MulticastStrategy.Publish)(sched)
-        subject.doOnSubscribe(
-          Task.eval {
-            val nonBlockingStub = RemoteExecGrpc.newStub(channel)
-            val md = new Metadata();
-            plan.execPlan.queryContext.traceInfo.foreach {
-              case (key, value) => md.put(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER), value)
-            }
-            nonBlockingStub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md))
-              .withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
-              .executePlan(
-                protoPlan,
-                new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
-                  override def onNext(value: GrpcMultiPartitionQueryService.StreamingResponse): Unit =
-                    subject.onNext(value)
-
-                  override def onError(t: java.lang.Throwable): Unit = subject.onError(t)
-
-                  override def onCompleted(): Unit = subject.onComplete()
-                }
-              )
-          }
-        )
-      }
-      import filodb.query.ProtoConverters._
-      val taskOfList: Task[List[GrpcMultiPartitionQueryService.StreamingResponse]] = observableResponse.toListL
-      taskOfList.map(_.toIterator.toQueryResponse)
-    }
-
-    // Currently, we do not use streaming for dispatching execution plans withing FiloDB clusters, even though
-    // we do have call dispatchStreamingExecPlan that utilize Akka streaming.
-    // It's an experimental feature and taking into account that Akka is not to be used in the newer versions of FiloDB,
-    // ActorPlanDispatcher's streaming feature is not to be used.
-    // GrpcPlanDispatcher is to be used exclusively for HighAvailability planner, as such it is NOT used for calls
-    // withing a FiloDB cluster but for calls between FiloDB clusters. To do so, it utilizes PromQlGrpcServer.
-    // PromQLGrpcServer currently is mostly a wrapper on top of ActorPlanDispatcher and although it defines method
-    // execStreaming
-    // it does not use queryPlanner.dispatchStreamingExecPlan and instead makes a call to dispatchExecPlan
-    // PromQLGrpcServer gets normal non streaming QueryResponse from the FiloDB cluster and then converts it to
-    // a GRPC streaming response but this is not to be confused with Akka streaming that theoretically can be used
-    // withing FiloDB cluster.
-    // When we start using GRPC dispatcher within cluster (ie replace ActorPlanDispatcher) and start using streaming
-    // for these GRPC dispatchers, we need to implement this method. Currently, it does not make sense to implement
-    // streaming in this dispatcher.
-
-    def dispatchStreaming
-    (plan: ExecPlanWithClientParams, source: ChunkSource)
-    (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
-      ???
-    }
-
-    def isLocalCall: Boolean = false
   }
+
+  def remoteShardsAreHealthy(): Boolean = {
+    buddyShardMapperProvider.get.getActiveShardMapper().allShardsActive
+  }
+
+  def materializeMixedLocalAndRemote(
+    logicalPlan: LogicalPlan, qContext : QueryContext,
+    localActiveShardMapper: ActiveShardMapper,
+    remoteActiveShardMapper: ActiveShardMapper
+  ): ExecPlan = {
+    // TODO makes sense to do local planning if we have at least X% of shards running
+    // otherwise, it's better to ship the entire query
+    val timeout : Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
+    val haPlannerParams = qContext.plannerParams.copy(
+      failoverMode = filodb.core.query.ShardLevelFailoverMode,
+      buddyGrpcTimeoutMs = Some(timeout),
+      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get),
+      localShardMapper = Some(localActiveShardMapper),
+      buddyShardMapper = Some(remoteActiveShardMapper)
+    )
+    val context = qContext.copy(plannerParams = haPlannerParams)
+    val plan = localPlanner.materialize(logicalPlan, context);
+    plan
+  }
+
+  def getLocalActiveShardMapper(plannerParams: PlannerParams): filodb.core.query.ActiveShardMapper = {
+    val shardMapper = localShardMapperFunc
+    val shardInfo = filodb.core.query.ShardInfo(false, "")
+    val shardInfoArray = Array.fill(shardMapper.statuses.size)(shardInfo)
+    shardMapper.statuses.zipWithIndex.foreach(t => {
+      val isActive = if (t._1 == filodb.coordinator.ShardStatusActive) {true} else {false}
+      val path = shardMapper.coordForShard(t._2).path.toString
+      shardInfoArray(t._2) = filodb.core.query.ShardInfo(isActive, path)
+    })
+    val localActiveShardMapper = ActiveShardMapper(shardInfoArray)
+    markDownShards(localActiveShardMapper, plannerParams.downPartitions, partitionName, workUnit, clusterName)
+    localActiveShardMapper
+  }
+
+  def getRemoteActiveShardMapper(plannerParams: PlannerParams): filodb.core.query.ActiveShardMapper = {
+    val shardMapper = buddyShardMapperProvider.get.getActiveShardMapper()
+    markDownShards(shardMapper, plannerParams.downPartitions, partitionName, buddyWorkUnit, clusterName)
+    shardMapper
+  }
+
+  def markDownShards(
+      asm: ActiveShardMapper,
+      downPartitions: scala.collection.mutable.Set[DownPartition],
+      partitionName: String, workunitName: String, clusterType: String
+  ): Unit = {
+    val downPartition = downPartitions.find(
+      dp => dp.name == partitionName
+    )
+    //val clusterType = localPlanner.asInstanceOf[SingleClusterPlanner].cl
+    val downWorkUnit = downPartition.foreach(dp =>
+      dp.downWorkUnits.find(dwu => dwu.name == workunitName).foreach(
+        wu => wu.downClusters.find(dc => dc.clusterType == clusterType).foreach(
+          dc => dc.downShards.foreach(
+            s => asm.shards(s) = asm.shards(s).copy(active = false)
+          )
+        )
+      )
+    )
+  }
+
+
+  def materializeAllRemote(
+    logicalPlan: LogicalPlan, qContext: QueryContext, remoteActiveShardMapper: ActiveShardMapper
+  ): GenericRemoteExec = {
+    val timeout: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
+    val plannerParams = qContext.plannerParams.copy(
+      failoverMode = filodb.core.query.AllRemoteBuddyFailoverMode,
+      buddyGrpcTimeoutMs = Some(timeout),
+      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get),
+      localShardMapper = None,
+      buddyShardMapper = Some(remoteActiveShardMapper)
+    )
+    val c = qContext.copy(plannerParams = plannerParams)
+    val ep = localPlanner.materialize(logicalPlan, c)
+    val dispatcher = GrpcPlanDispatcher(remoteGrpcEndpoint.get, timeout)
+    GenericRemoteExec(dispatcher, ep)
+  }
+
+
+
 }
