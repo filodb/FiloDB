@@ -1,0 +1,17 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="FiloCli-Prom" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="filodb.cli.CliMain" />
+    <module name="filodb-cli" />
+    <option name="PROGRAM_PARAMETERS" value="--host 127.0.0.1 --dataset prometheus --promql heap_usage{_ns_=\&quot;App-0\&quot;,_ws_=\&quot;demo\&quot;} --start 1659408880 --end 1659412480 --limit 15" />
+    <option name="VM_PARAMETERS" value="-Xmx2G -Dconfig.file=conf/timeseries-filodb-server.conf -Dakka.remote.netty.tcp.port=0 -Dlogback.configurationFile=conf/logback-dev.xml" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="filodb.standalone.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

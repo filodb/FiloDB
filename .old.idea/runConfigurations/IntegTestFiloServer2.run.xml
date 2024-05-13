@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="IntegTestFiloServer2" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="filodb.standalone.FiloServer" />
+    <module name="standalone" />
+    <option name="VM_PARAMETERS" value="-Xmx2G -Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=8081 -Dkamon.prometheus.embedded-server.port=9096 -Dconfig.file=$PROJECT_DIR$/../../mosaic/mosaic-local-runtime/conf/filodb/timeseries-filodb-server.conf -Dlogback.configurationFile=conf/logback-dev.xml -Dkamon.environment.service=filodb-local2 -Dfilodb.new-cluster-enabled=false" />
+    <method v="2">
+      <option name="MakeNoErrorCheck" enabled="true" />
+    </method>
+  </configuration>
+</component>

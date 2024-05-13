@@ -124,7 +124,8 @@ trait PartKeyIndexRaw {
   def endTimeFromPartId(partId: Int): Long
 
   /**
-   * Called when a document is updated with new endTime
+   * Fetch start time for given set of partIds. Used to check if ODP is needed for
+   * queries.
    */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long]
 
@@ -168,7 +169,6 @@ trait PartKeyIndexRaw {
    * Fetch partId given partKey. This is slower since it would do an index search
    * instead of a key-lookup.
    */
-
   def partIdFromPartKeySlow(partKeyBase: Any,
                             partKeyOffset: Long): Option[Int]
 
@@ -180,7 +180,6 @@ trait PartKeyIndexRaw {
                                endTime: Long): Option[Array[Byte]]
 
 }
-
 
 trait PartKeyIndexDownsampled extends PartKeyIndexRaw {
 

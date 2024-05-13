@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Perf-Produce" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="filodb.gateway.GatewayServer" />
+    <module name="filodb-gateway" />
+    <option name="PROGRAM_PARAMETERS" value="--gen-gauge-data -p 5000 -n 180 -i 60 -m 2 conf/promperf-source.conf" />
+    <option name="VM_PARAMETERS" value="-Dlogback.configurationFile=conf/logback-dev.xml -Dconfig.file=conf/timeseries-filodb-server.conf -Dkamon.prometheus.embedded-server.port=9097" />
+    <method v="2">
+      <option name="MakeNoErrorCheck" enabled="true" />
+    </method>
+  </configuration>
+</component>

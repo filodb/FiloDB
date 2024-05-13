@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ScalaSbtSettings">
+    <option name="linkedExternalProjectsSettings">
+      <SbtProjectSettings>
+        <option name="converterVersion" value="2" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/akka-bootstrapper" />
+            <option value="$PROJECT_DIR$/cassandra" />
+            <option value="$PROJECT_DIR$/cli" />
+            <option value="$PROJECT_DIR$/coordinator" />
+            <option value="$PROJECT_DIR$/core" />
+            <option value="$PROJECT_DIR$/gateway" />
+            <option value="$PROJECT_DIR$/gatling" />
+            <option value="$PROJECT_DIR$/grpc" />
+            <option value="$PROJECT_DIR$/http" />
+            <option value="$PROJECT_DIR$/jmh" />
+            <option value="$PROJECT_DIR$/kafka" />
+            <option value="$PROJECT_DIR$/memory" />
+            <option value="$PROJECT_DIR$/project" />
+            <option value="$PROJECT_DIR$/prometheus" />
+            <option value="$PROJECT_DIR$/query" />
+            <option value="$PROJECT_DIR$/spark-jobs" />
+            <option value="$PROJECT_DIR$/standalone" />
+          </set>
+        </option>
+        <option name="sbtVersion" value="1.3.7" />
+      </SbtProjectSettings>
+    </option>
+  </component>
+</project>

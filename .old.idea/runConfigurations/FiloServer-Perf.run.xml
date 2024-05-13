@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="FiloServer-Perf" type="Application" factoryName="Application">
+    <option name="ALTERNATIVE_JRE_PATH" value="1.8" />
+    <option name="MAIN_CLASS_NAME" value="filodb.standalone.FiloServer" />
+    <module name="standalone" />
+    <option name="VM_PARAMETERS" value="-agentpath:/Applications/YourKit-Java-Profiler-2022.3.app/Contents/Resources/bin/mac/libyjpagent.dylib -Xmx2G -Dconfig.file=conf/promperf-filodb-server.conf -Dlogback.configurationFile=conf/logback-perf.xml -Dkamon.environment.service=filodb-local0 -Dfilodb.cluster-discovery.localhost-ordinal=0" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
