@@ -135,7 +135,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          val lifecycleManager: Option[IndexMetadataStore] = None,
                          useMemoryMappedImpl: Boolean = true,
                          disableIndexCaching: Boolean = false
-                        ) extends StrictLogging {
+                        ) extends StrictLogging with PartKeyIndexDownsampled {
 
   import PartKeyLuceneIndex._
 
@@ -445,10 +445,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Started flush thread for lucene index on dataset=$ref shard=$shardNum")
   }
 
-  /**
-   * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
-   * @return matching partIds
-   */
   def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
     val collector = new PartIdCollector(Int.MaxValue)
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
@@ -457,13 +453,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.result
   }
 
-  /**
-   * Method to delete documents from index that ended before the provided end time
-   *
-   * @param endedBefore the cutoff timestamp. All documents with time <= this time will be removed
-   * @param returnApproxDeletedCount a boolean flag that requests the return value to be an approximate count of the
-   *                                 documents that got deleted, if value is set to false, 0 is returned
-   */
   def removePartitionsEndedBefore(endedBefore: Long, returnApproxDeletedCount: Boolean = true): Int = {
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
     // SInce delete does not return the deleted document count, we query to get the count that match the filter criteria
@@ -491,9 +480,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
   }
 
-  /**
-   * Delete partitions with given partIds
-   */
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     if (!partIds.isEmpty) {
       val terms = new util.ArrayList[BytesRef]()
@@ -506,14 +492,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
 
-  /**
-   * Number of documents in flushed index, excludes tombstones for deletes
-   */
   def indexNumEntries: Long = indexWriter.getDocStats().numDocs
 
-  /**
-   * Number of documents in flushed index, includes tombstones for deletes
-   */
   def indexNumEntriesWithTombstones: Long = indexWriter.getDocStats().maxDoc
 
   def closeIndex(): Unit = {
@@ -588,13 +568,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     labelValues
   }
 
-  /**
-   * Fetch values/terms for a specific column/key/field, in order from most frequent on down.
-   * Note that it iterates through all docs up to a certain limit only, so if there are too many terms
-   * it will not report an accurate top k in exchange for not running too long.
-   * @param fieldName the name of the column/field/key to get terms for
-   * @param topK the number of top k results to fetch
-   */
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
     // FIXME this API returns duplicate values because same value can be present in multiple lucene segments
 
@@ -737,28 +710,18 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     })
   }
 
-  /**
-   * Called when TSPartition needs to be created when on-demand-paging from a
-   * partId that does not exist on heap
-   */
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
     withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector) )
     Option(collector.singleResult)
   }
 
-  /**
-   * Called when a document is updated with new endTime
-   */
   def startTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
     withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
 
-  /**
-   * Called when a document is updated with new endTime
-   */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
 
     val startExecute = System.nanoTime()
@@ -780,9 +743,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def commit(): Long = indexWriter.commit()
 
-  /**
-   * Called when a document is updated with new endTime
-   */
   def endTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
     withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
@@ -839,10 +799,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.updateDocument(new Term(PART_ID_FIELD, partId.toString), docToAdd)
   }
 
-  /**
-   * Refresh readers with updates to index. May be expensive - use carefully.
-   * @return
-   */
   def refreshReadersBlocking(): Unit = {
     searcherManager.maybeRefreshBlocking()
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
@@ -919,6 +875,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
   }
   //scalastyle:on method.length
+
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long,
@@ -1017,9 +974,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     chosenPartId
   }
 
-  /**
-   * Iterate through the LuceneIndex and calculate cardinality count
-   */
   def calculateCardinality(partSchema: PartitionSchema, cardTracker: CardinalityTracker): Unit = {
     val coll = new CardinalityCountBuilder(partSchema, cardTracker)
     withNewSearcher(s => s.search(new MatchAllDocsQuery(), coll))
