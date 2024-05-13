@@ -130,22 +130,22 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
           .takeWhile(_ <= (rangeParams.endSecs - rangeParams.startSecs)).map { t =>
           val timestamp = t + rangeParams.startSecs
           val rvkSeen = new ListBuffer[RangeVectorKey]
-          val row = rows.next()
-          var i = 1
-          while (row.notNull(i)) {
-            if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
-              val key = row.filoUTF8String(i)
-              logger.debug(s"TopkPresent before decoding key=$key")
-              val rvk = CustomRangeVectorKey.fromZcUtf8(key)
-              logger.debug(s"TopkPresent after decoding key=${rvk.labelValues.mkString(",")}")
-              rvkSeen += rvk
-              val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
-              addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
+          if (rows.hasNext) {
+            val row = rows.next()
+            var i = 1
+            while (row.notNull(i)) {
+              if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
+                val key = row.filoUTF8String(i)
+                val rvk = CustomRangeVectorKey.fromZcUtf8(key)
+                rvkSeen += rvk
+                val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
+                addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
+              }
+              i += 2
             }
-            i += 2
-          }
-          resRvs.keySet.foreach { rvs =>
-            if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs(rvs), timestamp * 1000, Double.NaN)
+            resRvs.keySet.foreach { rvs =>
+              if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs(rvs), timestamp * 1000, Double.NaN)
+            }
           }
         }
         // address step == 0 case
