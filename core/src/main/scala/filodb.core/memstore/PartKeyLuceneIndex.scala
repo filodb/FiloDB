@@ -496,6 +496,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def indexNumEntriesWithTombstones: Long = indexWriter.getDocStats().maxDoc
 
+  /**
+   * Close the index so it is readable by tools
+   */
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
     if (flushThread != UnsafeUtils.ZeroPointer) flushThread.close()

@@ -6,11 +6,17 @@ import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.ColumnFilter
 
-
-
 trait PartKeyIndexRaw {
 
+  /**
+   * Clear the index by deleting all documents and commit
+   */
   def reset(): Unit
+
+  /**
+   * Start the asynchronous thread to automatically flush
+   * new writes to readers at the given min and max delays
+   */
   def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit
 
   /**
@@ -33,6 +39,9 @@ trait PartKeyIndexRaw {
    */
   def removePartKeys(partIds: debox.Buffer[Int]): Unit
 
+  /**
+   * Memory used by index, esp for unflushed data
+   */
   def indexRamBytes: Long
 
   /**
@@ -45,8 +54,15 @@ trait PartKeyIndexRaw {
    */
   def indexNumEntriesWithTombstones: Long
 
+  /**
+   * Closes the index for read by other clients. Check for implementation if commit would be done
+   * automatically.
+   */
   def closeIndex(): Unit
 
+  /**
+   * Return user field/dimension names in index, except those that are created internally
+   */
   def indexNames(limit: Int): Seq[String]
 
   /**
@@ -58,11 +74,20 @@ trait PartKeyIndexRaw {
    */
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo]
 
-
+  /**
+   * Use faceting to get field/index names given a column filter and time range
+   */
   def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String]
+
+  /**
+   * Use faceting to get field/index values given a column filter and time range
+   */
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                            colName: String, limit: Int = 100): Seq[String]
 
+  /**
+   * Add new part key to index
+   */
   def addPartKey(partKeyOnHeapBytes: Array[Byte],
                  partId: Int,
                  startTime: Long,
@@ -71,6 +96,9 @@ trait PartKeyIndexRaw {
                 (partKeyNumBytes: Int = partKeyOnHeapBytes.length,
                  documentId: String = partId.toString): Unit
 
+  /**
+   * Update or create part key to index
+   */
   def upsertPartKey(partKeyOnHeapBytes: Array[Byte],
                     partId: Int,
                     startTime: Long,
@@ -99,8 +127,15 @@ trait PartKeyIndexRaw {
    * Called when a document is updated with new endTime
    */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long]
+
+  /**
+   * Commit index contents to disk
+   */
   def commit(): Long
 
+  /**
+   * Update existing part key document with new endTime.
+   */
   def updatePartKeyWithEndTime(partKeyOnHeapBytes: Array[Byte],
                                partId: Int,
                                endTime: Long = Long.MaxValue,
@@ -112,18 +147,37 @@ trait PartKeyIndexRaw {
    * @return
    */
   def refreshReadersBlocking(): Unit
+
+  /**
+   * Fetch list of partIds for given column filters
+   */
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long,
                          limit: Int = Int.MaxValue): debox.Buffer[Int]
 
+  /**
+   * Fetch list of part key records for given column filters
+   */
   def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
                                 startTime: Long,
                                 endTime: Long,
                                 limit: Int = Int.MaxValue): Seq[PartKeyLuceneIndexRecord]
 
+  /**
+   * Fetch partId given partKey. This is slower since it would do an index search
+   * instead of a key-lookup.
+   */
+
   def partIdFromPartKeySlow(partKeyBase: Any,
                             partKeyOffset: Long): Option[Int]
+
+  /**
+   * Fetch one partKey matching filters
+   */
+  def singlePartKeyFromFilters(columnFilters: Seq[ColumnFilter],
+                               startTime: Long,
+                               endTime: Long): Option[Array[Byte]]
 
 }
 
@@ -139,12 +193,14 @@ trait PartKeyIndexDownsampled extends PartKeyIndexRaw {
    */
   def calculateCardinality(partSchema: PartitionSchema, cardTracker: CardinalityTracker): Unit
 
-  def singlePartKeyFromFilters(columnFilters: Seq[ColumnFilter],
-                               startTime: Long,
-                               endTime: Long): Option[Array[Byte]]
-
+  /**
+   * Run some code for each ingesting partKey which has endTime != Long.MaxValue
+   */
   def foreachPartKeyStillIngesting(func: (Int, BytesRef) => Unit): Int
 
+  /**
+   * Run some code for each partKey matchin column filter
+   */
   def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
                                    startTime: Long,
                                    endTime: Long, func: (BytesRef) => Unit): Int
