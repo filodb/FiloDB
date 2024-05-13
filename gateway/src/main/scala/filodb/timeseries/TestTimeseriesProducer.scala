@@ -18,7 +18,7 @@ import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.core.metadata.Schemas.gauge
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{DeltaCounterRecord, InputRecord, MetricTagInputRecord, PrometheusCounterRecord,
-                                  PrometheusInputRecord}
+                                  PrometheusGaugeRecord}
 import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
 
 /**
@@ -149,7 +149,7 @@ object TestTimeseriesProducer extends StrictLogging {
         if (schema == Schemas.deltaCounter)
           DeltaCounterRecord(tags, "heap_usage_delta" + i, timestamp, value)
         else
-          PrometheusInputRecord(tags, "heap_usage" + i, timestamp, value)
+          PrometheusGaugeRecord(tags, "heap_usage" + i, timestamp, value)
       }
     }
   }

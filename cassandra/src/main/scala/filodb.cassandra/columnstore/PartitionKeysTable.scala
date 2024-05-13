@@ -48,6 +48,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"SELECT * FROM $tableString " +
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
@@ -56,28 +57,32 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanCqlForEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readCql = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE partKey = ? ")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
-    s"WHERE partKey = ?"
-  ).setConsistencyLevel(writeConsistencyLevel)
+    s"WHERE partKey = ?")
+    .setConsistencyLevel(writeConsistencyLevel)
 
   def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {

@@ -6,7 +6,7 @@ import net.ceedubs.ficus.readers.ValueReader
 
 import filodb.core.DatasetRef
 
-case class QuotaRecord(shardKeyPrefix: Seq[String], quota: Int)
+case class QuotaRecord(shardKeyPrefix: Seq[String], quota: Long)
 
 /**
  * Source of quotas for shard key prefixes.
@@ -27,7 +27,7 @@ trait QuotaSource {
    * Hence number of items in the returned sequence should be
    * shardKeyLen + 1
    */
-  def getDefaults(dataset: DatasetRef): Seq[Int]
+  def getDefaults(dataset: DatasetRef): Seq[Long]
 }
 
 /**
@@ -36,7 +36,7 @@ trait QuotaSource {
 class ConfigQuotaSource(filodbConfig: Config, shardKeyLen: Int) extends QuotaSource {
   implicit val quotaReader: ValueReader[QuotaRecord] = ValueReader.relative { quotaConfig =>
     QuotaRecord(quotaConfig.as[Seq[String]]("shardKeyPrefix"),
-                quotaConfig.as[Int]("quota"))
+                quotaConfig.as[Long]("quota"))
   }
 
   def getQuotas(dataset: DatasetRef): Iterator[QuotaRecord] = {
@@ -47,13 +47,13 @@ class ConfigQuotaSource(filodbConfig: Config, shardKeyLen: Int) extends QuotaSou
     }
   }
 
-  def getDefaults(dataset: DatasetRef): Seq[Int] = {
+  def getDefaults(dataset: DatasetRef): Seq[Long] = {
     if (filodbConfig.hasPath(s"quotas.$dataset.custom")) {
-      val defaults = filodbConfig.as[Seq[Int]](s"quotas.$dataset.defaults")
+      val defaults = filodbConfig.as[Seq[Long]](s"quotas.$dataset.defaults")
       require(defaults.length == shardKeyLen + 1, s"Quota defaults $defaults was not of length ${shardKeyLen + 1}")
       defaults
     } else {
-      val default = filodbConfig.as[Int]("quotas.default")
+      val default = filodbConfig.as[Long]("quotas.default")
       Seq.fill(shardKeyLen + 1)(default)
     }
   }

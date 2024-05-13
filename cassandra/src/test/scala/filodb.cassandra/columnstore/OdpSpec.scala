@@ -57,7 +57,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
-    colStore.initialize(dataset.ref, 1).futureValue
+    colStore.initialize(dataset.ref, 1, ConfigFactory.empty).futureValue
     colStore.truncate(dataset.ref, 1).futureValue
   }
 

@@ -3,8 +3,8 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.sys.ShutdownHookThread
 
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
@@ -16,6 +16,7 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
@@ -47,6 +48,23 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
 
+  /**
+   * Applies all {@link RangeVectorTransformer}s to a remote response.
+   * FIXME: This is needed because RemoteExec plans override the default ExecPlan::execute()
+   *   logic; if possible, this override should eventually be removed.
+   */
+  protected def applyTransformers(resp: QueryResponse,
+                                  querySession: QuerySession,
+                                  source: ChunkSource,
+                                  timeout: Duration)(implicit sched: Scheduler): QueryResponse = resp match {
+    case qr: QueryResult =>
+      val (obs, schema) =
+        applyTransformers(Observable.fromIterable(qr.result), qr.resultSchema, querySession, source)
+      val fut = obs.toListL.map(rvs => qr.copy(result = rvs, resultSchema = schema)).runToFuture
+      Await.result(fut, timeout)
+    case qe: QueryError => qe
+  }
+
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
@@ -61,6 +79,11 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+        .timed
+        .map{ case (elapsed, qresp) =>
+          val timeRemaining = Duration(requestTimeoutMs, TimeUnit.MILLISECONDS) - elapsed
+          applyTransformers(qresp, querySession, source, timeRemaining)
+        }
     }
   }
 
