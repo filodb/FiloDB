@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableException}
+import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -39,6 +39,7 @@ extends TimeSeriesStore with StrictLogging {
 
   private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
   private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]
+  private val FILODB_PARTITION = filodbConfig.getString("partition")
 
   val stats = new ChunkSourceStats
 
@@ -73,8 +74,12 @@ extends TimeSeriesStore with StrictLogging {
     }
   }
 
-  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+  def scanTsCardinalities(queryContext: QueryContext, ref: DatasetRef, shards: Seq[Int],
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    // adding an additional check to verify if the partition is same as mentioned in query context
+    require(isCorrectPartitionForCardinalityQuery(queryContext, FILODB_PARTITION),
+      s"[TsCardinalities] Query not routed to correct partition! " +
+        s"Expected: ${queryContext.traceInfo}  | Actual: ${FILODB_PARTITION}")
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala

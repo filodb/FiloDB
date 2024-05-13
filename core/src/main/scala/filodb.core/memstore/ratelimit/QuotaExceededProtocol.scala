@@ -22,12 +22,12 @@ trait QuotaExceededProtocol {
    * @param shardKeyPrefix the shardKeyPrefix for which quota was breached
    * @param quota the actual quota number that was breached
    */
-  def quotaExceeded(ref: DatasetRef, shardNum: Int, shardKeyPrefix: Seq[String], quota: Int): Unit
+  def quotaExceeded(ref: DatasetRef, shardNum: Int, shardKeyPrefix: Seq[String], quota: Long): Unit
 }
 
 /**
  * Default implementation which takes no action.
  */
 object NoActionQuotaProtocol extends QuotaExceededProtocol {
-  def quotaExceeded(ref: DatasetRef, shardNum: Int, shardKeyPrefix: Seq[String], quota: Int): Unit = {}
+  def quotaExceeded(ref: DatasetRef, shardNum: Int, shardKeyPrefix: Seq[String], quota: Long): Unit = {}
 }

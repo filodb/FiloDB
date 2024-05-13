@@ -35,7 +35,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
-    colStore.initialize(promDataset.ref, 1).futureValue
+    colStore.initialize(promDataset.ref, 1, ConfigFactory.empty).futureValue
     colStore.truncate(promDataset.ref, 1).futureValue
   }
 
@@ -66,7 +66,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   "PartKey Reads, Writes and Deletes" should "work" in {
     val dataset = Dataset("prometheus", Schemas.gauge).ref
 
-    colStore.initialize(dataset, 1).futureValue
+    colStore.initialize(dataset, 1, ConfigFactory.empty).futureValue
     colStore.truncate(dataset, 1).futureValue
 
     // GOTCHA: these synthetic pks are not well-formed. We just use the bytes for Schemas to read some hash
@@ -95,7 +95,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {
     val dataset = Dataset("source", Schemas.gauge)
 
-    colStore.initialize(dataset.ref, 1).futureValue
+    colStore.initialize(dataset.ref, 1, ConfigFactory.empty).futureValue
     colStore.truncate(dataset.ref, 1).futureValue
 
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
@@ -104,7 +104,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
     val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
-    targetColStore.initialize(dataset.ref, 1).futureValue
+    targetColStore.initialize(dataset.ref, 1, ConfigFactory.empty).futureValue
     targetColStore.truncate(dataset.ref, 1).futureValue
 
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)

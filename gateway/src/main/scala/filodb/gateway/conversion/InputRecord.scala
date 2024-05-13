@@ -309,6 +309,30 @@ case class PrometheusInputRecord(tags: Map[String, String],
     InputRecord.writeUntypedRecord(builder, metric, tags, timestamp, value)
 }
 
+case class PrometheusGaugeRecord(tags: Map[String, String],
+                                 metric: String,
+                                 timestamp: Long,
+                                 value: Double) extends InputRecord {
+  import filodb.core.metadata.Schemas.promCounter
+  import PrometheusInputRecord._
+  import collection.JavaConverters._
+
+  val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
+  val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
+
+  // Get hashes and sort tags of the keys/values for shard calculation
+  val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
+
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, metricCol, trimmedMetric)
+  final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(javaTags, hashes, ignorePartKeyTags)
+
+  val nonMetricShardValues: Seq[String] = nonMetricShardCols.flatMap(tags.get)
+  final def getMetric: String = metric
+
+  def addToBuilder(builder: RecordBuilder): Unit =
+    InputRecord.writeGaugeRecord(builder, metric, tags, timestamp, value)
+}
+
 case class PrometheusCounterRecord(val tags: Map[String, String],
                                    val metric: String,
                                    val timestamp: Long,

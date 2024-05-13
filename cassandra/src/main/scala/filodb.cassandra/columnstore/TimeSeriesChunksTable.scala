@@ -55,27 +55,31 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     s"SELECT info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readAllChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanBySplit = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readChunkRangeCql = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE partition IN ? AND chunkid >= ? AND chunkid < ?")
     .setConsistencyLevel(readConsistencyLevel)
-
+    .setIdempotent(true)
 
   def writeChunks(partition: Array[Byte],
                   chunkInfo: ChunkSetInfo,

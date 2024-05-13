@@ -1,7 +1,9 @@
 package filodb.query.exec
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
@@ -9,6 +11,9 @@ import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BinaryOperator, QueryResponse, QueryResult}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
+
+
+
 
 /**
   * Exec Plans for scalar binary operations which can execute locally without being dispatched
@@ -58,12 +63,21 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, evaluate))
-    Task.eval { // not async
-      QueryResult(
-        queryContext.queryId, resultSchema, rangeVectors, QueryStats(), QueryWarnings(),
-        querySession.resultCouldBePartial,
-        querySession.partialResultsReason
-      )
+    Kamon.runWithSpan(Kamon.currentSpan(), false) {
+      Task {
+        rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) {
+          case ((rvs, schema), rvTransformer) =>
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
+            rvTransformer.funcParams.map(_.getResult(querySession, source))
+          (rvTransformer.apply(rvs, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, schema,
+            paramRangeVector), rvTransformer.schema(schema))
+        }._1.toListL.map({
+          QueryResult(queryContext.queryId, resultSchema, _,
+            QueryStats(), QueryWarnings(), querySession.resultCouldBePartial,
+            querySession.partialResultsReason
+          )
+        })
+      }.flatten
     }
   }
 }

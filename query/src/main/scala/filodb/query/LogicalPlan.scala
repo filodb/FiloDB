@@ -761,6 +761,40 @@ object LogicalPlan {
     }
   }
 
+  /**
+   * Given a LogicalPlan, the function finds a Seq of all Child nodes,and returns a Set of ColumnFilters.
+   * It filters out the column filter group for all the scalar leaf plans
+   *
+   * @param logicalPlan the root LogicalPlan
+   * @return Seq[ColumnFilterListWithLogicalPlan], Seq has size same as the number of leaf nodes
+   */
+  def getColumnFilterGroupFilteringLeafScalarPlans(logicalPlan: LogicalPlan): Seq[Set[ColumnFilter]] = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
+      lp match {
+        case lp: LabelValues => (lp.filters toSet, true)
+        case lp: LabelNames => (lp.filters toSet, true)
+        case lp: RawSeries => (lp.filters toSet, true)
+        case lp: RawChunkMeta => (lp.filters toSet, true)
+        case lp: SeriesKeysByFilters => (lp.filters toSet, true)
+        case lp: LabelCardinality => (lp.filters.toSet, true)
+        case lp: TsCardinalities => (lp.filters.toSet, true)
+        case _: ScalarTimeBasedPlan => (Set.empty[ColumnFilter], false)
+        case _: ScalarFixedDoublePlan => (Set.empty[ColumnFilter], false)
+        case _: ScalarBinaryOperation => (Set.empty[ColumnFilter], false)
+        case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
+      }
+    } match {
+      case groupSeq: Seq[(Set[ColumnFilter], Boolean)] =>
+        if (groupSeq.isEmpty || groupSeq.forall( x => x._1.isEmpty)) Seq.empty else {
+          // filter out the scalar plans with empty column filter group
+          // and only include the column filter of raw leaf plans
+          groupSeq.filter(y => y._2)
+            .map(x => x._1)
+        }
+      case _ => Seq.empty
+    }
+  }
+
   def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).map { l =>
       l match {

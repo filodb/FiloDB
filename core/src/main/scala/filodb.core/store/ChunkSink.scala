@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.Scheduler
@@ -61,7 +62,7 @@ trait ChunkSink {
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
-  def initialize(dataset: DatasetRef, numShards: Int): Future[Response]
+  def initialize(dataset: DatasetRef, numShards: Int, resources: Config): Future[Response]
 
   /**
    * Truncates/clears all data from the ChunkSink for that given dataset.
@@ -141,7 +142,8 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
     Future.successful(Success)
   }
 
-  def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = Future.successful(Success)
+  def initialize(dataset: DatasetRef, numShards: Int,
+                 resources: Config): Future[Response] = Future.successful(Success)
 
   def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
     partitionKeys -= dataset
