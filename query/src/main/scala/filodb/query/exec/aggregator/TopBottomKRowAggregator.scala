@@ -136,9 +136,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
             while (row.notNull(i)) {
               if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
                 val key = row.filoUTF8String(i)
-                //logger.debug(s"TopkPresent before decoding key=$key")
                 val rvk = CustomRangeVectorKey.fromZcUtf8(key)
-                //logger.debug(s"TopkPresent after decoding key=${rvk.labelValues.mkString(",")}")
                 rvkSeen += rvk
                 val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
                 addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
