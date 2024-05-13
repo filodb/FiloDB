@@ -1,15 +1,17 @@
 package filodb.core.memstore
 
-import filodb.core.query.ColumnFilter
 import org.apache.lucene.util.BytesRef
 
-trait PartKeyIndex {
+import filodb.core.query.ColumnFilter
+
+
+trait PartKeyIndexRaw {
 
   def reset(): Unit
   def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit
   def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int]
   def removePartitionsEndedBefore(endedBefore: Long, returnApproxDeletedCount: Boolean = true): Int
-  def removePartKeys(partIds: debox.Buffer[Int])
+  def removePartKeys(partIds: debox.Buffer[Int]): Unit
   def indexRamBytes: Long
   def indexNumEntries: Long
   def indexNumEntriesWithTombstones: Long
@@ -53,6 +55,11 @@ trait PartKeyIndex {
                          startTime: Long,
                          endTime: Long,
                          limit: Int = Int.MaxValue): debox.Buffer[Int]
+
+}
+
+
+trait PartKeyIndexDownsampled extends PartKeyIndexRaw {
 
   def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
                                    startTime: Long,
