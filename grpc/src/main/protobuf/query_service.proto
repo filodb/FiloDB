@@ -49,6 +49,7 @@ message PlannerParams {
     optional bool useProtoExecPlans                 = 16;
     optional bool reduceShardKeyRegexFanout         = 17;
     optional uint32 maxShardKeyRegexFanoutBatchSize = 18;
+    optional bool allowNestedAggregatePushdown      = 19;
 }
 
 message Request {
