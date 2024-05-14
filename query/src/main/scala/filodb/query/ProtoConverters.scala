@@ -230,6 +230,7 @@ object ProtoConverters {
       builder.setUseProtoExecPlans(pp.useProtoExecPlans)
       builder.setReduceShardKeyRegexFanout(pp.reduceShardKeyRegexFanout)
       builder.setMaxShardKeyRegexFanoutBatchSize(pp.maxShardKeyRegexFanoutBatchSize)
+      builder.setAllowNestedAggregatePushdown(pp.allowNestedAggregatePushdown)
       builder.build()
     }
   }
