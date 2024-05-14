@@ -311,7 +311,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part,
+  private[memstore] final val partKeyIndex: PartKeyIndexRaw = new PartKeyLuceneIndex(ref, schemas.part,
     indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
     storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
 
