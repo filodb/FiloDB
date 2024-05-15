@@ -1913,6 +1913,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardKeyColumns.map { col =>
       filters.collectFirst {
         case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+        case ColumnFilter(c, Filter.EqualsRegex(filtVal: String)) if c == col => filtVal
       }.getOrElse("multiple")
     }.toList
   }
