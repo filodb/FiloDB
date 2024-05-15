@@ -44,6 +44,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   val schemas1 = Schemas(schema1)
+  val schemas2 = Schemas(schema2)
 
   it("should detect duplicate setup") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf, 1)
@@ -570,6 +571,24 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // odp partitions should be evicted first before regular partitions
     shard.evictableOdpPartIds.size shouldEqual 0
 
+  }
+
+  it("should return the expected regex ns format for query stats group") {
+    memStore.setup(dataset1.ref, schemas2, 0, TestData.storeConf, 1)
+    val split = memStore.getScanSplits(dataset1.ref, 1).head
+    val session = QuerySession.makeForTestingOnly()
+    val filters = Seq(
+      ColumnFilter("_ws_", Filter.Equals("test_ws")),
+      ColumnFilter("_ns_", Filter.EqualsRegex("App-0|App-1")),
+      ColumnFilter("_metric_", Filter.Equals("http_latency")))
+    val value = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, filters),
+      querySession = session)
+      .toListL.runToFuture.futureValue
+    session.queryStats.stat.size shouldEqual 1
+    session.queryStats.stat.head._1.size shouldEqual 5
+    session.queryStats.stat.head._1(2) shouldEqual "test_ws"
+    session.queryStats.stat.head._1(3) shouldEqual "App-0|App-1"
+    session.queryStats.stat.head._1(4) shouldEqual "http_latency"
   }
 
   it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {
