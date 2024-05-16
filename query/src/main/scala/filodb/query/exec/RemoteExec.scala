@@ -1,10 +1,17 @@
 package filodb.query.exec
 
+import java.util
 import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, ExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import java.util.stream.Collectors
+
+import scala.collection.JavaConverters._
+import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
+import scala.util.{Failure, Success}
+import scala.util.control.Breaks.break
+
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
 import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
@@ -17,16 +24,14 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
+
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats, QueryWarnings}
-import filodb.core.store.{ChunkSource, startTimeFromChunkID}
+import filodb.core.store.ChunkSource
 import filodb.query._
 
 
-import scala.collection.JavaConversions._
-import java.util
-import java.util.stream.Collectors
-import scala.util.{Failure, Success}
-import scala.util.control.Breaks.break
+
+
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
@@ -71,8 +76,10 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
           case t: Throwable => CompletableFuture.failedFuture(t)
         }
       }
-      override def submit(task: Runnable): util.concurrent.Future[_] =
-        submit(task, null)
+      override def submit(task: Runnable): util.concurrent.Future[_] = {
+        // Ignoring scalastyle null check; API requires null is the result of successful futures.
+        submit(task, null) // scalastyle:ignore
+      }
       override def execute(command: Runnable): Unit = command.run()
       override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]]): util.List[util.concurrent.Future[T]] =
         tasks.stream().map(call => submit(call)).collect(Collectors.toList)
@@ -80,7 +87,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
           util.List[util.concurrent.Future[T]] = {
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
         val res = new util.ArrayList[util.concurrent.Future[T]]
-        for (c: Callable[T] <- tasks) {
+        for (c: Callable[T] <- tasks.asScala) {
           if (System.currentTimeMillis() > endTimeMs) {
             break
           }
@@ -97,7 +104,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 
       override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit): T = {
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
-        for (c: Callable[T] <- tasks) {
+        for (c: Callable[T] <- tasks.asScala) {
           if (System.currentTimeMillis() > endTimeMs) {
             break
           }
