@@ -52,7 +52,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         val waitUntilMs = System.currentTimeMillis() + unit.toMillis(timeout)
         // looping in case thread is woken up early
         while (!_shutdown && System.currentTimeMillis() < waitUntilMs) {
-          val waitMs = waitUntilMs - System.currentTimeMillis()
+          val waitMs = Math.max(0, waitUntilMs - System.currentTimeMillis())
           _shutdown.wait(waitMs)
         }
         _shutdown
