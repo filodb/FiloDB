@@ -4,14 +4,12 @@ import java.util
 import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, ExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import java.util.stream.Collectors
-
 import scala.collection.JavaConverters._
-import scala.concurrent.Future
+import scala.concurrent.{Future, TimeoutException}
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 import scala.util.{Failure, Success}
 import scala.util.control.Breaks.break
-
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
 import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
@@ -24,7 +22,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
-
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats, QueryWarnings}
 import filodb.core.store.ChunkSource
 import filodb.query._
@@ -38,13 +35,13 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   // Executes tasks immediately on the current thread.
   val inProcessScheduler = Scheduler(new ExecutorService {
       var _shutdown = false
-      def futureCompletedExceptionally[T](future: util.concurrent.Future[T]): Boolean = {
+      def getThrowable[T](future: util.concurrent.Future[T]): Option[Throwable] = {
         try {
           future.get()
         } catch {
-          case _: Throwable => return true
+          case t: Throwable => return Some(t)
         }
-        false
+        None
       }
       override def shutdown(): Unit = _shutdown = true
       override def shutdownNow(): util.List[Runnable] = util.List.of()
@@ -89,31 +86,40 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         val res = new util.ArrayList[util.concurrent.Future[T]]
         for (c: Callable[T] <- tasks.asScala) {
           if (System.currentTimeMillis() > endTimeMs) {
-            break
+            throw new TimeoutException(s"invokeAll timeout; execution time exceeded ${unit.toMillis(timeout)} millis")
           }
           res.add(submit(c))
         }
         res
       }
-      override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]]): T =
-        tasks.stream()
-          .map(callable => submit(callable))
-          .filter(future => !futureCompletedExceptionally(future))
-          .findAny()
-          .orElseThrow(() => new ExecutionException("no invokeAny task succeeded"))
+      override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]]): T = {
+        var thrown: Option[Throwable] = None
+        for (c: Callable[T] <- tasks.asScala) {
+          val future = submit(c)
+          val throwable = getThrowable(future)
+          if (throwable.isEmpty) {
+            return future.get()
+          }
+          thrown = throwable
+        }
+        throw new ExecutionException("no invokeAny task succeeded", thrown.get)
+      }
 
       override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit): T = {
+        var thrown: Option[Throwable] = None
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
         for (c: Callable[T] <- tasks.asScala) {
           if (System.currentTimeMillis() > endTimeMs) {
-            break
+            throw new TimeoutException(s"invokeAny timeout; execution time exceeded ${unit.toMillis(timeout)} millis")
           }
           val future = submit(c)
-          if (!futureCompletedExceptionally(future)) {
+          val throwable = getThrowable(future)
+          if (throwable.isEmpty) {
             return future.get()
           }
+          thrown = throwable
         }
-        throw new ExecutionException("no invokeAny task succeeded")
+        throw new ExecutionException("no invokeAny task succeeded", thrown.get)
       }
     })
 
