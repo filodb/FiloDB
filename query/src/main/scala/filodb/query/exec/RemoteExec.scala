@@ -62,8 +62,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
           case t: Throwable => CompletableFuture.failedFuture(t)
         }
       }
-
-    override def submit[T](task: Runnable, result: T): util.concurrent.Future[T] = {
+      override def submit[T](task: Runnable, result: T): util.concurrent.Future[T] = {
         try {
           execute(task)
           CompletableFuture.completedFuture(result)
@@ -79,8 +78,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]]): util.List[util.concurrent.Future[T]] = {
         tasks.asScala.map(call => submit(call)).toList.asJava
       }
-
-    override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit):
+      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit):
           util.List[util.concurrent.Future[T]] = {
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
         val res = new util.ArrayList[util.concurrent.Future[T]]
@@ -104,7 +102,6 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         }
         throw new ExecutionException("no invokeAny task succeeded", thrown.get)
       }
-
       override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit): T = {
         var thrown: Option[Throwable] = None
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
@@ -122,7 +119,6 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         throw new ExecutionException("no invokeAny task succeeded", thrown.get)
       }
     })
-
 
   def queryEndpoint: String
 
