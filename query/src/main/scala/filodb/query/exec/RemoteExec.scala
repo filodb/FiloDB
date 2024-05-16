@@ -4,12 +4,13 @@ import java.util
 import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, ExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import java.util.stream.Collectors
+
 import scala.collection.JavaConverters._
 import scala.concurrent.{Future, TimeoutException}
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 import scala.util.{Failure, Success}
-import scala.util.control.Breaks.break
+
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
 import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
@@ -22,12 +23,10 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
+
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats, QueryWarnings}
 import filodb.core.store.ChunkSource
 import filodb.query._
-
-
-
 
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
