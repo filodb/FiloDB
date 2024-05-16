@@ -41,7 +41,10 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         }
         None
       }
-      override def shutdown(): Unit = _shutdown = true
+      override def shutdown(): Unit = {
+        _shutdown = true
+        _shutdown.notifyAll()
+      }
       override def shutdownNow(): util.List[Runnable] = util.List.of()
       override def isShutdown: Boolean = _shutdown
       override def isTerminated: Boolean = _shutdown
