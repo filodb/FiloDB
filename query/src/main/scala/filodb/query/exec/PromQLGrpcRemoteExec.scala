@@ -3,7 +3,6 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
 
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}

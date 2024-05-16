@@ -3,7 +3,6 @@ package filodb.query.exec
 import java.util
 import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, ExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import java.util.stream.Collectors
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{Future, TimeoutException}
@@ -77,9 +76,11 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         submit(task, null) // scalastyle:ignore
       }
       override def execute(command: Runnable): Unit = command.run()
-      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]]): util.List[util.concurrent.Future[T]] =
-        tasks.stream().map(call => submit(call)).collect(Collectors.toList)
-      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit):
+      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]]): util.List[util.concurrent.Future[T]] = {
+        tasks.asScala.map(call => submit(call)).toList.asJava
+      }
+
+    override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit):
           util.List[util.concurrent.Future[T]] = {
         val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
         val res = new util.ArrayList[util.concurrent.Future[T]]
