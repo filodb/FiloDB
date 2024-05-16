@@ -1,12 +1,10 @@
 package filodb.query.exec
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, ExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.sys.ShutdownHookThread
-
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
 import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
@@ -19,12 +17,99 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
-
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats, QueryWarnings}
-import filodb.core.store.ChunkSource
+import filodb.core.store.{ChunkSource, startTimeFromChunkID}
 import filodb.query._
 
+
+import scala.collection.JavaConversions._
+import java.util
+import java.util.stream.Collectors
+import scala.util.{Failure, Success}
+import scala.util.control.Breaks.break
+
 trait RemoteExec extends LeafExecPlan with StrictLogging {
+
+  // Executes tasks immediately on the current thread.
+  val inProcessScheduler = Scheduler(new ExecutorService {
+      var _shutdown = false
+      def futureCompletedExceptionally[T](future: util.concurrent.Future[T]): Boolean = {
+        try {
+          future.get()
+        } catch {
+          case _: Throwable => return true
+        }
+        false
+      }
+      override def shutdown(): Unit = _shutdown = true
+      override def shutdownNow(): util.List[Runnable] = util.List.of()
+      override def isShutdown: Boolean = _shutdown
+      override def isTerminated: Boolean = _shutdown
+      override def awaitTermination(timeout: Long, unit: TimeUnit): Boolean = {
+        val waitUntilMs = System.currentTimeMillis() + unit.toMillis(timeout)
+        // looping in case thread is woken up early
+        while (!_shutdown && System.currentTimeMillis() < waitUntilMs) {
+          val waitMs = waitUntilMs - System.currentTimeMillis()
+          _shutdown.wait(waitMs)
+        }
+        _shutdown
+      }
+      override def submit[T](task: Callable[T]): util.concurrent.Future[T] = {
+        try {
+          val res = task.call()
+          CompletableFuture.completedFuture(res)
+        } catch {
+          case t: Throwable => CompletableFuture.failedFuture(t)
+        }
+      }
+
+    override def submit[T](task: Runnable, result: T): util.concurrent.Future[T] = {
+        try {
+          execute(task)
+          CompletableFuture.completedFuture(result)
+        } catch {
+          case t: Throwable => CompletableFuture.failedFuture(t)
+        }
+      }
+      override def submit(task: Runnable): util.concurrent.Future[_] =
+        submit(task, null)
+      override def execute(command: Runnable): Unit = command.run()
+      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]]): util.List[util.concurrent.Future[T]] =
+        tasks.stream().map(call => submit(call)).collect(Collectors.toList)
+      override def invokeAll[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit):
+          util.List[util.concurrent.Future[T]] = {
+        val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
+        val res = new util.ArrayList[util.concurrent.Future[T]]
+        for (c: Callable[T] <- tasks) {
+          if (System.currentTimeMillis() > endTimeMs) {
+            break
+          }
+          res.add(submit(c))
+        }
+        res
+      }
+      override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]]): T =
+        tasks.stream()
+          .map(callable => submit(callable))
+          .filter(future => !futureCompletedExceptionally(future))
+          .findAny()
+          .orElseThrow(() => new ExecutionException("no invokeAny task succeeded"))
+
+      override def invokeAny[T](tasks: util.Collection[_ <: Callable[T]], timeout: Long, unit: TimeUnit): T = {
+        val endTimeMs = System.currentTimeMillis() + unit.toMillis(timeout)
+        for (c: Callable[T] <- tasks) {
+          if (System.currentTimeMillis() > endTimeMs) {
+            break
+          }
+          val future = submit(c)
+          if (!futureCompletedExceptionally(future)) {
+            return future.get()
+          }
+        }
+        throw new ExecutionException("no invokeAny task succeeded")
+      }
+    })
+
 
   def queryEndpoint: String
 
@@ -55,13 +140,16 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
    */
   protected def applyTransformers(resp: QueryResponse,
                                   querySession: QuerySession,
-                                  source: ChunkSource,
-                                  timeout: Duration)(implicit sched: Scheduler): QueryResponse = resp match {
+                                  source: ChunkSource): QueryResponse = resp match {
     case qr: QueryResult =>
       val (obs, schema) =
-        applyTransformers(Observable.fromIterable(qr.result), qr.resultSchema, querySession, source)
-      val fut = obs.toListL.map(rvs => qr.copy(result = rvs, resultSchema = schema)).runToFuture
-      Await.result(fut, timeout)
+        applyTransformers(Observable.fromIterable(qr.result), qr.resultSchema, querySession, source)(inProcessScheduler)
+      val fut = obs.toListL.map(rvs => qr.copy(result = rvs, resultSchema = schema)).runToFuture(inProcessScheduler)
+      assert(fut.isCompleted, "RemoteExec transformer application should have been complete, but was not")
+      fut.value.get match {
+        case Success(qRes) => qRes
+        case Failure(error) => throw new RuntimeException("exception during RemoteExec transformer application", error)
+      }
     case qe: QueryError => qe
   }
 
@@ -79,12 +167,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
-        .timed
-        .map{ case (elapsed, qresp) =>
-          val timeRemaining = Duration(requestTimeoutMs, TimeUnit.MILLISECONDS) - elapsed
-          applyTransformers(qresp, querySession, source,
-            timeRemaining)(monix.execution.Scheduler.Implicits.global)
-        }
+        .map(applyTransformers(_, querySession, source))
     }
   }
 

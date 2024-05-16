@@ -53,12 +53,7 @@ trait GrpcRemoteExec extends RemoteExec {
             sendGrpcRequest(span, requestTimeoutMs)
               .toListL
               .map(_.toIterator.toQueryResponse)
-              .timed
-              .map { case (elapsed, qresp) =>
-                  val timeRemaining = Duration(requestTimeoutMs, TimeUnit.MILLISECONDS) - elapsed
-                  applyTransformers(qresp, querySession, source,
-                    timeRemaining)(monix.execution.Scheduler.Implicits.global)
-              }
+              .map (applyTransformers(_, querySession, source))
         }
     }
 
