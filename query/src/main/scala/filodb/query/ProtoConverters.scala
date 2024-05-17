@@ -263,7 +263,9 @@ object ProtoConverters {
         reduceShardKeyRegexFanout = if (gpp.hasReduceShardKeyRegexFanout) gpp.getReduceShardKeyRegexFanout
         else pp.reduceShardKeyRegexFanout,
         maxShardKeyRegexFanoutBatchSize = if (gpp.hasMaxShardKeyRegexFanoutBatchSize)
-          gpp.getMaxShardKeyRegexFanoutBatchSize else pp.maxShardKeyRegexFanoutBatchSize
+          gpp.getMaxShardKeyRegexFanoutBatchSize else pp.maxShardKeyRegexFanoutBatchSize,
+        allowNestedAggregatePushdown = if (gpp.hasAllowNestedAggregatePushdown) gpp.allowNestedAggregatePushdown
+        else pp.allowNestedAggregatePushdown
       )
     }
   }
