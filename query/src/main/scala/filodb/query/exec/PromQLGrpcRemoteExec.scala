@@ -3,7 +3,6 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
 
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}
@@ -50,17 +49,10 @@ trait GrpcRemoteExec extends RemoteExec {
         val span = Kamon.currentSpan()
         // Dont finish span since this code didnt create it
         Kamon.runWithSpan(span, finishSpan = false) {
-            sendGrpcRequest(span, requestTimeoutMs)
-              .toListL
-              .map(_.toIterator.toQueryResponse)
-              .timed
-              .map { case (elapsed, qresp) =>
-                  val timeRemaining = Duration(requestTimeoutMs, TimeUnit.MILLISECONDS) - elapsed
-                  applyTransformers(qresp, querySession, source,
-                    timeRemaining)(monix.execution.Scheduler.Implicits.global)
-              }
+            sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
         }
     }
+
 
     override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +
