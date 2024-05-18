@@ -194,10 +194,10 @@ case class PlannerParams(applicationId: String = "filodb",
                          allowNestedAggregatePushdown: Boolean = true,
                          downPartitions: scala.collection.mutable.Set[DownPartition] = SortedSet[DownPartition](),
                          failoverMode: FailoverMode = LegacyFailoverMode,
-                         @transient buddyGrpcEndpoint: Option[String] = None,
-                         @transient buddyGrpcTimeoutMs: Option[Long] = None,
-                         @transient localShardMapper: Option[ActiveShardMapper] = None,
-                         @transient buddyShardMapper: Option[ActiveShardMapper] = None
+                         buddyGrpcEndpoint: Option[String] = None,
+                         buddyGrpcTimeoutMs: Option[Long] = None,
+                         localShardMapper: Option[ActiveShardMapper] = None,
+                         buddyShardMapper: Option[ActiveShardMapper] = None
                         )
 
 object PlannerParams {
