@@ -1,4 +1,5 @@
 package filodb.coordinator.queryplanner
+//scalastyle:off file.size.limit
 
 import scala.collection.{mutable, Seq}
 
@@ -171,7 +172,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
       case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinaryOperation(logicalPlan, qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
       case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
@@ -181,6 +182,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _                               => materializeOthers(logicalPlan, qContext)
+    }
+  }
+
+  private def materializeScalarVectorBinaryOperation(logicalPlan: LogicalPlan,
+                                                     qContext: QueryContext,
+                                                     lp: ScalarVectorBinaryOperation): PlanResult = {
+    attemptPushdown(logicalPlan, qContext) match {
+      case Some(plan) =>  plan
+      case None       =>  val execs = materializeScalarVectorBinOp(qContext, lp)
+                          if (execs.plans.forall(_.isInstanceOf[RemoteExec])) {
+                            val reWrittenExecs = generateExecWithoutRegex(logicalPlan,
+                              LogicalPlan.getNonMetricShardKeyFilters(logicalPlan,
+                                dataset.options.nonMetricShardColumns).head, qContext)
+                            PlanResult(reWrittenExecs)
+                          } else {
+                            execs
+                          }
     }
   }
 
@@ -493,3 +511,5 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     PlanResult(Seq(exec))
   }
 }
+
+//scalastyle:on file.size.limit
