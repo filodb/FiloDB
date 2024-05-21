@@ -41,6 +41,16 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def limit: Int = ???
 
+  /**
+   * Logs each time a transformer is added.
+   * Transformations can always be pushed-down to the machines that serve the
+   *   remote data; they should never be applied to RemoteExec plans directly.
+   */
+  override def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
+    super.addRangeVectorTransformer(mapper)
+    logger.info("RangeVectorTransformer added to RemoteExec; plan=" + this)
+  }
+
   override def doExecute(source: ChunkSource,
                           querySession: QuerySession)
                          (implicit sched: Scheduler): ExecResult = {
