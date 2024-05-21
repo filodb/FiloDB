@@ -166,17 +166,11 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
-    val result = (resp: @unchecked) match {
+    (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
-        val rv = response(0)
-        rv.rows.size shouldEqual 0
-        rv.rows.map { row =>
-          val record = row.asInstanceOf[BinaryRecordRowReader]
-          rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
-        }
+        response.size shouldEqual 0
       }
     }
-    result.toArray shouldEqual Array.empty
   }
 
   it ("label values remote metadata exec") {

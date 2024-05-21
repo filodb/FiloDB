@@ -67,7 +67,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       val qResTask = sendRequest(span, requestTimeoutMs).map {
         case qr: QueryResult => qr
         case qe: QueryError => throw qe.t
-      }
+      }.memoize
       val schemaTask = qResTask.map(_.resultSchema)
       val rvObs = Observable.fromTask(qResTask)
         .map(_.result)

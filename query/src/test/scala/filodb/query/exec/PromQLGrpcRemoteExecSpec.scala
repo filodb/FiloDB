@@ -147,7 +147,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   it ("should convert the streaming records from gRPC service to a QueryResponse with data") {
 
     val params = PromQlQueryParams("""foo{app="app1"}""", 0, 0, 0)
-    val queryContext = QueryContext(origQueryParams = params)
+    val queryContext = QueryContext(origQueryParams = params, queryId = "someId")
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
     val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
@@ -184,7 +184,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it ("should convert the streaming records from gRPC service to a error ") {
     val params = PromQlQueryParams("""error_metric{app="app1"}""", 0, 0 , 0)
-    val queryContext = QueryContext(origQueryParams = params)
+    val queryContext = QueryContext(origQueryParams = params, queryId = "errorId")
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
     val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
