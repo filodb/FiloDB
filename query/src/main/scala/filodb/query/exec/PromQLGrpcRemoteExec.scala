@@ -2,11 +2,8 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.Future
-
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}
-import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -14,8 +11,7 @@ import monix.reactive.{MulticastStrategy, Observable}
 import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.core.DatasetRef
-import filodb.core.query.{PromQlQueryParams, QueryContext, QuerySession}
-import filodb.core.store.ChunkSource
+import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.grpc._
 import filodb.grpc.GrpcMultiPartitionQueryService._
 import filodb.query.ProtoConverters._

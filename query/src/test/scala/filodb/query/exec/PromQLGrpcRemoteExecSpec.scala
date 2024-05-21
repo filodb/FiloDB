@@ -1,10 +1,12 @@
 package filodb.query.exec
 
 import com.typesafe.scalalogging.StrictLogging
+import filodb.core.MetricsTestData
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.query._
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
@@ -12,8 +14,11 @@ import filodb.query.ProtoConverters._
 import filodb.query.{StreamQueryResponse, StreamQueryResult, StreamQueryResultFooter, StreamQueryResultHeader}
 import filodb.memory.format.ZeroCopyUTF8String._
 import io.grpc.netty.NettyServerBuilder
-import io.grpc.{Server, ManagedChannelBuilder, ManagedChannel, ServerBuilder}
+import io.grpc.{ManagedChannel, ManagedChannelBuilder, Server, ServerBuilder}
 import io.grpc.stub.StreamObserver
+import monix.eval.Task
+import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -22,6 +27,8 @@ import org.scalatest.time.{Millis, Span}
 
 
 import java.net.ServerSocket
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 import scala.util.Using
 
 class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures
@@ -29,7 +36,6 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   implicit val scheduler = monix.execution.Scheduler.Implicits.global
   implicit val defaultPatience = PatienceConfig(timeout = Span(60000, Millis))
-
 
   private def toRv(samples: Seq[(Long, Double)],
                    rangeVectorKey: RangeVectorKey,
@@ -186,6 +192,57 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     er.id shouldEqual "errorId"
     er.queryStats shouldEqual QueryStats()
     er.t.getMessage shouldEqual "Inevitable has happened"
+  }
+
+  it("should correctly apply RangeVectorTransformers") {
+    val range = RvRange(1000, 1000, 2000)
+    val queryParams = PromQlQueryParams("foo{}", range.startMs, range.stepMs, range.endMs)
+    val queryConfig: QueryConfig = null  // scalastyle:ignore
+    val resultSchema1 = ResultSchema(
+      Seq(
+        ColumnInfo("timestamp", ColumnType.TimestampColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)),
+      numRowKeyColumns = 1)
+    val data = Seq(
+      (CustomRangeVectorKey(Map("foo".utf8 -> "bar".utf8)),
+        Seq((1000L, 1.0), (2000L, 2.0))),
+      (CustomRangeVectorKey(Map("bat".utf8 -> "baz".utf8)),
+        Seq((1000L, 3.0), (2000L, 4.0)))
+    )
+
+    val exec = new PromQlRemoteExec("my.cool.endpoint",
+      requestTimeoutMs = 5000, QueryContext(origQueryParams = queryParams), dispatcher,
+      timeseriesDataset.ref, RemoteHttpClient.defaultClient) {
+
+      // Override doExecute to return the above data.
+      override def doExecute(source: ChunkSource, querySession: QuerySession)(implicit sched: Scheduler): ExecResult = {
+        val rvs = data.map { case (key, tsValPairs) =>
+          MetricsTestData.makeRv(key, tsValPairs, range)
+        }
+        ExecResult(Observable.fromIterable(rvs), Task.now(resultSchema1))
+      }
+    }
+
+    // Use an RVT to add `diff` to each value.
+    val diff = 10.0
+    exec.addRangeVectorTransformer(
+      ScalarOperationMapper(
+        BinaryOperator.ADD,
+        scalarOnLhs = false,
+        Seq(StaticFuncArgs(diff, RangeParams(range.startMs, range.stepMs, range.endMs)))))
+
+    val fut = exec.execute(UnsupportedChunkSource(), QuerySession(QueryContext(), queryConfig)).runToFuture
+    val qres = Await.result(fut, Duration.Inf).asInstanceOf[QueryResult]
+
+    // Convert the result back to simple key / time-value tuples.
+    qres.result.map { rv =>
+      val key = rv.key.labelValues
+      val pairs = rv.rows().toSeq.map { r =>
+        // Subtract the diff from the result-- this should again equal the original data.
+        (r.getLong(0), r.getDouble(1) - diff)
+      }
+      (key, pairs)
+    } shouldEqual data.map { rv => (rv._1.labelValues, rv._2) }
   }
 
 }
