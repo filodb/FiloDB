@@ -1,8 +1,7 @@
 package filodb.query.exec
 
-import scala.concurrent.Future
-
 import kamon.trace.Span
+import monix.eval.Task
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
@@ -44,12 +43,12 @@ case class PromQlRemoteExec(queryEndpoint: String,
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
   private val dummyQueryStats = QueryStats()
 
-  override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
-                              (implicit sched: Scheduler): Future[QueryResponse] = {
+  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+                          (implicit sched: Scheduler): Task[QueryResponse] = {
 
     import PromCirceSupport._
     import io.circe.parser
-    remoteExecHttpClient.httpPost(queryEndpoint, requestTimeoutMs,
+    val fut = remoteExecHttpClient.httpPost(queryEndpoint, requestTimeoutMs,
       queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
@@ -70,6 +69,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
           }
         }
       }
+    Task.fromFuture(fut)
   }
 
   // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double

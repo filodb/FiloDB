@@ -35,24 +35,8 @@ trait GrpcRemoteExec extends RemoteExec {
 
     def remoteExecHttpClient: RemoteExecHttpClient = ???
 
-    override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)(implicit sched: Scheduler):
-    Future[QueryResponse] = ???
-
-    // Since execute of overridden no one will invoke this
-    // TODO: note PromQLRemoteExec and this implementation should be using doExecute and not override execute.
-    //  execute in ExecPlan needs to be final
-    override def doExecute(source: ChunkSource, querySession: QuerySession)
-                          (implicit sched: Scheduler): ExecResult = ???
-
-    override def execute(source: ChunkSource,
-                         querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
-        val span = Kamon.currentSpan()
-        // Dont finish span since this code didnt create it
-        Kamon.runWithSpan(span, finishSpan = false) {
-            sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
-        }
-    }
-
+    override def sendRequest(span: Span, timeoutMs: Long)(implicit sched: Scheduler):
+    Task[QueryResponse] = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
 
     override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +
