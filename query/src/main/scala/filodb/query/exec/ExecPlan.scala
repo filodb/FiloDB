@@ -115,7 +115,7 @@ trait ExecPlan extends QueryCommand {
     */
   val rangeVectorTransformers = new ArrayBuffer[RangeVectorTransformer]()
 
-  final def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
+  def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
     rangeVectorTransformers += mapper
   }
 

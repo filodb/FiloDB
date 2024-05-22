@@ -16,6 +16,7 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
@@ -41,15 +42,18 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   def limit: Int = ???
 
   /**
-   * Since execute is already overrided here, doExecute() can be empty.
+   * Logs each time a transformer is added.
+   * Transformations can always be pushed-down to the machines that serve the
+   *   remote data; they should never be applied to RemoteExec plans directly.
    */
-  def doExecute(source: ChunkSource,
-                querySession: QuerySession)
-               (implicit sched: Scheduler): ExecResult = ???
+  override def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
+    super.addRangeVectorTransformer(mapper)
+    logger.info("RangeVectorTransformer added to RemoteExec; plan=" + printTree())
+  }
 
-  override def execute(source: ChunkSource,
-                       querySession: QuerySession)
-                      (implicit sched: Scheduler): Task[QueryResponse] = {
+  override def doExecute(source: ChunkSource,
+                          querySession: QuerySession)
+                         (implicit sched: Scheduler): ExecResult = {
     if (queryEndpoint == null) {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
@@ -60,12 +64,20 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     val span = Kamon.currentSpan()
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+      val qResTask = sendRequest(span, requestTimeoutMs).map {
+        case qr: QueryResult => qr
+        case qe: QueryError => throw qe.t
+      }.memoize
+      val schemaTask = qResTask.map(_.resultSchema)
+      val rvObs = Observable.fromTask(qResTask)
+        .map(_.result)
+        .flatMap(Observable.fromIterable(_))
+      ExecResult(rvObs, schemaTask)
     }
   }
 
-  def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
-                     (implicit sched: Scheduler): Future[QueryResponse]
+  def sendRequest(span: Span, timeoutMs: Long)
+                 (implicit sched: Scheduler): Task[QueryResponse]
 
   def getUrlParams(): Map[String, String] = {
     var finalUrlParams = urlParams ++
