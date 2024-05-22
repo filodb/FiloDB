@@ -1,8 +1,7 @@
 package filodb.query.exec
 
-import scala.concurrent.Future
-
 import kamon.trace.Span
+import monix.eval.Task
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
@@ -35,11 +34,11 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(config))
 
   private val dummyQueryStats = QueryStats()
-  override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
-                              (implicit sched: Scheduler): Future[QueryResponse] = {
+  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+                          (implicit sched: Scheduler): Task[QueryResponse] = {
     import PromCirceSupport._
     import io.circe.parser
-    remoteExecHttpClient.httpMetadataPost(queryEndpoint, httpTimeoutMs,
+    val fut = remoteExecHttpClient.httpMetadataPost(queryEndpoint, httpTimeoutMs,
       queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
@@ -60,6 +59,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
           }
         }
       }
+    Task.fromFuture(fut)
   }
 
   def toQueryResponse(response: MetadataSuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
