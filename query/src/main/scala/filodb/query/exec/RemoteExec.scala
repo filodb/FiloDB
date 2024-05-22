@@ -48,7 +48,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
    */
   override def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
     super.addRangeVectorTransformer(mapper)
-    logger.info("RangeVectorTransformer added to RemoteExec; plan=" + this)
+    logger.info("RangeVectorTransformer added to RemoteExec; plan=" + printTree())
   }
 
   override def doExecute(source: ChunkSource,
