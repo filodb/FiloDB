@@ -115,7 +115,7 @@ trait ExecPlan extends QueryCommand {
     */
   val rangeVectorTransformers = new ArrayBuffer[RangeVectorTransformer]()
 
-  final def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
+  def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
     rangeVectorTransformers += mapper
   }
 
@@ -327,26 +327,6 @@ trait ExecPlan extends QueryCommand {
     }
   }
 
-  protected def applyTransformers(rvs: Observable[RangeVector], resSchema: ResultSchema,
-                                  querySession: QuerySession, source: ChunkSource)(implicit sched: Scheduler):
-  (Observable[RangeVector], ResultSchema) = {
-    allTransformers.foldLeft((rvs, resSchema)) { (acc, transf) =>
-      val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
-        transf.funcParams.map(_.getResult(querySession, source))
-      val resultSchema: ResultSchema = acc._2
-      if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
-        // It is possible a null schema is returned (due to no time series). In that case just skip the
-        // transformers that cannot handle empty results
-        (acc._1, resultSchema)
-      } else {
-        val rangeVector: Observable[RangeVector] = transf.apply(
-          acc._1, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
-        )
-        val schema = transf.schema(resultSchema)
-        (rangeVector, schema)
-      }
-    }
-  }
 
   /**
   * Facade for the execution orchestration of the plan sub-tree
@@ -415,7 +395,22 @@ trait ExecPlan extends QueryCommand {
       span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       val resultTask = {
-        val finalRes = applyTransformers(res.rvs, resSchema, querySession, source)
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
+                transf.funcParams.map(_.getResult(querySession, source))
+          val resultSchema : ResultSchema = acc._2
+          if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
+            // It is possible a null schema is returned (due to no time series). In that case just skip the
+            // transformers that cannot handle empty results
+            (acc._1, resultSchema)
+          } else {
+            val rangeVector : Observable[RangeVector] = transf.apply(
+              acc._1, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
+            )
+            val schema = transf.schema(resultSchema)
+            (rangeVector, schema)
+          }
+        }
         if (finalRes._2 == ResultSchema.empty) {
           span.mark("empty-plan")
           span.mark(s"execute-step2-end-${getClass.getSimpleName}")

@@ -3,8 +3,8 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
@@ -42,32 +42,18 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   def limit: Int = ???
 
   /**
-   * Since execute is already overrided here, doExecute() can be empty.
+   * Logs each time a transformer is added.
+   * Transformations can always be pushed-down to the machines that serve the
+   *   remote data; they should never be applied to RemoteExec plans directly.
    */
-  def doExecute(source: ChunkSource,
-                querySession: QuerySession)
-               (implicit sched: Scheduler): ExecResult = ???
-
-  /**
-   * Applies all {@link RangeVectorTransformer}s to a remote response.
-   * FIXME: This is needed because RemoteExec plans override the default ExecPlan::execute()
-   *   logic; if possible, this override should eventually be removed.
-   */
-  protected def applyTransformers(resp: QueryResponse,
-                                  querySession: QuerySession,
-                                  source: ChunkSource,
-                                  timeout: Duration)(implicit sched: Scheduler): QueryResponse = resp match {
-    case qr: QueryResult =>
-      val (obs, schema) =
-        applyTransformers(Observable.fromIterable(qr.result), qr.resultSchema, querySession, source)
-      val fut = obs.toListL.map(rvs => qr.copy(result = rvs, resultSchema = schema)).runToFuture
-      Await.result(fut, timeout)
-    case qe: QueryError => qe
+  override def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
+    super.addRangeVectorTransformer(mapper)
+    logger.info("RangeVectorTransformer added to RemoteExec; plan=" + printTree())
   }
 
-  override def execute(source: ChunkSource,
-                       querySession: QuerySession)
-                      (implicit sched: Scheduler): Task[QueryResponse] = {
+  override def doExecute(source: ChunkSource,
+                          querySession: QuerySession)
+                         (implicit sched: Scheduler): ExecResult = {
     if (queryEndpoint == null) {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
@@ -78,17 +64,20 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     val span = Kamon.currentSpan()
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
-        .timed
-        .map{ case (elapsed, qresp) =>
-          val timeRemaining = Duration(requestTimeoutMs, TimeUnit.MILLISECONDS) - elapsed
-          applyTransformers(qresp, querySession, source, timeRemaining)
-        }
+      val qResTask = sendRequest(span, requestTimeoutMs).map {
+        case qr: QueryResult => qr
+        case qe: QueryError => throw qe.t
+      }.memoize
+      val schemaTask = qResTask.map(_.resultSchema)
+      val rvObs = Observable.fromTask(qResTask)
+        .map(_.result)
+        .flatMap(Observable.fromIterable(_))
+      ExecResult(rvObs, schemaTask)
     }
   }
 
-  def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
-                     (implicit sched: Scheduler): Future[QueryResponse]
+  def sendRequest(span: Span, timeoutMs: Long)
+                 (implicit sched: Scheduler): Task[QueryResponse]
 
   def getUrlParams(): Map[String, String] = {
     var finalUrlParams = urlParams ++
