@@ -565,6 +565,7 @@ object SerializedRangeVector extends StrictLogging {
             schema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
             numRows += 1
+            logger.debug(s"Schema ColName: ${schema.columnTypes}} ColumnTypes: ${schema.columnTypes} ")
             builder.addFromReader(nextRow, schema, 0)
           }
         }

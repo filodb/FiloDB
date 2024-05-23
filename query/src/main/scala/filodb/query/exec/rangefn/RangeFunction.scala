@@ -25,6 +25,8 @@ sealed trait BaseRangeFunction {
   def asSliding: RangeFunction = this.asInstanceOf[RangeFunction]
   def asChunkedD: ChunkedRangeFunction[TransientRow] = this.asInstanceOf[ChunkedRangeFunction[TransientRow]]
   def asChunkedH: ChunkedRangeFunction[TransientHistRow] = this.asInstanceOf[ChunkedRangeFunction[TransientHistRow]]
+  def asChunkedHMinMax: ChunkedRangeFunction[TransientHistMinMaxRow] =
+    this.asInstanceOf[ChunkedRangeFunction[TransientHistMinMaxRow]]
 }
 
 /**

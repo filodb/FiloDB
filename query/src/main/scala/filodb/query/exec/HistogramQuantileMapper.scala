@@ -75,7 +75,8 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
 
         // The buckets here will be populated for each instant for quantile calculation
         val buckets = sortedBucketRvs.map { b => Bucket(b._1, 0d) }
-
+        //println(s"Schema ColName: ${schema.columnTypes}} ColumnTypes: ${schema.columnTypes}")
+        println(s"""Source Schema ColName: ${sourceSchema.columns}""")
         // create the result iterator that lazily produces quantile for each timestamp
         val quantileResult = new RangeVectorCursor {
           val row = new TransientRow()

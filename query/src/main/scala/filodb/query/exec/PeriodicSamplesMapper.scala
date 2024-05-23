@@ -57,7 +57,15 @@ final case class PeriodicSamplesMapper(startMs: Long,
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length
+  def getHistMinMaxRangeVector(rv: RangeVector, rdrv: RawDataRangeVector, windowPlusPubInterval: Long,
+                           querySession: QuerySession,
+                           rangeFuncGen: RangeFunction.RangeFunctionGenerator): RangeVector = {
+    IteratorBackedRangeVector(rv.key,
+      new ChunkedWindowIteratorHMinMax(rdrv, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInterval,
+        rangeFuncGen().asChunkedHMinMax, querySession, new TransientHistMinMaxRow()), outputRvRange)
+  }
+
+ //scalastyle:off
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -68,8 +76,10 @@ final case class PeriodicSamplesMapper(startMs: Long,
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = ResultSchema.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
-    val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
-                      sourceSchema.columns(2).name == "max"
+    val hasMinMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length == 4 &&
+      sourceSchema.columns(2).name == "max" && sourceSchema.columns(3).name == "min"
+    val hasMaxColOnly = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length == 3 &&
+      sourceSchema.columns(2).name == "max"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
 
@@ -83,7 +93,6 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val chunkedHRangeFunc = rangeFuncGen().asChunkedH
           val minResolutionMs = rdrv.minResolutionMs
@@ -93,9 +102,15 @@ final case class PeriodicSamplesMapper(startMs: Long,
               s"yield intended results for rate/increase functions since each lookback window contains " +
               s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs}ms")
           val windowPlusPubInt = extendLookback(rv, windowLength)
-          IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, chunkedHRangeFunc, querySession, histRow), outputRvRange)
+          if (hasMinMaxCol) {
+            getHistMinMaxRangeVector(rv, rdrv, windowPlusPubInt, querySession, rangeFuncGen)
+          }
+          else {
+            val histRow = if (hasMaxColOnly) new TransientHistMaxRow() else new TransientHistRow()
+            IteratorBackedRangeVector(rv.key,
+              new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
+                windowPlusPubInt, chunkedHRangeFunc, querySession, histRow), outputRvRange)
+          }
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
@@ -147,7 +162,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
       }
     }).getOrElse(rvs)
   }
-  //scalastyle:on method.length
+  //scalastyle:on
 
   /**
    * If a counter function is used (increase or rate) along with a step multiple notation,
@@ -297,6 +312,14 @@ class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
 ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, querySession)
+
+class ChunkedWindowIteratorHMinMax(rv: RawDataRangeVector,
+                             start: Long, step: Long, end: Long, window: Long,
+                             rangeFunction: ChunkedRangeFunction[TransientHistMinMaxRow],
+                             querySession: QuerySession,
+                             // put emitter here in constructor for faster access
+                             var sampleToEmit: TransientHistMinMaxRow = new TransientHistMinMaxRow()) extends
+  ChunkedWindowIterator[TransientHistMinMaxRow](rv, start, step, end, window, rangeFunction, querySession)
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size

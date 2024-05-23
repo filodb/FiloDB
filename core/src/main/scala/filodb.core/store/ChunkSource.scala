@@ -172,11 +172,20 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       scanPartitions(ref, lookupRes, columnIDs, querySession)
         .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
     } else {
+      val firstSchemaName = Schemas.global.schemaName(lookupRes.firstSchemaId.get)
       lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
-          scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
-            if (p.schema.schemaHash != reqSchemaId)
-              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
+          val data = scanPartitions(ref, lookupRes, columnIDs, querySession)
+          data.filter { p =>
+            if (p.schema.schemaHash != reqSchemaId) {
+              if (p.schema.name == "otel-cumulative-histogram" && firstSchemaName == "prom-histogram") {
+                logger.info("mismatch")
+              }
+              else {
+                throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
+              }
+
+            }
             p.hasChunks(lookupRes.chunkMethod)
           }
         case None =>

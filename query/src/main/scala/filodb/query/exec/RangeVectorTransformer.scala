@@ -67,20 +67,26 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
     ResultSchema.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
+        val instantFunction = InstantFunction.histogram(function, sourceSchema)
         if (instantFunction.isHToDoubleFunc) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
               scalarRangeVector), rv.outputRange)
           }
-        } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
+        } else if (instantFunction.isHistDoubleToDoubleFunc &&
+          (sourceSchema.isHistDouble || sourceSchema.isMinMaxHist) ) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
               scalarRangeVector), rv.outputRange)
           }
-        } else {
-          throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
+        } else if (instantFunction.isHToDoubleWithMinMaxFunc) {
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key,
+              new HD2DoubleMinMaxInstantFuncIterator(rv.rows, instantFunction.asHDMinMaxToDouble,
+              scalarRangeVector), rv.outputRange)
+          }
         }
+        else { throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now") }
       case ColumnType.DoubleColumn =>
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
@@ -92,7 +98,6 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
             IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
               scalarRangeVector), rv.outputRange)
           }
-
           // NOTE: In BinaryJoin queries, if rhs is vector(static value) and lhs returns an empty TS, we must return
           // a TS of static value to be compliant with Prometheus. Else, we return the empty result
           if (function == InstantFunctionId.OrVectorDouble){
@@ -100,9 +105,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
             // is being sent. Hence we are selecting the head RangeVector
             result.defaultIfEmpty(scalarRangeVector.head)
           }
-          else {
-            result
-          }
+          else { result }
         }
       case cType: ColumnType =>
         throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
@@ -138,7 +141,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     // otherwise pass along the source
     ResultSchema.valueColumnType(source) match {
       case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
+        val instantFunction = InstantFunction.histogram(function, source)
         if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
           // Hist to Double function, so output schema is double
           source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
@@ -188,6 +191,21 @@ private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
     val timestamp = next.getLong(0)
     val newValue = instantFunction(next.getHistogram(1),
       next.getDouble(2), scalar.map(_.getValue(timestamp)))
+    result.setValues(timestamp, newValue)
+    result
+  }
+}
+
+private class HD2DoubleMinMaxInstantFuncIterator(rows: RangeVectorCursor,
+                                           instantFunction: HistToDoubleWithMinMaxIFunction,
+                                           scalar: Seq[ScalarRangeVector],
+                                           result: TransientRow = new TransientRow())
+  extends WrappedCursor(rows) {
+  override def doNext(): RowReader = {
+    val next = rows.next()
+    val timestamp = next.getLong(0)
+    val newValue = instantFunction(next.getHistogram(1),
+      next.getDouble(2), next.getDouble(3), scalar.map(_.getValue(timestamp)))
     result.setValues(timestamp, newValue)
     result
   }
