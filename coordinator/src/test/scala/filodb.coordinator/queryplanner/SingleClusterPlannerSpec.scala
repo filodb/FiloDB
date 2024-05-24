@@ -1238,6 +1238,109 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
   }
 
+
+  it("should do shard level failover") {
+
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1))
+    }
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job", "app")))
+    }
+
+    val query = """foo{job="baz"}""";
+
+      // ============== BEGIN BINARY JOIN TESTS ==================
+
+      // Binary join; same shards, join key is ts superset. Should pushdown.
+    val expectedExecPlan =
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1323384501],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1323384501],raw)
+          |-E~GenericRemoteExec() on GrpcPlanDispatcher(some_endpoint,1000)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on RemoteActorPlanDispatcher(address,raw)""".stripMargin
+
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+    val shardInfo = filodb.core.query.ShardInfo(true, "address")
+    val shardInfoArrayLocal = Array.fill(256)(shardInfo)
+    val shardInfoArrayRemote = Array.fill(256)(shardInfo)
+    shardInfoArrayLocal(17) = filodb.core.query.ShardInfo(false, "address")
+    shardInfoArrayRemote(1) = filodb.core.query.ShardInfo(false, "address")
+    val activeShardMapperLocal = ActiveShardMapper(shardInfoArrayLocal)
+    val activeShardMapperRemote = ActiveShardMapper(shardInfoArrayRemote)
+    val downPartition = scala.collection.mutable.SortedSet[DownPartition]()
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(
+        promQlQueryParams,
+        plannerParams = PlannerParams(
+          spreadOverride = Some(FunctionalSpreadProvider(spread)),
+          targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+          queryTimeoutMillis = 1000000,
+          downPartitions = downPartition,
+          failoverMode = ShardLevelFailoverMode,
+          localShardMapper = Some(activeShardMapperLocal),
+          buddyShardMapper = Some(activeShardMapperRemote),
+          buddyGrpcEndpoint = Some("some_endpoint"),
+          buddyGrpcTimeoutMs = Some(1000)
+        )
+      )
+    )
+    validatePlan(execPlan, expectedExecPlan)
+  }
+
+  it("should materialize a fully remote exec plan") {
+
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1))
+    }
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job", "app")))
+    }
+
+    val query = """foo{job="baz"}""";
+
+    // ============== BEGIN BINARY JOIN TESTS ==================
+
+    // Binary join; same shards, join key is ts superset. Should pushdown.
+    val expectedExecPlan =
+      """E~LocalPartitionDistConcatExec() on RemoteActorPlanDispatcher(address,raw)
+        |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on RemoteActorPlanDispatcher(address,raw)
+        |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on RemoteActorPlanDispatcher(address,raw)""".stripMargin
+
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+    val shardInfo = filodb.core.query.ShardInfo(true, "address")
+    val shardInfoArrayLocal = Array.fill(256)(shardInfo)
+    val shardInfoArrayRemote = Array.fill(256)(shardInfo)
+    shardInfoArrayLocal(17) = filodb.core.query.ShardInfo(false, "address")
+    val activeShardMapperLocal = ActiveShardMapper(shardInfoArrayLocal)
+    val activeShardMapperRemote = ActiveShardMapper(shardInfoArrayRemote)
+    val downPartition = scala.collection.mutable.SortedSet[DownPartition]()
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(
+        promQlQueryParams,
+        plannerParams = PlannerParams(
+          spreadOverride = Some(FunctionalSpreadProvider(spread)),
+          targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+          queryTimeoutMillis = 1000000,
+          downPartitions = downPartition,
+          failoverMode = ShardLevelFailoverMode,
+          localShardMapper = Some(activeShardMapperLocal),
+          buddyShardMapper = Some(activeShardMapperRemote),
+          buddyGrpcEndpoint = Some("some_endpoint"),
+          buddyGrpcTimeoutMs = Some(1000)
+        )
+      )
+    )
+    validatePlan(execPlan, expectedExecPlan)
+  }
+
   it ("should pushdown BinaryJoins/Aggregates when valid and clause shard key labels are implicit") {
 
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
