@@ -57,7 +57,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length
+ //scalastyle:off method.length cyclomatic.complexity
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -70,6 +70,8 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // If a max column is present, the ExecPlan's job is to put it into column 2
     val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
                       sourceSchema.columns(2).name == "max"
+    val hasMaxMinCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 3 &&
+      sourceSchema.columns(2).name == "max" && sourceSchema.columns(3).name == "min"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
 
@@ -83,7 +85,8 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
+          val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else if (hasMaxCol) new TransientHistMaxRow()
+              else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val chunkedHRangeFunc = rangeFuncGen().asChunkedH
           val minResolutionMs = rdrv.minResolutionMs
@@ -147,7 +150,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
       }
     }).getOrElse(rvs)
   }
-  //scalastyle:on method.length
+  //scalastyle:on method.length cyclomatic.complexity
 
   /**
    * If a counter function is used (increase or rate) along with a step multiple notation,

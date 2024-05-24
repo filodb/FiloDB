@@ -24,6 +24,14 @@ object SelectRawPartitionsExec extends  {
           }
   }
 
+  // Returns Some(colID) the ID of a "min" column if one of given colIDs is a histogram.
+  def histMinColumn(schema: Schema, colIDs: Seq[Types.ColumnId]): Option[Int] = {
+    colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
+      .flatMap { histColID =>
+        schema.data.columns.find(c => c.name == "min" && c.columnType == DoubleColumn).map(_.id)
+      }
+  }
+
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
     transformers.collectFirst { case p: PeriodicSamplesMapper => p.functionId }.flatten
 
@@ -86,11 +94,18 @@ object SelectRawPartitionsExec extends  {
 
   // Automatically add column ID for max column if it exists and we picked histogram col already
   // But make sure the max column isn't already included
-  def addIDsForHistMax(dataSchema: Schema, colIDs: Seq[Types.ColumnId]): Seq[Types.ColumnId] =
-    histMaxColumn(dataSchema, colIDs).filter { mId => !(colIDs contains mId) }
+  def addIDsForHistMaxMin(dataSchema: Schema, colIDs: Seq[Types.ColumnId]): Seq[Types.ColumnId] = {
+    val colIdsWithMax = histMaxColumn(dataSchema, colIDs).filter { mId => !(colIDs contains mId) }
       .map { maxColID =>
         colIDs :+ maxColID
       }.getOrElse(colIDs)
+
+    // making sure that we are adding min column, after the max to maintain the order for HistogramMaxQuantileImpl
+    histMinColumn(dataSchema, colIdsWithMax).filter { mId => !(colIdsWithMax contains mId) }
+      .map { minColId =>
+        colIdsWithMax :+ minColId
+      }.getOrElse(colIdsWithMax)
+  }
 }
 
 /**

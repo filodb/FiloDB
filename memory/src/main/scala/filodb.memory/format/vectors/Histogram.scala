@@ -336,6 +336,38 @@ final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends 
 }
 
 /**
+ * The quantile result can never be above max, and below min, regardless of the bucket scheme.
+ */
+final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: Double) extends HistogramWithBuckets {
+  final def buckets: HistogramBuckets = innerHist.buckets
+  final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
+
+  def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
+
+  override def quantile(q: Double): Double = {
+    val result = if (q < 0) Double.NegativeInfinity
+    else if (q > 1) Double.PositiveInfinity
+    else if (numBuckets < 2) Double.NaN
+    else {
+      // find rank for the quantile using total number of occurrences (which is the last bucket value)
+      var rank = q * topBucketValue
+      // using rank, find the le bucket which would have the identified rank
+      val bucketNum = firstBucketGTE(rank)
+
+      // TODO: Double check with Sher ..
+      var (bucketStart, bucketEnd, count) = (min, Math.min(bucketTop(bucketNum), max), bucketValue(bucketNum))
+      if (bucketNum > 0) {
+        bucketStart = bucketTop(bucketNum-1)
+        count -= bucketValue(bucketNum-1)
+        rank -= bucketValue(bucketNum-1)
+      }
+      bucketStart + (bucketEnd-bucketStart)*(rank/count)
+    }
+    result
+  }
+}
+
+/**
  * A scheme for buckets in a histogram.  Since these are Prometheus-style histograms,
  * each bucket definition consists of occurrences of numbers which are less than or equal to the bucketTop
  * or definition of each bucket.

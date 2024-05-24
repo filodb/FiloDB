@@ -67,11 +67,11 @@ object TestTimeseriesProducer extends StrictLogging {
                    genPromCounter: Boolean, genOtelCumulativeHistData: Boolean, genOtelDeltaHistData: Boolean,
                    publishIntervalSec: Int): Unit = {
     val startQuery = startTimeMs / 1000
-    val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
+    val endQuery = startQuery + numSamples * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
 
     val metricName = if (genGauge) "heap_usage0"
-                      else if (genHist || genOtelCumulativeHistData) "http_request_latency"
+                      else if (genHist || genOtelCumulativeHistData) "test_otel_hist"
                       else if (genDeltaHist || genOtelDeltaHistData) "http_request_latency_delta"
                       else if (genPromCounter) "heap_usage_counter0"
                       else "heap_usage_delta0"
@@ -204,13 +204,13 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema): Stream[InputRecord] = {
-    val numBuckets = 10
+    val numBuckets = 3
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
     var buckets = new Array[Long](numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema) {
                   "http_request_latency_delta"
                  } else {
-                  "http_request_latency"
+                  "test_otel_hist"
                  }
 
     def updateBuckets(bucketNo: Int): Unit = {
@@ -221,13 +221,14 @@ object TestTimeseriesProducer extends StrictLogging {
 
     val instanceBase = System.currentTimeMillis
     var prevTimestamp = startTime
+    var timestamp = startTime
     Stream.from(0).map { n =>
-      val instance = n % numTimeSeries + instanceBase
-      val dc = instance & oneBitMask
-      val partition = (instance >> 1) & twoBitMask
+      val instance = 1//n % numTimeSeries + instanceBase
+      val dc = 2//instance & oneBitMask
+      val partition = 3//(instance >> 1) & twoBitMask
       val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
-      val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
+      timestamp = timestamp + 10000
       // reset buckets for delta histograms
       if ( (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema )
           && prevTimestamp != timestamp) {
