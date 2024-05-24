@@ -263,7 +263,6 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.FailoverMode = {
       fm match {
         case LegacyFailoverMode => GrpcMultiPartitionQueryService.FailoverMode.LEGACY_FAILOVER_MODE
-        case AllRemoteBuddyFailoverMode => GrpcMultiPartitionQueryService.FailoverMode.ALL_REMOTE_FAILOVER_MODE
         case ShardLevelFailoverMode => GrpcMultiPartitionQueryService.FailoverMode.SHARD_LEVEL_FAILOVER_MODE
       }
     }
@@ -273,7 +272,6 @@ object ProtoConverters {
     def fromProto: FailoverMode = {
       fm match {
         case GrpcMultiPartitionQueryService.FailoverMode.LEGACY_FAILOVER_MODE => LegacyFailoverMode
-        case GrpcMultiPartitionQueryService.FailoverMode.ALL_REMOTE_FAILOVER_MODE => AllRemoteBuddyFailoverMode
         case GrpcMultiPartitionQueryService.FailoverMode.SHARD_LEVEL_FAILOVER_MODE => ShardLevelFailoverMode
         case GrpcMultiPartitionQueryService.FailoverMode.UNRECOGNIZED =>
           throw new IllegalArgumentException("Unrecognized failover mode")

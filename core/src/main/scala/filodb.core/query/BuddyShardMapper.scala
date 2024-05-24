@@ -9,6 +9,5 @@ case class ActiveShardMapper(shards: Array[ShardInfo]) {
 
 sealed trait FailoverMode
 case object LegacyFailoverMode extends FailoverMode
-case object AllRemoteBuddyFailoverMode extends FailoverMode
 case object ShardLevelFailoverMode extends FailoverMode
 

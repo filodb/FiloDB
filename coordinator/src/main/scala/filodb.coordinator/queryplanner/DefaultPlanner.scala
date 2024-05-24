@@ -653,14 +653,27 @@ object PlannerUtil extends StrictLogging {
    */
   def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
     val plannerParams = children.iterator.next().queryContext.plannerParams
-    if (plannerParams.failoverMode == ShardLevelFailoverMode) {
+    // there is a very subtle point on how to decide how we need to pick up the dispatcher
+    // HA planner would inject the children that are created with HA planner with the active shard map
+    // of the local and buddy clusters. However, if children were not scheduled by HA Planner, these maps
+    // would be missing. Until we get rid of the hierarchy of planners, we cannot deal with children
+    // scheduled by other planners. So, this is what we check below.
+    if (plannerParams.failoverMode == ShardLevelFailoverMode && plannerParams.localShardMapper.isDefined) {
       // here we can encounter the following dispatchers to pick from:
       // (a) ActorPlanDispatcher - happy case
-      // (b) RemoteActorPlanDispatcher - we cannot use
-      // (c) GrpcPlanDispatcher - we cannot use
+      // (b) RemoteActorPlanDispatcher - we cannot use because non leaf plans can be running
+      //                                 only locally
+      // (c) GrpcPlanDispatcher - we cannot use because non leaf plans can be running
+      //                          only locally
       // (d) we don't find an ActorPlanDispatcher at all, hence, we need to pick
       //     from the list of available and active local shards
-      pickDispatcherShardLevelFailover(children, plannerParams)
+      val localActiveShardMapper = plannerParams.localShardMapper.get
+      val buddyActiveShardMapper = plannerParams.buddyShardMapper.get
+      if (!localActiveShardMapper.allShardsActive && buddyActiveShardMapper.allShardsActive) {
+        pickDispatcherNormal(children)
+      } else {
+        pickDispatcherShardLevelFailover(children, plannerParams)
+      }
     } else {
       // this case is used for both:
       // (1) legacy failover mode (ie no shard failover at all). In that case
@@ -696,12 +709,11 @@ object PlannerUtil extends StrictLogging {
       val childTargets = children.map(_.dispatcher)
       // Above list can contain duplicate dispatchers, and we don't make them distinct.
       // Those with more shards must be weighed higher
-      val activeChildTargets = childTargets.filter( d =>
-        (!d.isInstanceOf[RemoteActorPlanDispatcher]) && (!d.isInstanceOf[GrpcPlanDispatcher]))
+      val localDispatchers = childTargets.filter( d => isScheduledLocally(d))
       val rnd = ThreadLocalRandom.current()
-      if (activeChildTargets.isEmpty) {
+      if (localDispatchers.isEmpty) {
         // This should be vary rare. We tried to assign a dispatcher for a non leaf plan by
-        // picking one of dispatchers of its own children but none of the children plans
+        // picking one of the dispatchers of its own children but none of the children plans
         // have a local dispatcher. So, we have to assign this plan to a random active
         // shard of this cluster. We do shard level fail over only if there are decent
         // umber of active shards in the local cluster.
@@ -722,10 +734,15 @@ object PlannerUtil extends StrictLogging {
         dispatcher
       } else {
         val dispatcher =
-          activeChildTargets.iterator.drop(rnd.nextInt(activeChildTargets.size)).next
+          localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
         dispatcher
       }
    }
+  }
+
+  def isScheduledLocally(d : PlanDispatcher): Boolean = {
+    val scheduledLocally = (!d.isInstanceOf[RemoteActorPlanDispatcher]) && (!d.isInstanceOf[GrpcPlanDispatcher])
+    scheduledLocally
   }
 
   //scalastyle:off method.length

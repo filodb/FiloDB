@@ -47,8 +47,7 @@ message DownCluster {
 
 enum FailoverMode {
   LEGACY_FAILOVER_MODE      = 0;
-  ALL_REMOTE_FAILOVER_MODE  = 1;
-  SHARD_LEVEL_FAILOVER_MODE = 2;
+  SHARD_LEVEL_FAILOVER_MODE = 1;
 }
 
 message PlannerParams {

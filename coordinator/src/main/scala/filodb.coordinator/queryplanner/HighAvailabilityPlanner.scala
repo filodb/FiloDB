@@ -11,7 +11,7 @@ import io.grpc.ManagedChannel
 import filodb.coordinator.GrpcPlanDispatcher
 import filodb.coordinator.ShardMapper
 import filodb.core.DatasetRef
-import filodb.core.query.{ActiveShardMapper, DownPartition, PlannerParams, ShardLevelFailoverMode}
+import filodb.core.query.{ActiveShardMapper, DownPartition, LegacyFailoverMode, PlannerParams, ShardLevelFailoverMode}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.grpc.GrpcCommonUtils
 import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
@@ -177,9 +177,24 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     // Instead we should keep shards down and FailureTimeRanges information separate!
     // Keeping the existing logic in place for now but allow one to switch to the new logic.
     if (unroutableLogicalPlan || notPromQlQuery || markedNotToBeFailedOver || hasMultipleTimeRanges) {
-      localPlanner.materialize(logicalPlan, qContext)
+      // we don't want to do any complicated shard level logic and instead
+      // even want to turn it off completely to make sure that the logic stays
+      // exactly the same
+      val plannerParams = qContext.plannerParams.copy(
+        failoverMode = LegacyFailoverMode
+      )
+      val q = qContext.copy(plannerParams = plannerParams)
+      localPlanner.materialize(logicalPlan, q)
     } else if (useShardLevelFailover || qContext.plannerParams.failoverMode == ShardLevelFailoverMode) {
-      materializeShardLevelFailover(logicalPlan, qContext)
+      // we need to populate planner params with the shard maps
+      val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
+      val remoteActiveShardMapper = getRemoteActiveShardMapper(qContext.plannerParams)
+      val plannerParams = qContext.plannerParams.copy(
+        localShardMapper = Some(localActiveShardMapper),
+        buddyShardMapper = Some(remoteActiveShardMapper)
+      )
+      val q = qContext.copy(plannerParams = plannerParams)
+      materializeShardLevelFailover(logicalPlan, q)
     } else {
       materializeLegacy(logicalPlan, qContext)
     }
@@ -277,35 +292,38 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       periodicSeriesTimeWithOffset.startMs - lookBackTime,
       periodicSeriesTimeWithOffset.endMs
     )
-    val failures = failureProvider.getFailures2(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
+    val failures = failureProvider.getMaintenancesAndDataIssues(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
     // if failures is an empty collection, next statement will be true
     val canQueryLocal = failures.forall(f => f.isRemote)
     val canQueryRemote = failures.forall(f => !f.isRemote)
     val cannotQueryLocal = !canQueryLocal
     val cannotQueryRemote = !canQueryRemote
-    val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
-    val remoteActiveShardMapper = getRemoteActiveShardMapper(qContext.plannerParams)
+    val pp = qContext.plannerParams
+    val localActiveShardMapper = pp.localShardMapper.get
+    val remoteActiveShardMapper = pp.buddyShardMapper.get
     if (cannotQueryLocal && cannotQueryRemote) {
       // the only way this might happen is because one of the partitions is in maintenance
-      // and the other one has a mark saying that the partition has gap
-      // (or there was a bug in TR and both partitions are in maintenance... though who knows
-      // that might be ok, ie we might declare both partitions as unavailable for some weird reason)
+      // and the other one has a mark saying that the partition has a gap
       throw new filodb.core.query.ServiceUnavailableException(
         "Time range of the query is marked as unavailable by the FailureProvider"
       )
     } else if (cannotQueryLocal) {
-      // CASE NUMBER_ONE
-      materializeAllRemote(logicalPlan, qContext, remoteActiveShardMapper)  //CASE NUBER_ONE
+      materializeAllRemote(logicalPlan, qContext, localActiveShardMapper, remoteActiveShardMapper)
     } else if (cannotQueryRemote) {
-      // materialize local only
-      localPlanner.materialize(logicalPlan, qContext)
+      val plannerParams = qContext.plannerParams.copy(
+        failoverMode = LegacyFailoverMode
+      )
+      val q = qContext.copy(plannerParams = plannerParams)
+      localPlanner.materialize(logicalPlan, q)
     } else if (localActiveShardMapper.allShardsActive) {
-      localPlanner.materialize(logicalPlan, qContext)
+      val plannerParams = qContext.plannerParams.copy(
+        failoverMode = LegacyFailoverMode
+      )
+      val q = qContext.copy(plannerParams = plannerParams)
+      localPlanner.materialize(logicalPlan, q)
     } else if (remoteActiveShardMapper.allShardsActive) {
-      // CASE NUMBER_ONE
-      materializeAllRemote(logicalPlan, qContext, remoteActiveShardMapper)
+      materializeAllRemote(logicalPlan, qContext, localActiveShardMapper, remoteActiveShardMapper)
     } else {
-      // CASE NUMBER_TWO
       materializeMixedLocalAndRemote(logicalPlan, qContext, localActiveShardMapper, remoteActiveShardMapper)
     }
   }
@@ -319,15 +337,23 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     localActiveShardMapper: ActiveShardMapper,
     remoteActiveShardMapper: ActiveShardMapper
   ): ExecPlan = {
-    // TODO makes sense to do local planning if we have at least X% of shards running
-    // otherwise, it's better to ship the entire query
+    // it makes sense to do local planning if we have at least 50% of shards running
+    // as the query might overload the few shards we have while doing second level aggregation
+    // Generally, it would be better to ship the entire query to the cluster that has more shards up
+    // and let that cluster pull missing shards data from its buddy cluster. We don't want to implement
+    // this feature though because hopefully in the near future we will have a class of stateless nodes to which
+    // we can always assign non leaf plans
+    val activeLocalShards = localActiveShardMapper.activeShards.size
+    if (activeLocalShards < (localActiveShardMapper.shards.length /2) ) {
+      throw new filodb.core.query.ServiceUnavailableException(
+        s"$activeLocalShards  is not enough to finish the query in $clusterName, work unit $workUnit"
+      )
+    }
     val timeout : Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
     val haPlannerParams = qContext.plannerParams.copy(
       failoverMode = filodb.core.query.ShardLevelFailoverMode,
       buddyGrpcTimeoutMs = Some(timeout),
-      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get),
-      localShardMapper = Some(localActiveShardMapper),
-      buddyShardMapper = Some(remoteActiveShardMapper)
+      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get)
     )
     val context = qContext.copy(plannerParams = haPlannerParams)
     val plan = localPlanner.materialize(logicalPlan, context);
@@ -338,11 +364,16 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     val shardMapper = localShardMapperFunc
     val shardInfo = filodb.core.query.ShardInfo(false, "")
     val shardInfoArray = Array.fill(shardMapper.statuses.size)(shardInfo)
-    shardMapper.statuses.zipWithIndex.foreach(t => {
-      val isActive = if (t._1 == filodb.coordinator.ShardStatusActive) {true} else {false}
-      val path = shardMapper.coordForShard(t._2).path.toString
-      shardInfoArray(t._2) = filodb.core.query.ShardInfo(isActive, path)
-    })
+    val localStatuses = shardMapper.statuses
+    for (i <- localStatuses.indices) {
+      val isActive = if (localStatuses(i) == filodb.coordinator.ShardStatusActive) {
+        true
+      } else {
+        false
+      }
+      val path = shardMapper.coordForShard(i).path.toString
+      shardInfoArray(i) = filodb.core.query.ShardInfo(isActive, path)
+    }
     val localActiveShardMapper = ActiveShardMapper(shardInfoArray)
     markDownShards(localActiveShardMapper, plannerParams.downPartitions, partitionName, workUnit, clusterName)
     localActiveShardMapper
@@ -374,17 +405,16 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     )
   }
 
-
   def materializeAllRemote(
-    logicalPlan: LogicalPlan, qContext: QueryContext, remoteActiveShardMapper: ActiveShardMapper
+    logicalPlan: LogicalPlan,
+    qContext: QueryContext,
+    localActiveShardMapper: ActiveShardMapper, remoteActiveShardMapper: ActiveShardMapper
   ): GenericRemoteExec = {
     val timeout: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
     val plannerParams = qContext.plannerParams.copy(
-      failoverMode = filodb.core.query.AllRemoteBuddyFailoverMode,
+      failoverMode = filodb.core.query.ShardLevelFailoverMode,
       buddyGrpcTimeoutMs = Some(timeout),
-      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get),
-      localShardMapper = None,
-      buddyShardMapper = Some(remoteActiveShardMapper)
+      buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get)
     )
     val c = qContext.copy(plannerParams = plannerParams)
     val ep = localPlanner.materialize(logicalPlan, c)

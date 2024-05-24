@@ -141,7 +141,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     queryContext.plannerParams.failoverMode match {
       case LegacyFailoverMode => legacyDispatcherForShard(shard, queryContext)
-      case AllRemoteBuddyFailoverMode => allRemoteDispatcherForShard(shard, queryContext)
       case ShardLevelFailoverMode => shardLevelFailoverDispatcherForShard(shard, queryContext)
     }
   }
@@ -158,7 +157,35 @@ class SingleClusterPlanner(val dataset: Dataset,
     ActorPlanDispatcher(targetActor, clusterName)
   }
 
-  private def allRemoteDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
+
+
+  private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
+    val pp = queryContext.plannerParams
+    val localShardMapper =
+      pp.localShardMapper.getOrElse(throw new RuntimeException("Local shard map unavailable"))
+    val buddyShardMapper = pp.buddyShardMapper.get
+    // the reason we check shard mapper from the query context as opposed to
+    // the regular shard mapper of the SingleClusterPlanner is because the former allows us to
+    // inject failures to test the code as well as verify shard level failover in production by
+    // providing parameter downShards, for example downShards=tsdb1/us-east-1a/raw/6,7,8
+    if (!localShardMapper.allShardsActive && buddyShardMapper.allShardsActive) {
+      // all remote case
+      getRemoteDispatcherForShard(shard, queryContext)
+    } else if (localShardMapper.shards(shard).active) {
+      val targetActor = shardMapperFunc.coordForShard(shard)
+      // this means that the shard went down in the split second after high availability took
+      // a snapshot of the shard state
+      if (targetActor == ActorRef.noSender) {
+        getRemoteDispatcherForShard(shard, queryContext)
+      } else {
+        ActorPlanDispatcher(targetActor, clusterName)
+      }
+    } else {
+      getRemoteDispatcherForShard(shard, queryContext)
+    }
+  }
+
+  private def getRemoteDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
     val remoteShardMapper =
       queryContext.plannerParams.buddyShardMapper.getOrElse(throw new RuntimeException("Remote shard map unavailable"))
     val shardInfo = remoteShardMapper.shards(shard)
@@ -166,33 +193,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       if (queryContext.plannerParams.allowPartialResults)
         logger.debug(s"Shard: $shard is not available however query is proceeding as partial results is enabled")
       else
-        throw new RuntimeException(s"Remote Buddy Shard: $shard is not available")
+        throw new filodb.core.query.ServiceUnavailableException(
+          s"Remote Buddy Shard: $shard is not available"
+        )
     }
     val dispatcher = RemoteActorPlanDispatcher(shardInfo.address, clusterName)
     dispatcher
-  }
-
-  private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
-    val localShardMapper =
-      queryContext.plannerParams.localShardMapper.getOrElse(throw new RuntimeException("Local shard map unavailable"))
-    // the reason we check shard mapper from the query context as opposed to
-    // the regular shard mapper of the SingleClusterPlanner is because the former allows us to
-    // inject failures to test the code as well as verify shard level failover in production by
-    // providing parameter downShards, for example downShards=tsdb1/us-east-1a/raw/6,7,8
-    if (localShardMapper.shards(shard).active) {
-      val targetActor = shardMapperFunc.coordForShard(shard)
-      // this means that the shard went down in the split second after high availability took
-      // a snapshot of the shard state
-      if (targetActor == ActorRef.noSender) {
-        allRemoteDispatcherForShard(shard, queryContext)
-      } else {
-        ActorPlanDispatcher(targetActor, clusterName)
-      }
-    } else {
-      allRemoteDispatcherForShard(shard, queryContext)
-    }
-
-
   }
 
   private def makeBuddyExecPlanIfNeeded(qContext: QueryContext, ep: ExecPlan): ExecPlan = {
@@ -205,6 +211,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val pp = qContext.plannerParams
     if (
       pp.failoverMode == ShardLevelFailoverMode &&
+      (!pp.buddyShardMapper.get.allShardsActive) && // not shipping the entire plan remotely
       ep.dispatcher.isInstanceOf[RemoteActorPlanDispatcher]
     ) {
       GenericRemoteExec(
@@ -902,17 +909,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       // GenericRemoteExec exists only because we cannot directly query the shards
       // from a coordinator. GenericRemoteExec will pass it to a machine that can resolve
       // ActorRef of a remote shard.
-      if (
-        qContext.plannerParams.failoverMode == ShardLevelFailoverMode &&
-          dispatcher.isInstanceOf[RemoteActorPlanDispatcher]
-      ) {
-        GenericRemoteExec(
-          GrpcPlanDispatcher(
-            qContext.plannerParams.buddyGrpcEndpoint.get,
-            qContext.plannerParams.buddyGrpcTimeoutMs.get),
-          ep
-        )
-      } else ep
+      makeBuddyExecPlanIfNeeded(qContext, ep)
     }
 
     // Stitch only if spread changes during the query-window.
