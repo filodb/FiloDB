@@ -67,7 +67,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
     ResultSchema.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
+        val instantFunction = InstantFunction.histogram(function, sourceSchema)
         if (instantFunction.isHToDoubleFunc) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
@@ -78,7 +78,14 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
             IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
               scalarRangeVector), rv.outputRange)
           }
-        } else {
+        } else if (instantFunction.isHMaxMinToDoubleFunc && sourceSchema.isHistMaxMin) {
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key,
+              new HMaxMin2DoubleInstantFuncIterator(rv.rows, instantFunction.asHMinMaxToDouble,
+                scalarRangeVector), rv.outputRange)
+          }
+        }
+        else {
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
         }
       case ColumnType.DoubleColumn =>
@@ -138,8 +145,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     // otherwise pass along the source
     ResultSchema.valueColumnType(source) match {
       case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
-        if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
+        val instantFunction = InstantFunction.histogram(function, source)
+        if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc
+            || instantFunction.isHMaxMinToDoubleFunc) {
           // Hist to Double function, so output schema is double
           source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
         } else { source }
@@ -188,6 +196,21 @@ private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
     val timestamp = next.getLong(0)
     val newValue = instantFunction(next.getHistogram(1),
       next.getDouble(2), scalar.map(_.getValue(timestamp)))
+    result.setValues(timestamp, newValue)
+    result
+  }
+}
+
+private class HMaxMin2DoubleInstantFuncIterator(rows: RangeVectorCursor,
+                                                 instantFunction: HMaxMinToDoubleIFunction,
+                                                 scalar: Seq[ScalarRangeVector],
+                                                 result: TransientRow = new TransientRow())
+  extends WrappedCursor(rows) {
+  override def doNext(): RowReader = {
+    val next = rows.next()
+    val timestamp = next.getLong(0)
+    val newValue = instantFunction(next.getHistogram(1),
+      next.getDouble(2), next.getDouble(3), scalar.map(_.getValue(timestamp)))
     result.setValues(timestamp, newValue)
     result
   }

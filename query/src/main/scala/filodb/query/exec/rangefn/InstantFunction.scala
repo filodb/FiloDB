@@ -4,7 +4,8 @@ import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
 
 import spire.syntax.cfor._
 
-import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
+import filodb.core.query.ResultSchema
+import filodb.memory.format.vectors.{Histogram, MaxHistogram, MaxMinHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
 
@@ -25,8 +26,10 @@ trait EmptyParamsInstantFunction extends DoubleInstantFunction
 sealed trait HistogramInstantFunction {
   def isHToDoubleFunc: Boolean = this.isInstanceOf[HistToDoubleIFunction]
   def isHistDoubleToDoubleFunc: Boolean = this.isInstanceOf[HDToDoubleIFunction]
+  def isHMaxMinToDoubleFunc: Boolean = this.isInstanceOf[HMaxMinToDoubleIFunction]
   def asHToDouble: HistToDoubleIFunction = this.asInstanceOf[HistToDoubleIFunction]
   def asHDToDouble: HDToDoubleIFunction = this.asInstanceOf[HDToDoubleIFunction]
+  def asHMinMaxToDouble: HMaxMinToDoubleIFunction = this.asInstanceOf[HMaxMinToDoubleIFunction]
   def asHToH: HistToHistIFunction = this.asInstanceOf[HistToHistIFunction]
 }
 
@@ -54,6 +57,19 @@ trait HDToDoubleIFunction extends HistogramInstantFunction {
     * @return Calculated value
     */
   def apply(h: Histogram, d: Double, scalarParams: Seq[Double] = Nil): Double
+}
+
+/**
+ * An instant function taking a histogram and double and returning a Double value
+ */
+trait HMaxMinToDoubleIFunction extends HistogramInstantFunction {
+  /**
+   * Apply the required instant function against the given value.
+   *
+   * @param value Sample against which the function will be applied
+   * @return Calculated value
+   */
+  def apply(h: Histogram, max: Double, min: Double, scalarParams: Seq[Double] = Nil): Double
 }
 
 /**
@@ -107,8 +123,9 @@ object InstantFunction {
   /**
    * Returns the HistogramInstantFunction given the function ID and parameters
    */
-  def histogram(function: InstantFunctionId): HistogramInstantFunction = function match {
-    case HistogramQuantile    => HistogramQuantileImpl()
+  def histogram(function: InstantFunctionId, sourceSchema: ResultSchema): HistogramInstantFunction = function match {
+    case HistogramQuantile    =>
+      if (sourceSchema.isHistMaxMin) HistogramQuantileWithMaxMinImpl()else HistogramQuantileImpl()
     case HistogramMaxQuantile => HistogramMaxQuantileImpl()
     case HistogramBucket      => HistogramBucketImpl()
     case _                    => throw new UnsupportedOperationException(s"$function not supported.")
@@ -376,6 +393,20 @@ final case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
       case other: Histogram    => MaxHistogram(MutableHistogram(other), max)
     }
     maxHist.quantile(scalarParams(0))
+  }
+}
+
+/**
+ * Histogram quantile function for Histogram columns, where all buckets are together.
+ */
+final case class HistogramQuantileWithMaxMinImpl() extends HMaxMinToDoubleIFunction {
+  final def apply(value: Histogram, max: Double, min: Double, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
+    val maxMinHist = value match {
+      case h: MutableHistogram => MaxMinHistogram(h, max, min)
+      case other: Histogram => MaxMinHistogram(MutableHistogram(other), max, min)
+    }
+    maxMinHist.quantile(scalarParams(0))
   }
 }
 
