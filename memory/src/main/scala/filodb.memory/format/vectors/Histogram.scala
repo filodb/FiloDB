@@ -302,7 +302,8 @@ object MutableHistogram {
  * Both changes mean that the 0.90+ quantiles return much closer to the max value, instead of interpolating or clipping.
  * The quantile result can never be above max, regardless of the bucket scheme.
  */
-final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends HistogramWithBuckets {
+final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: Double = 0.0)
+  extends HistogramWithBuckets {
   final def buckets: HistogramBuckets = innerHist.buckets
   final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
 
@@ -316,17 +317,18 @@ final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends 
       // find rank for the quantile using total number of occurrences (which is the last bucket value)
       var rank = q * topBucketValue
       // using rank, find the le bucket which would have the identified rank
-      val b = firstBucketGTE(rank)
+      val bucketNum = firstBucketGTE(rank)
 
       // now calculate quantile.  No need to special case top bucket since we will always cap top at max
-      if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
+      if (bucketNum == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
         // interpolate quantile within le bucket
-        var (bucketStart, bucketEnd, count) = (0d, Math.min(bucketTop(b), max), bucketValue(b))
-        if (b > 0) {
-          bucketStart = bucketTop(b-1)
-          count -= bucketValue(b-1)
-          rank -= bucketValue(b-1)
+        var (bucketStart, bucketEnd, count) = (Math.max(0d, min),
+          Math.min(bucketTop(bucketNum), max), bucketValue(bucketNum))
+        if (bucketNum > 0) {
+          bucketStart = bucketTop(bucketNum-1)
+          count -= bucketValue(bucketNum-1)
+          rank -= bucketValue(bucketNum-1)
         }
         bucketStart + (bucketEnd-bucketStart)*(rank/count)
       }

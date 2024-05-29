@@ -93,13 +93,13 @@ class TransientHistRow(var timestamp: Long = 0L,
 }
 
 // 0: Timestamp, 1: Histogram, 2: Max/Double
-final class TransientHistMaxRow(var max: Double = 0.0) extends TransientHistRow() {
+final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0) extends TransientHistRow() {
   override def setDouble(columnNo: Int, valu: Double): Unit =
-    if (columnNo == 2) max = valu else throw new IllegalArgumentException()
+    if (columnNo == 2) max = valu else if (columnNo == 3) min = valu else throw new IllegalArgumentException()
   override def getDouble(columnNo: Int): Double =
-    if (columnNo == 2) max else throw new IllegalArgumentException()
+    if (columnNo == 2) max else if (columnNo == 3) min else throw new IllegalArgumentException()
 
-  override def toString: String = s"TransientHistMaxRow(t=$timestamp, h=$value, max=$max)"
+  override def toString: String = s"TransientHistMaxMinRow(t=$timestamp, h=$value, max=$max, min=$min)"
 }
 
 final class AvgAggTransientRow extends MutableRowReader {

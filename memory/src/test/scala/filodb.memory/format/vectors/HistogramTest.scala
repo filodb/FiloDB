@@ -74,16 +74,16 @@ class HistogramTest extends NativeVectorTest {
     }
 
     it("should calculate more accurate quantile with MaxHistogram") {
-      val h = MaxHistogram(mutableHistograms(0), 90)
+      val h = MaxMinHistogram(mutableHistograms(0), 90)
       h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!
 
       // Not just last bucket, but should always be clipped at max regardless of bucket scheme
       val values = Array[Double](10, 15, 17, 20, 25, 25, 25, 25)
-      val h2 = MaxHistogram(MutableHistogram(bucketScheme, values), 10)
+      val h2 = MaxMinHistogram(MutableHistogram(bucketScheme, values), 10)
       h2.quantile(0.95) shouldEqual 9.5 +- 0.1   // more accurate due to max!
 
       val values3 = Array[Double](1, 1, 1, 1, 1, 4, 7, 7, 9, 9) ++ Array.fill(54)(12.0)
-      val h3 = MaxHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0)
+      val h3 = MaxMinHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0)
       h3.quantile(0.99) shouldEqual 1593.2 +- 0.1
       h3.quantile(0.90) shouldEqual 1379.4 +- 0.1
     }

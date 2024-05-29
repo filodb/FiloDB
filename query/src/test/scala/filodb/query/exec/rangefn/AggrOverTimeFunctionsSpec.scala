@@ -300,7 +300,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(50) + 5
       info(s"iteration $x windowSize=$windowSize step=$step")
 
-      val row = new TransientHistMaxRow()
+      val row = new TransientHistMaxMinRow()
       val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
