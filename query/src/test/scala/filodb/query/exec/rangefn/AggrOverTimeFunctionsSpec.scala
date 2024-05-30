@@ -301,14 +301,14 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
 
       val row = new TransientHistMaxMinRow()
-      val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
+      val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(4), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.LongHistogram])
+        val sumRawHist = rawDataWindow.map(_(5).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
 
-        val maxMax = rawDataWindow.map(_(3).asInstanceOf[Double])
+        val maxMax = rawDataWindow.map(_(4).asInstanceOf[Double])
                                   .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
         aggRow.getDouble(2) shouldEqual maxMax
       }
