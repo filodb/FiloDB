@@ -103,7 +103,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
-            val newxformers = newXFormersForHistMax(sch, colIDs, newxformers1)
+            val newxformers = newXFormersForHistMaxMin(sch, colIDs, newxformers1)
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),

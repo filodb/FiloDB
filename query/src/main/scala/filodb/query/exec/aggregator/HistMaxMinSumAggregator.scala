@@ -13,7 +13,7 @@ object HistMaxMinSumAggregator extends RowAggregator {
                             var min: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientHistMaxMinRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row.max = max; row.min = min; row }
-    def resetToZero(): Unit = { h = bv.Histogram.empty; max = 0.0; min = 0.0 }
+    def resetToZero(): Unit = { h = bv.Histogram.empty; max = 0.0; min = Double.MaxValue }
   }
   type AggHolderType = HistSumMaxMinHolder
   def zero: HistSumMaxMinHolder = new HistSumMaxMinHolder

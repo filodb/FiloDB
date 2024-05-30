@@ -13,15 +13,16 @@ import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
 
-object SelectRawPartitionsExec extends  {
+object SelectRawPartitionsExec extends {
+
   import Column.ColumnType._
 
   // Returns Some(colID) the ID of a "max" column if one of given colIDs is a histogram.
   def histMaxColumn(schema: Schema, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
-          .flatMap { histColID =>
-            schema.data.columns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
-          }
+      .flatMap { histColID =>
+        schema.data.columns.find(c => c.name == "max" && c.columnType == DoubleColumn).map(_.id)
+      }
   }
 
   // Returns Some(colID) the ID of a "min" column if one of given colIDs is a histogram.
@@ -59,13 +60,13 @@ object SelectRawPartitionsExec extends  {
       qLogger.debug(s"Replacing range function $origFunc with $newFunc...")
       replaceRangeFunction(transformers, origFunc, newFunc)
     } else {
-      transformers.toBuffer   // Produce an immutable copy, so the original one is not mutated by accident
+      transformers.toBuffer // Produce an immutable copy, so the original one is not mutated by accident
     }
   }
 
-  def newXFormersForHistMax(schema: Schema,
-                            colIDs: Seq[Types.ColumnId],
-                            transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+  def newXFormersForHistMaxMin(schema: Schema,
+                               colIDs: Seq[Types.ColumnId],
+                               transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
     histMaxMinColumns(schema, colIDs).map { colId =>
       // Histogram with max column present.  Check for range functions and change if needed
       val origFunc = findFirstRangeFunction(transformers)
@@ -109,11 +110,11 @@ object SelectRawPartitionsExec extends  {
 
     // making sure that we are adding min column, after the max to maintain the order for HistogramMaxMinQuantileImpl
     histMinColumn(dataSchema, colIdsWithMax).filter { mId => !(colIdsWithMax contains mId) }
-    .map { minColId =>
-      colIdsWithMax :+ minColId
-    }.getOrElse(colIdsWithMax)
+      .map { minColId =>
+        colIdsWithMax :+ minColId
+      }.getOrElse(colIdsWithMax)
+  }
 }
-
 /**
   * ExecPlan to select raw data from partitions.  Specific to a particular schema.
   * This plan should be created with transformers and column IDs exactly as needed to query data given the

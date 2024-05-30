@@ -1,9 +1,10 @@
 package filodb.query.exec.rangefn
 
-import filodb.core.query.ResultSchema
-
 import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
+
 import spire.syntax.cfor._
+
+import filodb.core.query.ResultSchema
 import filodb.memory.format.vectors.{Histogram, MaxMinHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId._
@@ -113,8 +114,8 @@ object InstantFunction {
     case HistogramMaxQuantile => HistogramMaxQuantileImpl()
     case HistogramBucket => HistogramBucketImpl()
     case _ => throw new UnsupportedOperationException(s"$function not supported.")
+  }
 }
-
 /**
   * abs(v instant-vector) returns the input vector with all
   * sample values converted to their absolute value.
@@ -384,7 +385,7 @@ final case class HistogramMaxQuantileImpl() extends HMaxMinToDoubleIFunction {
   /**
     * @param scalarParams - a single value between 0 and 1, the quantile to calculate.
     */
-  final def apply(hist: Histogram, max: Double, scalarParams: Seq[Double]): Double = {
+  final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     val maxHist = hist match {
       case h: MutableHistogram => MaxMinHistogram(h, max)
@@ -416,7 +417,6 @@ final case class HistogramBucketImpl() extends HistToDoubleIFunction {
         if (Math.abs(value.bucketTop(b) - bucket) <= 1E-10) return value.bucketValue(b)
       }
       Double.NaN
-
     }
   }
 }
