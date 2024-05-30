@@ -9,6 +9,7 @@ import filodb.memory.format.vectors.{Histogram, MaxMinHistogram, MutableHistogra
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId._
 
+//scalastyle:off number.of.types
 /**
   * Applies a function transforming a single value into another value, both of type Double.
   */
@@ -420,3 +421,4 @@ final case class HistogramBucketImpl() extends HistToDoubleIFunction {
     }
   }
 }
+//scalastyle:on number.of.types
