@@ -294,7 +294,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   // Goal of this is to verify aggregation functionality for diff time windows.
   // See PeriodicSampleMapperSpec for verifying integration of histograms with max
   it("should aggregate both max and hist for sum_over_time when max in schema") {
-    val (data, rv) = MMD.histMaxRV(defaultStartTS, pubFreq, 150, 8)
+    val (data, rv) = MMD.histMaxMinRV(defaultStartTS, pubFreq, 150, 8)
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(50) + 10
       val step = rand.nextInt(50) + 5

@@ -295,12 +295,15 @@ object MutableHistogram {
 }
 
 /**
- * MaxHistogram improves quantile calculation accuracy with a known max value recorded from the client.
+ * MaxMinHistogram improves quantile calculation accuracy with a known max value recorded from the client.
  * Whereas normally Prom histograms have +Inf as the highest bucket, and we cannot interpolate above the last
  * non-Inf bucket, having a max allows us to interpolate from the rank up to the max.
  * When the max value is lower, we interpolate between the bottom of the bucket and the max value.
  * Both changes mean that the 0.90+ quantiles return much closer to the max value, instead of interpolating or clipping.
  * The quantile result can never be above max, regardless of the bucket scheme.
+ *
+ * UPDATE: Adding support for min value as well to make sure the quantile is never below the minimum specified value.
+ * By default, the minimum value is set to 0.0
  */
 final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: Double = 0.0)
   extends HistogramWithBuckets {

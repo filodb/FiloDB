@@ -73,7 +73,7 @@ class HistogramTest extends NativeVectorTest {
       mutableHistograms(0).quantile(0.95) shouldEqual 64
     }
 
-    it("should calculate more accurate quantile with MaxHistogram") {
+    it("should calculate more accurate quantile with MaxMinHistogram") {
       val h = MaxMinHistogram(mutableHistograms(0), 90)
       h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!
 
