@@ -389,8 +389,8 @@ final case class HistogramMaxQuantileImpl() extends HMaxMinToDoubleIFunction {
   final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     val maxHist = hist match {
-      case h: MutableHistogram => MaxMinHistogram(h, max)
-      case other: Histogram    => MaxMinHistogram(MutableHistogram(other), max)
+      case h: MutableHistogram => MaxMinHistogram(h, max, 0d)
+      case other: Histogram    => MaxMinHistogram(MutableHistogram(other), max, 0d)
     }
     maxHist.quantile(scalarParams(0))
   }

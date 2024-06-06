@@ -1,12 +1,11 @@
 package filodb.query.exec
 
 import scala.util.Random
-
 import com.typesafe.config.ConfigFactory
+import filodb.core.MachineMetricsData.histMaxMinDS
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
@@ -121,6 +120,22 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
 
     val expectedResult = Seq(histKey1 -> Seq((10, 4.666666666666667), (20, 3.3), (30, 3.4), (40, 1.9)))
     calculateAndVerify(0.5, histRvs, expectedResult)
+  }
+
+  it ("test histMaxMinColumns returns values as expected") {
+    val colIds = SelectRawPartitionsExec.histMaxMinColumns(histMaxMinDS.schema, Seq(0, 5, 4, 3))
+    colIds.isDefined shouldEqual true
+    colIds.size shouldEqual 1
+
+    val colIds2 = SelectRawPartitionsExec.histMaxMinColumns(histMaxMinDS.schema, Seq(0, 5, 4, 3))
+    colIds2.isDefined shouldEqual true
+    colIds2.size shouldEqual 1
+  }
+
+  it ("test histMinColumn returns the colId of the min column in max-min histograms") {
+    val colIds = SelectRawPartitionsExec.histMinColumn(histMaxMinDS.schema, Seq(0, 5, 4, 3))
+    colIds.isDefined shouldEqual true
+    colIds.get shouldEqual 3
   }
 
 }

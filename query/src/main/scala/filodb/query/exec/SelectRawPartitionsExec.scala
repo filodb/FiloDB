@@ -33,10 +33,21 @@ object SelectRawPartitionsExec extends {
       }
   }
 
+  /**
+   * Get the column ids of max and min columns in case of an otel max-min histogram
+   * @param schema Schema
+   * @param colIDs ColumnIds associated with the schema
+   * @return
+   */
   def histMaxMinColumns(schema: Schema, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
       .flatMap { histColID =>
-        schema.data.columns.find(c => (c.name == "min" || c.name == "max") && c.columnType == DoubleColumn).map(_.id)
+        val ids = schema.data.columns.filter(
+          c => (c.name == "min" || c.name == "max") && c.columnType == DoubleColumn).map(_.id)
+        ids.size match {
+          case 2 => Some(ids.head)
+          case _ => None
+        }
       }
   }
 
@@ -64,11 +75,12 @@ object SelectRawPartitionsExec extends {
     }
   }
 
+  // Replacing range functions for otel max-min histograms
   def newXFormersForHistMaxMin(schema: Schema,
                                colIDs: Seq[Types.ColumnId],
                                transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
     histMaxMinColumns(schema, colIDs).map { colId =>
-      // Histogram with max column present.  Check for range functions and change if needed
+      // Histogram with max and min column present.  Check for range functions and change if needed
       val origFunc = findFirstRangeFunction(transformers)
       val newFunc = RangeFunction.histMaxMinRangeFunction(origFunc)
       qLogger.debug(s"Replacing range function for histogram max-min $origFunc with $newFunc...")

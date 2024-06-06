@@ -397,7 +397,7 @@ object MachineMetricsData {
     Seq("timestamp:ts", "count:long", "sum:long", "min:double", "max:double", "h:hist:counter=false"))
 
   // Pass in the output of linearHistSeries here.
-  // Adds in the max column before h/hist
+  // Adds in the max and min column before h/hist
   def histMaxMin(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
       val hist = row(3).asInstanceOf[bv.LongHistogram]
