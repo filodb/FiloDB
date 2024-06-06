@@ -197,7 +197,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     // shuffle the incoming write data before writing.
     // A global sort will minimize the number of output files.
     spark.createDataFrame(rdd, exportTableConfig.tableSchema)
-      .sortWithinPartitions(partitionColNames.head, partitionColNames.tail: _*)
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
