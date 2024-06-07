@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
-import filodb.core.MachineMetricsData.histMaxMinDS
+import filodb.core.MachineMetricsData.{histDataset, histMaxMinDS}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
@@ -123,19 +123,53 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
   }
 
   it ("test histMaxMinColumns returns values as expected") {
-    val colIds = SelectRawPartitionsExec.histMaxMinColumns(histMaxMinDS.schema, Seq(0, 5, 4, 3))
-    colIds.isDefined shouldEqual true
-    colIds.size shouldEqual 1
+    var hasMaxMinColumns = SelectRawPartitionsExec.histMaxMinColumns(histMaxMinDS.schema,
+      histMaxMinDS.schema.allColumns.map(x => x.id))
+    hasMaxMinColumns shouldEqual true
 
-    val colIds2 = SelectRawPartitionsExec.histMaxMinColumns(histMaxMinDS.schema, Seq(0, 5, 4, 3))
-    colIds2.isDefined shouldEqual true
-    colIds2.size shouldEqual 1
+    hasMaxMinColumns = SelectRawPartitionsExec.histMaxMinColumns(histDataset.schema,
+      histDataset.schema.allColumns.map(x => x.id))
+    hasMaxMinColumns shouldEqual false
   }
 
-  it ("test histMinColumn returns the colId of the min column in max-min histograms") {
-    val colIds = SelectRawPartitionsExec.histMinColumn(histMaxMinDS.schema, Seq(0, 5, 4, 3))
-    colIds.isDefined shouldEqual true
-    colIds.get shouldEqual 3
+  it ("test histMinColumn and histMaxColumn returns the colId of the min column in max-min histograms") {
+    val minColId = SelectRawPartitionsExec.histMinColumn(histMaxMinDS.schema,
+      histMaxMinDS.schema.allColumns.map(x => x.id))
+    minColId.isDefined shouldEqual true
+    minColId.get shouldEqual 3
+
+    val maxColId = SelectRawPartitionsExec.histMaxColumn(histMaxMinDS.schema,
+      histMaxMinDS.schema.allColumns.map(x => x.id))
+    maxColId.isDefined shouldEqual true
+    maxColId.get shouldEqual 4
+  }
+
+  it("test histMinColumn and histMaxColumn should not return the colId if not present") {
+    var colIds = SelectRawPartitionsExec.histMinColumn(histDataset.schema, histDataset.schema.allColumns.map(x => x.id))
+    colIds.isDefined shouldEqual false
+
+    colIds = SelectRawPartitionsExec.histMaxColumn(histDataset.schema, histDataset.schema.allColumns.map(x => x.id))
+    colIds.isDefined shouldEqual false
+  }
+
+  it("test getColumnIDs returns correct colIds for max-min histograms") {
+    val colIds = SelectRawPartitionsExec.getColumnIDs(histMaxMinDS.schema, Seq(),
+      Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
+    colIds.size shouldEqual 2
+    colIds shouldEqual Seq(0, 5)
+    val colIdsWithMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
+    colIdsWithMinMax.size shouldEqual 4
+    colIdsWithMinMax shouldEqual Seq(0, 5, 4, 3)
+  }
+
+  it("test getColumnIDs returns correct colIds for prom histograms") {
+    val colIds = SelectRawPartitionsExec.getColumnIDs(histDataset.schema, Seq(),
+      Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
+    colIds.size shouldEqual 2
+    colIds shouldEqual Seq(0, 3)
+    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
+    colIdsWithoutMinMax.size shouldEqual 2
+    colIdsWithoutMinMax shouldEqual Seq(0, 3)
   }
 
 }
