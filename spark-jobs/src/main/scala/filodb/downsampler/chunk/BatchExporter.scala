@@ -160,9 +160,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     val dataSeq = new mutable.ArrayBuffer[Any](exportTableConfig.tableSchema.fields.length)
     // append all dynamic column values
     exportTableConfig.labelColumnMapping.foreach { pair =>
-      val labelValue = exportData.labels.get(pair._1)
-      assert(labelValue.isDefined, s"${pair._1} label was expected but not found: ${exportData.labels}")
-      dataSeq.append(labelValue.get)
+      // scalastyle:off null
+      val result = exportData.labels.get(pair._1) match {
+        case Some(labelValue) => labelValue
+        case None => null
+      }
+      // scalastyle:on null
+      dataSeq.append(result)
     }
     // append all fixed column values
     dataSeq.append(
@@ -185,7 +189,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                               rdd: RDD[Row]): Unit = {
     spark.sql(sqlCreateDatabase(settings.exportDatabase))
     spark.sql(sqlCreateTable(settings.exportCatalog, settings.exportDatabase, exportTableConfig))
-    val partitionColNames = Seq("year", "month", "day") ++ exportTableConfig.partitionByCols ++ Seq("metric")
     // distribution mode: none, does not request any shuffles or sort to be performed automatically by Spark.
     // Because no work is done automatically by Spark, the data must be manually sorted by partition value.
     // The data must be sorted either within each spark task, or globally within the entire dataset.
@@ -193,7 +196,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     // shuffle the incoming write data before writing.
     // A global sort will minimize the number of output files.
     spark.createDataFrame(rdd, exportTableConfig.tableSchema)
-      .sortWithinPartitions(partitionColNames.head, partitionColNames.tail: _*)
       .write
       .format(settings.exportFormat)
       .mode(SaveMode.Append)
