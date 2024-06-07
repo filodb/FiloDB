@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
-import filodb.core.MachineMetricsData.{histDataset, histMaxMinDS}
+import filodb.core.MachineMetricsData.{dataset1, histDataset, histMaxMinDS}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
@@ -130,6 +130,9 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
     hasMaxMinColumns = SelectRawPartitionsExec.histMaxMinColumns(histDataset.schema,
       histDataset.schema.allColumns.map(x => x.id))
     hasMaxMinColumns shouldEqual false
+
+    hasMaxMinColumns = SelectRawPartitionsExec.histMaxMinColumns(dataset1.schema, Seq(0, 1, 2, 3, 4))
+    hasMaxMinColumns shouldEqual false
   }
 
   it ("test histMinColumn and histMaxColumn returns the colId of the min column in max-min histograms") {
@@ -170,6 +173,26 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
     val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
     colIdsWithoutMinMax.size shouldEqual 2
     colIdsWithoutMinMax shouldEqual Seq(0, 3)
+  }
+
+  it("test getColumnIDs for correct colIds for prom histograms") {
+    val colIds = SelectRawPartitionsExec.getColumnIDs(histDataset.schema, Seq(),
+      Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
+    colIds.size shouldEqual 2
+    colIds shouldEqual Seq(0, 3)
+    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
+    colIdsWithoutMinMax.size shouldEqual 2
+    colIdsWithoutMinMax shouldEqual Seq(0, 3)
+  }
+
+  it("test getColumnIDs for correct colIds for counter") {
+    val colIds = SelectRawPartitionsExec.getColumnIDs(dataset1.schema, Seq(),
+      Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
+    colIds.size shouldEqual 2
+    colIds shouldEqual Seq(0, 4)
+    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(dataset1.schema, colIds)
+    colIdsWithoutMinMax.size shouldEqual 2
+    colIdsWithoutMinMax shouldEqual Seq(0, 4)
   }
 
 }

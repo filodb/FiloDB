@@ -34,23 +34,20 @@ object SelectRawPartitionsExec extends {
   }
 
   /**
-   * Get the column ids of max and min columns in case of an otel max-min histogram
+   * Checks if the given schema is histogram and has max and min columns
    *
    * @param schema Schema
    * @param colIDs ColumnIds associated with the schema
    * @return
    */
   def histMaxMinColumns(schema: Schema, colIDs: Seq[Types.ColumnId]): Boolean = {
-    val hasMaxMin = colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
-      .flatMap { histColID =>
-        val ids = schema.data.columns.filter(
-          c => (c.name == "min" || c.name == "max") && c.columnType == DoubleColumn).map(_.id)
-        ids.size match {
-          case 2 => Some(ids.head)
-          case _ => None
-        }
-      }
-    hasMaxMin.isDefined
+    val isHistogramSchema = colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
+    if (isHistogramSchema.isDefined) {
+      val ids = schema.data.columns.filter(
+        c => (c.name == "min" || c.name == "max") && c.columnType == DoubleColumn).map(_.id)
+      ids.size == 2
+    }
+    else false
   }
 
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
