@@ -170,17 +170,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
       Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
     colIds.size shouldEqual 2
     colIds shouldEqual Seq(0, 3)
-    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
-    colIdsWithoutMinMax.size shouldEqual 2
-    colIdsWithoutMinMax shouldEqual Seq(0, 3)
-  }
-
-  it("test getColumnIDs for correct colIds for prom histograms") {
-    val colIds = SelectRawPartitionsExec.getColumnIDs(histDataset.schema, Seq(),
-      Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
-    colIds.size shouldEqual 2
-    colIds shouldEqual Seq(0, 3)
-    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
+    val colIdsWithoutMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histDataset.schema, colIds)
     colIdsWithoutMinMax.size shouldEqual 2
     colIdsWithoutMinMax shouldEqual Seq(0, 3)
   }
