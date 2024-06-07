@@ -7,6 +7,7 @@ import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.Query
+//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
 
 /**
@@ -319,6 +320,7 @@ object RangeFunction {
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
       case Some(Last)             => () => new LastSampleChunkedFunctionL
+      case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionL()
       case _                      => iteratingFunction(func, schema, funcParams)
     }
   }
@@ -360,6 +362,7 @@ object RangeFunction {
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
       case Some(PresentOverTime)  => () => new PresentOverTimeChunkedFunctionD()
+      case Some(MedianAbsoluteDeviationOverTime) => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionD()
       case _                      => iteratingFunction(func, schema, funcParams)
     }
   }
@@ -424,6 +427,7 @@ object RangeFunction {
     case Some(StdVarOverTime)         => () => new StdVarOverTimeFunction()
     case Some(Changes)                => () => ChangesOverTimeFunction
     case Some(QuantileOverTime)       => () => new QuantileOverTimeFunction(funcParams)
+    case Some(MedianAbsoluteDeviationOverTime) => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case _                            => ??? //TODO enumerate all possible cases
   }
 }

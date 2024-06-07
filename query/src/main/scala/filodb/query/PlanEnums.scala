@@ -75,6 +75,7 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object Timestamp extends RangeFunctionId("timestamp", Seq(InstantVectorParam()))
   case object AbsentOverTime extends RangeFunctionId("absent_over_time", Seq(RangeVectorParam()))
   case object PresentOverTime extends RangeFunctionId("present_over_time", Seq(RangeVectorParam()))
+  case object MedianAbsoluteDeviationOverTime extends RangeFunctionId("mad_over_time", Seq(RangeVectorParam()))
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry
@@ -114,9 +115,9 @@ sealed abstract class BinaryOperator extends EnumEntry {
   def operatorString: String
 }
 
-sealed abstract class MathOperator (val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed abstract class SetOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed abstract class ComparisonOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class MathOperator (val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class SetOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class ComparisonOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
