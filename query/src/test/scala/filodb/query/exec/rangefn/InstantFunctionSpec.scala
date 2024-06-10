@@ -16,7 +16,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
-  val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs=Seq(0, 4, 3))
+  val histMaxMinSchema = ResultSchema(MMD.histMaxMinDS.schema.infosFromIDs(Seq(0, 5, 4, 3)), 1, colIDs=Seq(0, 5, 4, 3))
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
   val sampleBase: Array[RangeVector] = Array(
@@ -326,25 +326,25 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it("should compute histogram_max_quantile on Histogram RV") {
-    val (data, histRV) = MMD.histMaxRV(100000L, numSamples = 7)
+    val (data, histRV) = MMD.histMaxMinRV(100000L, numSamples = 7)
     val expected = data.zipWithIndex.map { case (row, i) =>
       // Calculating the quantile is quite complex... sigh
-      val _max = row(3).asInstanceOf[Double]
+      val _max = row(4).asInstanceOf[Double]
       if ((i % 8) == 0) (_max * 0.9) else {
-        val _hist = row(4).asInstanceOf[bv.LongHistogram]
+        val _hist = row(5).asInstanceOf[bv.LongHistogram]
         val rank = 0.9 * _hist.bucketValue(_hist.numBuckets - 1)
         val ratio = (rank - _hist.bucketValue((i-1) % 8)) / (_hist.bucketValue(i%8) - _hist.bucketValue((i-1) % 8))
         _hist.bucketTop((i-1) % 8) + ratio * (_max -  _hist.bucketTop((i-1) % 8))
       }
     }
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
-                                 InstantFunctionId.HistogramMaxQuantile, Seq(0.9), histMaxSchema)
+                                 InstantFunctionId.HistogramMaxQuantile, Seq(0.9), histMaxMinSchema)
   }
 
   it("should return proper schema after applying histogram_max_quantile") {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile,
                                                                  Seq(StaticFuncArgs(0.99, rangeParams)))
-    val outSchema = instantVectorFnMapper.schema(histMaxSchema)
+    val outSchema = instantVectorFnMapper.schema(histMaxMinSchema)
     outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
   }
 

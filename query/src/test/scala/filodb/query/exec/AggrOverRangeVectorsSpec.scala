@@ -21,7 +21,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
-  val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
+  val histMaxMinSchema = ResultSchema(
+    MMD.histMaxMinDS.schema.infosFromIDs(Seq(0, 5, 4, 3)), 1, colIDs = Seq(0, 5, 4, 3))
 
   val qc = QueryContext()
   val queryStats = QueryStats()
@@ -619,11 +620,11 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
     it("should sum and compute max of histogram & max RVs") {
-    val (data1, rv1) = MMD.histMaxRV(100000L, numSamples = 5)
-    val (data2, rv2) = MMD.histMaxRV(100000L, numSamples = 5)
+    val (data1, rv1) = MMD.histMaxMinRV(100000L, numSamples = 5)
+    val (data2, rv2) = MMD.histMaxMinRV(100000L, numSamples = 5)
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
-    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histMaxSchema)
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histMaxMinSchema)
     val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc, QueryWarnings())
     val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key,  queryContext = qc, QueryWarnings())
 
@@ -632,13 +633,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(4).asInstanceOf[bv.LongHistogram])
-      h1.add(row2(4).asInstanceOf[bv.LongHistogram])
+      val h1 = bv.MutableHistogram(row1(5).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(5).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
     val maxes = data1.zip(data2).map { case (row1, row2) =>
-      Math.max(row1(3).asInstanceOf[Double], row2(3).asInstanceOf[Double])
+      Math.max(row1(4).asInstanceOf[Double], row2(4).asInstanceOf[Double])
     }.toList
 
     val answers = result(0).rows.map(r => (r.getHistogram(1), r.getDouble(2))).toList

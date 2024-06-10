@@ -70,7 +70,6 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData = MMD.linearHistSeries().take(100)
-  val histMaxData = MMD.histMax(histData)
   val system = ActorSystemHolder.createActorSystem("testActorSystem", allConfig)
 
   implicit val execTimeout = 5.seconds
@@ -88,7 +87,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     memStore.refreshIndexForTesting(dsRef)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
-    memStore.refreshIndexForTesting(MMD.histMaxDS.ref)
+    memStore.refreshIndexForTesting(MMD.histMaxMinDS.ref)
   }
 
   override def afterAll(): Unit = {
