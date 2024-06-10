@@ -863,7 +863,7 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionD
     var rowNum = startRowNum
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
 
-    for (rowNum <- startNum to endRowNum) {
+    for (rowNum <- startRowNum to endRowNum) {
       var nextvalue = it.next
       // There are many possible values of NaN.  Use a function to ignore them reliably.
       if (!JLDouble.isNaN(nextvalue)) {
@@ -907,7 +907,7 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionL
 
       var rowNum = startRowNum
       val it = longReader.iterate(longVectAcc, longVect, startRowNum)
-      for (rowNum <- startNum to endRowNum) {
+      for (rowNum <- startRowNum to endRowNum) {
         var nextvalue = it.next
         values += nextvalue
       }
