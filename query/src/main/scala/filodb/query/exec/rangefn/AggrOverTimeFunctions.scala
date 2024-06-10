@@ -259,7 +259,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
     var medianAbsoluteDeviationResult : Double = Double.NaN
     val diffFromMedians: Buffer[Double] = Buffer.ofSize(window.size)
 
-    for (i <-0 until window.size) {
+    for (i <- 0 until window.size) {
       val curValue = window.apply(i).getDouble(1)
       diffFromMedians.append(Math.abs(median - curValue))
     }
@@ -803,11 +803,11 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { medianAbsoluteDeviationResult = Double.NaN; values = Buffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    val counter = values.length
-    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, counter)
+    val size = values.length
+    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, size)
     values.sort(spire.algebra.Order.fromOrdering[Double])
     var median: Double = Double.NaN
-    if (counter > 0) {
+    if (size > 0) {
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
       val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
       val iter = values.iterator()
@@ -863,7 +863,7 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionD
     var rowNum = startRowNum
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
 
-    for (rowNum <= startNum to endRowNum) {
+    for (rowNum <- startNum to endRowNum) {
       var nextvalue = it.next
       // There are many possible values of NaN.  Use a function to ignore them reliably.
       if (!JLDouble.isNaN(nextvalue)) {
@@ -907,10 +907,9 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionL
 
       var rowNum = startRowNum
       val it = longReader.iterate(longVectAcc, longVect, startRowNum)
-      while (rowNum <= endRowNum) {
+      for (rowNum <- startNum to endRowNum) {
         var nextvalue = it.next
         values += nextvalue
-        rowNum += 1
       }
   }
 }
