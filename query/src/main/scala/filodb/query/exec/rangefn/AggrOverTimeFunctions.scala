@@ -242,32 +242,29 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
                     ): Unit = {
     val q = 0.5
     val values: Buffer[Double] = Buffer.ofSize(window.size)
-    var i = 0
-    while (i < window.size) {
+    for (i <- 0 until window.size) {
       val curValue = window.apply(i).getDouble(1)
       if (!curValue.isNaN) {
         values.append(curValue)
       }
-      i = i + 1
     }
-    val counter = values.length
+    val size = values.length
     values.sort(spire.algebra.Order.fromOrdering[Double])
-    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
+    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
     var median : Double = Double.NaN
-    if (counter > 0) {
+    if (size > 0) {
       median = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
     }
 
     var medianAbsoluteDeviationResult : Double = Double.NaN
     val diffFromMedians: Buffer[Double] = Buffer.ofSize(window.size)
 
-    while (i < window.size) {
+    for (i <-0 until window.size) {
       val curValue = window.apply(i).getDouble(1)
       diffFromMedians.append(Math.abs(median - curValue))
-      i = i + 1
     }
     diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
-    if (counter > 0) {
+    if (size > 0) {
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex)*(1-weight) + diffFromMedians(upperIndex)*weight
     }
     sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)
@@ -814,8 +811,8 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
       val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
       val iter = values.iterator()
-      while (iter.hasNext) {
-        diffFromMedians.append(Math.abs(median - iter.next()))
+      for (value <- values) {
+        diffFromMedians.append(Math.abs(median - value))
       }
       diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
@@ -865,14 +862,12 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionD
                                 endRowNum: Int): Unit = {
     var rowNum = startRowNum
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
-    while (rowNum <= endRowNum) {
+    for (rowNum <- startRowNum to endRowNum)
       var nextvalue = it.next
       // There are many possible values of NaN.  Use a function to ignore them reliably.
       if (!JLDouble.isNaN(nextvalue)) {
-        //println(nextvalue)
         values += nextvalue
       }
-      rowNum += 1
     }
   }
 }
