@@ -72,7 +72,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
     val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
     if (pushdownKeys.isDefined) {
-      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
       Some(PlanResult(plans))
     } else None
@@ -222,7 +222,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    */
   private def generateExecForEachPartition(logicalPlan: LogicalPlan,
                                            keys: Seq[Seq[ColumnFilter]],
-                                           qContext: QueryContext): Seq[ExecPlan] = {
+                                           qContext: QueryContext,
+                                           pushdownPlan: Boolean = false): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
     if (keys.isEmpty) {
@@ -269,7 +270,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
     // Skip lower-level aggregate presentation if there is more than one plan to materialize.
     // In that case, the presentation step will be applied by this planner.
-    val skipAggregatePresentValue = partitionToKeyGroups.values.map(_.size).sum + partitionSplitKeys.size > 1
+    val skipAggregatePresentValue = !pushdownPlan &&
+                                      partitionToKeyGroups.values.map(_.size).sum + partitionSplitKeys.size > 1
 
     // Materialize a plan for each group of non-split of keys.
     // Each group will be encoded into a set of Equals/EqualsRegex filters, where regex filters
@@ -324,9 +326,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   // FIXME: This will eventually be replaced with generateExecForEachPartition.
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
-                                     qContext: QueryContext): Seq[ExecPlan] = {
+                                     qContext: QueryContext,
+                                     pushdownPlan: Boolean = false): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val skipAggregatePresentValue = keys.length > 1
+    val skipAggregatePresentValue = !pushdownPlan && keys.length > 1
     keys.map { result =>
       val newLogicalPlan = logicalPlan.replaceFilters(result)
       // Querycontext should just have the part of query which has regex
@@ -365,11 +368,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    */
   private def generateExec(logicalPlan: LogicalPlan,
                            keys: Seq[Seq[ColumnFilter]],
-                           qContext: QueryContext): Seq[ExecPlan] =
+                           qContext: QueryContext,
+                           pushdownPlan: Boolean = false): Seq[ExecPlan] =
     if (qContext.plannerParams.reduceShardKeyRegexFanout) {
-      generateExecForEachPartition(logicalPlan, keys, qContext)
+      generateExecForEachPartition(logicalPlan, keys, qContext, pushdownPlan)
     } else {
-      generateExecForEachKey(logicalPlan, keys, qContext)
+      generateExecForEachKey(logicalPlan, keys, qContext, pushdownPlan)
     }
 
   /**
