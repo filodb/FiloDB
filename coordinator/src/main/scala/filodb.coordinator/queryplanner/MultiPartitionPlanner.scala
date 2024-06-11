@@ -465,21 +465,22 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // Snap remaining range starts to a step (if a step is provided).
     // Add the constant period of uncertainity to the start of the Assignment time
     // TODO: Move to config later
+    val periodOfUncertaintyMs = if (queryConfig.routingConfig.supportRemoteRawExport)
+      queryConfig.routingConfig.periodOfUncertaintyMs
+    else
+      0
     val tailRanges = filteredAssignments.tail.map { assign =>
       val startMs = if (stepMsOpt.nonEmpty) {
-        snapToStep(timestamp = assign.timeRange.startMs + lookbackMs + offsetMs,
+        snapToStep(timestamp = assign.timeRange.startMs + lookbackMs + offsetMs + periodOfUncertaintyMs,
                    step = stepMsOpt.get,
                    origin = queryRange.startMs)
       } else {
         assign.timeRange.startMs + lookbackMs + offsetMs
       }
       val endMs = math.min(queryRange.endMs, assign.timeRange.endMs + offsetMs)
-      val periodOfUncertaintyMs = if (queryConfig.routingConfig.supportRemoteRawExport)
-              queryConfig.routingConfig.periodOfUncertaintyMs
-              else
-                0
-      if (startMs + periodOfUncertaintyMs <= endMs) {
-        Some(TimeRange(startMs + periodOfUncertaintyMs, endMs))
+
+      if (startMs <= endMs) {
+        Some(TimeRange(startMs, endMs))
       } else
         None
     }

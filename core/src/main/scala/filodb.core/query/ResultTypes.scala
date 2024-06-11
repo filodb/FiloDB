@@ -63,9 +63,11 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   def isEmpty: Boolean = columns.isEmpty
   def isTimeSeries: Boolean = columns.nonEmpty && numRowKeyColumns == 1 &&
                               (columns.head.colType == LongColumn || columns.head.colType == TimestampColumn)
-  // True if main col is Histogram and extra column is a Double
-  def isHistDouble: Boolean = columns.length == 3 &&
-                              columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
+  // True if main col is Histogram and extra columns are Double types( max and min )
+  def isHistMaxMin: Boolean = columns.length == 4 &&
+                              columns(1).colType == HistogramColumn &&
+                              columns(2).colType == DoubleColumn &&
+                              columns(3).colType == DoubleColumn
   def isHistogram: Boolean = columns.length == 2 && columns(1).colType == HistogramColumn
   def isAvgAggregator: Boolean = columns.length == 3 && columns(2).name.equals("count")
   def isStdValAggregator: Boolean = columns.length == 4 && columns(2).name.equals("mean")

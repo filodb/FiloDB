@@ -294,21 +294,21 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   // Goal of this is to verify aggregation functionality for diff time windows.
   // See PeriodicSampleMapperSpec for verifying integration of histograms with max
   it("should aggregate both max and hist for sum_over_time when max in schema") {
-    val (data, rv) = MMD.histMaxRV(defaultStartTS, pubFreq, 150, 8)
+    val (data, rv) = MMD.histMaxMinRV(defaultStartTS, pubFreq, 150, 8)
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(50) + 10
       val step = rand.nextInt(50) + 5
       info(s"iteration $x windowSize=$windowSize step=$step")
 
-      val row = new TransientHistMaxRow()
-      val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
+      val row = new TransientHistMaxMinRow()
+      val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(4), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.LongHistogram])
+        val sumRawHist = rawDataWindow.map(_(5).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
 
-        val maxMax = rawDataWindow.map(_(3).asInstanceOf[Double])
+        val maxMax = rawDataWindow.map(_(4).asInstanceOf[Double])
                                   .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
         aggRow.getDouble(2) shouldEqual maxMax
       }

@@ -55,7 +55,7 @@ object InternalRangeFunction {
 
   // Used only for histogram schemas with max column
   case object SumAndMaxOverTime extends InternalRangeFunction
-  case object LastSampleHistMax extends InternalRangeFunction
+  case object LastSampleHistMaxMin extends InternalRangeFunction
 
   case object Timestamp extends InternalRangeFunction
 
