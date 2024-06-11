@@ -99,7 +99,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
+  private val partKeyIndex: PartKeyIndexDownsampled = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
     indexMetadataStore

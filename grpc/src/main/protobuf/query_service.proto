@@ -30,6 +30,26 @@ message PerQueryLimits {
   optional uint64 rawScannedBytes               = 7; // Limit on max actual scanned bytes per shard
 }
 
+message DownPartition {
+  string name                         = 1;
+  repeated DownWorkUnit downWorkUnits = 2;
+}
+
+message DownWorkUnit {
+  string name = 1;
+  repeated DownCluster downClusters = 2;
+}
+
+message DownCluster {
+  string clusterType         = 1;
+  repeated uint32 downShards = 2;
+}
+
+enum FailoverMode {
+  LEGACY_FAILOVER_MODE      = 0;
+  SHARD_LEVEL_FAILOVER_MODE = 1;
+}
+
 message PlannerParams {
     optional string applicationId                   = 1;
     optional uint32 queryTimeoutMillis              = 2;
@@ -50,6 +70,8 @@ message PlannerParams {
     optional bool reduceShardKeyRegexFanout         = 17;
     optional uint32 maxShardKeyRegexFanoutBatchSize = 18;
     optional bool allowNestedAggregatePushdown      = 19;
+    repeated DownPartition downPartitions           = 20;
+    optional FailoverMode failoverMode              = 21;
 }
 
 message Request {
@@ -356,14 +378,26 @@ message ActorPlanDispatcher {
   string actorPath                   = 2;
 }
 
+message RemoteActorPlanDispatcher {
+  PlanDispatcher planDispatcher     = 1;
+  string actorPath                  = 2;
+}
+
 message InProcessPlanDispatcher {
   QueryConfig queryConfig            = 1;
+}
+
+message GrpcPlanDispatcher {
+  string endpoint            = 1;
+  int64  requestTimeoutMs    = 2;
 }
 
 message PlanDispatcherContainer {
   oneof dispatcher  {
     ActorPlanDispatcher actorPlanDispatcher                        = 1;
     InProcessPlanDispatcher inProcessPlanDispatcher                = 2;
+    RemoteActorPlanDispatcher remoteActorPlanDispatcher            = 3;
+    GrpcPlanDispatcher grpcPlanDispatcher                          = 4;
   }
 
 }
@@ -601,7 +635,7 @@ enum InternalRangeFunction {
   LAST_OVER_TIME        = 21;
   AVG_WITH_SUM_AND_COUNT_OVER_TIME = 22;
   SUM_AND_MAX_OVER_TIME = 23;
-  LAST_SAMPLE_HIST_MAX  = 24;
+  LAST_SAMPLE_HIST_MAX_MIN  = 24;
   TIME_STAMP            = 25;
   ABSENT_OVER_TIME      = 26;
   PRESENT_OVER_TIME     = 27;
@@ -870,6 +904,11 @@ message LabelNamesDistConcatExec {
   NonLeafExecPlan nonLeafExecPlan = 1;
 }
 
+message GenericRemoteExec {
+  PlanDispatcherContainer dispatcher = 1;
+  ExecPlanContainer execPlan         = 2;
+}
+
 //
 // leaf exec plans
 //
@@ -1027,6 +1066,7 @@ message ExecPlanContainer {
     LabelValuesDistConcatExec labelValuesDistConcatExec = 11;
     PartKeysDistConcatExec partKeysDistConcatExec = 12;
     LabelNamesDistConcatExec labelNamesDistConcatExec = 13;
+    GenericRemoteExec genericRemoteExec = 14;
 
     //leaf plans
     LabelNamesExec labelNamesExec = 20;

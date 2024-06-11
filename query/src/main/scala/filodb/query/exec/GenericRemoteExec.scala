@@ -23,9 +23,13 @@ case class GenericRemoteExec(
   /**
    * Child execution plans representing sub-queries
    */
-  override def children: Seq[ExecPlan] = ???
+  override def children: Seq[ExecPlan] = Seq(execPlan)
 
   override def dataset: DatasetRef = execPlan.dataset
+
+  override def addRangeVectorTransformer(mapper: RangeVectorTransformer) : Unit = {
+    execPlan.addRangeVectorTransformer(mapper)
+  }
 
   /**
    * This is a simple shell that does not use execute or executeStreaming logic of the parent ExecPlan

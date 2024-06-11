@@ -365,9 +365,9 @@ object RangeFunction {
   }
   // scalastyle:on cyclomatic.complexity
 
-  def histMaxRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
+  def histMaxMinRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
     f match {
-      case None                   => Some(LastSampleHistMax)
+      case None                   => Some(LastSampleHistMaxMin)
       case Some(SumOverTime)      => Some(SumAndMaxOverTime)
       case other                  => other
     }
@@ -376,8 +376,8 @@ object RangeFunction {
                           func: Option[InternalRangeFunction],
                           funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionH
-    case Some(LastSampleHistMax) => require(schema.columns(2).name == "max")
-                                 () => new LastSampleChunkedFunctionHMax(schema.colIDs(2))
+    case Some(LastSampleHistMaxMin) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
+                                 () => new LastSampleChunkedFunctionHMax(schema.colIDs(2), schema.colIDs(3))
     case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
                                  () => new SumAndMaxOverTimeFuncHD(schema.colIDs(2))
     case Some(Last)           => () => new LastSampleChunkedFunctionH
@@ -501,13 +501,16 @@ extends LastSampleChunkedFunction[TransientHistRow] {
 }
 
 class LastSampleChunkedFunctionHMax(maxColID: Int,
+                                    minColId: Int,
                                     var timestamp: Long = -1L,
                                     var value: bv.HistogramWithBuckets = bv.Histogram.empty,
-                                    var max: Double = Double.NaN) extends ChunkedRangeFunction[TransientHistMaxRow] {
-  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty; max = Double.NaN }
-  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+                                    var max: Double = Double.NaN,
+                                    var min: Double = Double.NaN) extends ChunkedRangeFunction[TransientHistMaxMinRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty; max = Double.NaN; min = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
     sampleToEmit.setDouble(2, max)
+    sampleToEmit.setDouble(3, min)
   }
 
   // Add each chunk and update timestamp and value such that latest sample wins
@@ -527,9 +530,12 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
       if (ts >= startTime && ts > timestamp) {
         val maxvectAcc = info.vectorAccessor(maxColID)
         val maxVectOff = info.vectorAddress(maxColID)
+        val minvectAcc = info.vectorAccessor(minColId)
+        val minVectOff = info.vectorAddress(minColId)
         timestamp = ts
         value = valueReader.asHistReader(endRowNum)
         max = bv.DoubleVector(maxvectAcc, maxVectOff)(maxvectAcc, maxVectOff, endRowNum)
+        min = bv.DoubleVector(minvectAcc, minVectOff)(minvectAcc, minVectOff, endRowNum)
       }
     }
   }

@@ -3,12 +3,14 @@ package filodb.core.query
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import scala.collection.Seq
 import scala.collection.concurrent.TrieMap
+import scala.collection.mutable.SortedSet
 import scala.concurrent.duration._
 
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
+
+
 
 trait TsdbQueryParams
 
@@ -137,6 +139,37 @@ case class QueryWarnings(
   }
 }
 
+case class DownPartition(name: String, downWorkUnits: scala.collection.mutable.Set[DownWorkUnit])
+extends Ordered[DownPartition] {
+  override def compare(that: DownPartition): Int = {
+    name.compareTo(that.name)
+  }
+}
+//object DownPartition {
+//  def asImmutableSet(partitions: scala.collection.mutable.Set[DownPartition]) : Set[DownPartition] = partitions.toSet
+//}
+case class DownWorkUnit(name: String, downClusters: scala.collection.mutable.Set[DownCluster])
+extends Ordered[DownWorkUnit] {
+  override def compare(that: DownWorkUnit): Int = {
+    name.compareTo(that.name)
+  }
+}
+// Assume that the same shards are shared for various datasets withing the same partition, dc, and cluster
+case class DownCluster(
+  clusterType: String,
+  downShards: scala.collection.mutable.Set[Int] = new scala.collection.mutable.LinkedHashSet[Int]
+) extends Ordered[DownCluster] {
+  override def compare(that: DownCluster): Int = {
+    clusterType.compareTo(that.clusterType)
+  }
+}
+
+object DownCluster {
+  def create(clusterType: String): DownCluster = {
+    DownCluster(clusterType)
+  }
+}
+
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
@@ -158,7 +191,14 @@ case class PlannerParams(applicationId: String = "filodb",
                          reduceShardKeyRegexFanout: Boolean = true,
                          maxShardKeyRegexFanoutBatchSize: Int = 10,
                          useProtoExecPlans: Boolean = false,
-                         allowNestedAggregatePushdown: Boolean = true)
+                         allowNestedAggregatePushdown: Boolean = true,
+                         downPartitions: scala.collection.mutable.Set[DownPartition] = SortedSet[DownPartition](),
+                         failoverMode: FailoverMode = LegacyFailoverMode,
+                         buddyGrpcEndpoint: Option[String] = None,
+                         buddyGrpcTimeoutMs: Option[Long] = None,
+                         localShardMapper: Option[ActiveShardMapper] = None,
+                         buddyShardMapper: Option[ActiveShardMapper] = None
+                        )
 
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =

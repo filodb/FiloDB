@@ -83,7 +83,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData = MMD.linearHistSeries().take(100)
-  val histMaxData = MMD.histMax(histData)
+  val histMaxMinData = MMD.histMaxMin(histData)
 
   implicit val execTimeout = 5.seconds
 
@@ -97,12 +97,12 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
-    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf, 1)
-    memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
+    memStore.setup(MMD.histMaxMinDS.ref, Schemas(MMD.histMaxMinDS.schema), 0, TestData.storeConf, 1)
+    memStore.ingest(MMD.histMaxMinDS.ref, 0, MMD.records(MMD.histMaxMinDS, histMaxMinData))
 
     memStore.refreshIndexForTesting(dsRef)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
-    memStore.refreshIndexForTesting(MMD.histMaxDS.ref)
+    memStore.refreshIndexForTesting(MMD.histMaxMinDS.ref)
   }
 
   override def afterAll(): Unit = {
@@ -356,7 +356,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   // A lower-level (below coordinator) end to end histogram with max ingestion and querying test
   it("should sum Histogram records with max correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
-    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxDS.ref, 0,
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
                                              filters, AllChunkScan, "_metric_", colName = Some("h"))
 
     val start = 105000L
@@ -370,17 +370,19 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     info(execPlan.printTree())
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
-    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 4, 3)
+    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 5, 4, 3)
     val result = resp.asInstanceOf[QueryResult]
-    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
+    result.resultSchema.columns.map(_.colType) shouldEqual
+      Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1), r.getDouble(2)))
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1),
+      r.getDouble(2), r.getDouble(3)))
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
-    val orig = histMaxData.filter(_(6).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+    val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
@@ -402,7 +404,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
   it("should extract Histogram with max using Last/None function correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
-    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxDS.ref, 0,
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
                                              filters, AllChunkScan, "_metric_")   // should default to h column
 
     val start = 105000L
@@ -412,18 +414,22 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
-    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
+    result.resultSchema.columns.map(_.colType) shouldEqual
+      Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1), r.getDouble(2)))
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1),
+      r.getDouble(2), r.getDouble(3)))
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
-    val orig = histMaxData.filter(_(6).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+    val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
+      res._4.isNaN shouldEqual false
+      res._4 should be <= origData._3.asInstanceOf[Double]
     }
 
   }

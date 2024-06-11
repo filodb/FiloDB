@@ -5,7 +5,7 @@ import java.lang.{Double => JLDouble}
 import debox.Buffer
 import java.util
 
-import filodb.core.query.{QueryConfig, TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
@@ -287,7 +287,7 @@ extends TimeRangeFunction[TransientHistRow] {
  * Sums Histograms over time and also computes Max over time of a Max field.
  * @param maxColID the data column ID containing the max column
  */
-class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[TransientHistMaxRow] {
+class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[TransientHistMaxMinRow] {
   private val hFunc = new SumOverTimeChunkedFunctionH
   private val maxFunc = new MaxOverTimeChunkedFunctionD
 
@@ -295,7 +295,7 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
     hFunc.reset()
     maxFunc.reset()
   }
-  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
     sampleToEmit.setValues(endTimestamp, hFunc.h)
     sampleToEmit.setDouble(2, maxFunc.max)
   }

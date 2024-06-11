@@ -978,7 +978,7 @@ object ProtoConverters {
         case InternalRangeFunction.AvgWithSumAndCountOverTime =>
           GrpcMultiPartitionQueryService.InternalRangeFunction.AVG_WITH_SUM_AND_COUNT_OVER_TIME
         case InternalRangeFunction.SumAndMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.SUM_AND_MAX_OVER_TIME
-        case InternalRangeFunction.LastSampleHistMax => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX
+        case InternalRangeFunction.LastSampleHistMaxMin => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN
         case InternalRangeFunction.Timestamp => GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP
         case InternalRangeFunction.AbsentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME
         case InternalRangeFunction.PresentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME
@@ -1014,7 +1014,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.AVG_WITH_SUM_AND_COUNT_OVER_TIME =>
           InternalRangeFunction.AvgWithSumAndCountOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.SUM_AND_MAX_OVER_TIME => InternalRangeFunction.SumAndMaxOverTime
-        case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX => InternalRangeFunction.LastSampleHistMax
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN => InternalRangeFunction.LastSampleHistMaxMin
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP => InternalRangeFunction.Timestamp
         case GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME => InternalRangeFunction.AbsentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME => InternalRangeFunction.PresentOverTime
@@ -1284,6 +1284,8 @@ object ProtoConverters {
       pd match {
         case apd: ActorPlanDispatcher => builder.setActorPlanDispatcher(apd.toProto)
         case ippd: InProcessPlanDispatcher => builder.setInProcessPlanDispatcher(ippd.toProto)
+        case rapd: RemoteActorPlanDispatcher => builder.setRemoteActorPlanDispatcher(rapd.toProto)
+        case gpd: GrpcPlanDispatcher => builder.setGrpcPlanDispatcher(gpd.toProto)
         case _ => throw new IllegalArgumentException(s"Unexpected PlanDispatcher subclass ${pd.getClass.getName}")
       }
       builder.build()
@@ -1311,6 +1313,26 @@ object ProtoConverters {
     }
   }
 
+  implicit class RemoteActorPlanDispatcherToProtoConverter(apd: filodb.coordinator.RemoteActorPlanDispatcher) {
+    def toProto(): GrpcMultiPartitionQueryService.RemoteActorPlanDispatcher = {
+      val builder = GrpcMultiPartitionQueryService.RemoteActorPlanDispatcher.newBuilder()
+      builder.setPlanDispatcher(apd.asInstanceOf[filodb.query.exec.PlanDispatcher].toProto)
+      builder.setActorPath(apd.path)
+      builder.build()
+    }
+  }
+
+  implicit class RemoteActorPlanDispatcherFromProtoConverter(
+    rapd: GrpcMultiPartitionQueryService.RemoteActorPlanDispatcher
+  ) {
+    def fromProto: RemoteActorPlanDispatcher = {
+      val dispatcher = RemoteActorPlanDispatcher(
+        rapd.getActorPath, rapd.getPlanDispatcher.getClusterName
+      )
+      dispatcher
+    }
+  }
+
   implicit class InProcessPlanDispatcherToProtoConverter(ippd: filodb.query.exec.InProcessPlanDispatcher) {
     def toProto(): GrpcMultiPartitionQueryService.InProcessPlanDispatcher = {
       val builder = GrpcMultiPartitionQueryService.InProcessPlanDispatcher.newBuilder()
@@ -1323,6 +1345,22 @@ object ProtoConverters {
   implicit class InProcessPlanDispatcherFromProtoConverter(apd: GrpcMultiPartitionQueryService.InProcessPlanDispatcher) {
     def fromProto: InProcessPlanDispatcher = {
       InProcessPlanDispatcher(apd.getQueryConfig.fromProto)
+    }
+  }
+
+  implicit class GrpcPlanDispatcherToProtoConverter(gpd: filodb.coordinator.GrpcPlanDispatcher) {
+    def toProto(): GrpcMultiPartitionQueryService.GrpcPlanDispatcher = {
+      val builder = GrpcMultiPartitionQueryService.GrpcPlanDispatcher.newBuilder()
+      builder.setEndpoint(gpd.endpoint)
+      builder.setRequestTimeoutMs(gpd.requestTimeoutMs)
+      builder.build()
+    }
+  }
+
+  implicit class GrpcPlanDispatcherFromProtoConverter(gpd: GrpcMultiPartitionQueryService.GrpcPlanDispatcher) {
+    def fromProto: GrpcPlanDispatcher = {
+      val dispatcher = GrpcPlanDispatcher(gpd.getEndpoint, gpd.getRequestTimeoutMs)
+      dispatcher
     }
   }
 
@@ -2343,6 +2381,25 @@ object ProtoConverters {
     }
   }
 
+  // GenericRemoteExec
+  implicit class GenericRemoteExecToProtoConverter(gre: GenericRemoteExec) {
+    def toProto(): GrpcMultiPartitionQueryService.GenericRemoteExec = {
+      val builder = GrpcMultiPartitionQueryService.GenericRemoteExec.newBuilder()
+      builder.setExecPlan(gre.execPlan.toExecPlanContainerProto())
+      builder.setDispatcher(gre.dispatcher.toPlanDispatcherContainer)
+      builder.build()
+    }
+  }
+
+  implicit class GenericRemoteExecFromProtoConverter(gre: GrpcMultiPartitionQueryService.GenericRemoteExec) {
+    def fromProto(): GenericRemoteExec = {
+      val execPlan = gre.getExecPlan.fromProto()
+      val dispatcher = gre.getDispatcher.fromProto
+      val p = GenericRemoteExec(dispatcher, execPlan)
+      p
+    }
+  }
+
   //
   //
   // Leaf Plans
@@ -2869,6 +2926,7 @@ object ProtoConverters {
         case tce: TsCardExec => b.setTsCardExec(tce.toProto)
         case tsge: TimeScalarGeneratorExec => b.setTimeScalarGeneratorExec(tsge.toProto)
         case srpe: SelectRawPartitionsExec => b.setSelectRawPartitionsExec(srpe.toProto)
+        case gre: GenericRemoteExec => b.setGenericRemoteExec(gre.toProto)
         //case _ => throw new IllegalArgumentException(s"Unknown execution plan ${ep.getClass.getName}")
       }
       b.build()
@@ -2884,6 +2942,10 @@ object ProtoConverters {
           pdc.getActorPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.INPROCESSPLANDISPATCHER =>
           pdc.getInProcessPlanDispatcher.fromProto
+        case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.REMOTEACTORPLANDISPATCHER =>
+          pdc.getRemoteActorPlanDispatcher.fromProto
+        case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.GRPCPLANDISPATCHER =>
+          pdc.getGrpcPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.DISPATCHER_NOT_SET =>
           throw new IllegalArgumentException("Invalid PlanDispatcherContainer")
       }
@@ -2922,6 +2984,7 @@ object ProtoConverters {
         case ExecPlanCase.TSCARDEXEC => epc.getTsCardExec.fromProto
         case ExecPlanCase.TIMESCALARGENERATOREXEC => epc.getTimeScalarGeneratorExec.fromProto
         case ExecPlanCase.SELECTRAWPARTITIONSEXEC => epc.getSelectRawPartitionsExec.fromProto
+        case ExecPlanCase.GENERICREMOTEEXEC => epc.getGenericRemoteExec.fromProto
         case ExecPlanCase.EXECPLAN_NOT_SET =>
           throw new RuntimeException("Received Proto Execution Plan with null value")
       }
@@ -2929,8 +2992,6 @@ object ProtoConverters {
     }
     // scalastyle:on cyclomatic.complexity
   }
-
-
 
 }
 
