@@ -421,16 +421,15 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
-   * Returns a set of target-schema columns iff all of:
-   *   - all plan RawSeries share the same target-schema columns.
-   *   - no target-schema definition changes during the query.
+   * Returns an occupied set of target-schema columns iff a
+   *   target-schema is applicable to the plan.
+   * @param getShardKeyFilterGroups returns sets of pure-equals or pipe-concatenated
+   *                                regex-equals shard-key filters
    */
   def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
                                        targetSchemaProvider: TargetSchemaProvider,
-                                       getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]])
+                                       getShardKeyFilterGroups: RawSeries => Seq[Seq[ColumnFilter]])
   : Option[Seq[String]] = {
-    // compose a stream of Options for each RawSeries--
-    //   the options contain a target-schema iff it is defined and unchanging.
     val rawSeries = LogicalPlan.findLeafLogicalPlans(plan)
       .filter(_.isInstanceOf[RawSeries])
       .map(_.asInstanceOf[RawSeries])
@@ -438,26 +437,16 @@ object LogicalPlanUtils extends StrictLogging {
       // Cannot handle RawSeries without IntervalSelector.
       return None
     }
-    val rsTschemaOpts = rawSeries.flatMap{ rs =>
-        val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
-        val rawShardKeyFilters = getShardKeyFilters(rs)
-        // The filters might contain pipe-concatenated EqualsRegex values.
-        // Convert these into sets of single-valued Equals filters.
-        val resolvedShardKeyFilters = rawShardKeyFilters.flatMap { filters =>
-          val equalsFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
-            filter.filter match {
-              case EqualsRegex(values: String) if QueryUtils.containsPipeOnlyRegex(values) =>
-                QueryUtils.splitAtUnescapedPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
-              case _ => Seq(filter)
-            }
-          }
-          // E.g. foo{key1=~"baz|bat",key2=~"bar|bak"} would give the following combos:
-          // [[baz,bar], [baz,bak], [bat,bar], [bat,bak]]
-          QueryUtils.combinations(equalsFilters)
-        }.map(_.toSet).distinct.map(_.toSeq)  // make sure keys are distinct
-      resolvedShardKeyFilters.map{ shardKey =>
-        val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
-        LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
+    val rsTschemaOpts = rawSeries.flatMap { rs =>
+      val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+      val rawFilters = LogicalPlan.getColumnFilterGroup(rs)
+      assert(rawFilters.size == 1, s"expected single RawSeries filter group; rawSeries=$rs; filters=$rawFilters")
+      val shardKeyFilterGroups = getShardKeyFilterGroups(rs)
+      shardKeyFilterGroups.map { shardKeyFilterGroup =>
+        // Upsert shard-key equality filters into the full set of filters;
+        //   use this new set to find the target-schema columns.
+        val newFilters = LogicalPlanUtils.upsertFilters(rawFilters.head.toSeq, shardKeyFilterGroup)
+        PlannerUtil.getTargetSchemaColumns(newFilters, targetSchemaProvider, interval.from, interval.to)
       }
     }
     if (rsTschemaOpts.isEmpty) {
