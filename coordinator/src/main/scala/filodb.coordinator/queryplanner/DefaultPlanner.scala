@@ -2,8 +2,10 @@ package filodb.coordinator.queryplanner
 
 
 import java.util.concurrent.ThreadLocalRandom
+
 import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
 import filodb.core.TargetSchemaProvider
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -17,6 +19,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
+// scalastyle:off file.size.limit
 
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
@@ -913,3 +916,5 @@ object PlannerUtil extends StrictLogging {
   }
   // scalastyle:on method.length
 }
+
+// scalastyle:on file.size.limit
