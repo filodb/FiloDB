@@ -7,9 +7,10 @@ import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
+import filodb.core.TargetSchemaProvider
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
@@ -18,6 +19,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
+// scalastyle:off file.size.limit
 
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
@@ -841,4 +843,78 @@ object PlannerUtil extends StrictLogging {
   def replaceLastBucketOccurenceStringFromMetricName(metricName: String): String = {
     metricName.replaceAll("_bucket$", "")
   }
+
+  /**
+   * Returns true iff the argument filters match the target-schema columns
+   *   by either pure or regex equality.
+   */
+  def hasAllTargetSchemaFilters(targetSchemaCols: Seq[String],
+                                colFilters: Seq[ColumnFilter]): Boolean = {
+    targetSchemaCols.forall { tschemaCol =>
+      colFilters.filter(_.column == tschemaCol).exists {
+        case ColumnFilter(_, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) => true
+        case ColumnFilter(_, equals: Equals) => true
+        case _ => false
+      }
+    }
+  }
+
+  // scalastyle:off method.length
+
+  /**
+   * Returns a target-schema iff all of the following are true:
+   *   - When the argument filters are resolved into sets of pure equality filters,
+   *     tschemas are defined for all sets.
+   *   - All tschemas are defined against the same columns.
+   *   - No tschema changes during the query range.
+   */
+  def getTargetSchemaColumns(colFilters: Seq[ColumnFilter],
+                             targetSchemaProvider: TargetSchemaProvider,
+                             startMs: Long, endMs: Long): Option[Seq[String]] = {
+    val keyToValues = colFilters.filter {
+        case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) => true
+        case _ => false
+      }.map { colFilter =>
+        val eqRegex = colFilter.filter.asInstanceOf[EqualsRegex]
+        val values = QueryUtils.splitAtUnescapedPipes(eqRegex.value.toString).distinct
+        (colFilter.column, values)
+      }.filter(_._2.nonEmpty)
+      .toMap
+
+    val targetSchemaChanges = QueryUtils.makeAllKeyValueCombos(keyToValues).map { keyToValue =>
+      // Replace pipe-concatenated EqualsRegex filters with Equals filters.
+      val equalsFilters = keyToValue.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSeq
+      val newFilters = LogicalPlanUtils.upsertFilters(colFilters, equalsFilters)
+      targetSchemaProvider.targetSchemaFunc(newFilters)
+    }
+
+    val isChanging = targetSchemaChanges.exists { changes =>
+      changes.nonEmpty && changes.exists(c => c.time >= startMs && c.time <= endMs)
+    }
+    if (isChanging) {
+      return None
+    }
+
+    val targetSchemaOpts = targetSchemaChanges.map { changes =>
+      val tsIndex = changes.lastIndexWhere(t => t.time <= startMs)
+      if (tsIndex > -1) Some(changes(tsIndex)) else None
+    }
+    if (targetSchemaOpts.exists(_.isEmpty)) {
+      return None
+    }
+
+    val targetSchemas = targetSchemaOpts.map(_.get.schema)
+    val hasAllSameTargetSchemas = {
+      val headCols = targetSchemas.head.toSet
+      targetSchemas.tail.forall(_.toSet == headCols)
+    }
+    if (!hasAllSameTargetSchemas) {
+      return None
+    }
+
+    Some(targetSchemas.head)
+  }
+  // scalastyle:on method.length
 }
+
+// scalastyle:on file.size.limit
