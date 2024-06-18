@@ -208,6 +208,77 @@ object ProtoConverters {
     }
   }
 
+  implicit class DownClusterToProtoConversion(dc: DownCluster) {
+    def toProto: GrpcMultiPartitionQueryService.DownCluster = {
+      val builder = GrpcMultiPartitionQueryService.DownCluster.newBuilder()
+      builder.setClusterType(dc.clusterType)
+      dc.downShards.foreach(s => builder.addDownShards(s))
+      builder.build()
+    }
+  }
+
+  implicit class DownClusterFromProtoConverter(dc: GrpcMultiPartitionQueryService.DownCluster) {
+    def fromProto: DownCluster = {
+      val shards = scala.collection.mutable.LinkedHashSet[Int]()
+      dc.getDownShardsList.asScala.foreach(s => shards.add(s))
+      DownCluster(dc.getClusterType(), shards)
+    }
+  }
+
+  implicit class DownWorkUnitToProtoConversion(dc: DownWorkUnit) {
+    def toProto: GrpcMultiPartitionQueryService.DownWorkUnit = {
+      val builder = GrpcMultiPartitionQueryService.DownWorkUnit.newBuilder()
+      builder.setName(dc.name)
+      dc.downClusters.foreach(dc => builder.addDownClusters(dc.toProto))
+      builder.build()
+    }
+  }
+
+  implicit class DownWorkUnitFromProtoConverter(dc: GrpcMultiPartitionQueryService.DownWorkUnit) {
+    def fromProto: DownWorkUnit = {
+      val downClusters = scala.collection.mutable.LinkedHashSet[DownCluster]()
+      dc.getDownClustersList.asScala.foreach(downCluster => downClusters.add(downCluster.fromProto))
+      DownWorkUnit(dc.getName(), downClusters)
+    }
+  }
+
+  implicit class DownPartitionToProtoConversion(dp: DownPartition) {
+    def toProto: GrpcMultiPartitionQueryService.DownPartition = {
+      val builder = GrpcMultiPartitionQueryService.DownPartition.newBuilder()
+      builder.setName(dp.name)
+      dp.downWorkUnits.foreach(dc => builder.addDownWorkUnits(dc.toProto))
+      builder.build()
+    }
+  }
+
+  implicit class DownPartitionFromProtoConverter(dp: GrpcMultiPartitionQueryService.DownPartition) {
+    def fromProto: DownPartition = {
+      val downDCs = scala.collection.mutable.LinkedHashSet[DownWorkUnit]()
+      dp.getDownWorkUnitsList.asScala.foreach(downDC => downDCs.add(downDC.fromProto))
+      DownPartition(dp.getName, downDCs)
+    }
+  }
+
+  implicit class FailoverModeToProtoConverter(fm: FailoverMode) {
+    def toProto: GrpcMultiPartitionQueryService.FailoverMode = {
+      fm match {
+        case LegacyFailoverMode => GrpcMultiPartitionQueryService.FailoverMode.LEGACY_FAILOVER_MODE
+        case ShardLevelFailoverMode => GrpcMultiPartitionQueryService.FailoverMode.SHARD_LEVEL_FAILOVER_MODE
+      }
+    }
+  }
+
+  implicit class FailoverModeFromProtoConverter(fm: GrpcMultiPartitionQueryService.FailoverMode) {
+    def fromProto: FailoverMode = {
+      fm match {
+        case GrpcMultiPartitionQueryService.FailoverMode.LEGACY_FAILOVER_MODE => LegacyFailoverMode
+        case GrpcMultiPartitionQueryService.FailoverMode.SHARD_LEVEL_FAILOVER_MODE => ShardLevelFailoverMode
+        case GrpcMultiPartitionQueryService.FailoverMode.UNRECOGNIZED =>
+          throw new IllegalArgumentException("Unrecognized failover mode")
+      }
+    }
+  }
+
   implicit class PlannerParamsToProtoConverter(pp: PlannerParams) {
     def toProto: GrpcMultiPartitionQueryService.PlannerParams = {
       val enforcedLimits = pp.enforcedLimits.toProto
@@ -230,6 +301,9 @@ object ProtoConverters {
       builder.setUseProtoExecPlans(pp.useProtoExecPlans)
       builder.setReduceShardKeyRegexFanout(pp.reduceShardKeyRegexFanout)
       builder.setMaxShardKeyRegexFanoutBatchSize(pp.maxShardKeyRegexFanoutBatchSize)
+      builder.setAllowNestedAggregatePushdown(pp.allowNestedAggregatePushdown)
+      pp.downPartitions.foreach(dp => builder.addDownPartitions(dp.toProto))
+      builder.setFailoverMode(pp.failoverMode.toProto)
       builder.build()
     }
   }
@@ -238,6 +312,13 @@ object ProtoConverters {
     def fromProto: PlannerParams = {
       val enforcedLimits = gpp.getEnforcedLimits.fromProto(PerQueryLimits.defaultEnforcedLimits())
       val warnLimits = gpp.getWarnLimits.fromProto(PerQueryLimits.defaultWarnLimits())
+      val downPartitionsMutableSet = scala.collection.mutable.Set[DownPartition]()
+      val downPartitions = gpp.getDownPartitionsList().asScala.foreach(dp => downPartitionsMutableSet.add(dp.fromProto))
+      val failoverMode = if (gpp.hasFailoverMode) {
+        gpp.getFailoverMode.fromProto
+      } else {
+        LegacyFailoverMode
+      }
       val pp = PlannerParams()
 
       pp.copy(
@@ -262,7 +343,12 @@ object ProtoConverters {
         reduceShardKeyRegexFanout = if (gpp.hasReduceShardKeyRegexFanout) gpp.getReduceShardKeyRegexFanout
         else pp.reduceShardKeyRegexFanout,
         maxShardKeyRegexFanoutBatchSize = if (gpp.hasMaxShardKeyRegexFanoutBatchSize)
-          gpp.getMaxShardKeyRegexFanoutBatchSize else pp.maxShardKeyRegexFanoutBatchSize
+          gpp.getMaxShardKeyRegexFanoutBatchSize else pp.maxShardKeyRegexFanoutBatchSize,
+        allowNestedAggregatePushdown =
+          if (gpp.hasAllowNestedAggregatePushdown) gpp.getAllowNestedAggregatePushdown
+          else pp.allowNestedAggregatePushdown,
+        downPartitions = downPartitionsMutableSet,
+        failoverMode = failoverMode
       )
     }
   }
@@ -655,7 +741,7 @@ object ProtoConverters {
         (
           "",
           ResultSchema.empty,
-          List.empty[SerializableRangeVector],
+          Seq.empty[SerializableRangeVector],
           QueryStats(),
           QueryWarnings(),
           false, Option.empty[String], Option.empty[Throwable]
@@ -665,7 +751,7 @@ object ProtoConverters {
           if (response.hasBody) {
               val body = response.getBody
               (id, schema,
-                body.getResultList.asScala.map(_.fromProto).toList::: rvs, stats, warnings, isPartial, partialReason, t)
+                rvs ++ body.getResultList.asScala.map(_.fromProto).toList, stats, warnings, isPartial, partialReason, t)
           } else if (response.hasFooter) {
             val footer = response.getFooter
             (

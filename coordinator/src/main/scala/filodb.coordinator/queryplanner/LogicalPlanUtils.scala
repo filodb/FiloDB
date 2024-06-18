@@ -12,6 +12,7 @@ import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
+import filodb.query.AggregateClause.ClauseType
 
 object LogicalPlanUtils extends StrictLogging {
 
@@ -42,6 +43,7 @@ object LogicalPlanUtils extends StrictLogging {
     case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregateOrJoin(_))
     case _                            => false
   }
+
   /**
     * Retrieve start and end time from LogicalPlan
     */
@@ -429,9 +431,14 @@ object LogicalPlanUtils extends StrictLogging {
   : Option[Seq[String]] = {
     // compose a stream of Options for each RawSeries--
     //   the options contain a target-schema iff it is defined and unchanging.
-    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
+    val rawSeries = LogicalPlan.findLeafLogicalPlans(plan)
       .filter(_.isInstanceOf[RawSeries])
-      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
+      .map(_.asInstanceOf[RawSeries])
+    if (rawSeries.exists(!_.rangeSelector.isInstanceOf[IntervalSelector])) {
+      // Cannot handle RawSeries without IntervalSelector.
+      return None
+    }
+    val rsTschemaOpts = rawSeries.flatMap{ rs =>
         val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
         val rawShardKeyFilters = getShardKeyFilters(rs)
         // The filters might contain pipe-concatenated EqualsRegex values.
@@ -489,14 +496,6 @@ object LogicalPlanUtils extends StrictLogging {
       // TODO: Validate this is indeed the expected behavior as on clause with empty () vs no on clause are not same
       case BinaryJoin(_, _, _, _, on, _, _) => on.getOrElse(Nil)
     }
-
-    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
-    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
-    //  a few files / tests, so we'll save it for a separate PR.
-    // val clauseCols = bj.on
-    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
-    //   return true
-    // }
 
     val tschema = sameRawSeriesTargetSchemaColumns(plan, targetSchemaProvider, getShardKeyFilters)
     if (tschema.isEmpty) {
@@ -566,8 +565,64 @@ object LogicalPlanUtils extends StrictLogging {
       case sc: ScalarPlan => Some(Set.empty)  // since "None" will prevent optimization for all parent plans
       case _ => None
     }
-    helper(lp)
+    // Require that all raw-series selectors are configured with the same target-schema columns.
+    if (sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider, getShardKeyFilters).isDefined) helper(lp) else None
   }
   // scalastyle:on method.length
   // scalastyle:on cyclomatic.complexity
+
+  /**
+   * Returns true iff the entire plan tree preserves the argument label set.
+   * In other words:
+   *   - no aggregation "aggregates away" any of the argument labels.
+   *   - no scalar() wraps any selector.
+   */
+  def treePreservesLabels(lp: LogicalPlan, labels: Seq[String]): Boolean = lp match {
+    case agg: Aggregate =>
+      val clausePreservesLabels = agg.clauseOpt match {
+        case Some(AggregateClause(ClauseType.By, clauseLabels)) =>
+          labels.forall(clauseLabels.contains(_))
+        case Some(AggregateClause(ClauseType.Without, clauseLabels)) =>
+          labels.forall(!clauseLabels.contains(_))
+        case _ => labels.isEmpty
+      }
+      if (!clausePreservesLabels) {
+        return false
+      }
+      treePreservesLabels(agg.vectors, labels)
+    case _: ScalarVaryingDoublePlan => false
+    case nl: NonLeafLogicalPlan => nl.children.forall(treePreservesLabels(_, labels))
+    case _ => true
+  }
+
+  /**
+   * Returns the concrete sets of Equals non-metric shard-key filters defined by the
+   *   argument plan's Equals and pipe-concatenated EqualsRegex filters.
+   *
+   * Example: [{A=~1|2, B=1}, {A=1, B=2}] -> [{A=1, B=1}, {A=2, B=1}, {A=1, B=2}]
+   *
+   * @param lp should contain only Equals and pipe-concatenated EqualsRegex filters.
+   */
+  def resolvePipeConcatenatedShardKeyFilters(lp: LogicalPlan,
+                                             nonMetricShardKeyCols: Seq[String]): Seq[Seq[ColumnFilter]] = {
+    LogicalPlan.getNonMetricShardKeyFilters(lp, nonMetricShardKeyCols)
+      .flatMap { group =>
+        val keyToValues = group.map { filter =>
+          val values = filter match {
+            case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
+              QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
+            case ColumnFilter(col, equals: Equals) =>
+              Seq(equals.value.toString)
+            case _ => throw new IllegalArgumentException("unexpected filter: " + filter)
+          }
+          (filter.column, values)
+        }.toMap
+        QueryUtils.makeAllKeyValueCombos(keyToValues).map { shardKeyMap =>
+          // Convert to set of Equals-only ColumnFilters.
+          shardKeyMap.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSet
+        }
+      }
+      .distinct
+      .map(_.toSeq)
+  }
 }

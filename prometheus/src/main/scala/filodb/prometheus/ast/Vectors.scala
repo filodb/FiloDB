@@ -21,6 +21,8 @@ object WindowConstants {
                                   getDuration("stale-sample-after").toMillis
 }
 
+class RegexLengthLimitException(msg: String) extends IllegalArgumentException(msg)
+
 sealed trait JoinMatching {
   def labels: Seq[String]
 }
@@ -265,24 +267,22 @@ sealed trait Vector extends Expression {
       } else { labelVal }
       labelMatch.labelMatchOp match {
         case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelValue))
-        case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
-                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
-                                ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
+        case NotRegexMatch   =>
+          if (labelValue.length > Parser.REGEX_MAX_LEN) {
+            throw new RegexLengthLimitException(
+              s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+          }
+          ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
         case RegexMatch      =>
           // Relax the length limit only for matchers that contain at most the "|" special character.
           val shouldRelax = queryConfig.hasPath("relaxed-pipe-only-equals-regex-limit") &&
                               QueryUtils.containsPipeOnlyRegex(labelValue)
-          if (shouldRelax) {
-            val limit = queryConfig.getInt("relaxed-pipe-only-equals-regex-limit");
-            require(labelValue.length <= limit,
-              s"Regular expression filters should be <= $limit characters " +
-               s"when no special characters except '|' are used. " +
-               s"Violating filter is: ${labelMatch.label}=$labelValue")
-          } else {
-            require(labelValue.length <= Parser.REGEX_MAX_LEN,
-              s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters " +
-               s"when non-`|` special characters are used. " +
-               s"Violating filter is: ${labelMatch.label}=$labelValue")
+          val limit =
+            if (shouldRelax) queryConfig.getInt("relaxed-pipe-only-equals-regex-limit") else Parser.REGEX_MAX_LEN
+          if(labelValue.length > limit) {
+            throw new RegexLengthLimitException(s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} " +
+              s"characters when non-`|` special characters are used. " +
+              s"Violating filter is: ${labelMatch.label}=$labelValue")
           }
           ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))

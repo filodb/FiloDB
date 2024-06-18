@@ -6,7 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 
-case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
+case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Long)
   extends RuntimeException
 
 /**
@@ -38,7 +38,7 @@ case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[Str
 class CardinalityTracker(ref: DatasetRef,
                          shard: Int,
                          shardKeyLen: Int,
-                         defaultChildrenQuota: Seq[Int],
+                         defaultChildrenQuota: Seq[Long],
                          val store: CardinalityStore,
                          quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol,
                          flushCount: Option[Int] = None) extends StrictLogging {
@@ -99,7 +99,7 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix,
-        CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+        CardinalityRecord(shard, prefix, CardinalityValue(0L, 0L, 0L, defaultChildrenQuota(i))))
 
       val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
         activeTsCount = old.value.activeTsCount + activeDelta,
@@ -242,7 +242,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @param childrenQuota maximum number of time series for this prefix
    * @return current CardinalityRecord for the prefix
    */
-  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Int): CardinalityRecord = {
+  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Long): CardinalityRecord = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 

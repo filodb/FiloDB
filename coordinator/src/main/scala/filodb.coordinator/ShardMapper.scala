@@ -172,10 +172,25 @@ class ShardMapper(val numShards: Int) extends Serializable {
   /**
    * Find out if a shard is active (Normal or Recovery status) or filter a list of shards
    */
-  def activeShard(shard: Int): Boolean =
+  def activeOrRecoveringShard(shard: Int): Boolean =
     statusMap(shard) == ShardStatusActive || statusMap(shard).isInstanceOf[ShardStatusRecovery]
 
-  def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeShard)
+  def activeOrRecoveringShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeOrRecoveringShard)
+
+  def isActiveShard(shard: Int): Boolean =
+    statusMap(shard) == ShardStatusActive
+
+  def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(isActiveShard)
+
+  def isHealthy(): Boolean = statusMap.forall(s => s == ShardStatusActive)
+
+  def notActiveShards(): Set[Int] = {
+    statusMap.zipWithIndex.filter(_._1 != ShardStatusActive).map(_._2).toSet
+  }
+
+  def activeShards(): Set[Int] = {
+    statusMap.zipWithIndex.filter(_._1 == ShardStatusActive).map(_._2).toSet
+  }
 
   /**
    * Returns a set of unique NodeCoordinator ActorRefs for all assigned shards

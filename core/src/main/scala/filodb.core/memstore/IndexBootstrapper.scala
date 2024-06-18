@@ -40,7 +40,7 @@ class RawIndexBootstrapper(colStore: ColumnStore) {
    * @param assignPartId the function to invoke to get the partitionId to be used to populate the index record
    * @return number of updated records
    */
-  def bootstrapIndexRaw(index: PartKeyLuceneIndex,
+  def bootstrapIndexRaw(index: PartKeyIndexRaw,
                         shardNum: Int,
                         ref: DatasetRef)
                        (assignPartId: PartKeyRecord => Int): Task[Long] = {
@@ -277,7 +277,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
    * creation requires more careful contention analysis. Bootstrap index operation
    * builds entire index from scratch
    */
-  def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
+  def bootstrapIndexDownsample(index: PartKeyIndexDownsampled,
                                shardNum: Int,
                                ref: DatasetRef,
                                ttlMs: Long,
@@ -321,7 +321,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
    * @return number of records refreshed
    */
   def refreshWithDownsamplePartKeys(
-                                     index: PartKeyLuceneIndex,
+                                     index: PartKeyIndexDownsampled,
                                      shardNum: Int,
                                      ref: DatasetRef,
                                      fromHour: Long,

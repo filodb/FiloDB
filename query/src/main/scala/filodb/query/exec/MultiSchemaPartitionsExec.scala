@@ -99,11 +99,11 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             // Get exact column IDs needed, including max column as needed for histogram calculations.
             // This code is responsible for putting exact IDs needed by any range functions.
             val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
-            val colIDs  = addIDsForHistMax(sch, colIDs1)
+            val colIDs  = addIDsForHistMaxMin(sch, colIDs1)
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
-            val newxformers = newXFormersForHistMax(sch, colIDs, newxformers1)
+            val newxformers = newXFormersForHistMaxMin(sch, colIDs, newxformers1)
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),

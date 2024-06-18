@@ -42,12 +42,12 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.setup(MMD.histDataset.ref, Schemas(MMD.histDataset.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
-    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf, 1)
-    memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
+    memStore.setup(MMD.histMaxMinDS.ref, Schemas(MMD.histMaxMinDS.schema), 0, TestData.storeConf, 1)
+    memStore.ingest(MMD.histMaxMinDS.ref, 0, MMD.records(MMD.histMaxMinDS, histMaxData))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
     memStore.refreshIndexForTesting(MMD.histDataset.ref)
-    memStore.refreshIndexForTesting(MMD.histMaxDS.ref)
+    memStore.refreshIndexForTesting(MMD.histMaxMinDS.ref)
   }
 
   after {
@@ -96,7 +96,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   val mmdTuples: Stream[Seq[Any]] = MMD.linearMultiSeries().take(100)
   val mmdSomeData: SomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData: Stream[Seq[Any]] = MMD.linearHistSeries().take(100)
-  val histMaxData: Stream[Seq[Any]] = MMD.histMax(histData)
+  val histMaxData: Stream[Seq[Any]] = MMD.histMaxMin(histData)
 
   val source = UnsupportedChunkSource()
 

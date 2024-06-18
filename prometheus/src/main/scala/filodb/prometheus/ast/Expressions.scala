@@ -85,13 +85,13 @@ case class BinaryExpression(lhs: Expression,
         case (lh: ScalarExpression, rh: ScalarExpression) =>
           ScalarBinaryOperation(operator.getPlanOperator, Left(lh.toScalar), Left(rh.toScalar), rangeParams)
         // (2 + 3) + 5
-        case (lh: BinaryExpression, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: PeriodicSeries, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), Left(rh.toScalar), rangeParams)
         // 2 + (3 * 5)
-        case (lh: ScalarExpression, rh: BinaryExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: ScalarExpression, rh: PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
           Left(lh.toScalar), Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
         // (2 + 3) + (5 - 6)
-        case (lh: BinaryExpression, rh: BinaryExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: PeriodicSeries, rh: PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]),
           Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
       }

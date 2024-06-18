@@ -112,8 +112,10 @@ trait RowAggregator {
 
 //scalastyle:off cyclomatic.complexity
 object RowAggregator {
-  def isHistMax(valColType: ColumnType, schema: ResultSchema): Boolean =
-    valColType == ColumnType.HistogramColumn && schema.isHistDouble && schema.columns(2).name == "max"
+  def isHistMaxMin(valColType: ColumnType, schema: ResultSchema): Boolean =
+    valColType == ColumnType.HistogramColumn && schema.isHistMaxMin &&
+      schema.columns(2).name == "max" &&
+      schema.columns(3).name == "min"
 
   /**
     * Factory for RowAggregator
@@ -124,7 +126,7 @@ object RowAggregator {
       case Min if valColType != ColumnType.HistogramColumn => MinRowAggregator
       case Max if valColType != ColumnType.HistogramColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
-      case Sum if isHistMax(valColType, schema) => HistMaxSumAggregator
+      case Sum if isHistMaxMin(valColType, schema) => HistMaxMinSumAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist

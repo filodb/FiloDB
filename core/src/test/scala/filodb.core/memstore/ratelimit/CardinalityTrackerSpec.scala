@@ -68,8 +68,8 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
     class MyQEP extends QuotaExceededProtocol {
       var breachedPrefix: Seq[String] = Nil
-      var breachedQuota = -1
-      def quotaExceeded(ref: DatasetRef, shard: Int, shardKeyPrefix: Seq[String], quota: Int): Unit = {
+      var breachedQuota = -1L
+      def quotaExceeded(ref: DatasetRef, shard: Int, shardKeyPrefix: Seq[String], quota: Long): Unit = {
         breachedPrefix = shardKeyPrefix
         breachedQuota = quota
       }

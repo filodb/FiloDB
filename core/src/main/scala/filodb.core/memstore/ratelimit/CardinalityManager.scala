@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.PartKeyLuceneIndex
+import filodb.core.memstore.PartKeyIndexDownsampled
 import filodb.core.metadata.PartitionSchema
 
 /**
@@ -14,7 +14,7 @@ import filodb.core.metadata.PartitionSchema
 class CardinalityManager(datasetRef: DatasetRef,
                          shardNum: Int,
                          shardKeyLen: Int,
-                         partKeyIndex: PartKeyLuceneIndex,
+                         partKeyIndex: PartKeyIndexDownsampled,
                          partSchema: PartitionSchema,
                          filodbConfig: Config,
                          meteringEnabled: Boolean,

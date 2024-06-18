@@ -311,7 +311,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part,
+  private[memstore] final val partKeyIndex: PartKeyIndexRaw = new PartKeyLuceneIndex(ref, schemas.part,
     indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
     storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
 
@@ -1913,6 +1913,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardKeyColumns.map { col =>
       filters.collectFirst {
         case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+        case ColumnFilter(c, Filter.EqualsRegex(filtVal: String)) if c == col => filtVal
       }.getOrElse("multiple")
     }.toList
   }

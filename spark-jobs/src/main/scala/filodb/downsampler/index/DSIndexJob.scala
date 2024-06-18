@@ -96,6 +96,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
                                     fullIndexMigration: Boolean): Int = {
     @volatile var count = 0
     val rawDataSource = rawCassandraColStore
+    rawDataSource.initialize(rawDatasetRef, -1, dsSettings.rawDatasetIngestionConfig.resources)
+    downsampleCassandraColStore.initialize(dsDatasetRef, -1, dsSettings.rawDatasetIngestionConfig.resources)
     val pkRecords = partKeys.filter { pk =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)

@@ -1,9 +1,12 @@
 package filodb.coordinator.queryplanner
 
+
 import java.util.concurrent.ThreadLocalRandom
 
+import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -342,6 +345,14 @@ trait  DefaultPlanner {
         }.toList
       } else toReduceLevel.plans
 
+   /*
+    * NOTE: this LocalPartitionReduceAggregateExec wrapper is always created even when toReduceLevel2
+    *   contains only one plan; this may artificially bloat QueryStats. However, ExecPlans currently
+    *   offer no simple method to update their dispatchers, and forceRootDispatcher here must be
+    *   honored to support target-schema pushdowns (see materializeWithPushdown in the SingleClusterPlanner).
+    *   Given that the work required to allow dispatcher updates and/or rework pushdown logic is nontrivial
+    *   and the QueryStats bloat given by unnecessary aggregation plans is likely small, the fix is skipped for now.
+    */
     val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
@@ -636,18 +647,102 @@ object PlannerUtil extends StrictLogging {
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
   }
 
+
   /**
    * Picks one dispatcher randomly from child exec plans passed in as parameter
    */
   def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+    val plannerParams = children.iterator.next().queryContext.plannerParams
+    // there is a very subtle point on how to decide how we need to pick up the dispatcher
+    // HA planner would inject the children that are created with HA planner with the active shard map
+    // of the local and buddy clusters. However, if children were not scheduled by HA Planner, these maps
+    // would be missing. Until we get rid of the hierarchy of planners, we cannot deal with children
+    // scheduled by other planners. So, this is what we check below.
+    if (plannerParams.failoverMode == ShardLevelFailoverMode && plannerParams.localShardMapper.isDefined) {
+      // here we can encounter the following dispatchers to pick from:
+      // (a) ActorPlanDispatcher - happy case
+      // (b) RemoteActorPlanDispatcher - we cannot use because non leaf plans can be running
+      //                                 only locally
+      // (c) GrpcPlanDispatcher - we cannot use because non leaf plans can be running
+      //                          only locally
+      // (d) we don't find an ActorPlanDispatcher at all, hence, we need to pick
+      //     from the list of available and active local shards
+      val localActiveShardMapper = plannerParams.localShardMapper.get
+      val buddyActiveShardMapper = plannerParams.buddyShardMapper.get
+      if (!localActiveShardMapper.allShardsActive && buddyActiveShardMapper.allShardsActive) {
+        pickDispatcherNormal(children)
+      } else {
+        pickDispatcherShardLevelFailover(children, plannerParams)
+      }
+    } else {
+      // this case is used for both:
+      // (1) legacy failover mode (ie no shard failover at all). In that case
+      //     we expect to pick ActorDispatchers out of ActorPlanDispatchers
+      //     provided (there cannot be any other dispatchers in the pool)
+      // (2) all remote failover
+      //     we expect to pick RemoteActorDispatcher out of RemoteActorPlanDispatchers
+      pickDispatcherNormal(children)
+    }
+
+  }
+
+  def pickDispatcherNormal(children: Seq[ExecPlan]): PlanDispatcher = {
+    children.find(_.dispatcher.isLocalCall).map(_.dispatcher).getOrElse {
+      val childTargets = children.map(_.dispatcher)
+      // Above list can contain duplicate dispatchers, and we don't make them distinct.
+      // Those with more shards must be weighed higher
+      val rnd = ThreadLocalRandom.current()
+      childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
+    }
+
+  }
+
+  /**
+   * Picks one dispatcher randomly from child exec plans passed in as parameter
+   */
+  def pickDispatcherShardLevelFailover(
+    children: Seq[ExecPlan], plannerParams: PlannerParams
+  ): PlanDispatcher = {
 
     children.find(_.dispatcher.isLocalCall).map(_.dispatcher).getOrElse {
-    val childTargets = children.map(_.dispatcher)
-    // Above list can contain duplicate dispatchers, and we don't make them distinct.
-    // Those with more shards must be weighed higher
-    val rnd = ThreadLocalRandom.current()
-    childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
+
+      val childTargets = children.map(_.dispatcher)
+      // Above list can contain duplicate dispatchers, and we don't make them distinct.
+      // Those with more shards must be weighed higher
+      val localDispatchers = childTargets.filter( d => isScheduledLocally(d))
+      val rnd = ThreadLocalRandom.current()
+      if (localDispatchers.isEmpty) {
+        // This should be vary rare. We tried to assign a dispatcher for a non leaf plan by
+        // picking one of the dispatchers of its own children but none of the children plans
+        // have a local dispatcher. So, we have to assign this plan to a random active
+        // shard of this cluster. We do shard level fail over only if there are decent
+        // umber of active shards in the local cluster.
+        // The very fact that a non leaf plan has no children
+        // assigned to an active local shard means that it probably has to be a target
+        // schema case of some sort. //TODO verify this is the only explanation
+        val ep = children.iterator.next
+        val clusterName = ep.dispatcher.clusterName
+        val localShardMapper = ep.queryContext.plannerParams.localShardMapper.get
+        val activeShards = localShardMapper.activeShards
+        val randomActiveShard = activeShards.iterator.drop(rnd.nextInt(activeShards.size)).next()
+        val path = localShardMapper.shards(randomActiveShard).address
+        val serialization = SerializationExtension(ActorSystemHolder.system)
+        val deserializedActorRef = serialization.system.provider.resolveActorRef(path)
+        val dispatcher = ActorPlanDispatcher(
+          deserializedActorRef, clusterName
+        )
+        dispatcher
+      } else {
+        val dispatcher =
+          localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
+        dispatcher
+      }
    }
+  }
+
+  def isScheduledLocally(d : PlanDispatcher): Boolean = {
+    val scheduledLocally = (!d.isInstanceOf[RemoteActorPlanDispatcher]) && (!d.isInstanceOf[GrpcPlanDispatcher])
+    scheduledLocally
   }
 
   //scalastyle:off method.length
