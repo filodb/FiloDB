@@ -105,25 +105,29 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   it("can update status from events and filter shards by status") {
     val mapper1 = new ShardMapper(32)
     mapper1.numAssignedShards shouldEqual 0
-    mapper1.activeShards(Seq(1, 5, 10)) shouldEqual Nil
+    mapper1.activeOrRecoveringShards(Seq(1, 5, 10)) shouldEqual Nil
+    mapper1.notActiveShards.size shouldEqual 32
 
     mapper1.updateFromEvent(ShardAssignmentStarted(dataset, 2, ref1)).isSuccess shouldEqual true
     mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
     mapper1.numAssignedShards shouldEqual 1
     mapper1.updateFromEvent(RecoveryInProgress(dataset, 4, ref1, 0)).isSuccess shouldEqual true
     mapper1.numAssignedShards shouldEqual 2
-    mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 4)
+    mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 4)
+    mapper1.notActiveShards shouldEqual (Set(0,1) ++ (3 to 31).toSet  )
 
     mapper1.updateFromEvent(ShardAssignmentStarted(dataset, 3, ref2)).isSuccess shouldEqual true
     mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
-    mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3, 4)
+    mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3, 4)
     mapper1.numAssignedShards shouldEqual 3
+    mapper1.notActiveShards.size shouldEqual 30
     println(mapper1.prettyPrint)
 
     mapper1.updateFromEvent(ShardDown(dataset, 4, ref1)).isSuccess shouldEqual true
-    mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
+    mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
     mapper1.numAssignedShards shouldEqual 2
     mapper1.coordForShard(4) shouldEqual ActorRef.noSender
+    mapper1.notActiveShards.size shouldEqual 30
   }
 
   it("can produce a minimal set of events to reproduce ShardMapper state") {
@@ -157,10 +161,10 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
 
     map.assignedShards shouldEqual initialShards
     map.unassignedShards.size shouldEqual numShards - initialShards.size
-    map.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq.empty
+    map.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq.empty
 
     map.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
-    map.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2)
+    map.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2)
 
     val nextShards = Seq(1, 3)
     nextShards forall { shard =>
@@ -173,7 +177,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.assignedShards shouldEqual (initialShards ++ nextShards).sorted
     map.unassignedShards.size shouldEqual numShards - (initialShards.size + nextShards.size)
 
-    map.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(1, 2, 3)
+    map.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(1, 2, 3)
     map.numAssignedShards shouldEqual initialShards.size + nextShards.size
 
     map.updateFromEvent(IngestionError(dataset, 3, new java.io.IOException("ingestion fu"))).isSuccess shouldEqual true
@@ -263,7 +267,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
       map.updateFromEvent(ShardAssignmentStarted(dataset, shard, coord1)).isSuccess } shouldEqual true
     Seq(0, 1) forall { shard =>
       map.updateFromEvent(IngestionStarted(dataset, shard, coord1)).isSuccess } shouldEqual true
-    Seq(0, 1).forall(map.activeShard) shouldEqual true
+    Seq(0, 1).forall(map.activeOrRecoveringShard) shouldEqual true
     Seq(0, 1) forall { shard =>
       map.updateFromEvent(RecoveryStarted(dataset, shard, coord1, 0)).isSuccess } shouldEqual true
     assert(coord = coord1, shards = Seq(0, 1), numAssignedShards = 2, unassignedShards = 30)

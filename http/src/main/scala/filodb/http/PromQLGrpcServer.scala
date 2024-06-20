@@ -26,6 +26,7 @@ import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import filodb.query.exec.{ExecPlanWithClientParams, UnsupportedChunkSource}
 
 
 
@@ -59,12 +60,121 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
   private class PromQLGrpcService extends RemoteExecImplBase {
 
-        private def executeQuery(request: GrpcMultiPartitionQueryService.Request, span: Span)
-                                (f: QueryResponse => Unit): Unit = {
+        trait QueryResponseProcessor {
+          def processQueryResponse(qr: QueryResponse): Unit
+          def span: Span
+        }
+
+        class StreamingResponseProcessor(
+          val responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse],
+          val span: Span,
+          val dataset: String,
+          val startNs: Long
+        ) extends QueryResponseProcessor {
+          // scalastyle:off method.length
+          def processQueryResponse(qr: QueryResponse): Unit = {
+            import filodb.query.ProtoConverters._
+            import filodb.query.QueryResponseConverter._
+            // Catch all error
+            Try {
+              lazy val rb = SerializedRangeVector.newBuilder()
+              qr.toStreamingResponse(queryConfig).foreach {
+                case footer: StreamQueryResultFooter =>
+                  responseObserver.onNext(footer.toProto)
+                  span.mark("Received the footer of streaming response")
+                  span.finish()
+                  val endNs = System.nanoTime()
+                  queryResponseLatency
+                    .withTag("status", "success")
+                    .withTag("dataset", dataset)
+                    .record(endNs - startNs)
+                  responseObserver.onCompleted()
+                case error: StreamQueryError =>
+                  responseObserver.onNext(error.toProto)
+                  span.fail(error.t)
+                  span.finish()
+                  val endNs = System.nanoTime()
+                  queryResponseLatency
+                    .withTag("status", "error")
+                    .withTag("dataset", dataset)
+                    .record(endNs - startNs)
+                  responseObserver.onCompleted()
+                case header: StreamQueryResultHeader =>
+                  responseObserver.onNext(header.toProto)
+                  span.mark("Received the header of streaming response")
+                case result: StreamQueryResult =>
+                  // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
+                  // serializable one If we have a result, its definitely is a QueryResult
+                  val qres = qr.asInstanceOf[QueryResult]
+                  val strQueryResult = result.copy(result = result.result.map {
+                    case irv: IteratorBackedRangeVector =>
+                      SerializedRangeVector.apply(irv, rb,
+                        SerializedRangeVector.toSchema(qres.resultSchema.columns, qres.resultSchema.brSchemas),
+                        "GrpcServer", qres.queryStats)
+                    case result => result
+                  })
+                  span.mark("onNext of the streaming result called")
+                  responseObserver.onNext(strQueryResult.toProto)
+              }
+            } match {
+              // Catch all to ensure onError is invoked
+              case Failure(t) =>
+                logger.error("Caught failure while executing query", t)
+                span.fail(t)
+                span.finish()
+                responseObserver.onError(t)
+              case Success(_) =>
+            }
+          }
+        }
+
+        class ResponseProcessor(
+          val responseObserver: StreamObserver[GrpcMultiPartitionQueryService.Response],
+          val span: Span,
+          val startNs: Long,
+          val hist: kamon.metric.Histogram
+        ) extends QueryResponseProcessor {
+          def processQueryResponse(qr: QueryResponse): Unit = {
+            import filodb.query.ProtoConverters._
+            Try {
+              val queryResponse = qr match {
+                case err: QueryError => err
+                case res: QueryResult =>
+                  lazy val rb = SerializedRangeVector.newBuilder()
+                  val rvs = res.result.map {
+                    case irv: IteratorBackedRangeVector =>
+                      val resultSchema = res.resultSchema
+                      SerializedRangeVector.apply(irv, rb,
+                        SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
+                        "GrpcServer", res.queryStats)
+                    case rv => rv
+                  }
+                  res.copy(result = rvs)
+              }
+              responseObserver.onNext(queryResponse.toProto)
+            } match {
+              case Failure(t) =>
+                logger.error("Caught failure while executing query", t)
+                span.fail(t)
+                span.finish()
+                hist.withTag("status", "error").record(System.nanoTime() - startNs)
+                responseObserver.onError(t)
+              case Success(_) =>
+                span.finish()
+                hist.withTag("status", "success").record(System.nanoTime() - startNs)
+                responseObserver.onCompleted()
+            }
+          }
+        }
+
+        private def executeQuery(
+          request: GrpcMultiPartitionQueryService.Request,
+          rp: QueryResponseProcessor
+        ): Unit = {
           import filodb.query.ProtoConverters._
           implicit val timeout: FiniteDuration = queryAskTimeout
           implicit val dispatcherScheduler: Scheduler = scheduler
-          span.mark("Sending query request")
+          rp.span.mark("Sending query request")
           val queryParams = request.getQueryParams
           val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
@@ -76,118 +186,66 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
               TimeStepParams(queryParams.getStart, queryParams.getStep, queryParams.getEnd))
 
             val exec = queryPlanner.materialize(logicalPlan, config)
-            queryPlanner.dispatchExecPlan(exec, span).foreach(f)
+            queryPlanner.dispatchExecPlan(exec, rp.span).foreach(
+              (qr: QueryResponse) => rp.processQueryResponse(qr)
+            )
           }
           eval match {
             case Failure(t)   =>
               logger.error("Caught failure while executing query", t)
-              f(QueryError(config.queryId, QueryStats(), t))
-              span.fail("Query execution failed", t)
-            case _            =>  span.mark("query execution successful")
+              rp.processQueryResponse(QueryError(config.queryId, QueryStats(), t))
+              rp.span.fail("Query execution failed", t)
+            case _            =>  rp.span.mark("query execution successful")
           }
         }
-        //scalastyle:off method.length
-        override def execStreaming(request: GrpcMultiPartitionQueryService.Request,
-                           responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse]): Unit = {
-          import filodb.query.ProtoConverters._
-          import filodb.query.QueryResponseConverter._
+
+        override def execStreaming(
+          request: GrpcMultiPartitionQueryService.Request,
+          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse]
+        ): Unit = {
+          val dataset = request.getDataset
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
-          executeQuery(request, span) {
-                // Catch all error
-            qr: QueryResponse =>
-              Try {
-                lazy val rb = SerializedRangeVector.newBuilder()
-                qr.toStreamingResponse(queryConfig).foreach {
-                  case footer: StreamQueryResultFooter =>
-                    responseObserver.onNext(footer.toProto)
-                    span.mark("Received the footer of streaming response")
-                    span.finish()
-                    val endNs = System.nanoTime()
-                    queryResponseLatency
-                      .withTag("status", "success")
-                      .withTag("dataset", request.getDataset)
-                      .record(endNs - startNs)
-                    responseObserver.onCompleted()
-                  case error: StreamQueryError =>
-                    responseObserver.onNext(error.toProto)
-                    span.fail(error.t)
-                    span.finish()
-                    val endNs = System.nanoTime()
-                    queryResponseLatency
-                      .withTag("status", "error")
-                      .withTag("dataset", request.getDataset)
-                      .record(endNs - startNs)
-                    responseObserver.onCompleted()
-                  case header: StreamQueryResultHeader =>
-                    responseObserver.onNext(header.toProto)
-                    span.mark("Received the header of streaming response")
-                  case result: StreamQueryResult =>
-                    // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
-                    // serializable one If we have a result, its definitely is a QueryResult
-                    val qres = qr.asInstanceOf[QueryResult]
-                    val strQueryResult = result.copy(result = result.result.map {
-                      case irv: IteratorBackedRangeVector =>
-                        SerializedRangeVector.apply(irv, rb,
-                          SerializedRangeVector.toSchema(qres.resultSchema.columns, qres.resultSchema.brSchemas),
-                          "GrpcServer", qres.queryStats)
-                      case result => result
-                    })
-                    span.mark("onNext of the streaming result called")
-                    responseObserver.onNext(strQueryResult.toProto)
-                }
-              } match {
-                // Catch all to ensure onError is invoked
-                case Failure(t)            =>
-                            logger.error("Caught failure while executing query", t)
-                            span.fail(t)
-                            span.finish()
-                            responseObserver.onError(t)
-                case Success(_)            =>
-              }
-          }
+          val rp = new StreamingResponseProcessor(responseObserver, span, dataset, startNs)
+          executeQuery(request, rp)
         }
-        //scalastyle:on method.length
 
         override def exec(request: GrpcMultiPartitionQueryService.Request,
                          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.Response]): Unit = {
-           import filodb.query.ProtoConverters._
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
           val hist = queryResponseLatency.withTag("dataset", request.getDataset)
-           executeQuery(request, span) {
-               qr: QueryResponse =>
-                 Try {
-                   val queryResponse = qr match {
-                     case err: QueryError     => err
-                     case res: QueryResult    =>
-                       lazy val rb = SerializedRangeVector.newBuilder()
-                       val rvs = res.result.map {
-                         case irv: IteratorBackedRangeVector =>
-                           val resultSchema = res.resultSchema
-                           SerializedRangeVector.apply(irv, rb,
-                             SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
-                             "GrpcServer", res.queryStats)
-                         case rv => rv
-                       }
-                    res.copy(result = rvs)
-                   }
-                  responseObserver.onNext(queryResponse.toProto)
-                 } match {
-                   case Failure(t)            =>
-                      logger.error("Caught failure while executing query", t)
-                      span.fail(t)
-                      span.finish()
-                      hist.withTag("status", "error").record(System.nanoTime() - startNs)
-                      responseObserver.onError(t)
-                   case Success(_)            =>
-                      span.finish()
-                      hist.withTag("status", "success").record(System.nanoTime() - startNs)
-                      responseObserver.onCompleted()
-                 }
-           }
+          val rp = new ResponseProcessor(responseObserver, span, startNs, hist)
+          executeQuery(request, rp)
         }
-  }
+
+        override def executePlan(
+          execPlanProto: GrpcMultiPartitionQueryService.ExecPlanContainer,
+          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse]
+        ): Unit = {
+          implicit val dispatcherScheduler: Scheduler = scheduler
+          import filodb.coordinator.ProtoConverters._
+          val execPlan = execPlanProto.fromProto()
+          val span = Kamon.currentSpan()
+          val startNs = System.nanoTime()
+          val dataset = execPlan.dataset.dataset
+          val rp = new StreamingResponseProcessor(responseObserver, span, dataset, startNs)
+          val eval = Try {
+            val execPlanWParams = ExecPlanWithClientParams(
+              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)
+            )
+            execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource()).foreach(
+              (qr: QueryResponse) => rp.processQueryResponse(qr)
+            )
+          }
+          eval match {
+            case Failure(t) =>
+              logger.error("Caught failure while dispatching execution plan", t)
+              rp.processQueryResponse(QueryError(execPlan.queryContext.queryId, QueryStats(), t))
+            case _            =>  rp.span.mark("exec plan dispatched successful")
+          }
+        }
+      }
 
 
   def stop(): Unit = {

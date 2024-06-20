@@ -14,7 +14,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QuerySession, QueryStats, QueryWarnings, ResultSchema}
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store._
 import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
@@ -94,7 +94,7 @@ case class UnsupportedChunkSource() extends ChunkSource {
 
   override def isDownsampleStore: Boolean = false
 
-  override def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+  override def scanTsCardinalities(queryContext: QueryContext, ref: DatasetRef, shards: Seq[Int],
                                    shardKeyPrefix: Seq[String], depth: Int): scala.Seq[CardinalityRecord] =
     throw new UnsupportedOperationException("This operation is not supported")
 

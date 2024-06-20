@@ -72,7 +72,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
     val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
     if (pushdownKeys.isDefined) {
-      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
       Some(PlanResult(plans))
     } else None
@@ -222,7 +222,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    */
   private def generateExecForEachPartition(logicalPlan: LogicalPlan,
                                            keys: Seq[Seq[ColumnFilter]],
-                                           qContext: QueryContext): Seq[ExecPlan] = {
+                                           qContext: QueryContext,
+                                           pushdownPlan: Boolean = false): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
     if (keys.isEmpty) {
@@ -269,7 +270,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
     // Skip lower-level aggregate presentation if there is more than one plan to materialize.
     // In that case, the presentation step will be applied by this planner.
-    val skipAggregatePresentValue = partitionToKeyGroups.values.map(_.size).sum + partitionSplitKeys.size > 1
+    val skipAggregatePresentValue = !pushdownPlan &&
+                                      partitionToKeyGroups.values.map(_.size).sum + partitionSplitKeys.size > 1
 
     // Materialize a plan for each group of non-split of keys.
     // Each group will be encoded into a set of Equals/EqualsRegex filters, where regex filters
@@ -324,9 +326,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   // FIXME: This will eventually be replaced with generateExecForEachPartition.
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
-                                     qContext: QueryContext): Seq[ExecPlan] = {
+                                     qContext: QueryContext,
+                                     pushdownPlan: Boolean = false): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val skipAggregatePresentValue = keys.length > 1
+    val skipAggregatePresentValue = !pushdownPlan && keys.length > 1
     keys.map { result =>
       val newLogicalPlan = logicalPlan.replaceFilters(result)
       // Querycontext should just have the part of query which has regex
@@ -365,11 +368,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    */
   private def generateExec(logicalPlan: LogicalPlan,
                            keys: Seq[Seq[ColumnFilter]],
-                           qContext: QueryContext): Seq[ExecPlan] =
+                           qContext: QueryContext,
+                           pushdownPlan: Boolean = false): Seq[ExecPlan] =
     if (qContext.plannerParams.reduceShardKeyRegexFanout) {
-      generateExecForEachPartition(logicalPlan, keys, qContext)
+      generateExecForEachPartition(logicalPlan, keys, qContext, pushdownPlan)
     } else {
-      generateExecForEachKey(logicalPlan, keys, qContext)
+      generateExecForEachKey(logicalPlan, keys, qContext, pushdownPlan)
     }
 
   /**
@@ -390,16 +394,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
       // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
 
-      val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
-      val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+      val lhsPlanRes = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
+      val rhsPlanRes = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
       val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-        SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        SetOperatorExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
           logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
           rvRangeFromPlan(logicalPlan))
       else
-        BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
           logicalPlan.cardinality,
           logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
@@ -408,6 +412,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
       PlanResult(Seq(execPlan))
     }
+  }
+
+  /**
+   * Retuns an occupied Option iff the plan can be pushed-down according to the set of labels.
+   */
+  private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
+    val canTschemaPushdown = getPushdownKeys(qContext, lp).isDefined
+    if (canTschemaPushdown) {
+        LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext), getShardKeys)
+    } else None
   }
 
   /***
@@ -421,20 +435,15 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       return pushdownKeys.get
     }
 
-    // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
-    // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
-    // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual
-    // partitions may not give the correct answer, we should push down the sum to multiple partitions, perform a reduce
-    // locally and then run count on the results. The following implementation checks for descendant aggregates, if
-    // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
-    // using the wrapped planner
-    val plan = if (LogicalPlanUtils.hasDescendantAggregateOrJoin(aggregate.vectors)) {
-      val childPlan = materialize(aggregate.vectors, queryContext)
-      // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
+    val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
+    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels, queryContext)
+    val plan = if (!canPushdown) {
+      val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext)
+      // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will
       // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
       // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
       // use the same dispatcher
-      addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
+      addAggregator(aggregate, queryContext, childPlanRes)
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)

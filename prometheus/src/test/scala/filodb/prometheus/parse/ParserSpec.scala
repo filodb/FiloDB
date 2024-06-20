@@ -81,6 +81,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     lp.toString shouldEqual queryToLpString._2
   }
 
+  it("Parse error when regex is too long filter query") {
+    val exception = parseError(s"""last_over_time(http_requests_total{label=~"${"toolong" * 1024}.*"}[5m])""")
+    exception.getMessage.contains("Regular expression filters should be <=") shouldEqual true
+  }
+
   it("parse basic scalar expressions") {
     parseSuccessfully("-5")
     parseSuccessfully("+5")
@@ -609,6 +614,20 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseWithAntlr("+sum(+foo) < +1", """ScalarVectorBinaryOperation(LSS,ScalarBinaryOperation(ADD,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),true),List(),None),true),false)""")
     parseWithAntlr("---+--sum(---+-foo) < -++-+-1", """ScalarVectorBinaryOperation(LSS,ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(SUB,ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),true),true),true),true),true),List(),None),true),true),true),true),true),true),false)""")
     parseWithAntlr("+-1", """ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
+
+    // unary and unary
+    parseWithAntlr("+-1 * --10", """ScalarBinaryOperation(MUL,Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(10.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
+    // unary and binary
+    parseWithAntlr("+-1 * (0 + 10)", """ScalarBinaryOperation(MUL,Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(ADD,Left(0.0),Left(10.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
+    // binary and unary
+    parseWithAntlr("(0 + -1) * ---+++-10", """ScalarBinaryOperation(MUL,Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(10.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
+    // unary and scalar
+    parseWithAntlr("+-1 + 10", """ScalarBinaryOperation(ADD,Right(ScalarBinaryOperation(ADD,Left(0.0),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(1.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),Left(10.0),RangeParams(1524855988,1000,1524855988))""")
+    // scalar and unary
+    parseWithAntlr("-91 * (0 + 10)", """ScalarBinaryOperation(MUL,Right(ScalarBinaryOperation(SUB,Left(0.0),Left(91.0),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(ADD,Left(0.0),Left(10.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
+
+    // more complex query with unary expressions.
+    parseWithAntlr("-91 * (0 + 10) + -9", """ScalarBinaryOperation(ADD,Right(ScalarBinaryOperation(MUL,Right(ScalarBinaryOperation(SUB,Left(0.0),Left(91.0),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(ADD,Left(0.0),Left(10.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))),Right(ScalarBinaryOperation(SUB,Left(0.0),Left(9.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))""")
   }
 
   it("Should be able to make logical plans for Series Expressions") {
@@ -1038,6 +1057,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
       case _ => throw new UnsupportedOperationException()
     }
     val planString = lp.toString
+//    println(s"""parseWithAntlr("${query}", """ + "\"\"\"" + s"$planString" + "\"\"\")")
     planString shouldEqual (expectedLp)
   }
 

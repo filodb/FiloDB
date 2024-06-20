@@ -393,12 +393,12 @@ object MachineMetricsData {
   val schemas2h = Schemas(schema2.partition,
                         Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
 
-  val histMaxDS = Dataset("histmax", Seq("metric:string", "tags:map"),
-                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+  val histMaxMinDS = Dataset("histmaxmin", Seq("metric:string", "tags:map"),
+    Seq("timestamp:ts", "count:long", "sum:long", "min:double", "max:double", "h:hist:counter=false"))
 
   // Pass in the output of linearHistSeries here.
-  // Adds in the max column before h/hist
-  def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
+  // Adds in the max and min column before h/hist
+  def histMaxMin(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
       val hist = row(3).asInstanceOf[bv.LongHistogram]
       // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
@@ -406,7 +406,8 @@ object MachineMetricsData {
       val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
                             .lastOption.getOrElse(hist.numBuckets - 1)
       val max = hist.bucketTop(lastBucketNum) * 0.8
-      ((row take 3) :+ max) ++ (row drop 3)
+      val min = hist.bucketTop(lastBucketNum) * 0.1
+      ((row take 3):+ min :+ max) ++ (row drop 3)
     }
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
@@ -415,7 +416,7 @@ object MachineMetricsData {
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16, evictionLock)
   val histIngestBH = new BlockMemFactory(blockStore, histDataset.schema.data.blockMetaSize,
                                          dummyContext, true)
-  val histMaxBH = new BlockMemFactory(blockStore, histMaxDS.schema.data.blockMetaSize,
+  val histMaxMinBH = new BlockMemFactory(blockStore, histMaxMinDS.schema.data.blockMetaSize,
                                       dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
@@ -433,20 +434,21 @@ object MachineMetricsData {
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
   }
 
-  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with histMax(linearHistSeries) records
-  def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
   (Stream[Seq[Any]], RawDataRangeVector) = {
-    val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
-    val container = records(histMaxDS, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, false,
+    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(histMaxMinDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
+    container.iterate(histMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxMinBH, false,
       Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histMaxBH, encode = true)
-    // Select timestamp, hist, max
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), new AtomicLong, Long.MaxValue, "query-id"))
+    part.switchBuffers(histMaxMinBH, encode = true)
+    // Select timestamp, hist, max, min
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 5, 4, 3),
+      new AtomicLong, Long.MaxValue, "query-id"))
   }
 }
 

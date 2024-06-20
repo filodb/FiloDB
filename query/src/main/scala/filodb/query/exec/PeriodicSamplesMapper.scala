@@ -47,7 +47,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
   val endWithOffset = endMs - offsetMs.getOrElse(0L)
   val outputRvRange = Some(RvRange(startMs, stepMs, endMs))
 
-  val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
+  val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMaxMin) ||
     functionId.contains(InternalRangeFunction.Timestamp)
 
   if (!isLastFn) require(windowToUse.nonEmpty && windowToUse.get > 0,
@@ -67,9 +67,9 @@ final case class PeriodicSamplesMapper(startMs: Long,
     if (startMs < endMs && stepMs < querySession.queryConfig.minStepMs) // range query with small step
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = ResultSchema.valueColumnType(sourceSchema)
-    // If a max column is present, the ExecPlan's job is to put it into column 2
-    val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
-                      sourceSchema.columns(2).name == "max"
+    // If a max and min column is present, the ExecPlan's job is to put it into column 3
+    val hasMaxMinCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 3 &&
+                      sourceSchema.columns(2).name == "max" && sourceSchema.columns(3).name == "min"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
 
@@ -83,7 +83,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
+          val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val chunkedHRangeFunc = rangeFuncGen().asChunkedH
           val minResolutionMs = rdrv.minResolutionMs
