@@ -38,4 +38,41 @@ object Utils extends StrictLogging {
     availableMem
   }
 
+  /**
+   * Given a sorted sequence, returns the index of the first
+   *   occurrence of the argument element.
+   */
+  def findFirstIndexSorted[T](sorted: Seq[T], elt: T)(implicit ord: Ordering[T]): Int = {
+    var ileft = 0;
+    var iright = sorted.size - 1;
+    while (ileft < iright) {
+      val imid = (ileft + iright) / 2
+      val midValue = sorted(imid)
+      if (ord.gt(elt, midValue)) {
+        ileft = imid + 1
+      } else {
+        iright = imid
+      }
+    }
+    if (sorted(ileft) == elt) ileft else -1
+  }
+
+  /**
+   * Given a sorted sequence, returns the index of the last
+   * occurrence of the argument element.
+   */
+  def findLastIndexSorted[T](sorted: Seq[T], elt: T)(implicit ord: Ordering[T]): Int = {
+    var ileft = 0;
+    var iright = sorted.size - 1;
+    while (ileft < iright) {
+      val imid = (ileft + iright + 1) / 2
+      val midValue = sorted(imid)
+      if (ord.lt(elt, midValue)) {
+        iright = imid - 1
+      } else {
+        ileft = imid
+      }
+    }
+    if (sorted(ileft) == elt) ileft else -1
+  }
 }
