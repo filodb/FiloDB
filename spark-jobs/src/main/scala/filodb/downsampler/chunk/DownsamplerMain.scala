@@ -3,18 +3,16 @@ package filodb.downsampler.chunk
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
-
 import scala.collection.parallel.ForkJoinTaskSupport
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
+import filodb.core.query.ColumnFilter
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
 
@@ -92,7 +90,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
    * for each of "foo" and "bar".
    */
   private def exportForKey(rdd: RDD[Seq[PagedReadablePartition]],
-                           exportKey: Seq[String],
+                           exportKey: Seq[ColumnFilter],
                            exportTableConfig: ExportTableConfig,
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
@@ -105,7 +103,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig)).filter { row =>
       val rowKey = columnKeyIndices.map(row.get(_).toString)
-      rowKey == exportKey
+      rowKey.zip(exportKey).forall{ case (key, filter) => filter.filter.filterFunc(key) }
     }.map { row =>
       numRowsExported.increment()
       row
@@ -207,19 +205,17 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       }
     } else rdd
 
-    if (settings.exportIsEnabled && settings.exportKeyToRules.nonEmpty) {
-      // to ensure order, store all key, value pairs in a sequence
-      val exportKeyToRules = settings.exportKeyToRules.map(f => (f._1, f._2)).toSeq
+    if (settings.exportIsEnabled && settings.exportKeyToConfig.nonEmpty) {
       // Used to process tasks in parallel. Allows configurable parallelism.
       val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
       val exportTasks = {
         // downsample the data as the first key is exported
         val firstExportTaskWithDs = Seq(() =>
-          exportForKey(rddWithDs, exportKeyToRules.head._1, exportKeyToRules.head._2, batchExporter, spark))
+          val (filters, config) = settings.exportKeyToConfig.head
+          exportForKey(rddWithDs, filters, config, batchExporter, spark))
         // export all remaining keys without the downsample step
-        val remainingExportTasksWithoutDs = exportKeyToRules.tail.map { spec =>
-          () =>
-            exportForKey(rdd, spec._1, spec._2, batchExporter, spark)
+        val remainingExportTasksWithoutDs = settings.exportKeyToConfig.tail.map { case (filters, config) =>
+          () => exportForKey(rdd, filters, config, batchExporter, spark)
         }
         // create a parallel sequence of tasks
         (firstExportTaskWithDs ++ remainingExportTasksWithoutDs).par

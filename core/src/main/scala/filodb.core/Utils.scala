@@ -233,7 +233,7 @@ object Utils extends StrictLogging {
      *     - linearly with the count of distinct sets of key filter label names.
      *   This data-structure should only be used where each of these is reasonably small.
      */
-    def get(labels: Map[String, String]): Option[T] = {
+    def get(labels: collection.Map[String, String]): Option[T] = {
       // The tries we've built require that certain labels are present in the set.
       // Identify the set of (trie, labels-names) pairs s.t. all labels are present,
       //   then map these to the set of (trie, label-values) pairs for efficiency.

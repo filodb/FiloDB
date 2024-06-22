@@ -59,8 +59,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy val numRowExportPrepErrors = Kamon.counter("num-row-export-prep-errors").withoutTags()
 
-  val keyToRules = downsamplerSettings.exportKeyToRules
-
   /**
    * Returns the index of a column in the export schema.
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
@@ -233,12 +231,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
-    keyToRules.find { case (key, exportTableConfig) =>
-      // find the group with a key that matches these label-values
-      downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
-        partKeyMap.get(label).contains(key(i))
-      }
-    }.flatMap { case (key, exportTableConfig) =>
+    downsamplerSettings.exportColumnFilterMap.get(partKeyMap).flatMap { exportTableConfig =>
       exportTableConfig.exportRules.takeWhile { rule =>
         // step through rules while we still haven't matched a "block" filter
         !rule.blockFilterGroups.exists { filterGroup =>

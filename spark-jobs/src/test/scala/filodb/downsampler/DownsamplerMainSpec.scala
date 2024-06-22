@@ -66,7 +66,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |    "key-labels": [_ns_],
        |    "groups": [
        |      {
-       |        "key": [my_ns],
+       |        "key": ["_ns_=\\"my_ns\\""],
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
        |        "label-column-mapping": [
@@ -189,7 +189,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a",
         |          label-column-mapping = [
@@ -216,7 +216,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -248,7 +248,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -284,7 +284,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -316,7 +316,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1", "l2"]
         |      groups = [
         |        {
-        |          key = ["l1a", "l2a"]
+        |          key = ["l1=\"l1a\"", "l2=\"l2a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -343,7 +343,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -360,7 +360,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          ]
         |        },
         |        {
-        |          key = ["l1b"]
+        |          key = ["l1=\"l1b\""]
         |          table = "l1b"
         |          table-path: "s3a://bucket/directory/catalog/database/l1b"
         |          label-column-mapping = [
@@ -387,7 +387,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -468,7 +468,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      "hour"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -490,10 +490,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
     dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
-      batchExporter.getColumnIndex(colName, pairExportKeyTableConfig._2).get shouldEqual i}
+      batchExporter.getColumnIndex(colName, dsSettings.exportKeyToConfig.head._2).get shouldEqual i}
   }
 
   it("should give correct export schema") {
@@ -503,7 +502,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["_ws_"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -525,7 +524,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val exportSchema = {
       val fields = new scala.collection.mutable.ArrayBuffer[StructField](11)
       fields.append(
@@ -542,7 +540,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         StructField("hour", IntegerType, false))
       StructType(fields)
     }
-    pairExportKeyTableConfig._2.tableSchema shouldEqual exportSchema
+    dsSettings.exportKeyToConfig.head._2.tableSchema shouldEqual exportSchema
   }
 
   it ("should write untyped data to cassandra") {
