@@ -93,7 +93,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
    * for each of "foo" and "bar".
    */
   private def exportForKey(rdd: RDD[Seq[PagedReadablePartition]],
-                           exportKey: Seq[ColumnFilter],
+                           exportKeyFilters: Seq[ColumnFilter],
                            exportTableConfig: ExportTableConfig,
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
@@ -106,7 +106,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig)).filter { row =>
       val rowKey = columnKeyIndices.map(row.get(_).toString)
-      rowKey.zip(exportKey).forall{ case (key, filter) => filter.filter.filterFunc(key) }
+      rowKey.zip(exportKeyFilters).forall{ case (key, filter) => filter.filter.filterFunc(key) }
     }.map { row =>
       numRowsExported.increment()
       row
