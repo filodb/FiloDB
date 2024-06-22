@@ -1,13 +1,14 @@
 package filodb.core
 
 import java.lang.management.ManagementFactory
+
+import scala.collection.{mutable, Seq}
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.query.{ColumnFilter, Filter}
-
-
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.{Seq, mutable}
 
 object Utils extends StrictLogging {
   private val threadMbean = ManagementFactory.getThreadMXBean
@@ -262,39 +263,5 @@ object Utils extends StrictLogging {
         s"######## labels=$labels\n${trie.printTree()}"
       }.mkString("\n")
     }
-  }
-}
-
-object Foo {
-
-  def makeEquals(label: String, value: String): ColumnFilter = {
-    ColumnFilter(label, filodb.core.query.Filter.Equals(value))
-  }
-
-  def makeRegex(label: String, value: String): ColumnFilter = {
-    ColumnFilter(label, filodb.core.query.Filter.EqualsRegex(value))
-  }
-  def main(args: Array[String]): Unit = {
-
-    val elements = Seq(
-      // some config
-      ("a", Seq(makeEquals("_ws_", "v1"), makeEquals("_ns_", "v2"))),
-      // some other config
-      ("b", Seq(makeEquals("_ws_", "v1"), makeEquals("_ns_", "v3"))),
-      // some single-label config
-      ("c", Seq(makeEquals("_ws_", "v4"))),
-      // some single-label regex config
-      ("d", Seq(makeRegex("_ws_", "v5.*"))),
-      // another single-label regex config
-      ("e", Seq(makeEquals("_ns_", "v6.*"))),
-      // three-label config
-      ("a", Seq(makeEquals("_ws_", "A"), makeEquals("_ns_", "B"), makeRegex("_metric_", "C"))),
-      ("a", Seq(makeEquals("_ws_", "D"), makeEquals("_ns_", "B"), makeRegex("_metric_", "C"))),
-    )
-    val trie = new Utils.ColumnFilterMap[String](elements.map{ case (a, b) => (b, a)})
-
-    println(trie.printTree())
-    println(trie.get(Map("_ws_" -> "v4")))
-
   }
 }

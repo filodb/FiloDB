@@ -2,9 +2,11 @@ package filodb.downsampler.chunk
 
 import scala.collection.mutable
 import scala.concurrent.duration._
+
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
+
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.Utils.ColumnFilterMap
 import filodb.core.query.ColumnFilter

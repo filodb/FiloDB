@@ -3,12 +3,15 @@ package filodb.downsampler.chunk
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
+
 import scala.collection.parallel.ForkJoinTaskSupport
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
+
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
@@ -210,9 +213,10 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
       val exportTasks = {
         // downsample the data as the first key is exported
-        val firstExportTaskWithDs = Seq(() =>
+        val firstExportTaskWithDs = Seq(() => {
           val (filters, config) = settings.exportKeyToConfig.head
-          exportForKey(rddWithDs, filters, config, batchExporter, spark))
+          exportForKey(rddWithDs, filters, config, batchExporter, spark)
+        })
         // export all remaining keys without the downsample step
         val remainingExportTasksWithoutDs = settings.exportKeyToConfig.tail.map { case (filters, config) =>
           () => exportForKey(rdd, filters, config, batchExporter, spark)
