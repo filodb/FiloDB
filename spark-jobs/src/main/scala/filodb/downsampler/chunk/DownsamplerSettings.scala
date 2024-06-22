@@ -4,6 +4,7 @@ import scala.collection.mutable
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
 
@@ -20,7 +21,7 @@ import filodb.prometheus.parse.Parser
  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
  * from the spark application driver.
  */
-class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable {
+class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable with StrictLogging {
 
   @transient lazy val filodbSettings = new FilodbSettings(conf)
 
@@ -149,7 +150,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
     }
   }
 
-  @transient lazy val exportColumnFilterMap = new ColumnFilterMap[ExportTableConfig](exportKeyToConfig)
+  @transient lazy val exportColumnFilterMap = {
+    val cfMap = new ColumnFilterMap[ExportTableConfig](exportKeyToConfig)
+    logger.info(s"Constructed ColumnFilterMap of data-export rules:\n${cfMap.printTree()}")
+    cfMap
+  }
 
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
 
