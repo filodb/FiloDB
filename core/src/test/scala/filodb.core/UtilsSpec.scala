@@ -1,6 +1,6 @@
 package filodb.core
 
-import filodb.core.Utils.{ColumnFilterMap, Trie}
+import filodb.core.Utils.ColumnFilterMap
 import filodb.core.query.{ColumnFilter, Filter}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,56 +13,6 @@ class UtilsSpec extends AnyFunSpec with Matchers {
 
   private def regex(column: String, value: String): ColumnFilter = {
     ColumnFilter(column, Filter.EqualsRegex(value))
-  }
-
-  it ("should store/retrieve trie elements correctly") {
-    val trie = new Trie[String, String]()
-
-    // get() before add()
-    trie.get(Seq()) shouldEqual None
-    trie.get(Seq("a")) shouldEqual None
-    trie.get(Seq("a", "b")) shouldEqual None
-
-    // simple adds
-    trie.add(Seq("a"), "a")
-    trie.get(Seq("a")).get shouldEqual "a"
-    trie.add(Seq("a", "b"), "b")
-    trie.get(Seq("a")).get shouldEqual "a"
-    trie.get(Seq("a", "b")).get shouldEqual "b"
-    trie.get(Seq("b")) shouldEqual None
-
-    // add to existing path
-    intercept[IllegalArgumentException] {
-      trie.add(Seq("a"), "c")
-    }
-    trie.get(Seq("a")).get shouldEqual "a"
-
-    // add multiple roots
-    trie.add(Seq("c"), "c")
-    trie.add(Seq("d"), "d")
-    trie.get(Seq("a")).get shouldEqual "a"
-    trie.get(Seq("a", "b")).get shouldEqual "b"
-    trie.get(Seq("c")).get shouldEqual "c"
-    trie.get(Seq("d")).get shouldEqual "d"
-
-    // repeat keys
-    trie.add(Seq("a", "a", "a"), "aaa")
-    trie.get(Seq("a", "a", "a")).get shouldEqual "aaa"
-
-    // crossed paths
-    trie.add(Seq("a", "b", "c", "d"), "abcd")
-    trie.add(Seq("e", "f", "c", "d"), "efcd")
-    trie.get(Seq("a", "b", "c", "d")).get shouldEqual "abcd"
-    trie.get(Seq("e", "f", "c", "d")).get shouldEqual "efcd"
-
-    // add to empty path
-    trie.add(Nil, "nil")
-    trie.get(Nil).get shouldEqual "nil"
-    intercept[IllegalArgumentException] {
-      trie.add(Nil, "nil")
-    }
-    // make sure nothing is suddenly broken
-    trie.get(Seq("a")).get shouldEqual "a"
   }
 
   it ("should store/retrieve ColumnFilterMap elements correctly") {

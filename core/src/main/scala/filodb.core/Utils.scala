@@ -44,76 +44,6 @@ object Utils extends StrictLogging {
   }
 
   /**
-   * Simple HashMap-node trie implementation.
-   */
-  class Trie[K, V] {
-    private class Node(val next: mutable.Map[K, Node],
-                       var element: Option[V]) {
-      /**
-       * Prints the Node tree; useful for debugging.
-       * @param key the key used to access this node (if it exists).
-       */
-      def printTree(indent: Int = 0, key: Option[K] = None): String = {
-        val indentStr = "-".repeat(indent)
-        val elementStr = element.toString().replaceAll("\\n", "\\n")
-        val keyStr = key.map(k => s"${k.toString}: ")
-          .getOrElse("")
-          .replaceAll("\\n", "\\n")
-        val rootStr = s"$indentStr$keyStr$elementStr"
-        if (next.isEmpty) {
-          return rootStr
-        }
-        val childrenStr = next.map{case (k, node) =>
-          node.printTree(indent + 1, Some(k))
-        }.mkString("\n")
-        s"$rootStr\n$childrenStr"
-      }
-    }
-
-    private val root = new Node(
-      next = new mutable.HashMap[K, Node],
-      element = None)
-
-    /**
-     * Adds an element to the trie at the argument path.
-     * @param path must not already be occupied by an element.
-     */
-    def add(path: Seq[K], element: V): Unit = {
-      var ptr = root
-      for (key <- path) {
-        val node = new Node(
-          next = new mutable.HashMap[K, Node],
-          element = None)
-        ptr = ptr.next.getOrElseUpdate(key, node)
-      }
-      if (ptr.element.isDefined) {
-        throw new IllegalArgumentException(
-          s"element already exists at path; exists=${ptr.element.get}; new=$element")
-      }
-      ptr.element = Some(element)
-    }
-
-    /**
-     * Returns an occupied Option iff the path is occupied by an element.
-     */
-    def get(path: Seq[K]): Option[V] = {
-      var ptr = root
-      for (key <- path) {
-        if (!ptr.next.contains(key)) {
-          return None
-        }
-        ptr = ptr.next(key)
-      }
-      ptr.element
-    }
-
-    /**
-     * Prints the trie; useful for debugging.
-     */
-    def printTree(): String = root.printTree()
-  }
-
-  /**
    * Maps sets of {@link ColumnFilter} "keys" to element "values".
    *
    * Convenient for use-cases that require e.g. configuration of rules against
@@ -148,11 +78,23 @@ object Utils extends StrictLogging {
   class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T)]){
 
     // The main idea:
-    // - Require that filter sets added map "keys" include at most one non-Equals filter.
-    // - Use tries to match get() argument label-values pairs with Equals filters efficiently
-    //   (see get() for more details).
-    // - The trie get() matches Equals filters; store each element with its one final
-    //   (possibly non-Equals) filter as values in the trie. Iterate these filters as appropriate.
+    // - Require that filter sets include at most one non-Equals filter.
+    // - For each set of filters, deterministically extract a "key" sequence of label names
+    //   and map each key to an inner hash-map. Label names are sorted alphabetically, then any
+    //   non-Equals filters are moved to the end. For example, the following filter sets
+    //   would have the keys:
+    //     1) {labelA="value1a", labelB="value2a"} -> (labelA, labelB)
+    //     2) {labelA="value1b", labelB="value2b"} -> (labelA, labelB)  // Same as above.
+    //     3) {labelC=~"value3", labelD="value4", labelE="value5"} -> (labelD, labelE, labelC)  // Regex at end.
+    //     4) {labelC=~"value3", labelD=~"value4", labelE="value5"} -> INVALID! // >1 regex filter.
+    // - The inner hash-maps are keyed on a prefix of these values (all except the last), and
+    //   the final filter-- along with the element to store-- is stored as the value. For example,
+    //   the inner hash-map of example (3) above would be keyed on (labelD-value, labelE-value) and
+    //   store (labelC-filter, element) pairs.
+    // - When a set of labels-value pairs is processed through the ColumnFilterMap, the values are
+    //   used to access each inner map until (a) the inner map contains a corresponding value, and
+    //   (b) the final filter matches the final label-value. When a match is found, the filter's paired
+    //   element is returned.
 
     /**
      * Maps individual filters to elements.
@@ -177,9 +119,9 @@ object Utils extends StrictLogging {
       }
     }
 
-    // Stores all the tries (for matching Equals filters).
+    // Stores a map for each possible sequence of labels.
     // Keys are found deterministically from each set of ColumnFilters to store.
-    val labelSeqToTrie = new mutable.HashMap[Seq[String], Trie[String, FilterToElementMap]]
+    val labelSeqToMap = new mutable.HashMap[Seq[String], mutable.Map[Seq[String], FilterToElementMap]]
 
     filterElementPairs.foreach{ case (filters, _) =>
       require(filters.count(!_.filter.isInstanceOf[Filter.Equals]) <= 1,
@@ -187,7 +129,7 @@ object Utils extends StrictLogging {
     }
 
     filterElementPairs.map{ case (filters, elt) =>
-      // Sort the filters to determine the appropriate labelSeqToTrie key.
+      // Sort the filters to determine the appropriate labelSeqToMap key.
       // Sort alphabetically, then move any non-Equals filters to the end.
       val sortedFilters = filters.toSeq
         .sortBy(_.column)
@@ -198,16 +140,15 @@ object Utils extends StrictLogging {
         (sortedFilters, elt)
     }.groupBy{ case (sortedFilters, _) =>
       // Group each set of filters by:
-      //   - its sequence of label names (determines the trie it will be assigned to)
-      //   - its sequence of label values (excluding the last value; this "value prefix"
-      //     determines the element's storage path in the trie).
+      //   - its sequence of label names (determines the map it will be assigned to)
+      //   - its sequence of label values (determines the key for storage within the assigned map)
       val labelNames = sortedFilters.map(_.column)
       val prefixValues = sortedFilters
         .dropRight(1)
         .map(_.filter.asInstanceOf[Filter.Equals].value.toString)
       (labelNames, prefixValues)
     }.foreach{ case ((labelNames, prefixValues), sortedFiltersToElements) =>
-      // All (filters,element) pairs here will be grouped at the same path in the same trie.
+      // All (filters,element) pairs here will be grouped at the same path in the same map.
       // For some efficiency, we store all Equals filters as part of a map. All non-Equals
       //   filters are stored in a separate list (to be iterated sequentially).
       val equalsFilterMap = new mutable.HashMap[String, T]
@@ -219,9 +160,9 @@ object Utils extends StrictLogging {
         }
       }
       val filterToElementMap = FilterToElementMap(equalsFilterMap.toMap, otherFilters)
-      labelSeqToTrie
-        .getOrElseUpdate(labelNames, new Trie())
-        .add(prefixValues, filterToElementMap)
+      labelSeqToMap
+        .getOrElseUpdate(labelNames, new mutable.HashMap[Seq[String], FilterToElementMap]())
+        .put(prefixValues, filterToElementMap)
     }
 
     /**
@@ -235,18 +176,18 @@ object Utils extends StrictLogging {
      *   This data-structure should only be used where each of these is reasonably small.
      */
     def get(labels: collection.Map[String, String]): Option[T] = {
-      // The tries we've built require that certain labels are present in the set.
-      // Identify the set of (trie, labels-names) pairs s.t. all labels are present,
-      //   then map these to the set of (trie, label-values) pairs for efficiency.
-      val trieValuesPairs = labelSeqToTrie
-        .map{ case (filterLabels, trie) => (trie, filterLabels.map(labels.get)) }  // Get all value options.
-        .filter { case (_, filterValues) => filterValues.forall(_.isDefined) }     // Make sure all are defined.
-        .map { case (trie, filterValues) => (trie, filterValues.map(_.get)) }      // Extract the values.
-      for ((trie, values) <- trieValuesPairs) {
-        // Get the set of final ColumnFilters from the trie, then
+      // The maps we've built require that certain labels are present in the set.
+      // Identify the set of (map, labels-names) pairs s.t. all labels are present,
+      //   then map these to the set of (map, label-values) pairs for efficiency.
+      val mapValuesPairs = labelSeqToMap
+        .map{ case (filterLabels, map) => (map, filterLabels.map(labels.get)) }  // Get all value options.
+        .filter { case (_, filterValues) => filterValues.forall(_.isDefined) }   // Make sure all are defined.
+        .map { case (map, filterValues) => (map, filterValues.map(_.get)) }      // Extract the values.
+      for ((map, values) <- mapValuesPairs) {
+        // Get the set of final ColumnFilters from the map, then
         //   check each against the final label value.
         val valuesPrefix = values.dropRight(1)
-        val matchedElement = trie.get(valuesPrefix)
+        val matchedElement = map.get(valuesPrefix)
           .flatMap(filterToElementMap => filterToElementMap.get(values.last))
         if (matchedElement.isDefined) {
           return matchedElement
@@ -255,13 +196,8 @@ object Utils extends StrictLogging {
       None  // No matches were found.
     }
 
-    /**
-     * Prints the trie; useful for debugging.
-     */
-    def printTree(): String = {
-      labelSeqToTrie.map{ case (labels, trie) =>
-        s"######## labels=$labels\n${trie.printTree()}"
-      }.mkString("\n")
+    override def toString(): String = {
+      s"ColumnFilterMap(${labelSeqToMap.toString()})"
     }
   }
 }
