@@ -152,7 +152,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportColumnFilterMap = {
     val cfMap = new ColumnFilterMap[ExportTableConfig](exportKeyToConfig)
-    logger.info(s"Constructed ColumnFilterMap of data-export rules:\n${cfMap.printTree()}")
+    logger.info(s"Constructed data-export rule map: $cfMap")
     cfMap
   }
 
