@@ -44,7 +44,7 @@ object Utils extends StrictLogging {
   }
 
   /**
-   * Maps sets of {@link ColumnFilter} "keys" to element "values".
+   * Maps sets of ColumnFilter "keys" to element "values".
    *
    * Convenient for use-cases that require e.g. configuration of rules against
    *   label-value filters (filter->rule pairs). The {@link #get} method
@@ -65,7 +65,7 @@ object Utils extends StrictLogging {
    *     - all filter labels are present in the map
    *     - every filter is matched by label in the map.
    *
-   * NOTE: at most one {@link ColumnFilter} in a set can be non-Equals.
+   * NOTE: at most one ColumnFilter in a set can be non-Equals.
    *
    * NOTE: This implementation is intended to favor simplicity over efficiency.
    *   Other implementations should be considered if the {@link #get} runtime
@@ -166,8 +166,8 @@ object Utils extends StrictLogging {
     }
 
     /**
-     * Returns an occupied {@link Option} iff the labels matched an
-     *   entire set of {@link ColumnFilter}s.
+     * Returns an occupied Option iff the labels matched an
+     *   entire set of ColumnFilters.
      * An element is chosen arbitrarily when multiple sets are matched.
      *
      * Runtime grows (among other ways):

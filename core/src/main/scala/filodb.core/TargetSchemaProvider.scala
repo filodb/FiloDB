@@ -14,7 +14,7 @@ final case class StaticTargetSchemaProvider(targetSchemaOpt: Option[Seq[String]]
 }
 
 /**
- * A {@link TargetSchemaProvider} backed by a {@link ColumnFilterMap}.
+ * A TargetSchemaProvider backed by a ColumnFilterMap.
  *
  * @param filterChangesPairs (filters,changes) pairs; at most one of 'filters'
  *                           can be a non-Equals filter.
@@ -39,7 +39,7 @@ final class ColumnFilterMapTargetSchemaProvider(filtersChangesPairs: Iterable[(
   }
 
   /**
-   * NOTE!: this implementation only considers {@link Filter.Equals} filters.
+   * NOTE!: this implementation only considers Equals filters.
    * All other filters are ignored.
    */
   override def targetSchemaFunc(columnFilters: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
