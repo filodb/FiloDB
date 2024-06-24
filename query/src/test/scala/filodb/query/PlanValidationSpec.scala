@@ -17,8 +17,6 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
     planString
       .replaceAll("testProbe-.*]", "testActor]")
       .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-      .replaceAllLiterally("['", "")
-      .replaceAllLiterally("\n", "")
   }
 
   /**

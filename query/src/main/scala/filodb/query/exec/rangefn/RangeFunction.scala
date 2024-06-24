@@ -306,22 +306,22 @@ object RangeFunction {
                           func: Option[InternalRangeFunction],
                           funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
-      case None                   => () => new LastSampleChunkedFunctionL
-      case Some(CountOverTime)    => () => new CountOverTimeChunkedFunction()
-      case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionL
-      case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")
+      case None                                   => () => new LastSampleChunkedFunctionL
+      case Some(CountOverTime)                    => () => new CountOverTimeChunkedFunction()
+      case Some(SumOverTime)                      => () => new SumOverTimeChunkedFunctionL
+      case Some(AvgWithSumAndCountOverTime)       => require(schema.columns(2).name == "count")
                                    () => new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
-      case Some(AvgOverTime)      => () => new AvgOverTimeChunkedFunctionL
-      case Some(MinOverTime)      => () => new MinOverTimeChunkedFunctionL
-      case Some(MaxOverTime)      => () => new MaxOverTimeChunkedFunctionL
-      case Some(StdDevOverTime)   => () => new StdDevOverTimeChunkedFunctionL
-      case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionL
-      case Some(Changes)          => () => new ChangesChunkedFunctionL
-      case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
-      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
-      case Some(Last)             => () => new LastSampleChunkedFunctionL
+      case Some(AvgOverTime)                      => () => new AvgOverTimeChunkedFunctionL
+      case Some(MinOverTime)                      => () => new MinOverTimeChunkedFunctionL
+      case Some(MaxOverTime)                      => () => new MaxOverTimeChunkedFunctionL
+      case Some(StdDevOverTime)                   => () => new StdDevOverTimeChunkedFunctionL
+      case Some(StdVarOverTime)                   => () => new StdVarOverTimeChunkedFunctionL
+      case Some(Changes)                          => () => new ChangesChunkedFunctionL
+      case Some(QuantileOverTime)                 => () => new QuantileOverTimeChunkedFunctionL(funcParams)
+      case Some(PredictLinear)                    => () => new PredictLinearChunkedFunctionL(funcParams)
+      case Some(Last)                             => () => new LastSampleChunkedFunctionL
       case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionL()
-      case _                      => iteratingFunction(func, schema, funcParams)
+      case _                                      => iteratingFunction(func, schema, funcParams)
     }
   }
 
@@ -334,36 +334,36 @@ object RangeFunction {
                             config: QueryConfig,
                             funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
-      case None                   => () => new LastSampleChunkedFunctionD
-      case Some(Last)             => () => new LastSampleChunkedFunctionD
+      case None                                   => () => new LastSampleChunkedFunctionD
+      case Some(Last)                             => () => new LastSampleChunkedFunctionD
       case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative
-                                  => () => new ChunkedIncreaseFunction
+                                                  => () => new ChunkedIncreaseFunction
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
-                                  => () => new ChunkedRateFunction
+                                                  => () => new ChunkedRateFunction
       case Some(Increase) if !schema.columns(1).isCumulative
-                                  => () => new SumOverTimeChunkedFunctionD
+                                                  => () => new SumOverTimeChunkedFunctionD
       case Some(Rate)     if !schema.columns(1).isCumulative
-                                  => () => new RateOverDeltaChunkedFunctionD
+                                                  => () => new RateOverDeltaChunkedFunctionD
 
-      case Some(CountOverTime)    => () => new CountOverTimeChunkedFunctionD()
-      case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionD
+      case Some(CountOverTime)                    => () => new CountOverTimeChunkedFunctionD()
+      case Some(SumOverTime)                      => () => new SumOverTimeChunkedFunctionD
       case Some(AvgWithSumAndCountOverTime)
-                                  => require(schema.columns(2).name == "count")
+                                                  => require(schema.columns(2).name == "count")
                                      () => new AvgWithSumAndCountOverTimeFuncD(schema.colIDs(2))
-      case Some(AvgOverTime)      => () => new AvgOverTimeChunkedFunctionD
-      case Some(MinOverTime)      => () => new MinOverTimeChunkedFunctionD
-      case Some(MaxOverTime)      => () => new MaxOverTimeChunkedFunctionD
-      case Some(StdDevOverTime)   => () => new StdDevOverTimeChunkedFunctionD
-      case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionD
-      case Some(Changes)          => () => new ChangesChunkedFunctionD()
-      case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
-      case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
-      case Some(Timestamp)        => () => new TimestampChunkedFunction()
-      case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
-      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
-      case Some(PresentOverTime)  => () => new PresentOverTimeChunkedFunctionD()
-      case Some(MedianAbsoluteDeviationOverTime) => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionD()
-      case _                      => iteratingFunction(func, schema, funcParams)
+      case Some(AvgOverTime)                      => () => new AvgOverTimeChunkedFunctionD
+      case Some(MinOverTime)                      => () => new MinOverTimeChunkedFunctionD
+      case Some(MaxOverTime)                      => () => new MaxOverTimeChunkedFunctionD
+      case Some(StdDevOverTime)                   => () => new StdDevOverTimeChunkedFunctionD
+      case Some(StdVarOverTime)                   => () => new StdVarOverTimeChunkedFunctionD
+      case Some(Changes)                          => () => new ChangesChunkedFunctionD()
+      case Some(QuantileOverTime)                 => () => new QuantileOverTimeChunkedFunctionD(funcParams)
+      case Some(HoltWinters)                      => () => new HoltWintersChunkedFunctionD(funcParams)
+      case Some(Timestamp)                        => () => new TimestampChunkedFunction()
+      case Some(ZScore)                           => () => new ZScoreChunkedFunctionD()
+      case Some(PredictLinear)                    => () => new PredictLinearChunkedFunctionD(funcParams)
+      case Some(PresentOverTime)                  => () => new PresentOverTimeChunkedFunctionD()
+      case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionD()
+      case _                                      => iteratingFunction(func, schema, funcParams)
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -403,31 +403,31 @@ object RangeFunction {
                         schema: ResultSchema,
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
-    case None                         => () => LastSampleFunction
-    case Some(Last)                   => () => LastSampleFunction
+    case None                                   => () => LastSampleFunction
+    case Some(Last)                             => () => LastSampleFunction
     case Some(Rate) if schema.columns(1).isCumulative
-                                      => () => RateFunction
+                                                => () => RateFunction
     case Some(Increase) if schema.columns(1).isCumulative
-                                      => () => IncreaseFunction
-    case Some(Rate)                   => () => new RateOverDeltaFunction()
-    case Some(Increase)               => () => new SumOverTimeFunction() // Sum of deltas over time
-    case Some(Delta)                  => () => DeltaFunction
-    case Some(Resets)                 => () => new ResetsFunction()
+                                                => () => IncreaseFunction
+    case Some(Rate)                             => () => new RateOverDeltaFunction()
+    case Some(Increase)                         => () => new SumOverTimeFunction() // Sum of deltas over time
+    case Some(Delta)                            => () => DeltaFunction
+    case Some(Resets)                           => () => new ResetsFunction()
     case Some(Irate) if schema.columns(1).isCumulative
-                                      => () => IRateFunction
-    case Some(Idelta)                 => () => IDeltaFunction
-    case Some(Irate)                  => () => IRatePeriodicFunction
-    case Some(Deriv)                  => () => DerivFunction
-    case Some(MaxOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double])
-    case Some(MinOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
-    case Some(CountOverTime)          => () => new CountOverTimeFunction()
-    case Some(SumOverTime)            => () => new SumOverTimeFunction()
-    case Some(AvgOverTime)            => () => new AvgOverTimeFunction()
-    case Some(StdDevOverTime)         => () => new StdDevOverTimeFunction()
-    case Some(StdVarOverTime)         => () => new StdVarOverTimeFunction()
-    case Some(Changes)                => () => ChangesOverTimeFunction
-    case Some(QuantileOverTime)       => () => new QuantileOverTimeFunction(funcParams)
-    case Some(MedianAbsoluteDeviationOverTime) => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
+                                                => () => IRateFunction
+    case Some(Idelta)                           => () => IDeltaFunction
+    case Some(Irate)                            => () => IRatePeriodicFunction
+    case Some(Deriv)                            => () => DerivFunction
+    case Some(MaxOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double])
+    case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+    case Some(CountOverTime)                    => () => new CountOverTimeFunction()
+    case Some(SumOverTime)                      => () => new SumOverTimeFunction()
+    case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()
+    case Some(StdDevOverTime)                   => () => new StdDevOverTimeFunction()
+    case Some(StdVarOverTime)                   => () => new StdVarOverTimeFunction()
+    case Some(Changes)                          => () => ChangesOverTimeFunction
+    case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
+    case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case _                            => ??? //TODO enumerate all possible cases
   }
 }
