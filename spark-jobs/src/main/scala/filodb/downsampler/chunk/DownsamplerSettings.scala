@@ -9,12 +9,10 @@ import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
-import filodb.core.query.ColumnFilter
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.core.utils.ColumnFilterMap
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.ExportConstants._
-import filodb.prometheus.ast.InstantExpression
 import filodb.prometheus.parse.Parser
 
 /**
@@ -91,7 +89,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportKeyToConfig = {
     downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
-      val keyFilters = group.as[Seq[String]]("key").map(parseFilter)
+      val keyFilters = group.as[Seq[String]]("key").map(Parser.parseFilter)
       val tableName = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
       // label-column-mapping is defined like this in conf file ["_ws_", "workspace", "_ns_", "namespace"]
@@ -133,8 +131,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
-        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map(_.map(parseFilter))
-        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map(_.map(parseFilter))
+        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map(_.map(Parser.parseFilter))
+        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map(_.map(Parser.parseFilter))
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
@@ -181,12 +179,5 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   def shouldTrace(pkPairs: Seq[(String, String)]): Boolean = {
     trace.exists(w => w.forall(pkPairs.contains))
-  }
-
-  private def parseFilter(filter: String): ColumnFilter = {
-    Parser.parseQuery(s"{$filter}")
-      .asInstanceOf[InstantExpression]
-      .getUnvalidatedColumnFilters()
-      .head
   }
 }

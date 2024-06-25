@@ -222,4 +222,15 @@ object ParserUtil {
 
     bob.toString()
   }
+
+  /**
+   * Parses a single PromQL ColumnFilter.
+   * @param filter a PromQL-formatted filter. Example: foo=~"bar.*"
+   */
+  def parseFilter(filter: String): ColumnFilter = {
+    Parser.parseQuery(s"{$filter}")
+      .asInstanceOf[InstantExpression]
+      .getUnvalidatedColumnFilters()
+      .head
+  }
 }
