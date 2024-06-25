@@ -89,7 +89,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportKeyToConfig = {
     downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
-      val keyFilters = group.as[Seq[String]]("key").map(Parser.parseFilter)
+      val keyFilters = group.as[Seq[String]]("key").map(Parser.parseColumnFilter)
       val tableName = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
       // label-column-mapping is defined like this in conf file ["_ws_", "workspace", "_ns_", "namespace"]
@@ -131,8 +131,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
-        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map(_.map(Parser.parseFilter))
-        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map(_.map(Parser.parseFilter))
+        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map(_.map(Parser.parseColumnFilter))
+        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map(_.map(Parser.parseColumnFilter))
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }

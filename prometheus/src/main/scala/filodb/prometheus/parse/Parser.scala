@@ -195,6 +195,18 @@ object Parser extends StrictLogging {
       case _ => throw new UnsupportedOperationException()
     }
   }
+
+  /**
+   * Parses a single PromQL ColumnFilter.
+   *
+   * @param filter a PromQL-formatted filter. Example: foo=~"bar.*"
+   */
+  def parseColumnFilter(filter: String): ColumnFilter = {
+    Parser.parseQuery(s"{$filter}")
+      .asInstanceOf[InstantExpression]
+      .getUnvalidatedColumnFilters()
+      .head
+  }
 }
 
 object ParserUtil {
@@ -221,16 +233,5 @@ object ParserUtil {
     }
 
     bob.toString()
-  }
-
-  /**
-   * Parses a single PromQL ColumnFilter.
-   * @param filter a PromQL-formatted filter. Example: foo=~"bar.*"
-   */
-  def parseFilter(filter: String): ColumnFilter = {
-    Parser.parseQuery(s"{$filter}")
-      .asInstanceOf[InstantExpression]
-      .getUnvalidatedColumnFilters()
-      .head
   }
 }
