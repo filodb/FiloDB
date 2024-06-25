@@ -1,7 +1,7 @@
 package filodb.core
 
-import filodb.core.Utils.ColumnFilterMap
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.utils.ColumnFilterMap
 
 trait TargetSchemaProvider {
   def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange]
