@@ -27,7 +27,7 @@ object Dependencies {
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
-  val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
+  val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
   val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
   val scalaTest         = "org.scalatest"              %% "scalatest"            % "3.1.2"
