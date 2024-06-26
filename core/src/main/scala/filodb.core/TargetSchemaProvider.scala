@@ -15,20 +15,9 @@ final case class StaticTargetSchemaProvider(targetSchemaOpt: Option[Seq[String]]
 
 /**
  * A TargetSchemaProvider backed by a ColumnFilterMap.
- *
- * @param filterChangesPairs (filters,changes) pairs; at most one of 'filters'
- *                           can be a non-Equals filter.
  */
-final class ColumnFilterMapTargetSchemaProvider(filtersChangesPairs: Iterable[(
-                                                 Iterable[ColumnFilter],
-                                                 Iterable[TargetSchemaChange]
-                                               )]) extends TargetSchemaProvider {
-  val columnFilterMap = {
-    val sortedFilterElementPairs = filtersChangesPairs.map { case (filters, changes) =>
-      (filters, changes.toSeq.sortBy(_.time))
-    }
-    new ColumnFilterMap[Seq[TargetSchemaChange]](sortedFilterElementPairs)
-  }
+final case class ColumnFilterMapTargetSchemaProvider(columnFilterMap: ColumnFilterMap[Seq[TargetSchemaChange]])
+  extends TargetSchemaProvider {
 
   /**
    * Given a label->value map, returns an applicable set of
@@ -48,6 +37,25 @@ final class ColumnFilterMapTargetSchemaProvider(filtersChangesPairs: Iterable[(
       .map(f => f.column -> f.filter.asInstanceOf[Filter.Equals].value.toString)
       .toMap
     this.targetSchemaFunc(equalsMap)
+  }
+}
+
+object ColumnFilterMapTargetSchemaProvider {
+  /**
+   * @param filterChangePairs (filters,changes) pairs used to populate the backing ColumnFilterMap;
+   *                          at most one of 'filters' can be a non-Equals filter.
+   */
+  def apply(filterChangePairs: Iterable[(
+      Iterable[ColumnFilter],
+      Iterable[TargetSchemaChange]
+    )]): ColumnFilterMapTargetSchemaProvider = {
+    val columnFilterMap = {
+      val sortedFilterChangePairs = filterChangePairs.map { case (filters, changes) =>
+        (filters, changes.toSeq.sortBy(_.time))
+      }
+      new ColumnFilterMap[Seq[TargetSchemaChange]](sortedFilterChangePairs)
+    }
+    new ColumnFilterMapTargetSchemaProvider(columnFilterMap)
   }
 }
 
