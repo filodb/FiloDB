@@ -228,6 +228,50 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
   }
 }
 
+class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def apply(
+                      startTimestamp: Long, endTimestamp: Long, window: Window,
+                      sampleToEmit: TransientRow,
+                      queryConfig: QueryConfig
+                    ): Unit = {
+    val q = 0.5
+    val values: Buffer[Double] = Buffer.ofSize(window.size)
+    for (i <- 0 until window.size) {
+      val curValue = window.apply(i).getDouble(1)
+      if (!curValue.isNaN) {
+        values.append(curValue)
+      }
+    }
+    val size = values.length
+    values.sort(spire.algebra.Order.fromOrdering[Double])
+    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
+    var median : Double = Double.NaN
+    if (size > 0) {
+      median = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
+    }
+
+    var medianAbsoluteDeviationResult : Double = Double.NaN
+    val diffFromMedians: Buffer[Double] = Buffer.ofSize(window.size)
+
+    for (i <- 0 until window.size) {
+      val curValue = window.apply(i).getDouble(1)
+      diffFromMedians.append(Math.abs(median - curValue))
+    }
+    diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+    if (size > 0) {
+      medianAbsoluteDeviationResult = diffFromMedians(lowerIndex)*(1-weight) + diffFromMedians(upperIndex)*weight
+    }
+    sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)
+
+  }
+}
+
 abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
@@ -754,6 +798,30 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
 
 }
 
+abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsoluteDeviationResult: Double = Double.NaN,
+                                                               var values: Buffer[Double] = Buffer.empty[Double])
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { medianAbsoluteDeviationResult = Double.NaN; values = Buffer.empty[Double] }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val size = values.length
+    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, size)
+    values.sort(spire.algebra.Order.fromOrdering[Double])
+    var median: Double = Double.NaN
+    if (size > 0) {
+      median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
+      val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
+      val iter = values.iterator()
+      for (value <- values) {
+        diffFromMedians.append(Math.abs(median - value))
+      }
+      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      medianAbsoluteDeviationResult = diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
+    }
+    sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)
+  }
+
+}
+
 class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
@@ -784,6 +852,27 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
   }
 }
 
+class MedianAbsoluteDeviationOverTimeChunkedFunctionD
+  extends MedianAbsoluteDeviationOverTimeChunkedFunction
+  with ChunkedDoubleRangeFunction {
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    var rowNum = startRowNum
+    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
+
+    for (_ <- startRowNum to endRowNum) {
+      val nextvalue = it.next
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!JLDouble.isNaN(nextvalue)) {
+        values += nextvalue
+      }
+    }
+  }
+}
+
 class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
@@ -805,6 +894,21 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
         rowNum += 1
       }
     }
+  }
+}
+
+class MedianAbsoluteDeviationOverTimeChunkedFunctionL
+  extends MedianAbsoluteDeviationOverTimeChunkedFunction with ChunkedLongRangeFunction {
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+      val it = longReader.iterate(longVectAcc, longVect, startRowNum)
+      for (_ <- startRowNum to endRowNum) {
+        val nextvalue = it.next
+        values += nextvalue
+      }
   }
 }
 

@@ -639,6 +639,7 @@ enum InternalRangeFunction {
   TIME_STAMP            = 25;
   ABSENT_OVER_TIME      = 26;
   PRESENT_OVER_TIME     = 27;
+  MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME = 28;
 }
 
 enum SortFunctionId {

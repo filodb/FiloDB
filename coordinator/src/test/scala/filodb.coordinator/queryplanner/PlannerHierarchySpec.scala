@@ -1155,6 +1155,28 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan, expected)
   }
 
+  it("should generate plan for median absolute deviation over time") {
+    val lp = Parser.queryRangeToLogicalPlan(
+        """mad_over_time(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" }[15m])""",
+        TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
+
+    val expected =
+        """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000)))
+          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],raw)
+          |--T~PeriodicSamplesMapper(start=1634173730000, step=300000, end=1634777330000, window=Some(900000), functionId=Some(MedianAbsoluteDeviationOverTime), rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],raw)
+          |--T~PeriodicSamplesMapper(start=1634173730000, step=300000, end=1634777330000, window=Some(900000), functionId=Some(MedianAbsoluteDeviationOverTime), rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],raw)
+          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],downsample)
+          |--T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634173430000, window=Some(900000), functionId=Some(MedianAbsoluteDeviationOverTime), rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633912430000,1634173430000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],downsample)
+          |--T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634173430000, window=Some(900000), functionId=Some(MedianAbsoluteDeviationOverTime), rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633912430000,1634173430000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-767189112],downsample)""".stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
   it("should generate plan for raw query spanning multiple partitions with namespace regex, and push down aggregations") {
     val query =
       """sum(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" })
