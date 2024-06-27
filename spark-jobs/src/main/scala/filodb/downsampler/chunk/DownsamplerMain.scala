@@ -3,19 +3,16 @@ package filodb.downsampler.chunk
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
-
 import scala.collection.parallel.ForkJoinTaskSupport
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
 
@@ -98,11 +95,11 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
     val exportStartMs = System.currentTimeMillis()
-    val columnKeyIndices = settings.exportRuleKey.map(colName => {
+    val columnKeyIndices = exportKeyFilters.map(_.column).map{ colName =>
       val index = batchExporter.getColumnIndex(colName, exportTableConfig)
       assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
       index.get
-    })
+    }
 
     val filteredRowRdd = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig)).filter { row =>
       val rowKey = columnKeyIndices.map(row.get(_).toString)

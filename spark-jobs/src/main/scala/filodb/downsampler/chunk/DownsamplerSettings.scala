@@ -138,11 +138,10 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       }
       val config = ExportTableConfig(tableName, tableSchema, tablePath, rules, labelColumnMapping, partitionByCols)
 
-      assert(keyFilters.size <= exportRuleKey.size,
-        s"expected at most as many filters as exportRuleKey; filters=$keyFilters; exportRuleKey=$exportRuleKey")
-      assert(keyFilters.map(_.column) == exportRuleKey.take(keyFilters.size),
-        s"expected filter columns defined in the same order as exportRuleKey; " +
-          s"filters=$keyFilters; exportRuleKey=$exportRuleKey")
+      assert(keyFilters.map(_.column).toSet.subsetOf(exportRuleKey.toSet),
+        s"expected filters only on key columns; filters=$keyFilters")
+      assert(keyFilters.map(_.column).distinct.size == keyFilters.size,
+        s"expected at most one filter per column; filters=$keyFilters")
 
       keyFilters -> config
     }
