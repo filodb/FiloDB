@@ -370,7 +370,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     info(execPlan.printTree())
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
-    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 5, 4, 3)
+    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 3, 5, 4)
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
@@ -382,7 +382,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
@@ -424,7 +424,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]

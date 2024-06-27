@@ -139,12 +139,12 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
     val minColId = SelectRawPartitionsExec.histMinColumn(histMaxMinDS.schema,
       histMaxMinDS.schema.allColumns.map(x => x.id))
     minColId.isDefined shouldEqual true
-    minColId.get shouldEqual 3
+    minColId.get shouldEqual 4
 
     val maxColId = SelectRawPartitionsExec.histMaxColumn(histMaxMinDS.schema,
       histMaxMinDS.schema.allColumns.map(x => x.id))
     maxColId.isDefined shouldEqual true
-    maxColId.get shouldEqual 4
+    maxColId.get shouldEqual 5
   }
 
   it("test histMinColumn and histMaxColumn should not return the colId if not present") {
@@ -159,10 +159,10 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
     val colIds = SelectRawPartitionsExec.getColumnIDs(histMaxMinDS.schema, Seq(),
       Seq(PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())))
     colIds.size shouldEqual 2
-    colIds shouldEqual Seq(0, 5)
+    colIds shouldEqual Seq(0, 3)
     val colIdsWithMinMax = SelectRawPartitionsExec.addIDsForHistMaxMin(histMaxMinDS.schema, colIds)
     colIdsWithMinMax.size shouldEqual 4
-    colIdsWithMinMax shouldEqual Seq(0, 5, 4, 3)
+    colIdsWithMinMax shouldEqual Seq(0, 3, 5, 4)
   }
 
   it("test getColumnIDs returns correct colIds for prom histograms") {
