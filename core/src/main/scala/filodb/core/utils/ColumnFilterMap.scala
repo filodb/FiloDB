@@ -57,6 +57,37 @@ class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T
   //   used to access each inner map until (a) the inner map contains a corresponding value, and
   //   (b) the final filter matches the final label-value. When a match is found, the filter's paired
   //   element is returned.
+  //
+  // As an example, consider a ColumnFilterMap composed of these entries:
+  //
+  //     {l1="v1", l2="v2", l3="v3a"} -> A
+  //     {l1="v1", l2="v2", l3="v3b"} -> B
+  //     {l1="v1", l2="v2", l4="v4"} -> C
+  //     {l1="v1", l2="v2", l3=~"v3.*"} -> D
+  //     {l1="v1", l2=~"v2.*", l3="v3"} -> E
+  //     {l1="v1", l2="v2a"} -> F
+  //     {l1="v1", l2="v2b"} -> G
+  //     {l1="v1a", l2="v2a"} -> H
+  //     {l1="v1"} -> I
+  //
+  //   The nested maps would be structured as:
+  //
+  //     (l1, l2, l3) -> {
+  //         (v1, v2) -> [l3="v3a":A, l3="v3b":B, l3=~"v3.*":D]
+  //     }
+  //     (l1, l2, l4) -> {
+  //         (v1, v2) -> [l4="v4":C]
+  //     }
+  //     (l1, l3, l2) -> {
+  //         (v1, v3) -> [l2=~"v2.*":E]
+  //     }
+  //     (l1, l2) -> {
+  //         (v1) -> [l2="v2a":F, l2="v2b":G]
+  //         (v1a) -> [l2="v2a":H]
+  //     }
+  //     (l1) -> {
+  //         () -> [l1="v1":I]
+  //     }
 
   /**
    * Maps individual filters to elements.
@@ -67,6 +98,8 @@ class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T
     /**
      * Returns an occupied Option iff at least one filter is matched.
      * The Equals map is checked first before other filters are iterated.
+     *
+     * @param string the string to be matched.
      */
     def get(string: String): Option[T] = {
       if (equalsFilters.contains(string)) {
