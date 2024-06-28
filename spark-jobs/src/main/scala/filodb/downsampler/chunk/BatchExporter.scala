@@ -345,4 +345,28 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
   // scalastyle:on method.length
+
+  /**
+   * Filters for Rows that match the argument filters.
+   *
+   * @param exportKeyFilters at most one filter for each column of the export key.
+   */
+  def filterRdd(rdd: RDD[Row],
+                exportKeyFilters: Seq[ColumnFilter],
+                exportTableConfig: ExportTableConfig): RDD[Row] = {
+    // The ith index is the index of the column filtered by the ith filter.
+    // Example:
+    //   Columns: foo, bar, baz
+    //   Filters: "bar"=~"hello", foo="hey"
+    //   rowFilterIndices = [1, 0]
+    val rowFilterIndices = exportKeyFilters.map(_.column).map { colName =>
+      val index = getColumnIndex(colName, exportTableConfig)
+      assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
+      index.get
+    }
+    rdd.filter { row =>
+      val rowKey = rowFilterIndices.map(row.get(_).toString)
+      rowKey.zip(exportKeyFilters).forall { case (key, filter) => filter.filter.filterFunc(key) }
+    }
+  }
 }

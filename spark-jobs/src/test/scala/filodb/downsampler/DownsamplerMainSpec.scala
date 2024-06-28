@@ -26,7 +26,8 @@ import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.commons.io.FileUtils
-import org.apache.spark.{SparkConf, SparkException}
+import org.apache.spark.sql.Row
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -50,6 +51,8 @@ import scala.concurrent.duration._
 class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+
+  val sparkCtx = SparkContext.getOrCreate(new SparkConf(true).setMaster("local").setAppName("test"))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
   val exportToFile = None  // Some("s3a://bucket/directory/catalog/database/table")
@@ -493,6 +496,126 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
     dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
       batchExporter.getColumnIndex(colName, dsSettings.exportKeyToConfig.head._2).get shouldEqual i}
+  }
+
+  it("should correctly apply export column filters") {
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws", "a"),
+        Row("DNE", "b"),
+        Row("my_ws", "c"),
+        Row("DNE", "d"),
+      ))
+      val expected = Seq(
+        Row("my_ws", "a"),
+        Row("my_ws", "c"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("a", "my_ns"),
+        Row("b", "DNE"),
+        Row("c", "my_ns123"),
+        Row("d", "DNE"),
+      ))
+      val expected = Seq(
+        Row("a", "my_ns"),
+        Row("c", "my_ns123"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\"", "_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws", "my_ns1"),
+        Row("my_ws123", "my_ns2"),
+        Row("c", "c"),
+        Row("my_ws", "DNE"),
+        Row("my_ws", "my_ns3"),
+      ))
+      val expected = Seq(
+        Row("my_ws", "my_ns1"),
+        Row("my_ws", "my_ns3"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
   }
 
   it("should give correct export schema") {
