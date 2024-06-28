@@ -3,12 +3,15 @@ package filodb.downsampler.chunk
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
+
 import scala.collection.parallel.ForkJoinTaskSupport
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
+
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
