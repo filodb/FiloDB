@@ -1,9 +1,7 @@
-package filodb.core.utils
+package filodb.core.query
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-
-import filodb.core.query.{ColumnFilter, Filter}
 
 /**
  * Maps sets of ColumnFilter "keys" to element "values".

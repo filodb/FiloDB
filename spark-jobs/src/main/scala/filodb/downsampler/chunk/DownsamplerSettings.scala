@@ -9,8 +9,8 @@ import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
+import filodb.core.query.ColumnFilterMap
 import filodb.core.store.{IngestionConfig, StoreConfig}
-import filodb.core.utils.ColumnFilterMap
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.ExportConstants._
 import filodb.prometheus.parse.Parser

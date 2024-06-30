@@ -1,7 +1,6 @@
 package filodb.core
 
-import filodb.core.utils.ColumnFilterMap
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, ColumnFilterMap, Filter}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
