@@ -1,10 +1,9 @@
-package filodb.core
+package filodb.core.query
 
-import filodb.core.query.{ColumnFilter, ColumnFilterMap, Filter}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class UtilsSpec extends AnyFunSpec with Matchers {
+class ColumnFilterSpec extends AnyFunSpec with Matchers {
 
   private def equals(column: String, value: String): ColumnFilter = {
     ColumnFilter(column, Filter.Equals(value))
@@ -14,7 +13,7 @@ class UtilsSpec extends AnyFunSpec with Matchers {
     ColumnFilter(column, Filter.EqualsRegex(value))
   }
 
-  it ("should store/retrieve ColumnFilterMap elements correctly") {
+  it("should store/retrieve ColumnFilterMap elements correctly") {
     {
       // empty map
       val cfMap = new ColumnFilterMap[String](Nil)
