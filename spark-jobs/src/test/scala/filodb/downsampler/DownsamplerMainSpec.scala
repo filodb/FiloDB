@@ -616,6 +616,46 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         .collect().toSeq
       res shouldEqual expected
     }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\"", "_ws_=~\"my_ws.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws1", "my_ns1"),
+        Row("b", "b"),
+        Row("my_ws1", "DNE"),
+        Row("DNE", "my_ns1"),
+        Row("my_ws2", "my_ns2"),
+      ))
+      val expected = Seq(
+        Row("my_ws1", "my_ns1"),
+        Row("my_ws2", "my_ns2"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
   }
 
   it("should give correct export schema") {

@@ -25,137 +25,109 @@ import scala.collection.mutable.ArrayBuffer
  *     - all filter labels are present in the map
  *     - every filter is matched by label in the map.
  *
- * NOTE: at most one ColumnFilter in a set can be non-Equals.
- *
  * NOTE: This implementation is intended to favor simplicity over efficiency.
  *   Other implementations should be considered if the {@link #get} runtime
  *   (described in the method's javadoc) is insufficient.
  *
  * @tparam T the type of elements to store/return.
- * @param filterElementPairs (filter-set,element) pairs; at most one of filter-set
- *                           can be a non-Equals filter.
+ * @param filterElementPairs (filter-set,element) pairs
  */
 class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T)]){
 
-  // The main idea:
-  // - Require that filter sets include at most one non-Equals filter.
-  // - For each set of filters, deterministically extract a "key" sequence of label names
-  //   and map each key to an inner hash-map. Label names are sorted alphabetically, then any
-  //   non-Equals filters are moved to the end. For example, the following filter sets
-  //   would have the keys:
+  // HashMaps are used to efficiently match all Equals filters. To do this, we use two "layers" of maps.
+  //     - "Outer" maps map sequences of Equals filter names to "inner" maps.
+  //     - "Inner" maps map sequences of Equals filter values to Either[<regex-filters>, <element>]
+  //   Outer map keys are found by filtering for Equals filters then sorting by column name alphabetically:
   //     1) {labelA="value1a", labelB="value2a"} -> (labelA, labelB)
   //     2) {labelA="value1b", labelB="value2b"} -> (labelA, labelB)  // Same as above.
-  //     3) {labelC=~"value3", labelD="value4", labelE="value5"} -> (labelD, labelE, labelC)  // Regex at end.
-  //     4) {labelC=~"value3", labelD=~"value4", labelE="value5"} -> INVALID! // >1 regex filter.
-  // - The inner hash-maps are keyed on a prefix of these values (all except the last), and
-  //   the final filter-- along with the element to store-- is stored as the value. For example,
-  //   the inner hash-map of example (3) above would be keyed on (labelD-value, labelE-value) and
-  //   store (labelC-filter, element) pairs.
-  // - When a set of labels-value pairs is processed through the ColumnFilterMap, the values are
-  //   used to access each inner map until (a) the inner map contains a corresponding value, and
-  //   (b) the final filter matches the final label-value. When a match is found, the filter's paired
-  //   element is returned.
+  //     3) {labelC=~"value3", labelD="value4", labelE="value5"} -> (labelD, labelE)  // Regex columns are dropped.
+  //     4) {labelC=~"value3", labelD=~"value4", labelE=~"value5"} -> ()  // All are regex.
+  //   Inner map keys are simply the corresponding values to the outer-key labels:
+  //     1) {labelA="value1a", labelB="value2a"} -> (value1a, value2a)
+  //     2) {labelA="value1b", labelB="value2b"} -> (value1b, value2b)
+  //     3) {labelC=~"value3", labelD="value4", labelE="value5"} -> (value4, value5)
+  //     4) {labelC=~"value3", labelD=~"value4", labelE=~"value5"} -> ()
+  // When a set of labels-value pairs is processed through the ColumnFilterMap, each inner map is iterated:
+  //   the appropriate N-tuple of values is extracted from the argument label-value pairs and used to access
+  //   each map. When an inner key exists, we inspect the Either: if an element is contained, that is
+  //   returned directly. Otherwise, sets of filters are iterated until a set is found s.t. all are matched
+  //   by the argument label-value pairs; this element is returned. If no set is matched completely,
+  //   None is returned.
   //
   // As an example, consider a ColumnFilterMap composed of these entries:
   //
   //     {l1="v1", l2="v2", l3="v3a"} -> A
   //     {l1="v1", l2="v2", l3="v3b"} -> B
   //     {l1="v1", l2="v2", l4="v4"} -> C
-  //     {l1="v1", l2="v2", l3=~"v3.*"} -> D
-  //     {l1="v1", l2=~"v2.*", l3="v3"} -> E
-  //     {l1="v1", l2="v2a"} -> F
-  //     {l1="v1", l2="v2b"} -> G
-  //     {l1="v1a", l2="v2a"} -> H
-  //     {l1="v1"} -> I
+  //     {l1="v1", l2=~"v2.*", l3="v3"} -> D
+  //     {l1=~"v1a.*", l2="v2"} -> E
+  //     {l1=~"v1b.*", l2="v2"} -> F
+  //     {l1=~"v1.*", l2=~"v2.*", l3=~"v3.*"} -> G
   //
   //   The nested maps would be structured as:
   //
   //     (l1, l2, l3) -> {
-  //         (v1, v2) -> [l3="v3a":A, l3="v3b":B, l3=~"v3.*":D]
+  //         (v1, v2, v3a) -> Either[A]
+  //         (v1, v2, v3b) -> Either[B]
   //     }
   //     (l1, l2, l4) -> {
-  //         (v1, v2) -> [l4="v4":C]
+  //         (v1, v2, v4) -> Either[C]
   //     }
-  //     (l1, l3, l2) -> {
-  //         (v1, v3) -> [l2=~"v2.*":E]
+  //     (l1, l3) -> {
+  //         (v1, v3) -> Either[([l2=~"v2.*"], D)]
   //     }
-  //     (l1, l2) -> {
-  //         (v1) -> [l2="v2a":F, l2="v2b":G]
-  //         (v1a) -> [l2="v2a":H]
+  //     (l2) -> {
+  //         (v2) -> Either[([l1=~"v1a.*"], E),([l1=~"v1b.*"], F)]
   //     }
-  //     (l1) -> {
-  //         () -> [l1="v1":I]
+  //     () -> {
+  //         () -> Either[([l1=~"v1.*", l2=~"v2.*", l3=~"v3.*"], G)]
   //     }
 
-  /**
-   * Maps individual filters to elements.
-   * Equals filters are stored as a Map for efficiency.
-   */
-  protected case class FilterToElementMap(equalsFilters: Map[String, T],
-                                          otherFilters: Iterable[(ColumnFilter, T)]) {
-    /**
-     * Returns an occupied Option iff at least one filter is matched.
-     * The Equals map is checked first before other filters are iterated.
-     *
-     * @param string the string to be matched.
-     */
-    def get(string: String): Option[T] = {
-      if (equalsFilters.contains(string)) {
-        return Some(equalsFilters(string))
-      }
-      val matchingFilter = otherFilters.find{ case (filter, _) => filter.filter.filterFunc(string) }
-      if (matchingFilter.isDefined) {
-        val (_, elt) = matchingFilter.get
-        return Some(elt)
-      }
-      None  // No match found.
-    }
-  }
+  // Stores a map for each sequence of Equals labels.
+  // (l1, l2, l3) -> {
+  //     (v1, v2, v3) -> Either[Iterable[(filters, elt)], elt]
+  // }
+  val labelSeqToMap =
+    new mutable.HashMap[Seq[String], mutable.Map[Seq[String], Either[Iterable[(Iterable[ColumnFilter], T)], T]]]
 
-  // Stores a map for each possible sequence of labels.
-  // Keys are found deterministically from each set of ColumnFilters to store.
-  val labelSeqToMap = new mutable.HashMap[Seq[String], mutable.Map[Seq[String], FilterToElementMap]]
-
-  filterElementPairs.foreach{ case (filters, _) =>
-    require(filters.count(!_.filter.isInstanceOf[Filter.Equals]) <= 1,
-      "at most one filter can be non-Equals; filters=" + filters)
-  }
-
-  filterElementPairs.map{ case (filters, elt) =>
-    // Sort the filters to determine the appropriate labelSeqToMap key.
-    // Sort alphabetically, then move any non-Equals filters to the end.
-    val sortedFilters = filters.toSeq
-      .sortBy(_.column)
-      .sortWith { case (leftFilter, rightFilter) =>
-        leftFilter.filter.isInstanceOf[Filter.Equals] &&
-          !rightFilter.filter.isInstanceOf[Filter.Equals]
-      }
-      (sortedFilters, elt)
-  }.groupBy{ case (sortedFilters, _) =>
+  filterElementPairs.groupBy{ case (filters, elt) =>
     // Group each set of filters by:
-    //   - its sequence of label names (determines the map it will be assigned to)
-    //   - its sequence of label values (determines the key for storage within the assigned map)
-    val labelNames = sortedFilters.map(_.column)
-    val prefixValues = sortedFilters
-      .dropRight(1)
-      .map(_.filter.asInstanceOf[Filter.Equals].value.toString)
-    (labelNames, prefixValues)
-  }.foreach{ case ((labelNames, prefixValues), sortedFiltersToElements) =>
-    // All (filters,element) pairs here will be grouped at the same path in the same map.
-    // For some efficiency, we store all Equals filters as part of a map. All non-Equals
-    //   filters are stored in a separate list (to be iterated sequentially).
-    val equalsFilterMap = new mutable.HashMap[String, T]
-    val otherFilters = new ArrayBuffer[(ColumnFilter, T)]
-    sortedFiltersToElements.foreach { case (filters, element) =>
-      filters.last.filter match {
-        case Filter.Equals(value) => equalsFilterMap(value.toString) = element
-        case _ => otherFilters.append((filters.last, element))
+    //   - its sorted sequence of Equals label names (determines the map it will be assigned to)
+    //   - its corresponding sequence of label values (determines the key for storage within the assigned map)
+    val sortedEqualsFilters = filters
+      .filter(colFilter => colFilter.filter.isInstanceOf[Filter.Equals])
+      .toSeq
+      .sortBy(_.column)
+    val equalsLabels = sortedEqualsFilters.map(_.column)
+    val equalsValues = sortedEqualsFilters.map(_.filter.asInstanceOf[Filter.Equals].value.toString)
+    (equalsLabels, equalsValues)
+  }.foreach{ case ((equalsLabels, equalsValues), filtersToElements) =>
+    // All (filters,element) pairs here will be grouped at the same key in the same map.
+    // Note that we don't need to store any ColumnFilters here if any single set contains all Equals filters;
+    //   all these filters will have been matched by the map keys, so we can just return the corresponding
+    //   element by default. Therefore, we'll use Either below to store either a plain element
+    //   or a set of (filter-set,element).
+    val nonEqualsFiltersToElt = new ArrayBuffer[(Iterable[ColumnFilter], T)]
+    val allEqualsFiltersOpt = filtersToElements
+      .map{ case (filters, elt) =>
+        val nonEqualsFilters = filters.filterNot(_.filter.isInstanceOf[Filter.Equals])
+        nonEqualsFiltersToElt.append((nonEqualsFilters, elt))
+        (filters, elt)
       }
+      .find{ case (filters, _) =>
+        filters.forall(_.filter.isInstanceOf[Filter.Equals])
+      }
+
+    val either: Either[Iterable[(Iterable[ColumnFilter], T)], T] = allEqualsFiltersOpt match {
+      case Some((filters, elt)) => Right(elt)
+      case None => Left(nonEqualsFiltersToElt)
     }
-    val filterToElementMap = FilterToElementMap(equalsFilterMap.toMap, otherFilters)
+
     labelSeqToMap
-      .getOrElseUpdate(labelNames, new mutable.HashMap[Seq[String], FilterToElementMap]())
-      .put(prefixValues, filterToElementMap)
+      .getOrElseUpdate(
+        equalsLabels,
+        new mutable.HashMap[Seq[String], Either[Iterable[(Iterable[ColumnFilter], T)], T]]())
+      .put(equalsValues, either)
   }
 
   /**
@@ -172,21 +144,31 @@ class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T
     // The maps we've built require that certain labels are present in the set.
     // Identify the set of (map, labels-names) pairs s.t. all labels are present,
     //   then map these to the set of (map, label-values) pairs for efficiency.
-    val mapValuesPairs = labelSeqToMap
+    labelSeqToMap
       .map{ case (filterLabels, map) => (map, filterLabels.map(labels.get)) }  // Get all value options.
       .filter { case (_, filterValues) => filterValues.forall(_.isDefined) }   // Make sure all are defined.
       .map { case (map, filterValues) => (map, filterValues.map(_.get)) }      // Extract the values.
-    for ((map, values) <- mapValuesPairs) {
-      // Get the set of final ColumnFilters from the map, then
-      //   check each against the final label value.
-      val valuesPrefix = values.dropRight(1)
-      val matchedElement = map.get(valuesPrefix)
-        .flatMap(filterToElementMap => filterToElementMap.get(values.last))
-      if (matchedElement.isDefined) {
-        return matchedElement
+      .map { case (valuesMap, values) =>
+        valuesMap.get(values).flatMap {
+          case Left(filtersToElts) =>
+            filtersToElts.find { case (filters, elt) =>
+              // Make the argument label-value pairs:
+              //   - contains labels for all filter columns.
+              //   - matches all filters.
+              filters.forall { filter =>
+                labels.get(filter.column).exists(value => filter.filter.filterFunc(value))
+              }
+            }.map { case (filters, elt) => elt }
+          case Right(elt) =>
+            // No need to evaluate any filters; some set of filters used to build the map
+            //   was entirely composed of Equals filters, and the fact that the valuesMap
+            //   returned a value implies that all filters were matched.
+            Some(elt)
+        }
       }
-    }
-    None  // No matches were found.
+      .filter(_.isDefined)
+      .map(_.get)
+      .headOption  // Although multiple matches are possible, we just return the first.
   }
 
   override def toString(): String = {

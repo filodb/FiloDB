@@ -22,17 +22,6 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
     }
 
     {
-      // too many regex filters
-      val entries = Seq(
-        (Seq(equals("a", "a")), "foo"),
-        (Seq(regex("b", "b"), regex("c", "c")), "bar")
-      )
-      intercept[IllegalArgumentException] {
-        new ColumnFilterMap[String](entries)
-      }
-    }
-
-    {
       // single equals filter
       val entries = Seq(
         (Seq(equals("a", "a")), "foo")
@@ -59,16 +48,17 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
       // multiple filters
       val entries = Seq(
         (Seq(
-          regex("a", ".*"),
+          regex("a", "aaa.*"),
           equals("b", "b"),
-          equals("c", "c"),
+          regex("c", "ccc.*"),
           equals("d", "d")), "foo")
       )
       val cfMap = new ColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "hello")) shouldEqual None
-      cfMap.get(Map("b" -> "b", "c" -> "c", "d" -> "d")) shouldEqual None
-      cfMap.get(Map("a" -> "hello", "b" -> "b", "c" -> "c", "d" -> "d")).get shouldEqual "foo"
-      cfMap.get(Map("a" -> "hello", "b" -> "b", "c" -> "c", "d" -> "d", "e" -> "e")).get shouldEqual "foo"
+      cfMap.get(Map("b" -> "b", "d" -> "d")) shouldEqual None
+      cfMap.get(Map("a" -> "aaa123", "c" -> "ccc123")) shouldEqual None
+      cfMap.get(Map("a" -> "aaa123", "b" -> "b", "c" -> "ccc123", "d" -> "d")).get shouldEqual "foo"
+      cfMap.get(Map("a" -> "aaa123", "b" -> "b", "c" -> "ccc123", "d" -> "d", "e" -> "e")).get shouldEqual "foo"
       cfMap.get(Map("e" -> "e")) shouldEqual None
       cfMap.get(Map()) shouldEqual None
     }
@@ -92,34 +82,45 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
     }
 
     {
-      // multiple sets at same path
+      // multiple sets; different lengths at same paths
       val entries = Seq(
-        (Seq(regex("a", "a.*")), "a"),
-        (Seq(regex("a", "b.*")), "b"),
-        (Seq(equals("a", "c")), "c"),
-        (Seq(equals("a", "a")), "matches_first"),
+        (Seq(
+          equals("a", "a")), "1"),
+        (Seq(
+          equals("a", "a"),
+          equals("b", "b")), "2"),
+        (Seq(
+          equals("a", "a"),
+          equals("b", "b"),
+          equals("c", "c")), "3"),
+        (Seq(
+          equals("b", "b"),
+          equals("c", "c")), "4"),
+        (Seq(
+          regex("a", "aaa.*")), "1r"),
+        (Seq(
+          regex("a", "aaa.*"),
+          regex("b", "bbb.*")), "2r"),
+        (Seq(
+          regex("a", "aaa.*"),
+          regex("b", "bbb.*"),
+          regex("c", "ccc.*")), "3r"),
+        (Seq(
+          regex("b", "bbb.*"),
+          regex("c", "ccc.*")), "4r"),
       )
       val cfMap = new ColumnFilterMap[String](entries)
-      cfMap.get(Map("a" -> "a123")).get shouldEqual "a"
-      cfMap.get(Map("a" -> "b123")).get shouldEqual "b"
-      cfMap.get(Map("a" -> "c")).get shouldEqual "c"
-      cfMap.get(Map("a" -> "a")).isDefined shouldEqual true
       cfMap.get(Map()) shouldEqual None
-    }
-
-    {
-      // multiple sets; different lengths
-      val entries = Seq(
-        (Seq(equals("a", "a"), equals("b", "b")), "a"),
-        (Seq(equals("c", "c")), "c"),
-      )
-      val cfMap = new ColumnFilterMap[String](entries)
-      cfMap.get(Map("a" -> "a")) shouldEqual None
-      cfMap.get(Map("a" -> "a", "b" -> "b")).get shouldEqual "a"
-      cfMap.get(Map("c" -> "c")).get shouldEqual "c"
-      cfMap.get(Map("b" -> "b", "c" -> "c")).get shouldEqual "c"
+      cfMap.get(Map("a" -> "b")) shouldEqual None
+      cfMap.get(Map("d" -> "d")) shouldEqual None
+      cfMap.get(Map("a" -> "a")).get shouldEqual "1"
+      cfMap.get(Map("a" -> "a", "b" -> "b")).isDefined shouldEqual true
       cfMap.get(Map("a" -> "a", "b" -> "b", "c" -> "c")).isDefined shouldEqual true
-      cfMap.get(Map()) shouldEqual None
+      cfMap.get(Map("b" -> "b", "c" -> "c")).get shouldEqual "4"
+      cfMap.get(Map("a" -> "aaa123")).get shouldEqual "1r"
+      cfMap.get(Map("a" -> "aaa123", "b" -> "bbb123")).isDefined shouldEqual true
+      cfMap.get(Map("a" -> "aaa123", "b" -> "bbb123", "c" -> "ccc123")).isDefined shouldEqual true
+      cfMap.get(Map("b" -> "bbb123", "c" -> "ccc123")).get shouldEqual "4r"
     }
   }
 }
