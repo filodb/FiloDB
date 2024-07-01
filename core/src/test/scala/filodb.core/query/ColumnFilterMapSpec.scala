@@ -3,7 +3,7 @@ package filodb.core.query
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class ColumnFilterSpec extends AnyFunSpec with Matchers {
+class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
 
   private def equals(column: String, value: String): ColumnFilter = {
     ColumnFilter(column, Filter.Equals(value))
@@ -18,6 +18,7 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
       // empty map
       val cfMap = new ColumnFilterMap[String](Nil)
       cfMap.get(Map("foo" -> "bar")) shouldEqual None
+      cfMap.get(Map("foo" -> "bar", "baz" -> "bat")) shouldEqual None
       cfMap.get(Map()) shouldEqual None
     }
 
@@ -28,8 +29,10 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
       )
       val cfMap = new ColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "a")).get shouldEqual "foo"
+      cfMap.get(Map("a" -> "a", "b" -> "b")).get shouldEqual "foo"
       cfMap.get(Map("a" -> "b")) shouldEqual None
       cfMap.get(Map("b" -> "b")) shouldEqual None
+      cfMap.get(Map("a" -> "b", "b" -> "a")) shouldEqual None
       cfMap.get(Map()) shouldEqual None
     }
 
@@ -40,6 +43,7 @@ class ColumnFilterSpec extends AnyFunSpec with Matchers {
       )
       val cfMap = new ColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "hello")).get shouldEqual "foo"
+      cfMap.get(Map("a" -> "hello", "b" -> "goodbye")).get shouldEqual "foo"
       cfMap.get(Map("b" -> "hello")) shouldEqual None
       cfMap.get(Map()) shouldEqual None
     }
