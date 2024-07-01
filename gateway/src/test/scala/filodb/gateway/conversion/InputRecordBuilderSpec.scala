@@ -72,9 +72,9 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     builder2.allContainers.head.iterate(Schemas.otelDeltaHistogram.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
-      row.getDouble(3) shouldEqual min
-      row.getDouble(4) shouldEqual max
-      row.getHistogram(5) shouldEqual expected
+      row.getDouble(4) shouldEqual min
+      row.getDouble(5) shouldEqual max
+      row.getHistogram(3) shouldEqual expected
     }
   }
 
@@ -91,9 +91,9 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     builder2.allContainers.head.iterate(Schemas.otelCumulativeHistogram.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
-      row.getDouble(3) shouldEqual min
-      row.getDouble(4) shouldEqual max
-      row.getHistogram(5) shouldEqual expected
+      row.getDouble(4) shouldEqual min
+      row.getDouble(5) shouldEqual max
+      row.getHistogram(3) shouldEqual expected
     }
   }
 

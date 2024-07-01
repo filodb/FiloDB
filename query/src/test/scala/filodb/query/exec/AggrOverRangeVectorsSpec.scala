@@ -22,7 +22,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
   val histMaxMinSchema = ResultSchema(
-    MMD.histMaxMinDS.schema.infosFromIDs(Seq(0, 5, 4, 3)), 1, colIDs = Seq(0, 5, 4, 3))
+    MMD.histMaxMinDS.schema.infosFromIDs(Seq(0, 3, 5, 4)), 1, colIDs = Seq(0, 3, 5, 4))
 
   val qc = QueryContext()
   val queryStats = QueryStats()
@@ -633,13 +633,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(5).asInstanceOf[bv.LongHistogram])
-      h1.add(row2(5).asInstanceOf[bv.LongHistogram])
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(3).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
     val maxes = data1.zip(data2).map { case (row1, row2) =>
-      Math.max(row1(4).asInstanceOf[Double], row2(4).asInstanceOf[Double])
+      Math.max(row1(5).asInstanceOf[Double], row2(5).asInstanceOf[Double])
     }.toList
 
     val answers = result(0).rows.map(r => (r.getHistogram(1), r.getDouble(2))).toList
