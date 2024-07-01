@@ -26,14 +26,15 @@ import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.commons.io.FileUtils
-import org.apache.spark.sql.Row
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.apache.spark.sql.types._
+
 
 import java.io.File
 import java.time
@@ -51,8 +52,6 @@ import scala.concurrent.duration._
 class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
-
-  val sparkCtx = SparkContext.getOrCreate(new SparkConf(true).setMaster("local").setAppName("test"))
 
   // Add a path here to enable export during these tests. Useful for debugging export data.
   val exportToFile = None  // Some("s3a://bucket/directory/catalog/database/table")
@@ -499,6 +498,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   }
 
   it("should correctly apply export column filters") {
+    // should be closed at the end of the test
+    val sparkSession = SparkSession.builder()
+      .appName("shouldCorrectlyApplyExportColumnFilters")
+      .master("local")
+      .getOrCreate()
+    val sparkCtx = sparkSession.sparkContext
+
     {
       val testConf = ConfigFactory.parseString(
         """
@@ -656,6 +662,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         .collect().toSeq
       res shouldEqual expected
     }
+
+    sparkSession.close()
   }
 
   it("should give correct export schema") {
