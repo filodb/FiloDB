@@ -127,9 +127,9 @@ object InputRecord {
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
+      builder.addBlob(hist.serialize())
       builder.addDouble(min)
       builder.addDouble(max)
-      builder.addBlob(hist.serialize())
 
       builder.addString(metric)
       builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
@@ -220,9 +220,9 @@ object InputRecord {
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
+      builder.addBlob(hist.serialize())
       builder.addDouble(min)
       builder.addDouble(max)
-      builder.addBlob(hist.serialize())
 
       builder.addString(metric)
       builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
