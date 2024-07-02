@@ -59,8 +59,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy val numRowExportPrepErrors = Kamon.counter("num-row-export-prep-errors").withoutTags()
 
-  val keyToRules = downsamplerSettings.exportKeyToRules
-
   /**
    * Returns the index of a column in the export schema.
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
@@ -233,12 +231,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
-    keyToRules.find { case (key, exportTableConfig) =>
-      // find the group with a key that matches these label-values
-      downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
-        partKeyMap.get(label).contains(key(i))
-      }
-    }.flatMap { case (key, exportTableConfig) =>
+    downsamplerSettings.exportColumnFilterMap.get(partKeyMap).flatMap { exportTableConfig =>
       exportTableConfig.exportRules.takeWhile { rule =>
         // step through rules while we still haven't matched a "block" filter
         !rule.blockFilterGroups.exists { filterGroup =>
@@ -352,4 +345,28 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
   // scalastyle:on method.length
+
+  /**
+   * Filters for Rows that match the argument filters.
+   *
+   * @param exportKeyFilters at most one filter for each column of the export key.
+   */
+  def filterRdd(rdd: RDD[Row],
+                exportKeyFilters: Seq[ColumnFilter],
+                exportTableConfig: ExportTableConfig): RDD[Row] = {
+    // The ith index is the index of the column filtered by the ith filter.
+    // Example:
+    //   Columns: foo, bar, baz
+    //   Filters: "bar"=~"hello", foo="hey"
+    //   rowFilterIndices = [1, 0]
+    val rowFilterIndices = exportKeyFilters.map(_.column).map { colName =>
+      val index = getColumnIndex(colName, exportTableConfig)
+      assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
+      index.get
+    }
+    rdd.filter { row =>
+      val rowKey = rowFilterIndices.map(row.get(_).toString)
+      rowKey.zip(exportKeyFilters).forall { case (key, filter) => filter.filter.filterFunc(key) }
+    }
+  }
 }
