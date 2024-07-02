@@ -26,6 +26,7 @@ import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.commons.io.FileUtils
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
@@ -33,6 +34,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.apache.spark.sql.types._
+
 
 import java.io.File
 import java.time
@@ -66,7 +68,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |    "key-labels": [_ns_],
        |    "groups": [
        |      {
-       |        "key": [my_ns],
+       |        "key": ["_ns_=\\"my_ns\\""],
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
        |        "label-column-mapping": [
@@ -189,7 +191,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a",
         |          label-column-mapping = [
@@ -216,7 +218,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -248,7 +250,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -284,7 +286,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -316,7 +318,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1", "l2"]
         |      groups = [
         |        {
-        |          key = ["l1a", "l2a"]
+        |          key = ["l1=\"l1a\"", "l2=\"l2a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -343,7 +345,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -360,7 +362,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          ]
         |        },
         |        {
-        |          key = ["l1b"]
+        |          key = ["l1=\"l1b\""]
         |          table = "l1b"
         |          table-path: "s3a://bucket/directory/catalog/database/l1b"
         |          label-column-mapping = [
@@ -387,7 +389,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -468,7 +470,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      "hour"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -490,10 +492,178 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
     dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
-      batchExporter.getColumnIndex(colName, pairExportKeyTableConfig._2).get shouldEqual i}
+      batchExporter.getColumnIndex(colName, dsSettings.exportKeyToConfig.head._2).get shouldEqual i}
+  }
+
+  it("should correctly apply export column filters") {
+    // should be closed at the end of the test
+    val sparkSession = SparkSession.builder()
+      .appName("shouldCorrectlyApplyExportColumnFilters")
+      .master("local")
+      .getOrCreate()
+    val sparkCtx = sparkSession.sparkContext
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws", "a"),
+        Row("DNE", "b"),
+        Row("my_ws", "c"),
+        Row("DNE", "d"),
+      ))
+      val expected = Seq(
+        Row("my_ws", "a"),
+        Row("my_ws", "c"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("a", "my_ns"),
+        Row("b", "DNE"),
+        Row("c", "my_ns123"),
+        Row("d", "DNE"),
+      ))
+      val expected = Seq(
+        Row("a", "my_ns"),
+        Row("c", "my_ns123"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\"", "_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws", "my_ns1"),
+        Row("my_ws123", "my_ns2"),
+        Row("c", "c"),
+        Row("my_ws", "DNE"),
+        Row("my_ws", "my_ns3"),
+      ))
+      val expected = Seq(
+        Row("my_ws", "my_ns1"),
+        Row("my_ws", "my_ns3"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\"", "_ws_=~\"my_ws.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = []
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rdd = sparkCtx.parallelize(Seq(
+        Row("my_ws1", "my_ns1"),
+        Row("b", "b"),
+        Row("my_ws1", "DNE"),
+        Row("DNE", "my_ns1"),
+        Row("my_ws2", "my_ns2"),
+      ))
+      val expected = Seq(
+        Row("my_ws1", "my_ns1"),
+        Row("my_ws2", "my_ns2"),
+      )
+      val res = batchExporter.filterRdd(rdd,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        .collect().toSeq
+      res shouldEqual expected
+    }
+
+    sparkSession.close()
   }
 
   it("should give correct export schema") {
@@ -503,7 +673,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["_ws_"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -525,7 +695,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val exportSchema = {
       val fields = new scala.collection.mutable.ArrayBuffer[StructField](11)
       fields.append(
@@ -542,7 +711,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         StructField("hour", IntegerType, false))
       StructType(fields)
     }
-    pairExportKeyTableConfig._2.tableSchema shouldEqual exportSchema
+    dsSettings.exportKeyToConfig.head._2.tableSchema shouldEqual exportSchema
   }
 
   it ("should write untyped data to cassandra") {
