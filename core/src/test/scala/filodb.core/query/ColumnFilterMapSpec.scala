@@ -13,10 +13,10 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
     ColumnFilter(column, Filter.EqualsRegex(value))
   }
 
-  it("should store/retrieve ColumnFilterMap elements correctly") {
+  it("DefaultColumnFilterMap should store/retrieve elements correctly") {
     {
       // empty map
-      val cfMap = new ColumnFilterMap[String](Nil)
+      val cfMap = new DefaultColumnFilterMap[String](Nil)
       cfMap.get(Map("foo" -> "bar")) shouldEqual None
       cfMap.get(Map("foo" -> "bar", "baz" -> "bat")) shouldEqual None
       cfMap.get(Map()) shouldEqual None
@@ -27,7 +27,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
       val entries = Seq(
         (Seq(equals("a", "a")), "foo")
       )
-      val cfMap = new ColumnFilterMap[String](entries)
+      val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "a")).get shouldEqual "foo"
       cfMap.get(Map("a" -> "a", "b" -> "b")).get shouldEqual "foo"
       cfMap.get(Map("a" -> "b")) shouldEqual None
@@ -41,7 +41,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
       val entries = Seq(
         (Seq(regex("a", ".*")), "foo")
       )
-      val cfMap = new ColumnFilterMap[String](entries)
+      val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "hello")).get shouldEqual "foo"
       cfMap.get(Map("a" -> "hello", "b" -> "goodbye")).get shouldEqual "foo"
       cfMap.get(Map("b" -> "hello")) shouldEqual None
@@ -57,7 +57,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
           regex("c", "ccc.*"),
           equals("d", "d")), "foo")
       )
-      val cfMap = new ColumnFilterMap[String](entries)
+      val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "hello")) shouldEqual None
       cfMap.get(Map("b" -> "b", "d" -> "d")) shouldEqual None
       cfMap.get(Map("a" -> "aaa123", "c" -> "ccc123")) shouldEqual None
@@ -74,7 +74,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
         (Seq(regex("b", ".*")), "b"),
         (Seq(equals("c", "c")), "c"),
       )
-      val cfMap = new ColumnFilterMap[String](entries)
+      val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map("a" -> "hello")).get shouldEqual "a"
       cfMap.get(Map("b" -> "hello")).get shouldEqual "b"
       cfMap.get(Map("c" -> "hello")) shouldEqual None
@@ -113,7 +113,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
           regex("b", "bbb.*"),
           regex("c", "ccc.*")), "4r"),
       )
-      val cfMap = new ColumnFilterMap[String](entries)
+      val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map()) shouldEqual None
       cfMap.get(Map("a" -> "b")) shouldEqual None
       cfMap.get(Map("d" -> "d")) shouldEqual None
@@ -126,5 +126,98 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
       cfMap.get(Map("a" -> "aaa123", "b" -> "bbb123", "c" -> "ccc123")).isDefined shouldEqual true
       cfMap.get(Map("b" -> "bbb123", "c" -> "ccc123")).get shouldEqual "4r"
     }
+  }
+
+  it("FastColumnFilterMap should store/retrieve elements correctly") {
+    {
+      // empty map
+      val cfMap = new FastColumnFilterMap[String](
+        "equals",
+        Map(),
+        "filter",
+        Nil)
+      cfMap.get(Map("equals" -> "foo", "filter" -> "bar")) shouldEqual None
+      cfMap.get(Map("equals" -> "foo", "filter" -> "bar", "DNE" -> "DNE")) shouldEqual None
+    }
+
+    {
+      // equals filters only
+      val equalsValues = Map(
+        "foo" -> "fooVal",
+        "bar" -> "barVal",
+        "baz" -> "bazVal"
+      )
+      val cfMap = new FastColumnFilterMap[String](
+        "equals", equalsValues,
+        "filter", Nil)
+      cfMap.get(Map("equals" -> "hello", "filter" -> "DNE")) shouldEqual None
+      cfMap.get(Map("equals" -> "hello", "filter" -> "DNE", "DNE" -> "DNE")) shouldEqual None
+      cfMap.get(Map("equals" -> "foo", "filter" -> "DNE")).get shouldEqual "fooVal"
+      cfMap.get(Map("equals" -> "foo", "filter" -> "DNE", "DNE" -> "DNE")).get shouldEqual "fooVal"
+      cfMap.get(Map("equals" -> "bar", "filter" -> "DNE")).get shouldEqual "barVal"
+      cfMap.get(Map("equals" -> "baz", "filter" -> "DNE")).get shouldEqual "bazVal"
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "foo")) shouldEqual None
+    }
+
+    {
+      // filtered values only
+      val filterEltPairs = Seq(
+        (Filter.EqualsRegex("foo.*"), "fooVal"),  // Prefix regex!
+        (Filter.EqualsRegex("bar.123.*"), "barVal"),  // Not prefix regex (contains regex chars before .*).
+        (Filter.Equals("baz"), "bazVal"),
+      )
+      val cfMap = new FastColumnFilterMap[String](
+        "equals",
+        Map(),
+        "filter",
+        filterEltPairs)
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "DNE")) shouldEqual None
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "foo123")).get shouldEqual "fooVal"
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "foo123", "DNE" -> "DNE")).get shouldEqual "fooVal"
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "barA123456")).get shouldEqual "barVal"
+      cfMap.get(Map("equals" -> "DNE", "filter" -> "baz")).get shouldEqual "bazVal"
+    }
+  }
+
+  {
+    // filter mix
+    val equalsValues = Map(
+      "foo" -> "equalsFooVal",
+      "bar" -> "equalsBarVal",
+      "baz" -> "equalsBazVal"
+    )
+    val filterEltPairs = Seq(
+      (Filter.EqualsRegex("foo.*"), "filterFooVal"), // Prefix regex!
+      (Filter.EqualsRegex("foo.*"), "filterFooVal2"),
+      (Filter.EqualsRegex("bar.123.*"), "filterBarVal"), // Not prefix regex (contains regex chars before .*).
+      (Filter.EqualsRegex("bar.123.*"), "filterBarVal2"),
+      (Filter.Equals("baz"), "filterBazVal"),
+      (Filter.Equals("baz"), "filterBazVal2"),
+    )
+    val cfMap = new FastColumnFilterMap[String](
+      "equals",
+      equalsValues,
+      "filter",
+      filterEltPairs)
+
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "DNE")) shouldEqual None
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "DNE", "DNE" -> "DNE")) shouldEqual None
+    cfMap.get(Map("equals" -> "foo", "filter" -> "DNE")).get shouldEqual "equalsFooVal"
+    cfMap.get(Map("equals" -> "foo", "filter" -> "DNE", "DNE" -> "DNE")).get shouldEqual "equalsFooVal"
+    cfMap.get(Map("equals" -> "bar", "filter" -> "DNE")).get shouldEqual "equalsBarVal"
+    cfMap.get(Map("equals" -> "baz", "filter" -> "DNE")).get shouldEqual "equalsBazVal"
+
+    // Additionally makes sure filtered labels are evaluated in order
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "DNE")) shouldEqual None
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "foo123")).get shouldEqual "filterFooVal"
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "foo123", "DNE" -> "DNE")).get shouldEqual "filterFooVal"
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "barA123456")).get shouldEqual "filterBarVal"
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "baz")).get shouldEqual "filterBazVal"
+
+    // Make sure equals label is matched after filtered label
+    cfMap.get(Map("equals" -> "baz", "filter" -> "foo123")).get shouldEqual "filterFooVal"
+    cfMap.get(Map("equals" -> "baz", "filter" -> "foo123", "DNE" -> "DNE")).get shouldEqual "filterFooVal"
+    cfMap.get(Map("equals" -> "baz", "filter" -> "barA123456")).get shouldEqual "filterBarVal"
+    cfMap.get(Map("equals" -> "baz", "filter" -> "baz")).get shouldEqual "filterBazVal"
   }
 }
