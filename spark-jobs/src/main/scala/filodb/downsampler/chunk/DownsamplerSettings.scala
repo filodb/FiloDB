@@ -9,7 +9,6 @@ import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
-import filodb.core.query.ColumnFilterMap
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.ExportConstants._
@@ -145,12 +144,6 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
       keyFilters -> config
     }
-  }
-
-  @transient lazy val exportColumnFilterMap = {
-    val cfMap = new ColumnFilterMap[ExportTableConfig](exportKeyToConfig)
-    logger.info(s"Constructed data-export rule map: $cfMap")
-    cfMap
   }
 
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
