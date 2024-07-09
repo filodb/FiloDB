@@ -65,8 +65,13 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       val qResTask = sendRequest(span, requestTimeoutMs).map {
-        case qr: QueryResult => qr
-        case qe: QueryError => throw qe.t
+        // FIXME: QueryResponse should contain fields common to Result/Error
+        case qr: QueryResult =>
+          querySession.queryStats.add(qr.queryStats)
+          qr
+        case qe: QueryError =>
+          querySession.queryStats.add(qe.queryStats)
+          throw qe.t
       }.memoize
       val schemaTask = qResTask.map(_.resultSchema)
       val rvObs = Observable.fromTask(qResTask)
