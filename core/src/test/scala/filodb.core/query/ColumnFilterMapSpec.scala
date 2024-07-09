@@ -110,8 +110,8 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
           regex("b", "bbb.*"),
           regex("c", "ccc.*")), "3r"),
         (Seq(
-          regex("b", "bbb.*"),
-          regex("c", "ccc.*")), "4r"),
+          regex("b", "bbb.*123.*"),
+          regex("c", "ccc.*123.*")), "4r"),
       )
       val cfMap = new DefaultColumnFilterMap[String](entries)
       cfMap.get(Map()) shouldEqual None
@@ -124,7 +124,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
       cfMap.get(Map("a" -> "aaa123")).get shouldEqual "1r"
       cfMap.get(Map("a" -> "aaa123", "b" -> "bbb123")).isDefined shouldEqual true
       cfMap.get(Map("a" -> "aaa123", "b" -> "bbb123", "c" -> "ccc123")).isDefined shouldEqual true
-      cfMap.get(Map("b" -> "bbb123", "c" -> "ccc123")).get shouldEqual "4r"
+      cfMap.get(Map("b" -> "bbbXYZ123", "c" -> "cccXYZ123")).get shouldEqual "4r"
     }
   }
 
@@ -184,7 +184,8 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
     val equalsValues = Map(
       "foo" -> "equalsFooVal",
       "bar" -> "equalsBarVal",
-      "baz" -> "equalsBazVal"
+      "baz" -> "equalsBazVal",
+      "bat" -> "equalsBatVal",
     )
     val filterEltPairs = Seq(
       (Filter.EqualsRegex("foo.*"), "filterFooVal"), // Prefix regex!
@@ -193,6 +194,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
       (Filter.EqualsRegex("bar.123.*"), "filterBarVal2"),
       (Filter.Equals("baz"), "filterBazVal"),
       (Filter.Equals("baz"), "filterBazVal2"),
+      (Filter.EqualsRegex("bat.*123.*"), "filterBatVal"),
     )
     val cfMap = new FastColumnFilterMap[String](
       "equals",
@@ -213,6 +215,7 @@ class ColumnFilterMapSpec extends AnyFunSpec with Matchers {
     cfMap.get(Map("equals" -> "DNE", "filter" -> "foo123", "DNE" -> "DNE")).get shouldEqual "filterFooVal"
     cfMap.get(Map("equals" -> "DNE", "filter" -> "barA123456")).get shouldEqual "filterBarVal"
     cfMap.get(Map("equals" -> "DNE", "filter" -> "baz")).get shouldEqual "filterBazVal"
+    cfMap.get(Map("equals" -> "DNE", "filter" -> "bat123")).get shouldEqual "filterBatVal"
 
     // Make sure equals label is matched after filtered label
     cfMap.get(Map("equals" -> "baz", "filter" -> "foo123")).get shouldEqual "filterFooVal"
