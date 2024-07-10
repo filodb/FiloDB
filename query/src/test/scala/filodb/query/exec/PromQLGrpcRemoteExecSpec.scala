@@ -16,6 +16,7 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.{ManagedChannel, ManagedChannelBuilder, Server, ServerBuilder}
 import io.grpc.stub.StreamObserver
+import kamon.trace
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -245,4 +246,39 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     } shouldEqual data.map { rv => (rv._1.labelValues, rv._2) }
   }
 
+  it("should correctly update QueryStats") {
+    val range = RvRange(1000, 1000, 2000)
+    val queryParams = PromQlQueryParams("foo{}", range.startMs, range.stepMs, range.endMs)
+    val queryConfig: QueryConfig = null // scalastyle:ignore
+    val testResultSchema = ResultSchema(
+      Seq(
+        ColumnInfo("timestamp", ColumnType.TimestampColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)),
+      numRowKeyColumns = 1)
+    val data = Seq(
+      (CustomRangeVectorKey(Map("foo".utf8 -> "bar".utf8)),
+        Seq((1000L, 1.0), (2000L, 2.0))),
+      (CustomRangeVectorKey(Map("bat".utf8 -> "baz".utf8)),
+        Seq((1000L, 3.0), (2000L, 4.0)))
+    )
+
+    val exec = new PromQlRemoteExec("my.cool.endpoint",
+      requestTimeoutMs = 5000, QueryContext(origQueryParams = queryParams), dispatcher,
+      timeseriesDataset.ref, RemoteHttpClient.defaultClient) {
+      override def sendRequest(execPlan2Span: trace.Span, httpTimeoutMs: Long)(implicit sched: Scheduler): Task[QueryResponse] = {
+        val rvs = data.map { case (key, tsValPairs) =>
+          MetricsTestData.makeRv(key, tsValPairs, range)
+        }
+        val stats = QueryStats()
+        // Add 123 to group ("a" "b" "c").
+        stats.getTimeSeriesScannedCounter(Seq("a", "b", "c")).addAndGet(123)
+        Task.now(QueryResult("id", testResultSchema, rvs, stats))
+      }
+    }
+
+    val fut = exec.execute(UnsupportedChunkSource(), QuerySession(QueryContext(), queryConfig)).runToFuture
+    val qres = Await.result(fut, Duration.Inf).asInstanceOf[QueryResult]
+    // Group ("a" "b" "c") should have the 123 added earlier.
+    qres.queryStats.getTimeSeriesScannedCounter(Seq("a", "b", "c")).get() shouldEqual 123
+  }
 }
