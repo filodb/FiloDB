@@ -39,23 +39,4 @@ final case class ColumnFilterMapTargetSchemaProvider(columnFilterMap: ColumnFilt
   }
 }
 
-object ColumnFilterMapTargetSchemaProvider {
-  /**
-   * @param filterChangePairs (filters,changes) pairs used to populate the backing ColumnFilterMap;
-   *                          at most one of 'filters' can be a non-Equals filter.
-   */
-  def apply(filterChangePairs: Iterable[(
-      Iterable[ColumnFilter],
-      Iterable[TargetSchemaChange]
-    )]): ColumnFilterMapTargetSchemaProvider = {
-    val columnFilterMap = {
-      val sortedFilterChangePairs = filterChangePairs.map { case (filters, changes) =>
-        (filters, changes.toSeq.sortBy(_.time))
-      }
-      new ColumnFilterMap[Seq[TargetSchemaChange]](sortedFilterChangePairs)
-    }
-    new ColumnFilterMapTargetSchemaProvider(columnFilterMap)
-  }
-}
-
 final case class TargetSchemaChange(time: Long = 0L, schema: Seq[String])

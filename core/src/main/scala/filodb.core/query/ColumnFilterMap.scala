@@ -8,10 +8,22 @@ import scala.collection.mutable.ArrayBuffer
  *
  * Convenient for use-cases that require e.g. configuration of rules against
  *   label-value filters (filter->rule pairs). The {@link #get} method
- *   accepts a set of label-value pairs, identifies any matching filter sets,
- *   then returns the corresponding element.
  *
- * For example, consider the (filters,element) pairs:
+ * @tparam T the type of elements to store/return.
+ */
+trait ColumnFilterMap[T] {
+  /**
+   * Accepts a set of label-value pairs, identifies any matching filter sets,
+   *   then returns the corresponding element (if one exists).
+   */
+  def get(labels: collection.Map[String, String]): Option[T]
+}
+
+
+/**
+ * If multiple filters are matched, the returned element is chosen arbitrarily from the matches.
+ *
+ * * For example, consider the (filters,element) pairs:
  *     - ({l1="v1",l2=~"v2.*"}, elt1)
  *     - ({l1="v1",l2="v3"},    elt2)
  *     - ({l2=~"v4.*"},         elt3)
@@ -29,10 +41,9 @@ import scala.collection.mutable.ArrayBuffer
  *   Other implementations should be considered if the {@link #get} runtime
  *   (described in the method's javadoc) is insufficient.
  *
- * @tparam T the type of elements to store/return.
  * @param filterElementPairs (filter-set,element) pairs
  */
-class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T)]){
+class DefaultColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T)]) extends ColumnFilterMap[T] {
 
   // HashMaps are used to efficiently match all Equals filters. To do this, we use two "layers" of maps.
   //     - "Outer" maps map sequences of Equals filter names to "inner" maps.
@@ -140,7 +151,7 @@ class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T
    *     - linearly with the count of distinct sets of key filter label names.
    *   This data-structure should only be used where each of these is reasonably small.
    */
-  def get(labels: collection.Map[String, String]): Option[T] = {
+  override def get(labels: collection.Map[String, String]): Option[T] = {
     // The maps we've built require that certain labels are present in the set.
     // Identify the set of (map, labels-names) pairs s.t. all labels are present,
     //   then map these to the set of (map, label-values) pairs for efficiency.
@@ -172,6 +183,87 @@ class ColumnFilterMap[T](filterElementPairs: Iterable[(Iterable[ColumnFilter], T
   }
 
   override def toString(): String = {
-    s"ColumnFilterMap(${labelSeqToMap.toString()})"
+    s"DefaultColumnFilterMap(${labelSeqToMap.toString()})"
+  }
+}
+
+/**
+ * Bare-bones but (in some cases) ultra-fast ColumnFilterMap.
+ * At most two label-values are read during a get() call:
+ *   - One to be matched by equality.
+ *   - One to be matched by any arbitrary filter.
+ * Useful for performance-critical use-cases where this minimal functionality is sufficient:
+ *   at most two labels are filtered, and only one supports non-equals filters.
+ *
+ * See get() javadoc for additional details about runtime complexity.
+ *
+ * NOTE: EqualsRegex filters that end in ".*" and contain no other regex characters are
+ *       considered "prefix" filters and are matched efficiently.
+ *
+ * @param equalsLabel label to be matched exclusively by equality.
+ *                    Must be included in all label-value sets passed to get().
+ *                    This label is filtered after filteredLabel.
+ * @param equalsValuesToElts value->elt mapping for equalsLabel.
+ * @param filteredLabel label to be matched by any arbitrary filter.
+   *                    Must be included in all label-value sets passed to get()
+ *                      This label is filtered before equalsLabel.
+ * @param filterEltPairs (filter, elt) tuples to filter filteredLabel.
+ */
+class FastColumnFilterMap[T](equalsLabel: String,
+                             equalsValuesToElts: collection.Map[String, T],
+                             filteredLabel: String,
+                             filterEltPairs: Iterable[(Filter, T)]) extends ColumnFilterMap[T] {
+
+  /**
+   * Child classes apply tricks to evaluate filters more efficiently.
+   */
+  private trait FastFilter {
+    def apply(string: String): Boolean
+  }
+
+  private case class Default(filter: Filter) extends FastFilter {
+    override def apply(string: String): Boolean = {
+      filter.filterFunc.apply(string)
+    }
+  }
+
+  private case class Prefix(prefix: String) extends FastFilter {
+    override def apply(string: String): Boolean = {
+      string.startsWith(prefix)
+    }
+  }
+
+  private val fastFilterEltPairs = filterEltPairs.map { case (filter, elt) =>
+    val fastFilter = filter match {
+      case Filter.EqualsRegex(value) if ({
+        val valueStr = value.toString
+        valueStr.endsWith(".*") && !QueryUtils.containsRegexChars(valueStr.dropRight(2))
+      }) => Prefix(value.toString.dropRight(2))
+      case _ => Default(filter)
+    }
+    (fastFilter, elt)
+  }
+
+  /**
+   * Runtime grows linearly with the count of non-equals filters.
+   * Non-equals filters are evaluated in-order before the equals filters
+   *   (and i.e. they act as "overrides").
+   *
+   * @param labels must include both equalsLabel and filteredLabel.
+   */
+  override def get(labels: collection.Map[String, String]): Option[T] = {
+    val filteredValue = labels(filteredLabel)
+    for ((filter, elt) <- fastFilterEltPairs) {
+      if (filter(filteredValue)) {
+        return Some(elt)
+      }
+    }
+    val equalsValue = labels(equalsLabel)
+    equalsValuesToElts.get(equalsValue)
+  }
+
+  override def toString(): String = {
+    s"FastColumnFilterMap(equalsLabel=$equalsLabel, equalsValuesToElts=$equalsValuesToElts, " +
+      s"filteredLabel=$filteredLabel, filterEltPairs=$filterEltPairs)"
   }
 }
