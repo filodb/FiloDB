@@ -4,7 +4,7 @@ on:
   push:
     branches: [ develop ]
   pull_request:
-    branches: [ develop, integration, main ]
+    branches: [ develop, integration, main, feat-index-rust ]
 
 jobs:
   test:
