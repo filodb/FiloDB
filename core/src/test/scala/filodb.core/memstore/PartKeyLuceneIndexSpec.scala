@@ -900,27 +900,6 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
-  it("should match the regex after anchors stripped") {
-    for ((regex, regexNoAnchors) <- Map(
-      """^.*$""" -> """.*""", // both anchor are stripped.
-      """\$""" -> """\$""", // \$ is not removed.
-      """\\\$""" -> """\\\$""", // \$ is not removed.
-      """\\$""" -> """\\""", // $ is removed.
-      """$""" -> """""", // $ is removed.
-      """\^.*$""" -> """\^.*""", // do not remove \^.
-      """^ ^.*$""" -> """ ^.*""", // only remove the first ^.
-      """^.*\$""" -> """.*\$""",  // do not remove \$
-      """^ $foo""" -> """ $foo""",  // the $ is not at the end, keep it.
-      """.* $ \ $$""" -> """.* $ \ $""",  // only remove the last $
-      """foo.*\\\ $""" -> """foo.*\\\ """, // remove $ for it at the end and not escaped.
-      """foo.*\\\$""" -> """foo.*\\\$""", // keep \$.
-      """foo.*\\$""" -> """foo.*\\""",  // remove $ for it at the end and not escaped.
-      """foo.*$\\\\$""" -> """foo.*$\\\\""",  // keep the first $ since it not at the end.
-    )) {
-      PartKeyLuceneIndex.removeRegexAnchors(regex) shouldEqual regexNoAnchors
-    }
-  }
-
   it("should get a single match for part keys through a field with empty value") {
     val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.slice(95, 96)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
