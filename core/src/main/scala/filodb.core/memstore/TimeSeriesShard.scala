@@ -1220,7 +1220,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     partIter.skippedPartIDs.foreach { pId =>
       partKeyIndex.partKeyFromPartId(pId).foreach { pk =>
-        val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pk.offset)
+        val unsafePkOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(pk.offset)
         val schema = schemas(RecordSchema.schemaID(pk.bytes, unsafePkOffset))
         val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
           schemas.part.options.shardKeyColumns)
@@ -1899,7 +1899,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     partitions.get(partID) match {
       case TimeSeriesShard.OutOfMemPartition =>
         partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
-          val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
+          val unsafeKeyOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(pkBytesRef.offset)
           RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
         }.getOrElse(-1)
       case p: TimeSeriesPartition => p.schema.schemaHash
