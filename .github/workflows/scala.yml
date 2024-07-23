@@ -19,6 +19,14 @@ jobs:
       with:
         java-version: '11'
         distribution: 'adopt'
+    - name: Install Rust Toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt, clippy
+        target: x86_64-apple-darwin, aarch64-apple-darwin, aarch64-unknown-linux-gnu
+        cache-workspaces: "core/src/rust -> target"
+    - name: Install cargo-zigbuild
+      run: pip install cargo-zigbuild
     - name: Run tests
       run: .github/workflows/runtests.sh
     - name: Coverage Reports
