@@ -136,6 +136,14 @@ brew bottle --skip-relocation kafka
 brew reinstall `ls kafka*bottle*`
 ```
 
+Newer versions of ZooKeeper start an admin HTTP server on port 8080, which conflicts with the FiloDB servers.
+To fix this add the following to `zoo.cfg` (`/opt/homebrew/etc/zookeeper/zoo.cfg` if installing via homebrew):
+
+```
+# Disable admin server on 8080
+admin.enableServer=false
+```
+
 Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
 ```
 kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 4 --topic timeseries-dev
@@ -244,7 +252,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli -Dfilodb.v2-cluster-enabled=true --host 127.0.0.1 --dataset prometheus --promql 'heap_usage0{_ws_="demo", _ns_="App-2"}'
+./filo-cli --host 127.0.0.1 --dataset prometheus --promql 'heap_usage0{_ws_="demo", _ns_="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -286,15 +294,15 @@ Now, metrics from the application having a Prom endpoint at port 9095 will be st
 
 Querying the total number of ingesting time series for the last 5 minutes, every 10 seconds:
 
-    ./filo-cli -Dfilodb.v2-cluster-enabled=true  --host 127.0.0.1 --dataset prometheus --promql 'sum(num_ingesting_partitions{_ws_="local_test",_ns_="filodb"})' --minutes 5
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql 'sum(num_ingesting_partitions{_ws_="local_test",_ns_="filodb"})' --minutes 5
 
 Note that histograms are ingested using FiloDB's optimized histogram format, which leads to very large savings in space.  For example, querying the 90%-tile for the size of chunks written to Cassandra, last 5 minutes:
 
-    ./filo-cli -Dfilodb.v2-cluster-enabled=true  --host 127.0.0.1 --dataset prometheus --promql 'histogram_quantile(0.9, sum(rate(chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}[3m])))' --minutes 5
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql 'histogram_quantile(0.9, sum(rate(chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}[3m])))' --minutes 5
 
 Here is how you display the raw histogram data for the same:
 
-    ./filo-cli -Dfilodb.v2-cluster-enabled=true --host 127.0.0.1 --dataset prometheus --promql 'chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}' --minutes 5
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql 'chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}' --minutes 5
 
 ### Downsample Filo Cluster
 

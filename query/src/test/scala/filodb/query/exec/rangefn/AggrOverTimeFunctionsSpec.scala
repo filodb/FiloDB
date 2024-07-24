@@ -1,15 +1,13 @@
 package filodb.query.exec.rangefn
 
 import java.util.concurrent.atomic.AtomicLong
-
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
-
 import com.typesafe.config.ConfigFactory
+import debox.Buffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query._
@@ -484,6 +482,55 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregated2 shouldEqual data.sliding(windowSize, step).map(median).toBuffer
     }
   }
+
+  it("should correctly calculate medianabsolutedeviationovertime") {
+    val sampleData = Seq(9.0, 6.0, 4.0, 1.0, 1.0, 2.0, 2.0)
+    var rv = timeValueRV(sampleData)
+    val chunkedItSample = new ChunkedWindowIteratorD(rv, 170000, 10000, 170000, 100000,
+        new MedianAbsoluteDeviationOverTimeChunkedFunctionD(), querySession)
+    val aggregated2 = chunkedItSample.map(_.getDouble(1)).toBuffer
+      aggregated2(0) shouldEqual 1.0 +- 0.0000000001
+
+    val emptyData = Seq()
+    rv = timeValueRVPk(emptyData)
+    val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
+      new MedianAbsoluteDeviationOverTimeChunkedFunctionD(), querySession)
+    val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
+    aggregatedEmpty(0) isNaN
+
+    def median(s: Seq[Double]): Double = {
+      val (lower, upper) = s.sortWith(_ < _).splitAt(s.size / 2)
+      if (s.size % 2 == 0) (lower.last + upper.head) / 2.0 else upper.head
+    }
+
+    def mad(s: Seq[Double]) : Double = {
+      val medianVal = median(s)
+      val diffFromMedians: Buffer[Double] = Buffer.ofSize(s.length)
+      var iter = s.iterator
+      while (iter.hasNext) {
+        diffFromMedians.append(Math.abs(iter.next()-medianVal))
+      }
+      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
+      iter = diffFromMedians.iterator()
+      diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
+    }
+
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      val minChunkedIt = chunkedWindowIt(data, rv2, new MedianAbsoluteDeviationOverTimeChunkedFunctionD
+      (), windowSize, step)
+
+      val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(mad).toBuffer
+    }
+  }
+
 
   it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
     "than one chunks") {

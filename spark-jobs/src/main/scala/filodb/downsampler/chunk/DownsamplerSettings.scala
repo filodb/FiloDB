@@ -4,21 +4,22 @@ import scala.collection.mutable
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
+import filodb.core.query.DefaultColumnFilterMap
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.ExportConstants._
-import filodb.prometheus.ast.InstantExpression
 import filodb.prometheus.parse.Parser
 
 /**
  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
  * from the spark application driver.
  */
-class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable {
+class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable with StrictLogging {
 
   @transient lazy val filodbSettings = new FilodbSettings(conf)
 
@@ -86,9 +87,9 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
 
-  @transient lazy val exportKeyToRules = {
-    val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
-      val key = group.as[Seq[String]]("key")
+  @transient lazy val exportKeyToConfig = {
+    downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
+      val keyFilters = group.as[Seq[String]]("key").map(Parser.parseColumnFilter)
       val tableName = group.as[String]("table")
       val tablePath = group.as[String]("table-path")
       // label-column-mapping is defined like this in conf file ["_ws_", "workspace", "_ns_", "namespace"]
@@ -130,22 +131,26 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>
-        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map { group =>
-          Parser.parseQuery(s"{${group.mkString(",")}}")
-            .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
-        }
-        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map { group =>
-          Parser.parseQuery(s"{${group.mkString(",")}}")
-            .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
-        }
+        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map(_.map(Parser.parseColumnFilter))
+        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map(_.map(Parser.parseColumnFilter))
         val dropLabels = rule.as[Seq[String]]("drop-labels")
         ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      key -> ExportTableConfig(tableName, tableSchema, tablePath, rules, labelColumnMapping, partitionByCols)
+      val config = ExportTableConfig(tableName, tableSchema, tablePath, rules, labelColumnMapping, partitionByCols)
+
+      assert(keyFilters.map(_.column).toSet.subsetOf(exportRuleKey.toSet),
+        s"expected filters only on key columns; filters=$keyFilters")
+      assert(keyFilters.map(_.column).distinct.size == keyFilters.size,
+        s"expected at most one filter per column; filters=$keyFilters")
+
+      keyFilters -> config
     }
-    assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
-      "export rule group keys must be unique")
-    keyRulesPairs.toMap
+  }
+
+  @transient lazy val exportColumnFilterMap = {
+    val cfMap = new DefaultColumnFilterMap[ExportTableConfig](exportKeyToConfig)
+    logger.info(s"Constructed data-export rule map: $cfMap")
+    cfMap
   }
 
   @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
