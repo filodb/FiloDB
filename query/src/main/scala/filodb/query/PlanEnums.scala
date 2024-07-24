@@ -75,6 +75,7 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object Timestamp extends RangeFunctionId("timestamp", Seq(InstantVectorParam()))
   case object AbsentOverTime extends RangeFunctionId("absent_over_time", Seq(RangeVectorParam()))
   case object PresentOverTime extends RangeFunctionId("present_over_time", Seq(RangeVectorParam()))
+  case object MedianAbsoluteDeviationOverTime extends RangeFunctionId("mad_over_time", Seq(RangeVectorParam()))
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry

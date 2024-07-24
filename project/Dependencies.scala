@@ -21,13 +21,13 @@ object Dependencies {
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.3.4"
-  val kamonBundleVersion = "2.2.2"
+  val kamonBundleVersion = "2.7.3"
   val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "2.4.8"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
-  val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
+  val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
   val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
   val scalaTest         = "org.scalatest"              %% "scalatest"            % "3.1.2"
