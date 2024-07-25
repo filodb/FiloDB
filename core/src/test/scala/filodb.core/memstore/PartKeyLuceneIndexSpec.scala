@@ -97,6 +97,17 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
     partNums7 should not equal debox.Buffer.empty[Int]
 
+    // tests to validate schema ID filter
+    val filter8 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("_type_", Equals("schemaID:46894".utf8)))
+    val partNums8 = keyIndex.partIdsFromFilters(filter8, start, end)
+    partNums8 shouldEqual debox.Buffer(7, 8, 9)
+
+    val filter9 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("_type_", Equals("prom-counter".utf8)))
+    val partNums9 = keyIndex.partIdsFromFilters(filter9, start, end)
+    partNums9.length shouldEqual 0
+
   }
 
   it("should fetch part key records from filters correctly") {
