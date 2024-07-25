@@ -3,12 +3,13 @@ package filodb.query.exec
 import kamon.Kamon
 import monix.execution.Scheduler
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, GlobalConfig}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession, QueryWarnings}
 import filodb.core.query.Filter.Equals
 import filodb.core.store._
 import filodb.query.Query.qLogger
+import filodb.query.TsCardinalities
 
 final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
@@ -56,6 +57,14 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     (lookupRes, Some(columnName))
   }
 
+  def isMaxMinEnabledForWorkspace(ws: Option[String]) : Boolean = {
+    ws.isDefined match {
+      case true => (GlobalConfig.workspacesDisabledForMaxMin.isDefined) &&
+        (!GlobalConfig.workspacesDisabledForMaxMin.contains(ws.get))
+      case false => false
+    }
+  }
+
   // scalastyle:off method.length
   private def finalizePlan(source: ChunkSource,
                            querySession: QuerySession): SelectRawPartitionsExec = {
@@ -63,6 +72,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     Kamon.currentSpan().mark("filtered-partition-scan")
     var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
     val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
+    val ws = filters.find(_.column == TsCardinalities.LABEL_WORKSPACE).map(_.filter.valuesStrings.head.toString)
     var newColName = colName
 
     /*
@@ -99,11 +109,18 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             // Get exact column IDs needed, including max column as needed for histogram calculations.
             // This code is responsible for putting exact IDs needed by any range functions.
             val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
-            val colIDs  = addIDsForHistMaxMin(sch, colIDs1)
+
+            val colIDs = isMaxMinEnabledForWorkspace(ws) match {
+              case true => addIDsForHistMaxMin(sch, colIDs1)
+              case _ => colIDs1
+            }
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
-            val newxformers = newXFormersForHistMaxMin(sch, colIDs, newxformers1)
+            val newxformers = isMaxMinEnabledForWorkspace(ws) match {
+              case true => newXFormersForHistMaxMin(sch, colIDs, newxformers1)
+              case _ => newxformers1
+            }
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),

@@ -2,6 +2,7 @@ package filodb.core
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import scala.jdk.CollectionConverters._
 
 /**
   * Loads the overall configuration in a specific order:
@@ -40,5 +41,12 @@ object GlobalConfig extends StrictLogging {
       |  actor.provider = "remote"
       |}
       |""".stripMargin)
+
+  // Workspaces which are disabled for using min/max columns for otel histograms
+  val workspacesDisabledForMaxMin : Option[Set[String]] =
+    systemConfig.hasPath("filodb.query.workspaces-disabled-max-min") match {
+      case false => None
+      case true => Some(systemConfig.getStringList("filodb.query.workspaces-disabled-max-min").asScala.toSet)
+  }
 
 }
