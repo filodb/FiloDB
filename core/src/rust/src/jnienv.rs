@@ -17,12 +17,6 @@ pub trait JNIEnvExt<'a> {
     /// This is equivilant to Java code `obj.class.name`
     fn get_object_class_name(&mut self, obj: &JObject) -> JavaResult<String>;
 
-    /// Get a scala object instance
-    fn get_scala_object(&mut self, name: &str) -> JavaResult<JObject<'a>>;
-
-    /// Get a scala String val from an object
-    fn get_scala_text_constant(&mut self, obj: &JObject, name: &str) -> JavaResult<String>;
-
     /// Run a closure over every String in a String[]
     fn foreach_string_in_array<F>(&mut self, array: &JObjectArray, func: F) -> JavaResult<()>
     where
@@ -43,26 +37,6 @@ impl<'a> JNIEnvExt<'a> for JNIEnv<'a> {
             .into();
 
         let ret = self.get_string(&name)?.into();
-        Ok(ret)
-    }
-
-    fn get_scala_object(&mut self, name: &str) -> JavaResult<JObject<'a>> {
-        // objects are static fields on the class name named MODULE$
-        let obj = self
-            .get_static_field(format!("{name}$"), "MODULE$", format!("L{name}$;"))?
-            .l()?;
-
-        Ok(obj)
-    }
-
-    fn get_scala_text_constant(&mut self, obj: &JObject, name: &str) -> JavaResult<String> {
-        // private val foo = ""; is modeled in scala as a member method named foo that returns String
-        let val: JString = self
-            .call_method(obj, name, "()Ljava/lang/String;", &[])?
-            .l()?
-            .into();
-
-        let ret = self.get_string(&val)?.into();
         Ok(ret)
     }
 

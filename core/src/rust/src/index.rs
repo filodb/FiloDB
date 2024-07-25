@@ -18,7 +18,10 @@ use crate::{
     errors::{JavaException, JavaResult},
     exec::jni_exec,
     jnienv::JNIEnvExt,
-    state::{FieldConstants, IndexHandle},
+    state::{
+        field_constants::{self, facet_field_name, LABEL_LIST},
+        IndexHandle,
+    },
 };
 
 pub const WRITER_MEM_BUDGET: usize = 50 * 1024 * 1024;
@@ -38,14 +41,8 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
         let directory = MmapDirectory::open(disk_location)?;
 
         // Build the schema for documents
-        let fields = FieldConstants::load(env)?;
-        let (schema, default_field) = build_schema(
-            env,
-            &schema_fields,
-            &map_fields,
-            &multi_column_facet_fields,
-            &fields,
-        )?;
+        let (schema, default_field) =
+            build_schema(env, &schema_fields, &map_fields, &multi_column_facet_fields)?;
 
         // Open index
         let index = Index::open_or_create(directory, schema.clone())?;
@@ -57,7 +54,6 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             default_field,
             writer,
             reader,
-            fields,
         ))
     })
 }
@@ -82,15 +78,13 @@ fn build_schema(
     schema_fields: &JObjectArray,
     map_fields: &JObjectArray,
     multi_column_facet_fields: &JObjectArray,
-    constants: &FieldConstants,
 ) -> JavaResult<(Schema, Option<Field>)> {
     let mut builder = SchemaBuilder::new();
 
-    builder.add_text_field(&constants.part_id, STRING);
-    builder.add_i64_field(&constants.part_id_dv, INDEXED | STORED | FAST);
-    builder.add_bytes_field(&constants.part_key, INDEXED | STORED | FAST);
-    builder.add_i64_field(&constants.start_time, INDEXED | STORED | FAST);
-    builder.add_i64_field(&constants.end_time, INDEXED | STORED | FAST);
+    builder.add_i64_field(field_constants::PART_ID, INDEXED | STORED | FAST);
+    builder.add_bytes_field(field_constants::PART_KEY, INDEXED | STORED | FAST);
+    builder.add_i64_field(field_constants::START_TIME, INDEXED | STORED | FAST);
+    builder.add_i64_field(field_constants::END_TIME, INDEXED | STORED | FAST);
 
     // Fields from input schema
     env.foreach_string_in_array(schema_fields, |name| {
@@ -123,16 +117,13 @@ fn build_schema(
     };
 
     env.foreach_string_in_array(multi_column_facet_fields, |name| {
-        builder.add_facet_field(&constants.facet_field_name(&name), FacetOptions::default());
+        builder.add_facet_field(&facet_field_name(&name), FacetOptions::default());
 
         Ok(())
     })?;
 
     // Default facet for label list, always added
-    builder.add_facet_field(
-        &constants.facet_field_name(&constants.label_list),
-        FacetOptions::default(),
-    );
+    builder.add_facet_field(LABEL_LIST, FacetOptions::default());
 
     Ok((builder.build(), default_field))
 }

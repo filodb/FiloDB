@@ -8,13 +8,11 @@ use std::{
     sync::{atomic::AtomicBool, Mutex, RwLock},
 };
 
-use jni::{sys::jlong, JNIEnv};
+use jni::sys::jlong;
 use tantivy::{
     schema::{Field, OwnedValue, Schema},
     IndexReader, IndexWriter, TantivyDocument,
 };
-
-use crate::{errors::JavaResult, jnienv::JNIEnvExt};
 
 pub struct IndexHandle {
     // Immutable fields that don't need synchronization
@@ -24,8 +22,6 @@ pub struct IndexHandle {
     pub schema: Schema,
     // Default field for JSON searches
     pub default_field: Option<Field>,
-    // Field data
-    pub fields: FieldConstants,
 
     // Fields that need synchronization
     //
@@ -45,7 +41,6 @@ impl IndexHandle {
         default_field: Option<Field>,
         writer: IndexWriter,
         reader: IndexReader,
-        fields: FieldConstants,
     ) -> jlong {
         let obj = Box::new(Self {
             schema,
@@ -53,7 +48,6 @@ impl IndexHandle {
             writer: RwLock::new(writer),
             reader: Mutex::new(reader),
             changes_pending: AtomicBool::new(false),
-            fields,
             ingesting_doc: Mutex::new(IngestingDocument::default()),
         });
 
@@ -81,44 +75,18 @@ pub struct IngestingDocument {
 
 const PART_KEY_INDEX_RAW_CLASS: &str = "filodb/core/memstore/PartKeyIndexRaw";
 
-// Field constants loaded from Scala classes
-pub struct FieldConstants {
-    pub part_id: String,
-    pub part_id_dv: String,
-    pub part_key: String,
-    pub start_time: String,
-    pub end_time: String,
-    pub label_list: String,
-    pub facet_field_prefix: String,
-}
-
-impl FieldConstants {
-    /// Get a computed facet field name
-    pub fn facet_field_name(&self, name: &str) -> String {
-        format!("{}{}", self.facet_field_prefix, name)
+pub mod field_constants {
+    pub fn facet_field_name(name: &str) -> String {
+        format!("{}{}", FACET_FIELD_PREFIX, name)
     }
 
-    /// Load constants from Scala runtime classes
-    pub fn load(env: &mut JNIEnv) -> JavaResult<Self> {
-        let constants_object = env.get_scala_object(PART_KEY_INDEX_RAW_CLASS)?;
+    pub const PART_ID: &str = "__partIdDv__";
+    pub const PART_KEY: &str = "__partKey__";
+    pub const LABEL_LIST: &str = "__labelList__";
+    pub const FACET_FIELD_PREFIX: &str = "$facet_";
 
-        let part_id = env.get_scala_text_constant(&constants_object, "PART_ID_FIELD")?;
-        let part_id_dv = env.get_scala_text_constant(&constants_object, "PART_ID_DV")?;
-        let part_key = env.get_scala_text_constant(&constants_object, "PART_KEY")?;
-        let start_time = env.get_scala_text_constant(&constants_object, "START_TIME")?;
-        let end_time = env.get_scala_text_constant(&constants_object, "END_TIME")?;
-        let label_list = env.get_scala_text_constant(&constants_object, "LABEL_LIST")?;
-        let facet_field_prefix =
-            env.get_scala_text_constant(&constants_object, "FACET_FIELD_PREFIX")?;
-
-        Ok(Self {
-            part_id,
-            part_id_dv,
-            part_key,
-            start_time,
-            end_time,
-            label_list,
-            facet_field_prefix,
-        })
-    }
+    // These should be kept in sync with the constants in  PartKeyIndex.scala
+    // as they're fields that can be directly queried via incoming filters
+    pub const START_TIME: &str = "__startTime__";
+    pub const END_TIME: &str = "__endTime__";
 }
