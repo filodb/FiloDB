@@ -479,7 +479,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     keyIndex.refreshReadersBlocking()
 
-    keyIndex.indexNames(10).toList shouldEqual Seq("Actor2Code", "Actor2Name")
+    keyIndex.indexNames(10).toList shouldEqual Seq("_type_", "Actor2Code", "Actor2Name")
     keyIndex.indexValues("not_found").toSeq should equal (Nil)
 
     val infos = Seq("AFR", "CHN", "COP", "CVL", "EGYEDU").map(_.utf8).map(TermInfo(_, 1))
@@ -614,7 +614,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val labelValues1 = index3.labelNamesEfficient(filters1, 0, Long.MaxValue)
     labelValues1.toSet shouldEqual (0 until 5).map(c => s"dynamicLabel$c").toSet ++
                                    (0 until 10).map(c => s"infoLabel$c").toSet ++
-                                   Set("_ns_", "_ws_", "_metric_")
+                                   Set("_ns_", "_ws_", "_metric_", "_type_")
   }
 
   it("should be able to fetch label values efficiently using facets") {
