@@ -60,7 +60,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   def isMaxMinEnabledForWorkspace(ws: Option[String]) : Boolean = {
     ws.isDefined match {
       case true => (GlobalConfig.workspacesDisabledForMaxMin.isDefined) &&
-        (!GlobalConfig.workspacesDisabledForMaxMin.contains(ws.get))
+        (!GlobalConfig.workspacesDisabledForMaxMin.get.contains(ws.get))
       case false => false
     }
   }

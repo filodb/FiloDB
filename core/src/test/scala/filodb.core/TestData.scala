@@ -358,7 +358,7 @@ object MachineMetricsData {
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
-                       infBucket: Boolean = false):
+                       infBucket: Boolean = false, ws: String = "demo"):
   Stream[Seq[Any]] = {
     val scheme = if (infBucket) {
                    // Custom geometric buckets, with top bucket being +Inf
@@ -379,7 +379,7 @@ object MachineMetricsData {
           buckets.sum.toLong,
           bv.LongHistogram(scheme, buckets.map(x => x)),
           "request-latency",
-          extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+          extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 
