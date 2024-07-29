@@ -679,7 +679,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
-    luceneDocument.get().addField(Schemas.TypeLabel, schemaName)
+    addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
