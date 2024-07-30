@@ -491,6 +491,15 @@ object MetricsTestData {
   val timeseriesSchema = timeseriesDataset.schema
   val timeseriesSchemas = Schemas(timeseriesSchema)
 
+  var timeSeriesDatasetForHistMaxMin = Dataset.make("timeseries",
+                                  Seq("metric:string", "tags:map"),
+                                  Seq("timestamp:ts", "count:long", "sum:long", "min:double", "max:double", "h:hist:counter=false"),
+                                  Seq.empty,
+                                  None,
+                                  DatasetOptions(Seq("__name__", "job"), "__name__")).get
+
+  val timeseriesDatasetForHistMaxMinSchema = timeSeriesDatasetForHistMaxMin.schema
+
   val timeseriesDatasetWithMetric = Dataset.make("timeseries",
     Seq("_metric_:string", "tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),

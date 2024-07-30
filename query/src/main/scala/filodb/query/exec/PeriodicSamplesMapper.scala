@@ -136,12 +136,26 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // time parameters
     offsetMs.map(o => rvs.map { rv =>
       new RangeVector {
-        val row = new TransientRow()
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
-          row.setLong(0, r.getLong(0) + o)
-          row.setDouble(1, r.getDouble(1))
-          row
+          r match {
+            case tr: TransientRow =>
+              val updatedRow = new TransientRow()
+              updatedRow.setLong(0, tr.getLong(0) + o)
+              updatedRow.setDouble(1, tr.getDouble(1))
+              updatedRow
+            case thmr: TransientHistMaxMinRow =>
+              val updatedRow = new TransientHistMaxMinRow()
+              updatedRow.setValues(thmr.getLong(0) + o, thmr.value)
+              updatedRow.setDouble(2, thmr.getDouble(2))
+              updatedRow.setDouble(3, thmr.getDouble(3))
+              updatedRow
+            case thr: TransientHistRow =>
+              val updatedRow = new TransientHistRow()
+              thr.setValues(thr.getLong(0), thr.value)
+              updatedRow
+            case _ => throw new IllegalArgumentException("Unsupported row type for offset handling")
+          }
         }
         override def outputRange: Option[RvRange] = outputRvRange
       }
