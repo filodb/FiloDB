@@ -152,7 +152,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
               updatedRow
             case thr: TransientHistRow =>
               val updatedRow = new TransientHistRow()
-              thr.setValues(thr.getLong(0) + o, thr.value)
+              updatedRow.setValues(thr.getLong(0) + o, thr.value)
               updatedRow
             case _ => throw new IllegalArgumentException("Unsupported row type for offset handling")
           }
