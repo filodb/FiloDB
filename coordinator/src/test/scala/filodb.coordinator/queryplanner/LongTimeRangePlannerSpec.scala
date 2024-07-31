@@ -385,7 +385,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
 
-  it("RemoteExec plan should not have transformers when HA plan is used") {
+  it("RemoteExec promql params should not have transformers when HA plan is used") {
     val tp = TimeStepParams(1722361236, 60, 1722362236)
     val query = "1 - (sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[2m])) / " +
       "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[2m])))"
