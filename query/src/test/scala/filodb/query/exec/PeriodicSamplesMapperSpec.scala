@@ -3,7 +3,7 @@ package filodb.query.exec
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-import filodb.core.{MetricsTestData, TestData}
+import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query._
@@ -25,6 +25,11 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
   )
 
   val rv = timeValueRVPk(samples)
+
+  val histMaxMinSchema = ResultSchema(
+    MachineMetricsData.histMaxMinDS.schema.infosFromIDs(Seq(0, 5, 4, 3)), 1, colIDs = Seq(0, 5, 4, 3))
+
+  val rvHistMaxMin = MachineMetricsData.histMaxMinRV(100000L, numSamples = 3, numBuckets = 4)._2
 
   it("should return value present at time - staleSampleAfterMs") {
 
@@ -69,6 +74,35 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     val outSchema = periodicSamplesVectorFnMapper.schema(resultSchema)
     outSchema.columns shouldEqual resultSchema.columns
+    outSchema.fixedVectorLen shouldEqual Some(6)
+  }
+
+  it("should work with offset for HistogramMaxMin") {
+    val expected: List[(Long, Map[Double, Double])] = List(
+      100100L -> Map(2.0 -> 1.0, 4.0 -> 2.0, 8.0 -> 3.0, 16.0 -> 3.0),
+      200100L -> Map(2.0 -> 1.0, 4.0 -> 2.0, 8.0 -> 3.0, 16.0 -> 3.0),
+      300100L -> Map(2.0 -> 1.0, 4.0 -> 2.0, 8.0 -> 3.0, 16.0 -> 3.0),
+      400100L -> Map(2.0 -> 1.0, 4.0 -> 2.0, 8.0 -> 3.0, 16.0 -> 3.0),
+      500100L -> Map(),
+      600100L -> Map()
+    )
+
+    val expectedResults = expected.map { case (key, value) =>
+      s"($key,{${value.map { case (k, v) => s"$k=$v" }.mkString(", ")}})"
+    }.mkString("List(", ", ", ")")
+
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None, QueryContext(),
+      false, Nil, Some(100))
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rvHistMaxMin)), querySession,
+      1000, histMaxMinSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getHistogram(1))))
+
+    resultRows.map(_.toList).mkString shouldEqual expectedResults
+
+    val outSchema = periodicSamplesVectorFnMapper.schema(histMaxMinSchema)
+    outSchema.columns shouldEqual histMaxMinSchema.columns
     outSchema.fixedVectorLen shouldEqual Some(6)
   }
 
