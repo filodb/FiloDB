@@ -228,6 +228,7 @@ object LogicalPlanParser {
       case lp: VectorPlan                  => vectorToQuery(lp)
       case lp: SubqueryWithWindowing       => subqueryWithWindowingToQuery(lp)
       case lp: TopLevelSubquery            => topLevelSubqueryToQuery(lp)
+      case lp: MetadataQueryPlan           => metadataMatchToQuery(lp)
       case _                               => throw new UnsupportedOperationException(s"Logical plan to query not " +
         s"supported for ${logicalPlan}")
     }
