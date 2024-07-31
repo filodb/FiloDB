@@ -112,8 +112,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+          // rootLogicalPlan can be different from queryParams.promQl
+          // because rootLogicalPlan may not include the transformer that will not sent to remote.
+          // For instance, when promql = 1 - sum(foo), rootLogicalPlan = sum(foo).
+          // Because the logic "1 - " is translated to a transformer that runs locally.
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val promQlParams = PromQlQueryParams(queryParams.promQl,
+          val promQlParams = PromQlQueryParams(LogicalPlanParser.convertToQuery(rootLogicalPlan),
             (timeRange.startMs + offsetMs.max) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs.min) / 1000)
           val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
             copy(processFailure = false, processMultiPartition = false) )
