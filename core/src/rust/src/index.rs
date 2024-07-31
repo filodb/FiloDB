@@ -8,10 +8,10 @@ use jni::{
 use tantivy::{
     directory::MmapDirectory,
     schema::{
-        FacetOptions, Field, JsonObjectOptions, Schema, SchemaBuilder, TextFieldIndexing, FAST,
-        INDEXED, STORED, STRING,
+        BytesOptions, FacetOptions, Field, JsonObjectOptions, NumericOptions, Schema,
+        SchemaBuilder, TextFieldIndexing, TextOptions,
     },
-    Index, TantivyDocument,
+    Index, ReloadPolicy, TantivyDocument,
 };
 
 use crate::{
@@ -46,8 +46,12 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
 
         // Open index
         let index = Index::open_or_create(directory, schema.clone())?;
+
         let writer = index.writer::<TantivyDocument>(WRITER_MEM_BUDGET)?;
-        let reader = index.reader()?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
 
         Ok(IndexHandle::new_handle(
             schema,
@@ -81,14 +85,27 @@ fn build_schema(
 ) -> JavaResult<(Schema, Option<Field>)> {
     let mut builder = SchemaBuilder::new();
 
-    builder.add_i64_field(field_constants::PART_ID, INDEXED | STORED | FAST);
-    builder.add_bytes_field(field_constants::PART_KEY, INDEXED | STORED | FAST);
-    builder.add_i64_field(field_constants::START_TIME, INDEXED | STORED | FAST);
-    builder.add_i64_field(field_constants::END_TIME, INDEXED | STORED | FAST);
+    let text_options = TextOptions::default().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer("raw")
+            .set_fieldnorms(false),
+    );
+
+    let random_access_text_options = text_options.clone().set_fast(Some("raw"));
+
+    let numeric_options = NumericOptions::default().set_indexed().set_fast();
+
+    let byte_options = BytesOptions::default().set_fast().set_indexed();
+
+    builder.add_text_field(field_constants::DOCUMENT_ID, text_options.clone());
+    builder.add_i64_field(field_constants::PART_ID, numeric_options.clone());
+    builder.add_bytes_field(field_constants::PART_KEY, byte_options);
+    builder.add_i64_field(field_constants::START_TIME, numeric_options.clone());
+    builder.add_i64_field(field_constants::END_TIME, numeric_options.clone());
 
     // Fields from input schema
     env.foreach_string_in_array(schema_fields, |name| {
-        builder.add_text_field(&name, STRING);
+        builder.add_text_field(&name, random_access_text_options.clone());
 
         Ok(())
     })?;
@@ -108,7 +125,12 @@ fn build_schema(
         let field = builder.add_json_field(
             &name,
             JsonObjectOptions::default()
-                .set_indexing_options(TextFieldIndexing::default().set_tokenizer("raw")),
+                .set_indexing_options(
+                    TextFieldIndexing::default()
+                        .set_tokenizer("raw")
+                        .set_fieldnorms(false),
+                )
+                .set_fast(Some("raw")),
         );
 
         Some(field)
@@ -117,13 +139,13 @@ fn build_schema(
     };
 
     env.foreach_string_in_array(multi_column_facet_fields, |name| {
-        builder.add_facet_field(&facet_field_name(&name), FacetOptions::default());
+        builder.add_text_field(&name, random_access_text_options.clone());
 
         Ok(())
     })?;
 
     // Default facet for label list, always added
-    builder.add_facet_field(LABEL_LIST, FacetOptions::default());
+    builder.add_facet_field(&facet_field_name(LABEL_LIST), FacetOptions::default());
 
     Ok((builder.build(), default_field))
 }
