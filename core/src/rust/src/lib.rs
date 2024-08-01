@@ -21,5 +21,10 @@
 mod errors;
 mod exec;
 mod index;
+mod ingestion;
 mod jnienv;
+mod parser;
 mod state;
+
+#[cfg(test)]
+mod test_utils;

@@ -1,7 +1,7 @@
 //! Extensions to JNIEnv
 
 use jni::{
-    objects::{JObject, JObjectArray, JString},
+    objects::{JByteArray, JObject, JObjectArray, JString},
     JNIEnv,
 };
 
@@ -21,6 +21,17 @@ pub trait JNIEnvExt<'a> {
     fn foreach_string_in_array<F>(&mut self, array: &JObjectArray, func: F) -> JavaResult<()>
     where
         F: FnMut(String) -> JavaResult<()>;
+
+    /// Get a byte array from the JVM
+    fn get_byte_array_offset_len(
+        &mut self,
+        array: &JByteArray,
+        offset: usize,
+        len: usize,
+    ) -> JavaResult<Vec<u8>>;
+
+    /// Get a byte array from the JVM
+    fn get_byte_array(&mut self, array: &JByteArray) -> JavaResult<Vec<u8>>;
 }
 
 impl<'a> JNIEnvExt<'a> for JNIEnv<'a> {
@@ -52,5 +63,26 @@ impl<'a> JNIEnvExt<'a> for JNIEnv<'a> {
         }
 
         Ok(())
+    }
+
+    fn get_byte_array_offset_len(
+        &mut self,
+        array: &JByteArray,
+        offset: usize,
+        len: usize,
+    ) -> JavaResult<Vec<u8>> {
+        let mut bytes = vec![0u8; len];
+        let bytes_ptr = bytes.as_mut_ptr() as *mut i8;
+        let bytes_ptr = unsafe { std::slice::from_raw_parts_mut(bytes_ptr, len) };
+
+        self.get_byte_array_region(array, offset as i32, bytes_ptr)?;
+
+        Ok(bytes)
+    }
+
+    fn get_byte_array(&mut self, array: &JByteArray) -> JavaResult<Vec<u8>> {
+        let len = self.get_array_length(array)?;
+
+        self.get_byte_array_offset_len(array, 0, len as usize)
     }
 }

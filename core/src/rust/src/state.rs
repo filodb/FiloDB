@@ -5,7 +5,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{atomic::AtomicBool, Mutex, RwLock},
+    sync::{atomic::AtomicBool, RwLock},
 };
 
 use jni::sys::jlong;
@@ -15,24 +15,23 @@ use tantivy::{
 };
 
 pub struct IndexHandle {
-    // Immutable fields that don't need synchronization
+    // Fields that don't need explicit synchronization
     //
     //
     // Schema for this nidex
     pub schema: Schema,
     // Default field for JSON searches
     pub default_field: Option<Field>,
+    // Active reader
+    pub reader: IndexReader,
+    // Are there changes pending to commit
+    pub changes_pending: AtomicBool,
 
     // Fields that need synchronization
     //
     //
-    pub changes_pending: AtomicBool,
     // Active writer
     pub writer: RwLock<IndexWriter>,
-    // Active reader
-    pub reader: Mutex<IndexReader>,
-    // Actively ingesting doc
-    pub ingesting_doc: Mutex<IngestingDocument>,
 }
 
 impl IndexHandle {
@@ -46,9 +45,8 @@ impl IndexHandle {
             schema,
             default_field,
             writer: RwLock::new(writer),
-            reader: Mutex::new(reader),
+            reader,
             changes_pending: AtomicBool::new(false),
-            ingesting_doc: Mutex::new(IngestingDocument::default()),
         });
 
         Box::into_raw(obj) as jlong
@@ -72,8 +70,6 @@ pub struct IngestingDocument {
     // Document state for ingestion
     pub doc: TantivyDocument,
 }
-
-const PART_KEY_INDEX_RAW_CLASS: &str = "filodb/core/memstore/PartKeyIndexRaw";
 
 pub mod field_constants {
     pub fn facet_field_name(name: &str) -> String {
