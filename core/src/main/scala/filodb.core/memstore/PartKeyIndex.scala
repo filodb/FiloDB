@@ -64,6 +64,11 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
                                protected val lifecycleManager: Option[IndexMetadataStore] = None)
   extends StrictLogging {
 
+  protected val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
+      MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
   protected val queryIndexLookupLatency = Kamon.histogram("index-partition-lookup-latency",
       MeasurementUnit.time.nanoseconds)
     .withTag("dataset", ref.dataset)

@@ -285,6 +285,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val disableIndexCaching = filodbConfig.getBoolean("memstore.disable-index-caching")
+  private val partKeyIndexType = filodbConfig.getString("memstore.part-key-index-type")
 
 
   /////// END CONFIGURATION FIELDS ///////////////////
@@ -311,9 +312,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex: PartKeyIndexRaw = new PartKeyLuceneIndex(ref, schemas.part,
-    indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
-    storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
+  private[memstore] final val partKeyIndex: PartKeyIndexRaw = partKeyIndexType match {
+    case "lucene" => new PartKeyLuceneIndex(ref, schemas.part,
+      indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
+      storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
+    case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
+      shardNum, storeConfig.diskTTLSeconds * 1000)
+    case x => sys.error(s"Unsupported part key index type: '$x'")
+  }
 
   private val cardTracker: CardinalityTracker = initCardTracker()
 

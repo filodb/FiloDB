@@ -79,11 +79,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   import PartKeyLuceneIndex._
   import PartKeyIndexRaw._
 
-  val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
   val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
     MeasurementUnit.time.nanoseconds)
     .withTag("dataset", ref.dataset)
