@@ -57,8 +57,13 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     (lookupRes, Some(columnName))
   }
 
+  /**
+   * @param ws workspace name
+   * @return true if the config is defined AND ws is not in the list of disabled workspaces. false otherwise
+   */
   def isMaxMinEnabledForWorkspace(ws: Option[String]) : Boolean = {
     ws.isDefined match {
+      // we are making sure that the config is defined to avoid any accidental "turn on" of the feature when not desired
       case true => (GlobalConfig.workspacesDisabledForMaxMin.isDefined) &&
         (!GlobalConfig.workspacesDisabledForMaxMin.get.contains(ws.get))
       case false => false
@@ -72,7 +77,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     Kamon.currentSpan().mark("filtered-partition-scan")
     var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
     val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
-    val ws = filters.find(_.column == TsCardinalities.LABEL_WORKSPACE).map(_.filter.valuesStrings.head.toString)
+    val ws = filters.find(x => x.column == TsCardinalities.LABEL_WORKSPACE && x.filter.isInstanceOf[Equals])
+      .map(_.filter.valuesStrings.head.toString)
     var newColName = colName
 
     /*
