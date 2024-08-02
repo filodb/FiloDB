@@ -2,13 +2,11 @@ package filodb.coordinator.queryplanner
 
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
-import com.typesafe.config.ConfigFactory
-
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
+
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
-
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
@@ -385,6 +383,55 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
     binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+  }
+
+  it("HAPlan promql params should not have transformers when remote-route is used") {
+    val tp = TimeStepParams(1722361236, 60, 1722362236)
+    val query = "1 - (sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[2m])) / " +
+      "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[2m])))"
+    val lp = Parser.queryRangeToLogicalPlan(query, tp)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(1722360236000L, 1722363236000L), false))
+      }
+    }
+    val promQlParams = PromQlQueryParams(query, 1722361236, 60, 1722362236)
+
+    // Create new config with routing config
+    val routingConfigString = "routing {partition_name = p1 \n  remote {\n    http {\n" +
+      "      endpoint = localhost\n      timeout = 10000\n    }\n  }\n}"
+    val routingConfig = ConfigFactory.parseString(routingConfigString)
+
+    val localConfig = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
+      withFallback(routingConfig)
+    val queryConfigWithSelector = QueryConfig(localConfig).copy(plannerSelector = Some("plannerSelector"))
+
+    val queryConfigWithGrpcEndpoint = QueryConfig(
+      localConfig.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
+      .copy(plannerSelector = Some("plannerSelector"))
+
+    // SingleClusterPlanner which is passed to HAPlanner
+    val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+      queryConfigWithSelector,"raw")
+
+    val highAvailabilityPlannerRaw = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
+      queryConfigWithGrpcEndpoint,
+      workUnit = "", buddyWorkUnit = "", clusterName = "", useShardLevelFailover = false)
+
+    val longTimeRangePlanner = new LongTimeRangePlanner(highAvailabilityPlannerRaw, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfigWithGrpcEndpoint, dataset)
+
+    val execPlan = longTimeRangePlanner.materialize(lp, QueryContext(origQueryParams = promQlParams))
+    execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
+    execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "(sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])) / " +
+        "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])))"
+    execPlan.rangeVectorTransformers.size shouldEqual 1
+    execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarOperationMapper] shouldEqual true
+    execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].operator shouldEqual BinaryOperator.SUB
+    execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].scalarOnLhs shouldEqual true
   }
 
   it("should direct binary join to raw cluster and use ActorPlanDispatcher") {

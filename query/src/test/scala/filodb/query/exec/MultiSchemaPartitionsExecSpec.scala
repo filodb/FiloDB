@@ -1,14 +1,13 @@
 package filodb.query.exec
 
 import com.typesafe.config.ConfigFactory
-
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SchemaMismatch, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, LongColumn, TimestampColumn}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
-import filodb.core.{DatasetRef, QueryTimeoutException, TestData, Types}
+import filodb.core.{DatasetRef, GlobalConfig, QueryTimeoutException, TestData, Types}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -20,8 +19,8 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import monix.reactive.Observable
 
 object MultiSchemaPartitionsExecSpec {
@@ -85,6 +84,9 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val histData = MMD.linearHistSeries().take(100)
   val histMaxMinData = MMD.histMaxMin(histData)
 
+  val histDataDisabledWS = MMD.linearHistSeries(ws = GlobalConfig.workspacesDisabledForMaxMin.get.head).take(100)
+  val histMaxMinDataDisabledWS = MMD.histMaxMin(histDataDisabledWS)
+
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
@@ -99,6 +101,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.setup(MMD.histMaxMinDS.ref, Schemas(MMD.histMaxMinDS.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histMaxMinDS.ref, 0, MMD.records(MMD.histMaxMinDS, histMaxMinData))
+    memStore.ingest(MMD.histMaxMinDS.ref, 0, MMD.records(MMD.histMaxMinDS, histMaxMinDataDisabledWS))
 
     memStore.refreshIndexForTesting(dsRef)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
@@ -355,7 +358,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
   // A lower-level (below coordinator) end to end histogram with max ingestion and querying test
   it("should sum Histogram records with max correctly") {
-    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)), ColumnFilter("_ws_", Filter.Equals("demo".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
                                              filters, AllChunkScan, "_metric_", colName = Some("h"))
 
@@ -370,7 +373,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     info(execPlan.printTree())
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
-    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 5, 4, 3)
+    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 3, 5, 4)
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
@@ -382,7 +385,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
@@ -403,7 +406,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   }
 
   it("should extract Histogram with max using Last/None function correctly") {
-    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)), ColumnFilter("_ws_", Filter.Equals("demo".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
                                              filters, AllChunkScan, "_metric_")   // should default to h column
 
@@ -424,14 +427,40 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(5), r(4), r(3)) }
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
       res._4.isNaN shouldEqual false
       res._4 should be <= origData._3.asInstanceOf[Double]
     }
+  }
 
+  it("should not pickup max min columns if ws is disabled") {
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)), ColumnFilter("_ws_",
+      Filter.Equals(GlobalConfig.workspacesDisabledForMaxMin.get.head.utf8)))
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
+      filters, AllChunkScan, "_metric_", colName = Some("h"))
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000), // [5m]
+      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil))
+    execPlan.execute(memStore, querySession).runToFuture.futureValue
+    info(execPlan.printTree())
+    execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
+    // if the ws is disabled for max min calculation, then the max min columns should not be picked up
+    execPlan.finalPlan.colIds shouldEqual Seq(0, 3)
+  }
+
+  it("test isMaxMinEnabledForWorkspace correctly returns expected values") {
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
+      Seq(), AllChunkScan, "_metric_", colName = Some("h"))
+    execPlan.isMaxMinEnabledForWorkspace(Some("demo")) shouldEqual true
+    execPlan.isMaxMinEnabledForWorkspace(Some(GlobalConfig.workspacesDisabledForMaxMin.get.head)) shouldEqual false
+    execPlan.isMaxMinEnabledForWorkspace(None) shouldEqual false
   }
 
   it("should return chunk metadata from MemStore") {
