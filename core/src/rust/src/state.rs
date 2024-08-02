@@ -86,4 +86,5 @@ pub mod field_constants {
     pub const FACET_FIELD_PREFIX: &str = "$facet_";
     pub const START_TIME: &str = "__startTime__";
     pub const END_TIME: &str = "__endTime__";
+    pub const TYPE: &str = "_type_";
 }

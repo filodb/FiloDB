@@ -12,9 +12,10 @@ import org.apache.lucene.util.BytesRef
 import spire.implicits.cforRange
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PartKeyIndexRaw.bytesRefToUnsafeOffset
+import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.metadata.PartitionSchema
 import filodb.core.query.ColumnFilter
 import filodb.memory.format.UnsafeUtils
 
@@ -238,6 +239,9 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     // If configured and enabled, Multi-column facets will be created on "partition-schema" columns
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
+
+    val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
+    addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange {
       0 until numPartColumns
