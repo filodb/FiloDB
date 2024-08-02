@@ -27,7 +27,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
   val rv = timeValueRVPk(samples)
 
   val histMaxMinSchema = ResultSchema(
-    MachineMetricsData.histMaxMinDS.schema.infosFromIDs(Seq(0, 5, 4, 3)), 1, colIDs = Seq(0, 5, 4, 3))
+    MachineMetricsData.histMaxMinDS.schema.infosFromIDs(Seq(0, 3, 5, 4)), 1, colIDs = Seq(0, 3, 5, 4))
 
   val rvHistMaxMin = MachineMetricsData.histMaxMinRV(100000L, numSamples = 3, numBuckets = 4)._2
 
