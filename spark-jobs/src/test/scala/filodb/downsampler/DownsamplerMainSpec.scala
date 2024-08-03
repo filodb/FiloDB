@@ -409,6 +409,43 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |""".stripMargin
     )
 
+    val multiRuleSameGroupConfBlocked = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      key-labels = ["l1"]
+        |      groups = [
+        |        {
+        |          key = ["l1=\"l1a\""]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = [["l2=\"l2a\""]]  # allo A
+        |              block-filters = []
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2_DNE\""]]
+        |              block-filters = [["l2=\"l2b\""]]  # block B (DNE allow filter to require C is matched below)
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2c\""]] # allow C
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
+        |      ]
+        |    }
+        |""".stripMargin
+    )
+
     val allConfs = Seq(
       onlyKeyConf,
       includeExcludeConf,
@@ -416,15 +453,16 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       contradictFilterConf,
       multiKeyConf,
       multiRuleConf,
-      multiRuleSameGroupConf
+      multiRuleSameGroupConf,
+      multiRuleSameGroupConfBlocked
     )
 
     val labelConfPairs = Seq(
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf,                         multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2b", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf,               multiRuleConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2d", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf)),
       (Map("l1" -> "l1b", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](             multiRuleConf)),
       (Map("l1" -> "l1c", "l2" -> "l2a", "l3" -> "l3a"), Set[Config]()),
