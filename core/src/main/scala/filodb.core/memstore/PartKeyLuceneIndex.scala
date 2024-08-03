@@ -37,10 +37,10 @@ import spire.syntax.cfor._
 
 import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
-import filodb.core.binaryrecord2.MapItemConsumer
+import filodb.core.binaryrecord2.{MapItemConsumer, RecordSchema}
 import filodb.core.memstore.ratelimit.CardinalityTracker
+import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
 import filodb.core.query.Filter._
 import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
@@ -677,6 +677,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     // If configured and enabled, Multi-column facets will be created on "partition-schema" columns
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
+
+    val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
+    addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)

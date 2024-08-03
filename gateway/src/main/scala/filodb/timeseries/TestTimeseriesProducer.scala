@@ -249,7 +249,7 @@ object TestTimeseriesProducer extends StrictLogging {
       if (histSchema == Schemas.otelDeltaHistogram || histSchema == Schemas.otelCumulativeHistogram) {
         val minVal = buckets.min.toDouble
         val maxVal = buckets.max.toDouble
-        new MetricTagInputRecord(Seq(timestamp, sum, count, minVal, maxVal, hist), metric, tags, histSchema)
+        new MetricTagInputRecord(Seq(timestamp, sum, count, hist, minVal, maxVal), metric, tags, histSchema)
       }
       else {
         new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)

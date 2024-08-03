@@ -219,7 +219,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      promQl shouldEqual("""test1{job = "app"} + test2{job = "app"}""")
+      promQl shouldEqual("""(test1{job="app"} + test2{job="app"})""")
   }
 }
 
