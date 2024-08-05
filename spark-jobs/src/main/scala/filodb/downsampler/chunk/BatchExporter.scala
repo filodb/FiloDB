@@ -109,7 +109,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   /**
    * Returns the Spark Rows to be exported.
    */
-  def getExportRows(readablePartitions: Seq[ReadablePartition], exportTableConfig: ExportTableConfig): Iterator[Row] = {
+  def getExportRows(readablePartitions: Seq[ReadablePartition],
+                    keyFilters: Seq[ColumnFilter],
+                    exportTableConfig: ExportTableConfig): Iterator[Row] = {
     readablePartitions
       .iterator
       .map { part =>
@@ -125,7 +127,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           pairMap.remove(LABEL_METRIC)
           pairMap
         }
-        val rule = getRuleIfShouldExport(partKeyMap)
+        val rule = getRuleIfShouldExport(partKeyMap, keyFilters, exportTableConfig)
         (part, partKeyMap, rule)
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
@@ -230,18 +232,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        |""".stripMargin
   }
 
-  def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
-    downsamplerSettings.exportColumnFilterMap.get(partKeyMap).flatMap { exportTableConfig =>
-      exportTableConfig.exportRules.takeWhile { rule =>
-        // step through rules while we still haven't matched a "block" filter
-        !rule.blockFilterGroups.exists { filterGroup =>
-          matchAllFilters(filterGroup, partKeyMap)
-        }
-      }.find { rule =>
-        // stop at a rule if its "allow" filters are either empty or match the partKey
-        rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
-          matchAllFilters(filterGroup, partKeyMap)
-        }
+  def getRuleIfShouldExport(partKeyMap: collection.Map[String, String],
+                            keyFilters: Seq[ColumnFilter],
+                            exportTableConfig: ExportTableConfig): Option[ExportRule] = {
+    if (!matchAllFilters(keyFilters, partKeyMap)) {
+      return None
+    }
+    exportTableConfig.exportRules.takeWhile { rule =>
+      // step through rules while we still haven't matched a "block" filter
+      !rule.blockFilterGroups.exists { filterGroup =>
+        matchAllFilters(filterGroup, partKeyMap)
+      }
+    }.find { rule =>
+      // stop at a rule if its "allow" filters are either empty or match the partKey
+      rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
+        matchAllFilters(filterGroup, partKeyMap)
       }
     }
   }
@@ -345,28 +350,4 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
   // scalastyle:on method.length
-
-  /**
-   * Filters for Rows that match the argument filters.
-   *
-   * @param exportKeyFilters at most one filter for each column of the export key.
-   */
-  def filterRdd(rdd: RDD[Row],
-                exportKeyFilters: Seq[ColumnFilter],
-                exportTableConfig: ExportTableConfig): RDD[Row] = {
-    // The ith index is the index of the column filtered by the ith filter.
-    // Example:
-    //   Columns: foo, bar, baz
-    //   Filters: "bar"=~"hello", foo="hey"
-    //   rowFilterIndices = [1, 0]
-    val rowFilterIndices = exportKeyFilters.map(_.column).map { colName =>
-      val index = getColumnIndex(colName, exportTableConfig)
-      assert(index.isDefined, "export-key column name does not exist in pending-export row: " + colName)
-      index.get
-    }
-    rdd.filter { row =>
-      val rowKey = rowFilterIndices.map(row.get(_).toString)
-      rowKey.zip(exportKeyFilters).forall { case (key, filter) => filter.filter.filterFunc(key) }
-    }
-  }
 }

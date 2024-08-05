@@ -26,7 +26,6 @@ import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.commons.io.FileUtils
-import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
@@ -174,16 +173,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |    }
           |""".stripMargin
       ))
-
-    val emptyConf = ConfigFactory.parseString(
-      """
-        |    filodb.downsampler.data-export {
-        |      key-labels = ["l1"]
-        |      groups = []
-        |      drop-labels = []
-        |    }
-        |""".stripMargin
-    )
 
     val onlyKeyConf = ConfigFactory.parseString(
       """
@@ -420,23 +409,60 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |""".stripMargin
     )
 
+    val multiRuleSameGroupConfBlocked = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      key-labels = ["l1"]
+        |      groups = [
+        |        {
+        |          key = ["l1=\"l1a\""]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = [["l2=\"l2a\""]]  # allo A
+        |              block-filters = []
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2_DNE\""]]
+        |              block-filters = [["l2=\"l2b\""]]  # block B (DNE allow filter to require C is matched below)
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2c\""]] # allow C
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
+        |      ]
+        |    }
+        |""".stripMargin
+    )
+
     val allConfs = Seq(
-      emptyConf,
       onlyKeyConf,
       includeExcludeConf,
       multiFilterConf,
       contradictFilterConf,
       multiKeyConf,
       multiRuleConf,
-      multiRuleSameGroupConf
+      multiRuleSameGroupConf,
+      multiRuleSameGroupConfBlocked
     )
 
     val labelConfPairs = Seq(
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf,                         multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2b", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf,               multiRuleConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2d", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf)),
       (Map("l1" -> "l1b", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](             multiRuleConf)),
       (Map("l1" -> "l1c", "l2" -> "l2a", "l3" -> "l3a"), Set[Config]()),
@@ -447,7 +473,10 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
       // make sure batchExporter correctly decides when to export
       labelConfPairs.foreach { case (partKeyMap, includedConf) =>
-        batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
+        val shouldExport = dsSettings.exportKeyToConfig.exists { case (keyFilters, exportTableConfig) =>
+          batchExporter.getRuleIfShouldExport(partKeyMap, keyFilters, exportTableConfig).isDefined
+        }
+        shouldExport shouldEqual includedConf.contains(conf)
       }
     }
   }
@@ -497,14 +526,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchExporter.getColumnIndex(colName, dsSettings.exportKeyToConfig.head._2).get shouldEqual i}
   }
 
-  it("should correctly apply export column filters") {
-    // should be closed at the end of the test
-    val sparkSession = SparkSession.builder()
-      .appName("shouldCorrectlyApplyExportColumnFilters")
-      .master("local")
-      .getOrCreate()
-    val sparkCtx = sparkSession.sparkContext
-
+  it("should correctly apply export key column filters") {
     {
       val testConf = ConfigFactory.parseString(
         """
@@ -520,28 +542,36 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |            "_ns_", "namespace", "NOT NULL"
           |          ]
           |          partition-by-columns = []
-          |          rules = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
           |        }
           |      ]
           |    }
           |""".stripMargin
       ).withFallback(conf)
       val settings = new DownsamplerSettings(testConf)
-      val rdd = sparkCtx.parallelize(Seq(
-        Row("my_ws", "a"),
-        Row("DNE", "b"),
-        Row("my_ws", "c"),
-        Row("DNE", "d"),
-      ))
-      val expected = Seq(
-        Row("my_ws", "a"),
-        Row("my_ws", "c"),
+      val rows = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "a"),
+        Map("_ws_" -> "DNE", "_ns_" -> "b"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "c"),
+        Map("_ws_" -> "DNE", "_ns_" -> "d"),
       )
-      val res = batchExporter.filterRdd(rdd,
+      val expected = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "a"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "c"),
+      )
+      val filtered = rows.filter{ row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
           settings.exportKeyToConfig.head._1,
           settings.exportKeyToConfig.head._2)
-        .collect().toSeq
-      res shouldEqual expected
+        rule.isDefined
+      }
+      filtered shouldEqual expected
     }
 
     {
@@ -559,28 +589,36 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |            "_ns_", "namespace", "NOT NULL"
           |          ]
           |          partition-by-columns = []
-          |          rules = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
           |        }
           |      ]
           |    }
           |""".stripMargin
       ).withFallback(conf)
       val settings = new DownsamplerSettings(testConf)
-      val rdd = sparkCtx.parallelize(Seq(
-        Row("a", "my_ns"),
-        Row("b", "DNE"),
-        Row("c", "my_ns123"),
-        Row("d", "DNE"),
-      ))
-      val expected = Seq(
-        Row("a", "my_ns"),
-        Row("c", "my_ns123"),
+      val rows = Seq(
+        Map("_ws_" -> "a", "_ns_" -> "my_ns"),
+        Map("_ws_" -> "b", "_ns_" -> "DNE"),
+        Map("_ws_" -> "c", "_ns_" -> "my_ns123"),
+        Map("_ws_" -> "d", "_ns_" -> "DNE"),
       )
-      val res = batchExporter.filterRdd(rdd,
+      val expected = Seq(
+        Map("_ws_" -> "a", "_ns_" -> "my_ns"),
+        Map("_ws_" -> "c", "_ns_" -> "my_ns123"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
           settings.exportKeyToConfig.head._1,
           settings.exportKeyToConfig.head._2)
-        .collect().toSeq
-      res shouldEqual expected
+        rule.isDefined
+      }
+      filtered shouldEqual expected
     }
 
     {
@@ -598,29 +636,37 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |            "_ns_", "namespace", "NOT NULL"
           |          ]
           |          partition-by-columns = []
-          |          rules = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
           |        }
           |      ]
           |    }
           |""".stripMargin
       ).withFallback(conf)
       val settings = new DownsamplerSettings(testConf)
-      val rdd = sparkCtx.parallelize(Seq(
-        Row("my_ws", "my_ns1"),
-        Row("my_ws123", "my_ns2"),
-        Row("c", "c"),
-        Row("my_ws", "DNE"),
-        Row("my_ws", "my_ns3"),
-      ))
-      val expected = Seq(
-        Row("my_ws", "my_ns1"),
-        Row("my_ws", "my_ns3"),
+      val rows = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws123", "_ns_" -> "my_ns2"),
+        Map("_ws_" -> "c", "_ns_" -> "c"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "DNE"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns3"),
       )
-      val res = batchExporter.filterRdd(rdd,
+      val expected = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns3"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
           settings.exportKeyToConfig.head._1,
           settings.exportKeyToConfig.head._2)
-        .collect().toSeq
-      res shouldEqual expected
+        rule.isDefined
+      }
+      filtered shouldEqual expected
     }
 
     {
@@ -638,32 +684,38 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |            "_ns_", "namespace", "NOT NULL"
           |          ]
           |          partition-by-columns = []
-          |          rules = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
           |        }
           |      ]
           |    }
           |""".stripMargin
       ).withFallback(conf)
       val settings = new DownsamplerSettings(testConf)
-      val rdd = sparkCtx.parallelize(Seq(
-        Row("my_ws1", "my_ns1"),
-        Row("b", "b"),
-        Row("my_ws1", "DNE"),
-        Row("DNE", "my_ns1"),
-        Row("my_ws2", "my_ns2"),
-      ))
-      val expected = Seq(
-        Row("my_ws1", "my_ns1"),
-        Row("my_ws2", "my_ns2"),
+      val rows = Seq(
+        Map("_ws_" -> "my_ws1", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "b", "_ns_" -> "b"),
+        Map("_ws_" -> "my_ws1", "_ns_" -> "DNE"),
+        Map("_ws_" -> "DNE", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws2", "_ns_" -> "my_ns2"),
       )
-      val res = batchExporter.filterRdd(rdd,
+      val expected = Seq(
+        Map("_ws_" -> "my_ws1", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws2", "_ns_" -> "my_ns2"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
           settings.exportKeyToConfig.head._1,
           settings.exportKeyToConfig.head._2)
-        .collect().toSeq
-      res shouldEqual expected
+        rule.isDefined
+      }
+      filtered shouldEqual expected
     }
-
-    sparkSession.close()
   }
 
   it("should give correct export schema") {
