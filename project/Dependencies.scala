@@ -55,7 +55,7 @@ object Dependencies {
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.agrona"           %  "agrona"           % "0.9.35",
-    "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
+    "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
     "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
     scalaLoggingDep
   )
