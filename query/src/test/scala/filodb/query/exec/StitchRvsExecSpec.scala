@@ -1,12 +1,14 @@
 package filodb.query.exec
 
 import scala.annotation.tailrec
+
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
