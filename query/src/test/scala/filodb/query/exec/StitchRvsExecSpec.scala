@@ -352,6 +352,44 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     mergeAndValidate(rvs, expected)
   }
 
+  it("should merge avg correctly when there are gaps") {
+    // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
+    // The merge functionality should honor the passed RvRange and accordingly generate the rows
+    val rvs = Seq(
+      Seq(
+        (50L, 1L, 2.0),
+        (60L, 2L, 5.0),
+      ),
+      Seq(
+        (30L, 4L, 5.0)
+      )
+    )
+    val expected = Seq(
+        (30L, 4L, 5.0),
+        (40L, 0L, Double.NaN),
+        (50L, 1L, 2.0),
+        (60L, 2L, 5.0)
+      )
+    val inputSeq = rvs.map { rows =>
+      new NoCloseCursor(rows.iterator.map(r => {
+        val row = new AvgAggTransientRow()
+        row.setLong(0, r._1)
+        row.setLong(2, r._2)
+        row.setDouble(1, r._3)
+        row
+      }))
+    }
+    val (minTs, maxTs) = expected.foldLeft((Long.MaxValue, Long.MinValue)) {
+      case ((allMin, allMax), (thisTs, _, _)) => (allMin.min(thisTs), allMax.max(thisTs)) }
+    val expectedStep = expected match {
+      case (t1, _, _) :: (t2, _, _) :: _ => t2 - t1
+      case _ => 1
+    }
+    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
+      .map(r => (r.getLong(0), r.getLong(2), r.getDouble(1)))
+    compareIterAvg(result, expected.toIterator)
+  }
+
   it("should honor the passed RvRange from planner when generating rows") {
     // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
     // The merge functionality should honor the passed RvRange and accordingly generate the rows
@@ -399,7 +437,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     mergeAndValidateHistogram(rvs, expected)
   }
 
-  ignore("should merge histograms correctly when there are gaps") {
+  it("should merge histograms correctly when there are gaps") {
     // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
     // The merge functionality should honor the passed RvRange and accordingly generate the rows
     val h1 = LongHistogram(CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity)), (0L to 10L by 5).toArray)
@@ -464,6 +502,22 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         if (v1._2.isNaN) v2._2.isNaN shouldEqual true
         else Math.abs(v1._2-v2._2) should be < error
         compareIter(it1, it2)
+      case (false, false) => Unit
+      case _ => fail("Unequal lengths")
+    }
+  }
+
+  @tailrec
+  final private def compareIterAvg(it1: Iterator[(Long, Long, Double)], it2: Iterator[(Long, Long, Double)]): Unit = {
+    (it1.hasNext, it2.hasNext) match {
+      case (true, true) =>
+        val v1 = it1.next()
+        val v2 = it2.next()
+        v1._1 shouldEqual v2._1
+        v1._2 shouldEqual v2._2
+        if (v1._3.isNaN) v2._3.isNaN shouldEqual true
+        else Math.abs(v1._3 - v2._3) should be < error
+        compareIterAvg(it1, it2)
       case (false, false) => Unit
       case _ => fail("Unequal lengths")
     }
