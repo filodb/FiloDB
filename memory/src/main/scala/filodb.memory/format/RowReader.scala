@@ -19,6 +19,7 @@ import filodb.memory.format.vectors.Histogram
  */
 // scalastyle:off
 trait RowReader {
+  def isNaN: Boolean = false
   def notNull(columnNo: Int): Boolean
   def getBoolean(columnNo: Int): Boolean
   def getInt(columnNo: Int): Int
