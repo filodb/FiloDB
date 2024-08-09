@@ -11,8 +11,7 @@ trait MutableRowReader extends RowReader {
 }
 
 final class NaNRowReader(var timestamp: Long) extends RowReader {
-  override def isNaN: Boolean = true
-  override def notNull(columnNo: Int): Boolean = true
+  override def notNull(columnNo: Int): Boolean = columnNo == 0
   override def getBoolean(columnNo: Int): Boolean = false
   override def getInt(columnNo: Int): Int = 0
   override def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else 0

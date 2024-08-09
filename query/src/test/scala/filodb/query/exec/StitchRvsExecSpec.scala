@@ -460,6 +460,52 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       )
     mergeAndValidateHistogram(rvs, expected)
   }
+  it("should merge histograms correctly when there are gaps and empty data points1") {
+    // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
+    // The merge functionality should honor the passed RvRange and accordingly generate the rows
+    val h1 = LongHistogram(CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity)), (0L to 10L by 5).toArray)
+    val h2 = LongHistogram(CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity)), (0L to 10L by 2).toArray)
+    val rvs = Seq(
+      Seq(
+        (30L, h2),
+        (50L, h1),
+        (60L, h1),
+      ),
+      Seq()
+    )
+    val expected =
+      Seq(
+        (30L, h2),
+        (40L, HistogramWithBuckets.empty),
+        (50L, h1),
+        (60L, h1)
+      )
+    mergeAndValidateHistogram(rvs, expected)
+  }
+
+  it("should merge histograms correctly when there are gaps and empty data points2") {
+    // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
+    // The merge functionality should honor the passed RvRange and accordingly generate the rows
+    val h1 = LongHistogram(CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity)), (0L to 10L by 5).toArray)
+    val h2 = LongHistogram(CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity)), (0L to 10L by 2).toArray)
+    val rvs = Seq(
+      Seq(),
+      Seq(
+        (30L, h2),
+        (50L, h1),
+        (60L, h1),
+      )
+    )
+    val expected =
+      Seq(
+        (30L, h2),
+        (40L, HistogramWithBuckets.empty),
+        (50L, h1),
+        (60L, h1)
+      )
+    mergeAndValidateHistogram(rvs, expected)
+  }
+
 
   def mergeAndValidateHistogram(rvs: Seq[Seq[(Long, HistogramWithBuckets)]],
                                 expected: Seq[(Long, HistogramWithBuckets)]): Unit = {
