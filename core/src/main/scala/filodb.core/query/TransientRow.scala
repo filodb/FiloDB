@@ -10,8 +10,8 @@ trait MutableRowReader extends RowReader {
   def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
 }
 
-final class NaNRowRead(var timestamp: Long) extends RowReader {
-  override def isNaN(): Boolean = true
+final class NaNRowReader(var timestamp: Long) extends RowReader {
+  override def isNaN: Boolean = true
   override def notNull(columnNo: Int): Boolean = true
   override def getBoolean(columnNo: Int): Boolean = false
   override def getInt(columnNo: Int): Int = 0
