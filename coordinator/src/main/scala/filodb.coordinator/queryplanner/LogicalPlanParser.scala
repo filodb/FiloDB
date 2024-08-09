@@ -209,6 +209,12 @@ object LogicalPlanParser {
     }$ClosingCurlyBraces"
   }
 
+  private def applyLimitToQuery(lp: ApplyLimitFunction): String = {
+    val periodicSeriesQuery = convertToQuery(lp.vectors)
+    s"$periodicSeriesQuery limit ${lp.limit}"
+  }
+
+  //scalastyle:off cyclomatic.complexity
   def convertToQuery(logicalPlan: LogicalPlan): String = {
     logicalPlan match {
       case lp: RawSeries                   => rawSeriesLikeToQuery(lp, true)
@@ -229,8 +235,14 @@ object LogicalPlanParser {
       case lp: SubqueryWithWindowing       => subqueryWithWindowingToQuery(lp)
       case lp: TopLevelSubquery            => topLevelSubqueryToQuery(lp)
       case lp: MetadataQueryPlan           => metadataMatchToQuery(lp)
-      case _                               => throw new UnsupportedOperationException(s"Logical plan to query not " +
-        s"supported for ${logicalPlan}")
+      case lp: ApplyLimitFunction          => applyLimitToQuery(lp)
+      case lp: ApplyInstantFunctionRaw     => throw new UnsupportedOperationException(s"Logical plan to PromQL not " +
+                                                                                      s"supported for $lp")
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"Logical plan to PromQL not " +
+                                                                                      s"supported for $lp")
+      case lp: TsCardinalities             => throw new UnsupportedOperationException(s"Logical plan to PromQL not " +
+                                                                                      s"supported for $lp")
+      // do not add default case here as we want to generate compile error when a new logical plan is added
     }
   }
 }
