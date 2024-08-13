@@ -243,6 +243,8 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_remo
         let query = RangeQuery::new_i64_bounds(
             field_constants::END_TIME.to_string(),
             Bound::Included(0),
+            // To match existing Lucene index behavior, make this inclusive even though it's named
+            // "ended before" in the API
             Bound::Included(ended_before),
         );
 
