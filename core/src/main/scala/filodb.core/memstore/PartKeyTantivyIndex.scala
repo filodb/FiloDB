@@ -200,8 +200,8 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     // 1 - indexed field
     buffer += 1
-    TantivyQueryBuilder.writeStringToBuffer(key, buffer)
-    TantivyQueryBuilder.writeStringToBuffer(value, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(key, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(value, buffer)
   }
 
   protected def addIndexedMapField(mapColumn: String, key: String, value: String): Unit = {
@@ -209,9 +209,9 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     // 2 - map field
     buffer += 2
-    TantivyQueryBuilder.writeStringToBuffer(mapColumn, buffer)
-    TantivyQueryBuilder.writeStringToBuffer(key, buffer)
-    TantivyQueryBuilder.writeStringToBuffer(value, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(mapColumn, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(key, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(value, buffer)
   }
 
   protected override def addMultiColumnFacet(key: String, value: String): Unit = {
@@ -219,10 +219,17 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     // 3 - mc field
     buffer += 3
-    TantivyQueryBuilder.writeStringToBuffer(key, buffer)
-    TantivyQueryBuilder.writeStringToBuffer(value, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(key, buffer)
+    ByteBufferEncodingUtils.writeStringToBuffer(value, buffer)
   }
 
+  // Ideally this would be a map of field -> value or something similar.
+  // However, passing a Map to the Rust code generates a much more expensive
+  // back and forth between JVM code and Rust code to get data.
+  //
+  // To solve this efficiency problem we pack into a byte buffer with a simple
+  // serialization format that the Rust side can decode quickly without JVM
+  // callbacks.
   private val docBufferLocal = new ThreadLocal[ArrayBuffer[Byte]]() {
     override def initialValue(): ArrayBuffer[Byte] = new ArrayBuffer[Byte](4096)
   }
@@ -254,7 +261,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
   }
 }
 
-object TantivyQueryBuilder {
+object ByteBufferEncodingUtils {
   def writeStringToBuffer(s: String, buffer: ArrayBuffer[Byte]): Unit = {
     val bytes = s.getBytes
     writeLengthToBuffer(bytes.length, buffer)
