@@ -108,7 +108,9 @@ mod tests {
     use bytes::BufMut;
     use tantivy::{schema::OwnedValue, Document};
 
-    use crate::test_utils::{build_test_schema, COL1_NAME, JSON_ATTRIBUTE1_NAME, JSON_COL_NAME};
+    use tantivy_utils::test_utils::{
+        build_test_schema, COL1_NAME, JSON_ATTRIBUTE1_NAME, JSON_COL_NAME,
+    };
 
     use super::*;
 

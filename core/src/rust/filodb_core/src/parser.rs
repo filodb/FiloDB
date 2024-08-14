@@ -21,6 +21,8 @@ pub enum ParserError {
     IndexError(#[from] TantivyError),
     #[error("Unknown type byte: {0}")]
     UnknownType(u8),
+    #[error("Unknown occur byte: {0}")]
+    UnknownOccur(u8),
     #[error("Internal map error")]
     InternalMapError,
 }
