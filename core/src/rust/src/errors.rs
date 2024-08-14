@@ -10,6 +10,7 @@ const RUNTIME_EXCEPTION_CLASS: &str = "java/lang/RuntimeException";
 pub type JavaResult<T> = Result<T, JavaException>;
 
 /// Error type that can be thrown as an exception
+#[derive(Debug)]
 pub struct JavaException {
     class: &'static str,
     message: Cow<'static, str>,
