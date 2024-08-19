@@ -133,13 +133,17 @@ trait  DefaultPlanner {
     val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
     else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
 
+    val realScanStartMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(logicalPlanWithoutBucket.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+
     val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
-      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs,
+      realScanStepMs, realScanEndMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource = rawSource)))
-    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+    val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
         AggregateClause.byOpt(Seq("job")))
       // Add sum to aggregate all child responses
@@ -147,9 +151,14 @@ trait  DefaultPlanner {
       val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
         qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
       addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
-        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
-          logicalPlanWithoutBucket.endMs / 1000), qContext)
+        RangeParams(realScanStartMs, realScanStepMs, realScanEndMs), qContext)
     } else series
+    // repeat the same value for each step if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      result.plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs,
+        p.queryWithPlanName(qContext))))
+    }
+    result
   }
 
   private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]):
@@ -202,25 +211,53 @@ trait  DefaultPlanner {
 
     } else (None, None, lp)
 
+    val realScanStartMs = lp.atMs.getOrElse(lp.startMs)
+    val realScanEndMs = lp.atMs.getOrElse(lp.endMs)
+    val realScanStepMs: Long = lp.atMs.map(_ => 0L).getOrElse(lp.stepMs)
+
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
     val rawSource = lpWithoutBucket.rawSeries.isRaw && (lpWithoutBucket.rawSeries match {
       case r: RawSeries => !r.supportsRemoteDataCall
       case _ => true
     })
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      window = None, functionId = None, qContext, stepMultipleNotationUsed = false, funcParams = Nil,
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(realScanStartMs, realScanStepMs,
+      realScanEndMs, window = None, functionId = None, qContext, stepMultipleNotationUsed = false, funcParams = Nil,
       lp.offsetMs, rawSource = rawSource)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
-        lp.endMs / 1000))
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs / 1000, realScanStepMs / 1000,
+        realScanEndMs / 1000))
       rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
         Seq(paramsExec))))
+    }
+    // repeat the same value for each step if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      rawSeries.plans.foreach(p => p.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs,
+        p.queryWithPlanName(qContext))))
     }
     rawSeries
   }
 
-    def materializeApplyInstantFunction(qContext: QueryContext,
+  protected def getAtModifierTimestampsWithOffset(periodicSeriesPlan: PeriodicSeriesPlan): Seq[Long] = {
+    periodicSeriesPlan match {
+      case ps: PeriodicSeries => ps.atMs.map(at => at - ps.offsetMs.getOrElse(0L)).toSeq
+      case sww: SubqueryWithWindowing => sww.atMs.map(at => at - sww.offsetMs.getOrElse(0L)).toSeq
+      case psw: PeriodicSeriesWithWindowing => psw.atMs.map(at => at - psw.offsetMs.getOrElse(0L)).toSeq
+      case ts: TopLevelSubquery => ts.atMs.map(at => at - ts.originalOffsetMs.getOrElse(0L)).toSeq
+      case bj: BinaryJoin => getAtModifierTimestampsWithOffset(bj.lhs) ++ getAtModifierTimestampsWithOffset(bj.rhs)
+      case agg: Aggregate => getAtModifierTimestampsWithOffset(agg.vectors)
+      case aif: ApplyInstantFunction => getAtModifierTimestampsWithOffset(aif.vectors)
+      case amf: ApplyMiscellaneousFunction => getAtModifierTimestampsWithOffset(amf.vectors)
+      case asf: ApplySortFunction => getAtModifierTimestampsWithOffset(asf.vectors)
+      case aaf: ApplyAbsentFunction => getAtModifierTimestampsWithOffset(aaf.vectors)
+      case alf: ApplyLimitFunction => getAtModifierTimestampsWithOffset(alf.vectors)
+      case _: RawChunkMeta | _: ScalarBinaryOperation | _: ScalarFixedDoublePlan | _: ScalarTimeBasedPlan |
+           _: ScalarVaryingDoublePlan | _: ScalarVectorBinaryOperation | _: VectorPlan => Seq()
+    }
+  }
+
+
+  def materializeApplyInstantFunction(qContext: QueryContext,
                                         lp: ApplyInstantFunction,
                                         forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)

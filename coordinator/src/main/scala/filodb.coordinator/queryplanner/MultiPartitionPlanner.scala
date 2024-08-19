@@ -158,6 +158,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             }
             )
           )
+        case _: RawSeries => materializePeriodicAndRawSeries(logicalPlan, qContext)
         case _ : LogicalPlan  => super.defaultWalkLogicalPlanTree(logicalPlan, qContext, forceInProcess)
       }
     } else {
@@ -352,7 +353,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
       var prevPartitionStart = queryParams.startSecs * 1000
-      val execPlans = partitions.zipWithIndex.map { case (p, i) =>
+      val execPlans = partitions
+        .filter(p => {
+          if (!logicalPlan.hasAtModifier || !logicalPlan.isInstanceOf[PeriodicSeriesPlan])
+            true
+          else {
+            val time = getAtModifierTimestampsWithOffset(logicalPlan.asInstanceOf[PeriodicSeriesPlan]).head
+            p.timeRange.startMs <= time && p.timeRange.endMs > time
+          }
+        })
+        .zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time, no need to calculate time according to step for instant
         // queries
         val startMs =
@@ -400,12 +410,14 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                       timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val qContextWithOverride = timeRangeOverride.map{ r =>
       val oldParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-      val newParams = oldParams.copy(startSecs = r.startMs / 1000, endSecs = r.endMs / 1000)
+      val newParams = oldParams.copy(startSecs = r.startMs / 1000, endSecs = r.endMs / 1000,
+        promQl = if (logicalPlan.hasAtModifier) LogicalPlanParser.convertToQuery(logicalPlan) else oldParams.promQl)
       queryContext.copy(origQueryParams = newParams)
     }.getOrElse(queryContext)
     val queryParams = qContextWithOverride.origQueryParams.asInstanceOf[PromQlQueryParams]
     val timeRange = timeRangeOverride.getOrElse(TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
     val (partitionName, grpcEndpoint) = (partition.partitionName, partition.grpcEndPoint)
+
     if (partitionName.equals(localPartitionName)) {
       // FIXME: the below check is needed because subquery tests fail when their
       //   time-ranges are updated even with the original query params.
@@ -549,22 +561,29 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       .filter(_.isInstanceOf[RawSeries])
       .map(getPartitions(_, qParams))
       .exists(_.size > 1)
-    if (hasMultiPartitionLeaves) {
+    if (hasMultiPartitionLeaves && !logicalPlan.hasAtModifier) {
       materializeSplitLeafPlan(logicalPlan, qContext)
-    } else { logicalPlan match {
-      case agg: Aggregate => materializeAggregate(agg, qContext)
-      case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
-      case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
-      case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
-      case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
-      case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
-      case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
-      case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
-      case ps: PeriodicSeries => materializePeriodicAndRawSeries(ps, qContext)
-      case rcm: RawChunkMeta => materializePeriodicAndRawSeries(rcm, qContext)
-      case rs: RawSeries => materializePeriodicAndRawSeries(rs, qContext)
-      case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
-    }}
+    } else {
+      // either have @modifier or only one partition.
+      val canSplit = hasMultiPartitionLeaves && logicalPlan.hasAtModifier
+      logicalPlan match {
+        case agg: Aggregate => materializeAggregate(agg, qContext)
+        case psw: PeriodicSeriesWithWindowing if canSplit =>
+          super.materializePeriodicSeriesWithWindowing(qContext, psw, forceInProcess = true)
+        case psw: PeriodicSeriesWithWindowing if !canSplit => materializePeriodicAndRawSeries(psw, qContext)
+        case sqw: SubqueryWithWindowing  => super.materializeSubqueryWithWindowing(qContext, sqw)
+        case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
+        case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
+        case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
+        case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
+        case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
+        case ps: PeriodicSeries if canSplit => super.materializePeriodicSeries(qContext, ps, forceInProcess = true)
+        case ps: PeriodicSeries if !canSplit => materializePeriodicAndRawSeries(ps, qContext)
+        case rcm: RawChunkMeta => materializePeriodicAndRawSeries(rcm, qContext)
+        case rs: RawSeries => materializePeriodicAndRawSeries(rs, qContext)
+        case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
+      }
+    }
   }
 
   /**
