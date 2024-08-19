@@ -375,7 +375,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       } else {
         false
       }
-      val path = shardMapper.coordForShard(i).path.toString
+      val actorRef = shardMapper.coordForShard(i)
+      val path = if (actorRef == akka.actor.ActorRef.noSender) {
+        ""
+      } else {
+        actorRef.path.toString
+      }
       shardInfoArray(i) = filodb.core.query.ShardInfo(isActive, path)
     }
     val localActiveShardMapper = ActiveShardMapper(shardInfoArray)

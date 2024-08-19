@@ -34,6 +34,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.apache.spark.sql.types._
 
+
 import java.io.File
 import java.time
 import java.time.Instant
@@ -66,7 +67,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
        |    "key-labels": [_ns_],
        |    "groups": [
        |      {
-       |        "key": [my_ns],
+       |        "key": ["_ns_=\\"my_ns\\""],
        |        "table": "",
        |        "table-path": "${exportToFile.getOrElse("")}",
        |        "label-column-mapping": [
@@ -173,23 +174,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |""".stripMargin
       ))
 
-    val emptyConf = ConfigFactory.parseString(
-      """
-        |    filodb.downsampler.data-export {
-        |      key-labels = ["l1"]
-        |      groups = []
-        |      drop-labels = []
-        |    }
-        |""".stripMargin
-    )
-
     val onlyKeyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a",
         |          label-column-mapping = [
@@ -216,7 +207,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -248,7 +239,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -284,7 +275,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -316,7 +307,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1", "l2"]
         |      groups = [
         |        {
-        |          key = ["l1a", "l2a"]
+        |          key = ["l1=\"l1a\"", "l2=\"l2a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -343,7 +334,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -360,7 +351,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |          ]
         |        },
         |        {
-        |          key = ["l1b"]
+        |          key = ["l1=\"l1b\""]
         |          table = "l1b"
         |          table-path: "s3a://bucket/directory/catalog/database/l1b"
         |          label-column-mapping = [
@@ -387,7 +378,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["l1"]
         |      groups = [
         |        {
-        |          key = ["l1a"]
+        |          key = ["l1=\"l1a\""]
         |          table = "l1a"
         |          table-path = "s3a://bucket/directory/catalog/database/l1a"
         |          label-column-mapping = [
@@ -418,23 +409,60 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |""".stripMargin
     )
 
+    val multiRuleSameGroupConfBlocked = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      key-labels = ["l1"]
+        |      groups = [
+        |        {
+        |          key = ["l1=\"l1a\""]
+        |          table = "l1a"
+        |          table-path = "s3a://bucket/directory/catalog/database/l1a"
+        |          label-column-mapping = [
+        |            "_ws_", "workspace", "NOT NULL",
+        |            "_ns_", "namespace", "NOT NULL"
+        |          ]
+        |          partition-by-columns = ["namespace"]
+        |          rules = [
+        |            {
+        |              allow-filters = [["l2=\"l2a\""]]  # allo A
+        |              block-filters = []
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2_DNE\""]]
+        |              block-filters = [["l2=\"l2b\""]]  # block B (DNE allow filter to require C is matched below)
+        |              drop-labels = []
+        |            },
+        |            {
+        |              allow-filters = [["l2=\"l2c\""]] # allow C
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
+        |        }
+        |      ]
+        |    }
+        |""".stripMargin
+    )
+
     val allConfs = Seq(
-      emptyConf,
       onlyKeyConf,
       includeExcludeConf,
       multiFilterConf,
       contradictFilterConf,
       multiKeyConf,
       multiRuleConf,
-      multiRuleSameGroupConf
+      multiRuleSameGroupConf,
+      multiRuleSameGroupConfBlocked
     )
 
     val labelConfPairs = Seq(
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf, multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf,                         multiRuleSameGroupConfBlocked)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,                    multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2b", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf,               multiRuleConf)),
-      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf,                                                                       multiRuleSameGroupConf, multiRuleSameGroupConfBlocked)),
       (Map("l1" -> "l1a", "l2" -> "l2d", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf)),
       (Map("l1" -> "l1b", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](             multiRuleConf)),
       (Map("l1" -> "l1c", "l2" -> "l2a", "l3" -> "l3a"), Set[Config]()),
@@ -445,7 +473,10 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
       // make sure batchExporter correctly decides when to export
       labelConfPairs.foreach { case (partKeyMap, includedConf) =>
-        batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
+        val shouldExport = dsSettings.exportKeyToConfig.exists { case (keyFilters, exportTableConfig) =>
+          batchExporter.getRuleIfShouldExport(partKeyMap, keyFilters, exportTableConfig).isDefined
+        }
+        shouldExport shouldEqual includedConf.contains(conf)
       }
     }
   }
@@ -468,7 +499,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      "hour"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -490,10 +521,201 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val batchExporter = BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
     dsSettings.exportRuleKey.zipWithIndex.map{case (colName, i) =>
-      batchExporter.getColumnIndex(colName, pairExportKeyTableConfig._2).get shouldEqual i}
+      batchExporter.getColumnIndex(colName, dsSettings.exportKeyToConfig.head._2).get shouldEqual i}
+  }
+
+  it("should correctly apply export key column filters") {
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rows = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "a"),
+        Map("_ws_" -> "DNE", "_ns_" -> "b"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "c"),
+        Map("_ws_" -> "DNE", "_ns_" -> "d"),
+      )
+      val expected = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "a"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "c"),
+      )
+      val filtered = rows.filter{ row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        rule.isDefined
+      }
+      filtered shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rows = Seq(
+        Map("_ws_" -> "a", "_ns_" -> "my_ns"),
+        Map("_ws_" -> "b", "_ns_" -> "DNE"),
+        Map("_ws_" -> "c", "_ns_" -> "my_ns123"),
+        Map("_ws_" -> "d", "_ns_" -> "DNE"),
+      )
+      val expected = Seq(
+        Map("_ws_" -> "a", "_ns_" -> "my_ns"),
+        Map("_ws_" -> "c", "_ns_" -> "my_ns123"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        rule.isDefined
+      }
+      filtered shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ws_=\"my_ws\"", "_ns_=~\"my_ns.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rows = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws123", "_ns_" -> "my_ns2"),
+        Map("_ws_" -> "c", "_ns_" -> "c"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "DNE"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns3"),
+      )
+      val expected = Seq(
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws", "_ns_" -> "my_ns3"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        rule.isDefined
+      }
+      filtered shouldEqual expected
+    }
+
+    {
+      val testConf = ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      key-labels = ["_ws_", "_ns_"]
+          |      groups = [
+          |        {
+          |          key = ["_ns_=~\"my_ns.*\"", "_ws_=~\"my_ws.*\""]
+          |          table = "my_ws"
+          |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
+          |          label-column-mapping = [
+          |            "_ws_", "workspace", "NOT NULL",
+          |            "_ns_", "namespace", "NOT NULL"
+          |          ]
+          |          partition-by-columns = []
+          |          rules = [
+          |              {
+          |                  allow-filters = []
+          |                  block-filters = []
+          |                  drop-labels = []
+          |              }
+          |          ]
+          |        }
+          |      ]
+          |    }
+          |""".stripMargin
+      ).withFallback(conf)
+      val settings = new DownsamplerSettings(testConf)
+      val rows = Seq(
+        Map("_ws_" -> "my_ws1", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "b", "_ns_" -> "b"),
+        Map("_ws_" -> "my_ws1", "_ns_" -> "DNE"),
+        Map("_ws_" -> "DNE", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws2", "_ns_" -> "my_ns2"),
+      )
+      val expected = Seq(
+        Map("_ws_" -> "my_ws1", "_ns_" -> "my_ns1"),
+        Map("_ws_" -> "my_ws2", "_ns_" -> "my_ns2"),
+      )
+      val filtered = rows.filter { row =>
+        val rule = batchExporter.getRuleIfShouldExport(row,
+          settings.exportKeyToConfig.head._1,
+          settings.exportKeyToConfig.head._2)
+        rule.isDefined
+      }
+      filtered shouldEqual expected
+    }
   }
 
   it("should give correct export schema") {
@@ -503,7 +725,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |      key-labels = ["_ws_"]
         |      groups = [
         |        {
-        |          key = ["my_ws"]
+        |          key = ["_ws_=\"my_ws\""]
         |          table = "my_ws"
         |          table-path = "s3a://bucket/directory/catalog/database/my_ws"
         |          label-column-mapping = [
@@ -525,7 +747,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     ).withFallback(conf)
 
     val dsSettings = new DownsamplerSettings(testConf.withFallback(conf))
-    val pairExportKeyTableConfig = dsSettings.exportKeyToRules.map(f => (f._1, f._2)).toSeq.head
     val exportSchema = {
       val fields = new scala.collection.mutable.ArrayBuffer[StructField](11)
       fields.append(
@@ -542,7 +763,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         StructField("hour", IntegerType, false))
       StructType(fields)
     }
-    pairExportKeyTableConfig._2.tableSchema shouldEqual exportSchema
+    dsSettings.exportKeyToConfig.head._2.tableSchema shouldEqual exportSchema
   }
 
   it ("should write untyped data to cassandra") {

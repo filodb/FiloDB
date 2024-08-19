@@ -358,7 +358,7 @@ object MachineMetricsData {
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
-                       infBucket: Boolean = false):
+                       infBucket: Boolean = false, ws: String = "demo"):
   Stream[Seq[Any]] = {
     val scheme = if (infBucket) {
                    // Custom geometric buckets, with top bucket being +Inf
@@ -379,7 +379,7 @@ object MachineMetricsData {
           buckets.sum.toLong,
           bv.LongHistogram(scheme, buckets.map(x => x)),
           "request-latency",
-          extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+          extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 
@@ -393,8 +393,10 @@ object MachineMetricsData {
   val schemas2h = Schemas(schema2.partition,
                         Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
 
-  val histMaxMinDS = Dataset("histmaxmin", Seq("metric:string", "tags:map"),
-    Seq("timestamp:ts", "count:long", "sum:long", "min:double", "max:double", "h:hist:counter=false"))
+  val histMaxMinDS = Dataset.make("histmaxmin",
+    Seq("metric:string", "tags:map"),
+    Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false", "min:double", "max:double"),
+    valueColumn = Some("h")).get
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max and min column before h/hist
@@ -407,7 +409,7 @@ object MachineMetricsData {
                             .lastOption.getOrElse(hist.numBuckets - 1)
       val max = hist.bucketTop(lastBucketNum) * 0.8
       val min = hist.bucketTop(lastBucketNum) * 0.1
-      ((row take 3):+ min :+ max) ++ (row drop 3)
+      ((row take 4):+ min :+ max) ++ (row drop 4)
     }
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
@@ -436,7 +438,7 @@ object MachineMetricsData {
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
 
-  // Designed explicitly to work with histMax(linearHistSeries) records
+  // Designed explicitly to work with histMaxMin(linearHistSeries) records
   def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
   (Stream[Seq[Any]], RawDataRangeVector) = {
     val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
@@ -447,7 +449,7 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxMinBH, encode = true)
     // Select timestamp, hist, max, min
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 5, 4, 3),
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
       new AtomicLong, Long.MaxValue, "query-id"))
   }
 }
