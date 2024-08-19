@@ -372,6 +372,8 @@ object Schemas extends StrictLogging {
   import Accumulation._
   import Dataset._
 
+  val TypeLabel = "_type_"
+
   val _log = logger
 
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
@@ -461,8 +463,9 @@ object Schemas extends StrictLogging {
   val deltaHistogram = global.schemas("delta-histogram")
   val otelCumulativeHistogram = global.schemas("otel-cumulative-histogram")
   val otelDeltaHistogram = global.schemas("otel-delta-histogram")
-  val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
   val dsGauge = global.schemas("ds-gauge")
   val preaggGauge = global.schemas("preagg-gauge")
   val preaggDeltaCounter = global.schemas("preagg-delta-counter")
+  val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
+  val preaggOtelDeltaHistogram = global.schemas("preagg-otel-delta-histogram")
 }

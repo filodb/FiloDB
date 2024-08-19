@@ -37,5 +37,4 @@ object Utils extends StrictLogging {
     logger.info(s"Available memory calculated or configured as $availableMem")
     availableMem
   }
-
 }
