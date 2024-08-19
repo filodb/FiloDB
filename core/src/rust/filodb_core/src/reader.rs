@@ -25,7 +25,7 @@ use crate::{
     errors::{JavaException, JavaResult},
     exec::jni_exec,
     jnienv::JNIEnvExt,
-    query::cachable_query::CachableQuery,
+    query::filodb_query::FiloDBQuery,
     state::IndexHandle,
 };
 
@@ -105,7 +105,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_part
     jni_exec(&mut env, |env| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
-        let query = CachableQuery::ByEndTime(ended_before);
+        let query = FiloDBQuery::ByEndTime(ended_before);
         let collector = PartIdCollector::new(usize::MAX, handle.column_cache.clone());
 
         let results = handle.execute_cachable_query(query, collector)?;
@@ -129,7 +129,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_part
 
         let bytes = env.get_byte_array(&part_id)?;
 
-        let query = CachableQuery::ByPartKey(bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::ByPartKey(bytes.into_boxed_slice().into());
 
         let collector = PartIdCollector::new(1, handle.column_cache.clone());
         let results = handle
@@ -144,7 +144,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_part
 }
 
 fn fetch_label_names(
-    query: CachableQuery,
+    query: FiloDBQuery,
     handle: &IndexHandle,
     results: &mut HashSet<String>,
     start: i64,
@@ -184,7 +184,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
 
         let query_bytes = env.get_byte_array(&query)?;
 
-        let query = CachableQuery::Complex(query_bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
         fetch_label_names(query, handle, &mut results, start, end)?;
 
         let len = std::cmp::min(results.len(), limit as usize);
@@ -222,7 +222,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
             };
         }
 
-        let query = CachableQuery::All;
+        let query = FiloDBQuery::All;
         fetch_label_names(query, handle, &mut results, 0, i64::MAX)?;
 
         let java_ret =
@@ -235,10 +235,12 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
     })
 }
 
+// This matches the constant in PartKeyLuceneIndex.scala to keep results
+// consistent between the two index types
 const MAX_TERMS_TO_ITERATE: usize = 10_000;
 
 fn query_label_values(
-    query: CachableQuery,
+    query: FiloDBQuery,
     handle: &IndexHandle,
     mut field: String,
     limit: usize,
@@ -287,7 +289,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
 
         let query_bytes = env.get_byte_array(&query)?;
 
-        let query = CachableQuery::Complex(query_bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
 
         let results = query_label_values(query, handle, field, top_k, usize::MAX, start, end)?;
 
@@ -318,7 +320,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
 
         let field = env.get_rust_string(&field)?;
 
-        let query = CachableQuery::All;
+        let query = FiloDBQuery::All;
         let results = query_label_values(
             query,
             handle,
@@ -376,7 +378,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_quer
 
         let query_bytes = env.get_byte_array(&query)?;
 
-        let query = CachableQuery::Complex(query_bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
 
         let collector = PartIdCollector::new(limit as usize, handle.column_cache.clone());
         let filter_collector =
@@ -407,7 +409,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_quer
         let query_bytes = env.get_byte_array(&query)?;
 
         let searcher = handle.searcher();
-        let query = CachableQuery::Complex(query_bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
 
         let collector = PartKeyRecordCollector::new(limit as usize, handle.column_cache.clone());
         let filter_collector =
@@ -457,7 +459,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_quer
         }
 
         let query_bytes = env.get_byte_array(&query)?;
-        let query = CachableQuery::Complex(query_bytes.into_boxed_slice().into());
+        let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
         let searcher = handle.searcher();
 
         let collector = PartKeyCollector::new();
@@ -501,7 +503,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_star
         let mut part_id_values = vec![0i32; len as usize];
         env.get_int_array_region(&part_ids, 0, &mut part_id_values[..])?;
 
-        let query = CachableQuery::ByPartIds(part_id_values.into_boxed_slice().into());
+        let query = FiloDBQuery::ByPartIds(part_id_values.into_boxed_slice().into());
 
         let collector = TimeCollector::new(
             field_constants::START_TIME,
@@ -540,7 +542,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_endT
     jni_exec(&mut env, |_| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
-        let query = CachableQuery::ByPartId(part_id);
+        let query = FiloDBQuery::ByPartId(part_id);
 
         let collector =
             TimeCollector::new(field_constants::END_TIME, 1, handle.column_cache.clone());

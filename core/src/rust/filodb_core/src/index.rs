@@ -33,6 +33,9 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
     schema_fields: JObjectArray,
     map_fields: JObjectArray,
     multi_column_facet_fields: JObjectArray,
+    column_cache_size: jlong,
+    query_cache_max_size: jlong,
+    query_cache_estimated_item_size: jlong,
 ) -> jlong {
     jni_exec(&mut env, |env| {
         let disk_location: String = env.get_string(&disk_location)?.into();
@@ -64,6 +67,9 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             writer,
             reader,
             directory,
+            column_cache_size as u64,
+            query_cache_max_size as u64,
+            query_cache_estimated_item_size as u64,
         ))
     })
 }

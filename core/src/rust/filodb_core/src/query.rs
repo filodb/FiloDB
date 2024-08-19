@@ -20,7 +20,7 @@ use tantivy_utils::query::{
 
 use crate::parser::{parse_string, parse_type_id, AsNomError, ParserError, TypeParseResult};
 
-pub mod cachable_query;
+pub mod filodb_query;
 
 /// Query format
 ///
@@ -82,6 +82,11 @@ pub enum Occurs {
     MustNot = 2,
 }
 
+/// Parse a query from binary format
+///
+/// `default_field` is used to search JSON (map) columns
+/// If an input column name isn't in the list of indexed columns
+/// default_field is used and the input name is used as a JSON path
 pub fn parse_query<'a>(
     input: &'a [u8],
     schema: &Schema,
@@ -171,6 +176,15 @@ fn value_with_prefix(prefix: &str, value: &str) -> String {
     )
 }
 
+/// Build a query using a specified field and value, handling JSON
+/// fields
+///
+/// If `field` points to a valid indexed field
+/// then it is used as is and the prefix is set to an empty string
+///
+/// If `field` does not point to an indexed field then `default_field`
+/// is used and prefix is a formed JSON prefix based on `field` that
+/// should be included in any terms
 fn query_with_field_and_value<T>(
     schema: &Schema,
     default_field: Option<Field>,

@@ -10,7 +10,7 @@ use tantivy::{
 
 // Max column items to cache.  These are relatively cheap (< 1KB)
 // 1 item per column, per segment
-const COLUMN_CACHE_ITEM_COUNT: usize = 1000;
+const DEFAULT_COLUMN_CACHE_ITEM_COUNT: usize = 1000;
 
 // Helper to avoid having to clone strings just to do a cache lookup
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
@@ -41,14 +41,14 @@ pub struct ColumnCache {
 
 impl Default for ColumnCache {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_COLUMN_CACHE_ITEM_COUNT)
     }
 }
 
 impl ColumnCache {
-    pub fn new() -> Self {
+    pub fn new(size: usize) -> Self {
         Self {
-            cache: Arc::new(Cache::new(COLUMN_CACHE_ITEM_COUNT)),
+            cache: Arc::new(Cache::new(size)),
         }
     }
 
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_cache_miss() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _: Column<i64> = cache
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn test_cache_hit() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _: Column<i64> = cache
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_str_cache_miss() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _ = cache
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_str_cache_hit() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _ = cache
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn test_bytes_cache_miss() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _ = cache
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_bytes_cache_hit() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
         let reader = index.searcher.segment_readers().first().unwrap();
 
         let _ = cache

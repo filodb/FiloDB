@@ -25,8 +25,13 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_dump
         let (query_hits, query_misses) = index.query_cache_stats();
 
         let output = format!(
-            "Column cache: {} hits {} misses\nQuery cache: {} hits {} misses",
-            column_hits, column_misses, query_hits, query_misses
+            "Column cache: {} hits {} misses {}% hit\nQuery cache: {} hits {} misses {}% hit",
+            column_hits,
+            column_misses,
+            cache_hit_rate(column_hits, column_misses),
+            query_hits,
+            query_misses,
+            cache_hit_rate(query_hits, query_misses),
         );
 
         let java_str = env.new_string(output)?;
@@ -71,3 +76,37 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(feature = "dhat-heap")]
 static PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
+
+fn cache_hit_rate(hits: u64, misses: u64) -> String {
+    format!("{:0.2}", (hits as f64 / (hits + misses) as f64) * 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use quick_cache::sync::Cache;
+
+    use super::*;
+
+    #[test]
+    fn test_cache_hit_percent() {
+        let cache: Cache<i32, ()> = Cache::new(100);
+
+        for i in 0..20 {
+            cache.insert(i, ());
+        }
+
+        for i in 0..100 {
+            cache.get(&i);
+        }
+
+        let hits = cache.hits();
+        let misses = cache.misses();
+
+        assert_eq!(20, hits);
+        assert_eq!(80, misses);
+
+        let hit_rate = cache_hit_rate(hits, misses);
+
+        assert_eq!("20.00", hit_rate);
+    }
+}

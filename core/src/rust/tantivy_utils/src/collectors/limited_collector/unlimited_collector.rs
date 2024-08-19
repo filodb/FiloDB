@@ -1,4 +1,6 @@
 //! Helper to wrap collectors as unlimited
+//! This is needed for collectors outside this crate, such as the
+//! built-in Tantivy ones
 
 use tantivy::{
     collector::{Collector, SegmentCollector},

@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn test_part_id_collector() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let collector = PartIdCollector::new(usize::MAX, cache);
         let query = AllQuery;
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn test_part_id_collector_with_limit() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let collector = PartIdCollector::new(1, cache);
         let query = AllQuery;

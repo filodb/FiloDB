@@ -18,7 +18,7 @@ use super::parse_query;
 /// We can't just hold a reference to Tantivy's Query object because
 /// they don't implement Hash/Equals so they can't be a key
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub enum CachableQuery {
+pub enum FiloDBQuery {
     /// A complex query that is serialized in byte form
     Complex(Arc<Box<[u8]>>),
     /// Search by part key
@@ -33,18 +33,18 @@ pub enum CachableQuery {
     All,
 }
 
-impl tantivy_utils::query::cache::CachableQuery for CachableQuery {
+impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
     fn should_cache(&self) -> bool {
         match self {
-            CachableQuery::Complex(_) => true,
-            CachableQuery::ByPartIds(_) => true,
-            CachableQuery::ByEndTime(_) => true,
+            FiloDBQuery::Complex(_) => true,
+            FiloDBQuery::ByPartIds(_) => true,
+            FiloDBQuery::ByEndTime(_) => true,
             // No point caching all docs - the "query" is constant time anyway
-            &CachableQuery::All => false,
+            &FiloDBQuery::All => false,
             // A single term lookup is very efficient - no benefit in caching the doc ID
-            CachableQuery::ByPartId(_) => false,
+            FiloDBQuery::ByPartId(_) => false,
             // Also single term lookup
-            CachableQuery::ByPartKey(_) => false,
+            FiloDBQuery::ByPartKey(_) => false,
         }
     }
 
@@ -54,20 +54,20 @@ impl tantivy_utils::query::cache::CachableQuery for CachableQuery {
         default_field: Option<Field>,
     ) -> Result<Box<dyn Query>, TantivyError> {
         match self {
-            CachableQuery::Complex(query_bytes) => {
+            FiloDBQuery::Complex(query_bytes) => {
                 let (_, query) = parse_query(query_bytes, schema, default_field)
                     .map_err(|e| TantivyError::InternalError(format!("{:#}", e)))?;
 
                 Ok(query)
             }
-            CachableQuery::ByPartKey(part_key) => {
+            FiloDBQuery::ByPartKey(part_key) => {
                 let field = schema.get_field(field_constants::PART_KEY)?;
                 let term = Term::from_field_bytes(field, part_key);
                 let query = TermQuery::new(term, IndexRecordOption::Basic);
 
                 Ok(Box::new(query))
             }
-            CachableQuery::ByPartIds(part_ids) => {
+            FiloDBQuery::ByPartIds(part_ids) => {
                 let part_id_field = schema.get_field(field_constants::PART_ID)?;
 
                 let mut terms = vec![];
@@ -80,8 +80,8 @@ impl tantivy_utils::query::cache::CachableQuery for CachableQuery {
 
                 Ok(Box::new(query))
             }
-            CachableQuery::All => Ok(Box::new(AllQuery)),
-            CachableQuery::ByPartId(part_id) => {
+            FiloDBQuery::All => Ok(Box::new(AllQuery)),
+            FiloDBQuery::ByPartId(part_id) => {
                 let part_id_field = schema.get_field(field_constants::PART_ID)?;
                 let term = Term::from_field_i64(part_id_field, *part_id as i64);
 
@@ -89,7 +89,7 @@ impl tantivy_utils::query::cache::CachableQuery for CachableQuery {
 
                 Ok(Box::new(query))
             }
-            CachableQuery::ByEndTime(ended_before) => {
+            FiloDBQuery::ByEndTime(ended_before) => {
                 let query = RangeQuery::new_i64_bounds(
                     field_constants::END_TIME.to_string(),
                     Bound::Included(0),
@@ -105,20 +105,20 @@ impl tantivy_utils::query::cache::CachableQuery for CachableQuery {
 #[derive(Clone, Default)]
 pub struct CachableQueryWeighter;
 
-impl Weighter<(SegmentId, CachableQuery), Arc<BitSet>> for CachableQueryWeighter {
-    fn weight(&self, key: &(SegmentId, CachableQuery), val: &Arc<BitSet>) -> u64 {
+impl Weighter<(SegmentId, FiloDBQuery), Arc<BitSet>> for CachableQueryWeighter {
+    fn weight(&self, key: &(SegmentId, FiloDBQuery), val: &Arc<BitSet>) -> u64 {
         let bitset_size = ((val.max_value() as usize + 63) / 64) * 8;
-        let key_size = std::mem::size_of::<(SegmentId, CachableQuery)>();
+        let key_size = std::mem::size_of::<(SegmentId, FiloDBQuery)>();
 
         let type_size = match &key.1 {
-            CachableQuery::Complex(bytes) => bytes.len() + std::mem::size_of::<Box<[u8]>>(),
-            CachableQuery::ByPartKey(part_key) => part_key.len() + std::mem::size_of::<Box<[u8]>>(),
-            CachableQuery::ByPartIds(part_ids) => {
+            FiloDBQuery::Complex(bytes) => bytes.len() + std::mem::size_of::<Box<[u8]>>(),
+            FiloDBQuery::ByPartKey(part_key) => part_key.len() + std::mem::size_of::<Box<[u8]>>(),
+            FiloDBQuery::ByPartIds(part_ids) => {
                 (part_ids.len() * std::mem::size_of::<i32>()) + std::mem::size_of::<Box<[i32]>>()
             }
-            CachableQuery::All => 0,
-            CachableQuery::ByPartId(_) => 0,
-            CachableQuery::ByEndTime(_) => 0,
+            FiloDBQuery::All => 0,
+            FiloDBQuery::ByPartId(_) => 0,
+            FiloDBQuery::ByEndTime(_) => 0,
         };
 
         (type_size + key_size + bitset_size) as u64
@@ -135,12 +135,12 @@ mod tests {
 
     #[test]
     fn test_should_cache() {
-        assert!(CachableQuery::Complex(Arc::new([0u8; 0].into())).should_cache());
-        assert!(CachableQuery::ByPartIds(Arc::new([0i32; 0].into())).should_cache());
-        assert!(CachableQuery::ByEndTime(0).should_cache());
-        assert!(!CachableQuery::All.should_cache());
-        assert!(!CachableQuery::ByPartId(0).should_cache());
-        assert!(!CachableQuery::ByPartKey(Arc::new([0u8; 0].into())).should_cache());
+        assert!(FiloDBQuery::Complex(Arc::new([0u8; 0].into())).should_cache());
+        assert!(FiloDBQuery::ByPartIds(Arc::new([0i32; 0].into())).should_cache());
+        assert!(FiloDBQuery::ByEndTime(0).should_cache());
+        assert!(!FiloDBQuery::All.should_cache());
+        assert!(!FiloDBQuery::ByPartId(0).should_cache());
+        assert!(!FiloDBQuery::ByPartKey(Arc::new([0u8; 0].into())).should_cache());
     }
 
     #[test]
@@ -148,7 +148,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::Complex(Arc::new([1u8, 0u8].into()));
+        let query = FiloDBQuery::Complex(Arc::new([1u8, 0u8].into()));
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 
@@ -168,7 +168,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::ByPartKey(Arc::new([1u8, 0u8].into()));
+        let query = FiloDBQuery::ByPartKey(Arc::new([1u8, 0u8].into()));
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 
@@ -188,7 +188,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::ByEndTime(0);
+        let query = FiloDBQuery::ByEndTime(0);
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 
@@ -208,7 +208,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::All;
+        let query = FiloDBQuery::All;
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 
@@ -228,7 +228,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::ByPartId(0);
+        let query = FiloDBQuery::ByPartId(0);
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 
@@ -248,7 +248,7 @@ mod tests {
         let index = build_test_schema();
         let weighter = CachableQueryWeighter;
         let reader = index.searcher.segment_readers().first().unwrap();
-        let query = CachableQuery::ByPartIds(Arc::new([1, 2].into()));
+        let query = FiloDBQuery::ByPartIds(Arc::new([1, 2].into()));
 
         let parsed = query.to_query(&index.schema, None).expect("Should succeed");
 

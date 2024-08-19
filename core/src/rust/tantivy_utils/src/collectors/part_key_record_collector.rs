@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn test_part_key_collector() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let collector = PartKeyRecordCollector::new(usize::MAX, column_cache);
         let query = AllQuery;
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_part_key_collector_with_limit() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let collector = PartKeyRecordCollector::new(1, column_cache);
         let query = AllQuery;

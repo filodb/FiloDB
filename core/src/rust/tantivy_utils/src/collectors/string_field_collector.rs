@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn test_string_field_collector() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let collector = StringFieldCollector::new(COL1_NAME, usize::MAX, usize::MAX, column_cache);
         let query = AllQuery;
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn test_string_field_collector_json() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let col_name = format!("{}.{}", JSON_COL_NAME, "f1");
         let collector = StringFieldCollector::new(&col_name, usize::MAX, usize::MAX, column_cache);
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_string_field_collector_json_invalid_field() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let col_name = format!("{}.{}", JSON_COL_NAME, "invalid");
         let collector = StringFieldCollector::new(&col_name, usize::MAX, usize::MAX, column_cache);
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn test_string_field_collector_with_limit() {
         let index = build_test_schema();
-        let column_cache = ColumnCache::new();
+        let column_cache = ColumnCache::default();
 
         let collector = StringFieldCollector::new(COL1_NAME, 1, usize::MAX, column_cache);
         let query = AllQuery;

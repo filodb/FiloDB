@@ -63,11 +63,9 @@ where
 }
 
 // Tuning parameters for query cache
-const QUERY_CACHE_MAX_SIZE_BYTES: u64 = 50_000_000;
+const DEFAULT_QUERY_CACHE_MAX_SIZE_BYTES: u64 = 50_000_000;
 // Rough estimate of bitset size - 250k docs
-const QUERY_CACHE_AVG_ITEM_SIZE: u64 = 31250;
-const QUERY_CACHE_ESTIMATED_ITEM_COUNT: u64 =
-    QUERY_CACHE_MAX_SIZE_BYTES / QUERY_CACHE_AVG_ITEM_SIZE;
+const DEFAULT_QUERY_CACHE_AVG_ITEM_SIZE: u64 = 31250;
 
 impl<QueryType, WeighterType> QueryCache<QueryType, WeighterType>
 where
@@ -186,7 +184,13 @@ where
     WeighterType: Weighter<(SegmentId, QueryType), Arc<BitSet>> + Default + Clone,
 {
     fn default() -> Self {
-        Self::new(QUERY_CACHE_ESTIMATED_ITEM_COUNT, QUERY_CACHE_MAX_SIZE_BYTES)
+        const QUERY_CACHE_ESTIMATED_ITEM_COUNT: u64 =
+            DEFAULT_QUERY_CACHE_MAX_SIZE_BYTES / DEFAULT_QUERY_CACHE_AVG_ITEM_SIZE;
+
+        Self::new(
+            QUERY_CACHE_ESTIMATED_ITEM_COUNT,
+            DEFAULT_QUERY_CACHE_MAX_SIZE_BYTES,
+        )
     }
 }
 

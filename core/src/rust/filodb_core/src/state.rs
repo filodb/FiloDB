@@ -20,7 +20,7 @@ use tantivy_utils::{
     query::cache::QueryCache,
 };
 
-use crate::query::cachable_query::{CachableQuery, CachableQueryWeighter};
+use crate::query::filodb_query::{CachableQueryWeighter, FiloDBQuery};
 
 pub struct IndexHandle {
     // Fields that don't need explicit synchronization
@@ -33,7 +33,7 @@ pub struct IndexHandle {
     // Active reader
     pub reader: IndexReader,
     // Cache of query -> docs
-    query_cache: QueryCache<CachableQuery, CachableQueryWeighter>,
+    query_cache: QueryCache<FiloDBQuery, CachableQueryWeighter>,
     // Are there changes pending to commit
     pub changes_pending: AtomicBool,
     // Column lookup cache
@@ -49,21 +49,27 @@ pub struct IndexHandle {
 }
 
 impl IndexHandle {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_handle(
         schema: Schema,
         default_field: Option<Field>,
         writer: IndexWriter,
         reader: IndexReader,
         mmap_directory: MmapDirectory,
+        column_cache_size: u64,
+        query_cache_max_size: u64,
+        query_cache_estimated_item_size: u64,
     ) -> jlong {
+        let estimated_item_count: u64 = query_cache_max_size / query_cache_estimated_item_size;
+
         let obj = Box::new(Self {
             schema,
             default_field,
             writer: RwLock::new(writer),
             reader,
             changes_pending: AtomicBool::new(false),
-            query_cache: QueryCache::default(),
-            column_cache: ColumnCache::new(),
+            query_cache: QueryCache::new(estimated_item_count, query_cache_max_size),
+            column_cache: ColumnCache::new(column_cache_size as usize),
             mmap_directory,
         });
 
@@ -100,7 +106,7 @@ impl IndexHandle {
 
     pub fn execute_cachable_query<C>(
         &self,
-        cachable_query: CachableQuery,
+        cachable_query: FiloDBQuery,
         collector: C,
     ) -> Result<C::Fruit, TantivyError>
     where
@@ -114,7 +120,7 @@ impl IndexHandle {
 
     pub fn execute_cachable_query_with_searcher<C>(
         &self,
-        cachable_query: CachableQuery,
+        cachable_query: FiloDBQuery,
         collector: C,
         searcher: &Searcher,
     ) -> Result<C::Fruit, TantivyError>

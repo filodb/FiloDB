@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn test_time_filter_match_all() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let query = AllQuery;
         let collector = UnlimitedCollector::new(Count);
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn test_time_filter_match_end_filter() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let query = AllQuery;
         let collector = UnlimitedCollector::new(Count);
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_time_filter_match_start_filter() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let query = AllQuery;
         let collector = UnlimitedCollector::new(Count);
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn test_time_filter_match_overlap() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let query = AllQuery;
         let collector = UnlimitedCollector::new(Count);
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn test_time_filter_match_outside_range() {
         let index = build_test_schema();
-        let cache = ColumnCache::new();
+        let cache = ColumnCache::default();
 
         let query = AllQuery;
         let collector = UnlimitedCollector::new(Count);
