@@ -49,7 +49,7 @@ import filodb.query.exec._
 
   private def isPlanLongTimeAtModifier(plan: LogicalPlan): Boolean = {
     plan match {
-      case periodicSeriesPlan: PeriodicSeriesPlan if (periodicSeriesPlan.hasAtModifier) =>
+      case periodicSeriesPlan: PeriodicSeriesPlan if periodicSeriesPlan.hasAtModifier =>
         val earliestRawTime = earliestRawTimestampFn
         val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
         val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
@@ -57,7 +57,7 @@ import filodb.query.exec._
         val latestDownsampleTimestamp = latestDownsampleTimestampFn
         val atMsList = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
         val realStartMs = Math.min(periodicSeriesPlan.startMs - maxOffset, atMsList.min - lookbackMs)
-        val realEndMs = Math.max(periodicSeriesPlan.endMs - minOffset, atMsList.max - lookbackMs)
+        val realEndMs = Math.max(periodicSeriesPlan.endMs - minOffset, atMsList.max)
 
         realStartMs <= latestDownsampleTimestamp && realEndMs >= earliestRawTime
       case _ => false
@@ -72,10 +72,12 @@ import filodb.query.exec._
     val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
-
-    val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
+    val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
+    val startWithOffsetMs = if (periodicSeriesPlan.hasAtModifier) atModifierTimestampsWithOffset.min
+    else periodicSeriesPlan.startMs - maxOffset
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
-    val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
+    val endWithOffsetMs =
+      if (periodicSeriesPlan.hasAtModifier) atModifierTimestampsWithOffset.max else periodicSeriesPlan.endMs - minOffset
 //    val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
 
 //    val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
@@ -108,28 +110,17 @@ import filodb.query.exec._
          super.defaultWalkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
     }
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
-      if (periodicSeriesPlan.hasAtModifier
-        && getAtModifierTimestampsWithOffset(periodicSeriesPlan).head >= earliestRawTime) {
-        // if @modifier is present just send to the cluster that have data
-        rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      } else {
-        logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
-        downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      }
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) { // full time range in raw cluster
-      if (periodicSeriesPlan.hasAtModifier
-        && getAtModifierTimestampsWithOffset(periodicSeriesPlan).head < earliestRawTime) {
-        // if @modifier is present just send to the cluster that have data
-        downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      } else {
-        rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      }
+      rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
       // "(endWithOffsetMs - lookbackMs) < earliestRawTime" check is erroneous, we claim that we have
       // a long lookback only if the last lookback window overlaps with earliestRawTime, however, we
       // should check for ANY interval overalapping earliestRawTime. We
       // can happen with ANY lookback interval, not just the last one.
     } else if (
-      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
+      (endWithOffsetMs - lookbackMs < earliestRawTime && !periodicSeriesPlan.hasAtModifier)
+        || //TODO lookbacks can overlap in the middle intervals too
         LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
     ) {
       // For subqueries and long lookback queries, we keep things simple by routing to
@@ -155,14 +146,8 @@ import filodb.query.exec._
           periodicSeriesPlan.startMs / 1000,
           (latestDownsampleTimestampFn + offsetMillis.min) / 1000)
       }
-      if (periodicSeriesPlan.hasAtModifier
-        && getAtModifierTimestampsWithOffset(periodicSeriesPlan).head >= earliestRawTime) {
-        // if @modifier is present just send to the cluster that have data
-        rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      } else {
-        logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
-        downsampleClusterPlanner.materialize(downsampleLp, qContext)
-      }
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      downsampleClusterPlanner.materialize(downsampleLp, qContext)
     } else { // raw/downsample overlapping query without long lookback
       // Split the query between raw and downsample planners
       // Note - should never arrive here when start == end (so step never 0)
@@ -172,27 +157,17 @@ import filodb.query.exec._
       val lastDownsampleInstant = periodicSeriesPlan.startMs + numStepsInDownsample * periodicSeriesPlan.stepMs
       val firstInstantInRaw = lastDownsampleInstant + periodicSeriesPlan.stepMs
 
-      if (!periodicSeriesPlan.hasAtModifier) {
-        val downsampleLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
-          periodicSeriesPlan.startMs / 1000, lastDownsampleInstant / 1000)
-        val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
-        logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      val downsampleLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
+        periodicSeriesPlan.startMs / 1000, lastDownsampleInstant / 1000)
+      val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
 
-        val rawLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
-          firstInstantInRaw / 1000, periodicSeriesPlan.endMs / 1000)
+      val rawLp = copyLogicalPlanWithUpdatedSeconds(periodicSeriesPlan,
+        firstInstantInRaw / 1000, periodicSeriesPlan.endMs / 1000)
 
-        val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-        StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
-          Seq(rawEp, downsampleEp))
-      } else {
-        // if @modifier is present just send to the cluster that have data
-        val realScanStartMs = getAtModifierTimestampsWithOffset(periodicSeriesPlan).head
-        if (realScanStartMs >= firstInstantInRaw) {
-          rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-        } else {
-          downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
-        }
-      }
+      val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
+      StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
+        Seq(rawEp, downsampleEp))
     }
   }
   // scalastyle:on method.length
