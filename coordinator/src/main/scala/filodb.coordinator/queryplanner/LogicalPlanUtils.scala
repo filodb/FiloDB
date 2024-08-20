@@ -253,6 +253,7 @@ object LogicalPlanUtils extends StrictLogging {
     // is an interval that we want to process on one machine (primarily to compute range functions).
     // SubqueryWithWindowing has such a lookback while TopLevelSubquery does not.
     logicalPlan match {
+      case psw: PeriodicSeriesWithWindowing => Seq(psw.window)
       case sww: SubqueryWithWindowing => getLookBackMillis(sww.innerPeriodicSeries).map(lb => lb + sww.subqueryWindowMs)
       case nl: NonLeafLogicalPlan => nl.children.flatMap(getLookBackMillis)
       case rs: RawSeries => Seq(rs.lookbackMs.getOrElse(WindowConstants.staleDataLookbackMillis))

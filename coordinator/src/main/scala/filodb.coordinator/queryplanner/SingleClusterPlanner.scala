@@ -231,14 +231,15 @@ class SingleClusterPlanner(val dataset: Dataset,
       //For binary join LHS & RHS should have same times
       val boundParams = periodicSeriesPlan.get.head match {
         case p: PeriodicSeries => (p.startMs, p.stepMs, WindowConstants.staleDataLookbackMillis,
-          p.offsetMs.getOrElse(0L), p.atMs.getOrElse(0), p.endMs)
+          p.offsetMs.getOrElse(0L), p.atMs.getOrElse(-1), p.endMs)
         case w: PeriodicSeriesWithWindowing => (w.startMs, w.stepMs, w.window, w.offsetMs.getOrElse(0L),
           w.atMs.getOrElse(0L), w.endMs)
         case _  => throw new UnsupportedOperationException(s"Invalid plan: ${periodicSeriesPlan.get.head}")
       }
 
-      val newStartMs = boundToStartTimeToEarliestRetained(boundParams._1, boundParams._2, boundParams._3,
-        boundParams._4)
+      val newStartMs = if (boundParams._5.==(-1L)) {
+        boundToStartTimeToEarliestRetained(boundParams._1, boundParams._2, boundParams._3, boundParams._4)
+      } else boundParams._1
       if (newStartMs <= boundParams._6) { // if there is an overlap between query and retention ranges
         if (newStartMs != boundParams._1)
           Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedSeconds(

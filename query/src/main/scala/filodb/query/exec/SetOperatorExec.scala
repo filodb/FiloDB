@@ -108,7 +108,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private[exec] def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): Iterator[RangeVector] = {
     // isEmpty method consumes rhs range vector
-    require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+    require(rhsRvs.forall(_.isInstanceOf[SerializableRangeVector]),
+      s"RHS should be SerializedRangeVector ${rhsRvs.map(r => s"yu-test----- $r")}")
 
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()

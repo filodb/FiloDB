@@ -47,24 +47,22 @@ import filodb.query.exec._
     PlanResult(Seq(execPlan))
   }
 
-  private def getAtModifierTimestampsWithOffset(periodicSeriesPlan: PeriodicSeriesPlan): Seq[Long] = {
-    periodicSeriesPlan match {
-      case ps: PeriodicSeries => ps.atMs.map(at => at - ps.offsetMs.getOrElse(0L)).toSeq
-      case sww: SubqueryWithWindowing => sww.atMs.map(at => at - sww.offsetMs.getOrElse(0L)).toSeq
-      case psw: PeriodicSeriesWithWindowing => psw.atMs.map(at => at - psw.offsetMs.getOrElse(0L)).toSeq
-      case ts: TopLevelSubquery =>     ts.atMs.map(at => at - ts.originalOffsetMs.getOrElse(0L)).toSeq
-      case bj: BinaryJoin =>  getAtModifierTimestampsWithOffset(bj.lhs) ++ getAtModifierTimestampsWithOffset(bj.rhs)
-      case agg: Aggregate => getAtModifierTimestampsWithOffset(agg.vectors)
-      case aif: ApplyInstantFunction => getAtModifierTimestampsWithOffset(aif.vectors)
-      case amf: ApplyMiscellaneousFunction => getAtModifierTimestampsWithOffset(amf.vectors)
-      case asf: ApplySortFunction => getAtModifierTimestampsWithOffset(asf.vectors)
-      case aaf: ApplyAbsentFunction => getAtModifierTimestampsWithOffset(aaf.vectors)
-      case alf: ApplyLimitFunction => getAtModifierTimestampsWithOffset(alf.vectors)
-      case _: RawChunkMeta | _: ScalarBinaryOperation | _: ScalarFixedDoublePlan | _: ScalarTimeBasedPlan|
-        _: ScalarVaryingDoublePlan | _: ScalarVectorBinaryOperation | _: VectorPlan => Seq()
+  private def isPlanLongTimeAtModifier(plan: LogicalPlan): Boolean = {
+    plan match {
+      case periodicSeriesPlan: PeriodicSeriesPlan if periodicSeriesPlan.hasAtModifier =>
+        val earliestRawTime = earliestRawTimestampFn
+        val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
+        val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
+        val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
+        val latestDownsampleTimestamp = latestDownsampleTimestampFn
+        val atMsList = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
+        val realStartMs = Math.min(periodicSeriesPlan.startMs - maxOffset, atMsList.min - lookbackMs)
+        val realEndMs = Math.max(periodicSeriesPlan.endMs - minOffset, atMsList.max)
+
+        realStartMs <= latestDownsampleTimestamp && realEndMs >= earliestRawTime
+      case _ => false
     }
   }
-
 
   // scalastyle:off method.length
   private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
@@ -74,23 +72,25 @@ import filodb.query.exec._
     val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
-
-    val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
-    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
-    val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
     val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
+    val startWithOffsetMs = if (periodicSeriesPlan.hasAtModifier) atModifierTimestampsWithOffset.min
+    else periodicSeriesPlan.startMs - maxOffset
+    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
+    val endWithOffsetMs =
+      if (periodicSeriesPlan.hasAtModifier) atModifierTimestampsWithOffset.max else periodicSeriesPlan.endMs - minOffset
+//    val atModifierTimestampsWithOffset = getAtModifierTimestampsWithOffset(periodicSeriesPlan)
 
-    val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
-      // should be in raw cluster.
-      atModifierTimestampsWithOffset.forall(at => at - lookbackMs >= earliestRawTime)
-    } else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
-      // should be in down sample cluster.
-      atModifierTimestampsWithOffset.forall(at => at - lookbackMs < earliestRawTime)
-    } else {
-      atModifierTimestampsWithOffset.isEmpty
-    }
-    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported. Because it queries" +
-      s"both down sampled and raw data. Please adjust the query parameters if you want to use @modifier.")
+//    val isAtModifierValid = if (startWithOffsetMs - lookbackMs >= earliestRawTime) {
+//      // should be in raw cluster.
+//      atModifierTimestampsWithOffset.forall(at => at - lookbackMs >= earliestRawTime)
+//    } else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
+//      // should be in down sample cluster.
+//      atModifierTimestampsWithOffset.forall(at => at - lookbackMs < earliestRawTime)
+//    } else {
+//      atModifierTimestampsWithOffset.isEmpty
+//    }
+//    require(isAtModifierValid, s"@modifier $atModifierTimestampsWithOffset is not supported. Because it queries" +
+//      s"both down sampled and raw data. Please adjust the query parameters if you want to use @modifier.")
 
     if (maxOffset != minOffset
           && startWithOffsetMs - lookbackMs < earliestRawTime
@@ -119,7 +119,8 @@ import filodb.query.exec._
       // should check for ANY interval overalapping earliestRawTime. We
       // can happen with ANY lookback interval, not just the last one.
     } else if (
-      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
+      (endWithOffsetMs - lookbackMs < earliestRawTime && !periodicSeriesPlan.hasAtModifier)
+        || //TODO lookbacks can overlap in the middle intervals too
         LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
     ) {
       // For subqueries and long lookback queries, we keep things simple by routing to
@@ -245,8 +246,8 @@ import filodb.query.exec._
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
-
-    if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
+    val isLongTimeAtModifier = isPlanLongTimeAtModifier(logicalPlan)
+    if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan) && !isLongTimeAtModifier) {
       logicalPlan match {
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
@@ -266,8 +267,10 @@ import filodb.query.exec._
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
       case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: BinaryJoin                  => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: Aggregate if isLongTimeAtModifier => super.materializeAggregate(qContext, lp, forceInProcess = true)
+      case lp: Aggregate if !isLongTimeAtModifier => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: BinaryJoin if isLongTimeAtModifier => super.materializeBinaryJoin(qContext, lp, forceInProcess = true)
+      case lp: BinaryJoin if !isLongTimeAtModifier  => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
       case lp: TsCardinalities             => materializeTSCardinalityPlan(qContext, lp)

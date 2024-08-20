@@ -20,6 +20,8 @@ sealed trait LogicalPlan {
     */
   def isTimeSplittable: Boolean = true
 
+  def hasAtModifier: Boolean = false
+
   /**
     * Replace filters present in logical plan
     */
@@ -48,6 +50,10 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
   def children: Seq[LogicalPlan]
+
+  override def hasAtModifier: Boolean = {
+    children.exists(_.hasAtModifier)
+  }
 }
 
 /**
@@ -261,6 +267,10 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
+
+  override def hasAtModifier: Boolean = {
+    atMs.nonEmpty
+  }
 }
 
 /**
@@ -323,6 +333,9 @@ case class SubqueryWithWindowing(
     val updatedFunctionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan])
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
+  override def hasAtModifier: Boolean = {
+    atMs.nonEmpty
+  }
 }
 
 /**
@@ -361,6 +374,10 @@ case class TopLevelSubquery(
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
+
+  override def hasAtModifier: Boolean = {
+    atMs.nonEmpty || children.exists(_.hasAtModifier)
+  }
 }
 
 /**
@@ -390,6 +407,10 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def hasAtModifier: Boolean = {
+    atMs.nonEmpty || children.exists(_.hasAtModifier)
+  }
 }
 
 /**
@@ -438,6 +459,9 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -468,6 +492,10 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def isRoutable: Boolean = lhs.isRoutable || rhs.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
+
+  override def hasAtModifier: Boolean = {
+    rhs.hasAtModifier || lhs.hasAtModifier
+  }
 }
 
 /**
@@ -503,6 +531,10 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -518,6 +550,9 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -533,6 +568,10 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -546,6 +585,10 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -576,6 +619,10 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -617,6 +664,10 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def isRoutable: Boolean = scalars.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(scalars =
     scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
+
+  override def hasAtModifier: Boolean = {
+    scalars.hasAtModifier
+  }
 }
 
 /**
@@ -637,6 +688,10 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
                       asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
+
+  override def hasAtModifier: Boolean = {
+    (lhs.isRight && lhs.right.get.hasAtModifier) || (rhs.isRight && rhs.right.get.hasAtModifier)
+  }
 }
 
 /**
@@ -653,6 +708,9 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 /**
@@ -669,6 +727,10 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
+
+  override def hasAtModifier: Boolean = {
+    vectors.hasAtModifier
+  }
 }
 
 object LogicalPlan {
