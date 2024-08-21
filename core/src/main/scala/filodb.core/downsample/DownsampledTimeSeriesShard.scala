@@ -175,8 +175,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
         pair._1.utf8 -> pair._2.utf8
       }).toMap ++
-        Map(Schemas.TypeLabel.utf8 ->
-          Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
+        Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
     }
   }
 
