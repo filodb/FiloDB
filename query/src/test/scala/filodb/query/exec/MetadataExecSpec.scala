@@ -16,7 +16,7 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.ratelimit.CardinalityStore
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, _}
+import filodb.core.query._
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -160,52 +160,6 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     result shouldEqual jobQueryResult1
   }
 
-  it ("should read the job names from timeseriesindex matching the columnfilters with _type_ label") {
-    import ZeroCopyUTF8String._
-    val filters = Seq(ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
-                      ColumnFilter("_type_", Filter.Equals(Schemas.promCounter.name.utf8)),
-                      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-
-    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-      LabelValuesExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
-        ishard, filters, Seq("job", "unicode_tag"), now-5000, now)
-    }
-
-    val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
-
-    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
-    val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _,  _, _, _) => {
-        val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
-      }
-    }
-    result shouldEqual jobQueryResult1
-  }
-
-  it ("should read the job names from timeseriesindex matching the columnfilters with _type_ label empty result") {
-    import ZeroCopyUTF8String._
-    val filters = Seq(ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
-      ColumnFilter("_type_", Filter.Equals(Schemas.promHistogram.name.utf8)),
-      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-
-    val leaves = (0 until shardPartKeyLabelValues.size).map { ishard =>
-      LabelValuesExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
-        ishard, filters, Seq("job", "unicode_tag"), now - 5000, now)
-    }
-
-    val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
-
-    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
-    (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _, _) => {
-        response.isEmpty shouldEqual true
-      }
-    }
-  }
-
   it("should not return any rows for wrong column filters") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
@@ -322,7 +276,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should be able to query labels with filter") {
-    val expectedLabels = Set("job", "_metric_", "unicode_tag", "instance", "_ws_", "_ns_", "_type_")
+    val expectedLabels = Set("job", "_metric_", "unicode_tag", "instance", "_ws_", "_ns_")
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
@@ -401,8 +355,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           "job" -> "1",
           "instance" -> "2",
           "_metric_" -> "1",
-          "_ws_" -> "1",
-          "_type_" -> "1")
+          "_ws_" -> "1")
     }
   }
 

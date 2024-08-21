@@ -1020,7 +1020,8 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeSeriesKeysByFilters(qContext: QueryContext,
                                              lp: SeriesKeysByFilters,
                                              forceInProcess: Boolean): PlanResult = {
-    val renamedFilters = renameMetricFilter(lp.filters)
+    // NOTE: _type_ filter support currently isn't there in series keys queries
+    val (renamedFilters, _) = extractSchemaFilter(renameMetricFilter(lp.filters))
 
     val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
       shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs)
