@@ -134,7 +134,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          diskLocation: Option[File] = None,
                          val lifecycleManager: Option[IndexMetadataStore] = None,
                          useMemoryMappedImpl: Boolean = true,
-                         disableIndexCaching: Boolean = false
+                         disableIndexCaching: Boolean = false,
+                         addMetricTypeField: Boolean = true
                         ) extends StrictLogging with PartKeyIndexDownsampled {
 
   import PartKeyLuceneIndex._
@@ -679,7 +680,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
-    addIndexedField(Schemas.TypeLabel, schemaName)
+    if (addMetricTypeField) addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
