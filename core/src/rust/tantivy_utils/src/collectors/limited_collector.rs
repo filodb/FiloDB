@@ -51,6 +51,13 @@ where
         let mut segment_collector = self.for_segment(segment_ord, reader)?;
         let mut scorer = weight.scorer(reader, 1.0)?;
 
+        // This is an extension of the logic that the base Collector trait provides:
+        // For each document the scorer produces:
+        //    * Check if it is alive if we have an alive_bitset
+        //    * Collect it with the limiter method
+        //    * If the collect method returns an error that signals we're at the limit, abort
+        //
+        // This code does not handle scoring, in part because there's no usage of scoring in FiloDB.
         match (reader.alive_bitset(), self.requires_scoring()) {
             (Some(alive_bitset), false) => {
                 let mut doc = scorer.doc();

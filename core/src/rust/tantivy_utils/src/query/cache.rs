@@ -18,6 +18,14 @@ use crate::collectors::limited_collector::{
 use super::bitset_weight::BitSetWeight;
 
 /// Cache for query results
+///
+/// The cache key is a tuple of segment ID and query.  The specific format
+/// of the query part is left to the caller as it may be a serialized format.
+///
+/// The key is a bitfield of documents that match the query for a given segment.
+/// The bitfield size in bits will be equal to the number of documents in the
+/// segment.  We keep the BitSet in an Arc to reduce data copies as once created
+/// the field is immutable.
 pub struct QueryCache<QueryType, WeighterType>
 where
     QueryType: CachableQuery,

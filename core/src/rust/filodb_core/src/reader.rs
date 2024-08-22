@@ -25,7 +25,7 @@ use crate::{
     errors::{JavaException, JavaResult},
     exec::jni_exec,
     jnienv::JNIEnvExt,
-    query::filodb_query::FiloDBQuery,
+    query_parser::filodb_query::FiloDBQuery,
     state::IndexHandle,
 };
 

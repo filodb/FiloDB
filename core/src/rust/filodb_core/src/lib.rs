@@ -25,6 +25,6 @@ mod ingestion;
 mod jnienv;
 mod parser;
 mod profile;
-mod query;
+mod query_parser;
 mod reader;
 mod state;

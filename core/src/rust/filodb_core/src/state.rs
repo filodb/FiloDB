@@ -20,7 +20,7 @@ use tantivy_utils::{
     query::cache::QueryCache,
 };
 
-use crate::query::filodb_query::{CachableQueryWeighter, FiloDBQuery};
+use crate::query_parser::filodb_query::{CachableQueryWeighter, FiloDBQuery};
 
 pub struct IndexHandle {
     // Fields that don't need explicit synchronization

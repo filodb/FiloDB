@@ -70,7 +70,7 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
             FiloDBQuery::ByPartIds(part_ids) => {
                 let part_id_field = schema.get_field(field_constants::PART_ID)?;
 
-                let mut terms = vec![];
+                let mut terms = Vec::with_capacity(part_ids.len());
                 for id in part_ids.iter() {
                     let term = Term::from_field_i64(part_id_field, *id as i64);
                     terms.push(term);
@@ -89,11 +89,11 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
 
                 Ok(Box::new(query))
             }
-            FiloDBQuery::ByEndTime(ended_before) => {
+            FiloDBQuery::ByEndTime(ended_at) => {
                 let query = RangeQuery::new_i64_bounds(
                     field_constants::END_TIME.to_string(),
                     Bound::Included(0),
-                    Bound::Included(*ended_before),
+                    Bound::Included(*ended_at),
                 );
 
                 Ok(Box::new(query))
@@ -105,6 +105,15 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
 #[derive(Clone, Default)]
 pub struct CachableQueryWeighter;
 
+// We want our cache to hold a maximum number of items based on their total size in RAM vs item count
+// This is because not all segments are the same size / not all queries to cache are equal
+//
+// To do this we compute the weight of a given cache item as the size of the query key + the size
+// of the cached bitfield of results.  This enables quick_cache to ensure we never go too much above
+// a fixed amount of RAM usage.
+//
+// The weight does not impact which items get evicted first, just how many need to get evicted to
+// make space for a new incoming item.
 impl Weighter<(SegmentId, FiloDBQuery), Arc<BitSet>> for CachableQueryWeighter {
     fn weight(&self, key: &(SegmentId, FiloDBQuery), val: &Arc<BitSet>) -> u64 {
         let bitset_size = ((val.max_value() as usize + 63) / 64) * 8;
