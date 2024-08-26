@@ -60,7 +60,7 @@ trait BaseParser extends JavaTokenParsers with RegexParsers with PackratParsers 
           if (c == '\\') {
             val next = source.charAt(offset); offset += 1
             c = next match {
-              case '\\' | '\'' | '"' => next
+              case '\\' | '\'' | '"' | '.' => next
               case 'f' => '\f'
               case 'n' => '\n'
               case 'r' => '\r'
