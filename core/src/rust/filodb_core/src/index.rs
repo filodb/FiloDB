@@ -40,6 +40,8 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
 ) -> jlong {
     jni_exec(&mut env, |env| {
         let disk_location: String = env.get_string(&disk_location)?.into();
+        std::fs::create_dir_all(&disk_location)?;
+
         let directory = MmapDirectory::open(disk_location)?;
 
         // Build the schema for documents
