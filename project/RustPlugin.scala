@@ -23,6 +23,7 @@ object RustPlugin extends AutoPlugin {
     val rustArchitectures = settingKey[Seq[String]]("List of architectures to build for.  Takes either a Rust " +
       "target tuple or the special key 'host' to build for the current machine.  To supply multiple architectures " +
       "separate them with a ';' character.")
+    val rustFeatures = settingKey[String]("Value to pass to cargo's --features option.  Defaults to an empty string.")
     var rustOptimize = settingKey[Boolean]("Enable optimization during rust builds.  Defaults to false for host " +
       "only builds and true for any other configuration.")
   }
@@ -36,12 +37,20 @@ object RustPlugin extends AutoPlugin {
 
       archs.split(';').toSeq
     },
+    rustFeatures := {
+      val features = Option(System.getProperty("rust.features")).getOrElse("")
+
+      features
+    },
     rustOptimize := {
-      if (rustArchitectures.value.length > 1) {
-        true
-      } else {
-        false
-      }
+      val optimize = Option(System.getProperty("rust.optimize")).getOrElse(
+        if (rustArchitectures.value.length > 1) {
+          "true"
+        } else {
+          "false"
+        })
+
+      optimize.toBoolean
     },
     rustClean := {
       val log = streams.value.log
@@ -57,9 +66,10 @@ object RustPlugin extends AutoPlugin {
     rustCompile := {
       val log = streams.value.log
       val sourceDir = rustSourceDir.value
+      val features = rustFeatures.value
 
       for (archTarget <- rustArchitectures.value) {
-        log.info(s"Compiling rust source at $sourceDir for architecture $archTarget")
+        log.info(s"Compiling rust source at $sourceDir for architecture $archTarget with features '$features'")
 
         // target setup
         val targetCommand = if (archTarget == "host") {
@@ -82,7 +92,14 @@ object RustPlugin extends AutoPlugin {
           ""
         }
 
-        val returnCode = Process(s"cargo $buildCommand $buildFlags $targetCommand", sourceDir) ! cargoLog(log)
+        val featureFlags = if (features.isBlank) {
+          ""
+        } else {
+          s" --features $features "
+        }
+
+        val returnCode = Process(s"cargo $buildCommand $buildFlags $featureFlags $targetCommand",
+          sourceDir) ! cargoLog(log)
 
         if (returnCode != 0)
           sys.error(s"cargo build failed with exit code $returnCode")

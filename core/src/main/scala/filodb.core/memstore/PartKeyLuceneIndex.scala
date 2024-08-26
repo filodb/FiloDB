@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.io.File
+import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
@@ -13,7 +14,6 @@ import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
@@ -79,16 +79,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   import PartKeyLuceneIndex._
   import PartKeyIndexRaw._
-
-  val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
-  val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
 
   val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
     .withTag("dataset", ref.dataset)
@@ -297,6 +287,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
 
   def indexNumEntries: Long = indexWriter.getDocStats().numDocs
+
+  def indexMmapBytes: Long = {
+    ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean]).asScala
+      .find(_.getName == "mapped").get.getMemoryUsed
+  }
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")

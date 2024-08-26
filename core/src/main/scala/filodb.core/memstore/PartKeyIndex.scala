@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 import java.util.regex.Pattern
 
 import scala.collection.immutable.HashSet
@@ -69,13 +70,25 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
+  protected val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
+      MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
   protected val queryIndexLookupLatency = Kamon.histogram("index-partition-lookup-latency",
       MeasurementUnit.time.nanoseconds)
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
-  protected val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
+  protected val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
+      MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  private val _indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
     .getOrElse(createTempDir(ref, shardNum)).toPath
+
+  def indexDiskLocation: Path = _indexDiskLocation
 
   // If index rebuild is triggered or the state is Building, simply clean up the index directory and start
   // index rebuild
@@ -269,6 +282,11 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    * Number of documents in flushed index, excludes tombstones for deletes
    */
   def indexNumEntries: Long
+
+  /**
+   * Memory used by index in mmap segments, mostly for index data
+   */
+  def indexMmapBytes: Long
 
   /**
    * Closes the index for read by other clients. Check for implementation if commit would be done
@@ -505,20 +523,38 @@ abstract class PartKeyQueryBuilder {
 
   protected def visitQuery(columnFilters: Seq[ColumnFilter]): Unit = {
     visitStartBooleanQuery()
-    columnFilters.foreach { filter =>
-      visitFilter(filter.column, filter.filter)
+    if(columnFilters.isEmpty) {
+      // No filters should match all documents
+      visitMatchAllQuery()
+    } else {
+      columnFilters.foreach { filter =>
+        visitFilter(filter.column, filter.filter)
+      }
     }
     visitEndBooleanQuery()
   }
 
-  protected def visitQueryWithStartAndEnd(columnFilters: Seq[ColumnFilter], startTime: PartitionKey,
-                                          endTime: PartitionKey): Unit = {
+  protected def visitQueryWithStartAndEnd(columnFilters: Seq[ColumnFilter], startTime: Long,
+                                          endTime: Long): Unit = {
     visitStartBooleanQuery()
     columnFilters.foreach { filter =>
       visitFilter(filter.column, filter.filter)
     }
-    visitRangeQuery(START_TIME, 0, endTime, OccurMust)
-    visitRangeQuery(END_TIME, startTime, Long.MaxValue, OccurMust)
+    // Query optimization - don't time range filter if we're specifying max bounds and would match
+    // everything anyway
+    if (endTime < Long.MaxValue ) {
+      visitRangeQuery(START_TIME, 0, endTime, OccurMust)
+    }
+    if (startTime > 0) {
+      visitRangeQuery(END_TIME, startTime, Long.MaxValue, OccurMust)
+    }
+
+    // Query optimization - if we produced no filters after optimization emit a match all as the time ranges
+    // we skipped would have covered that
+    if (endTime == Long.MaxValue && startTime <= 0 && columnFilters.isEmpty) {
+      visitMatchAllQuery()
+    }
+
     visitEndBooleanQuery()
   }
 

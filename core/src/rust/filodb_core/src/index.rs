@@ -7,6 +7,7 @@ use jni::{
 };
 use tantivy::{
     directory::MmapDirectory,
+    indexer::LogMergePolicy,
     schema::{
         BytesOptions, FacetOptions, Field, JsonObjectOptions, NumericOptions, Schema,
         SchemaBuilder, TextFieldIndexing, TextOptions,
@@ -56,9 +57,22 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             .open_or_create(directory.clone())?;
 
         let writer = index.writer::<TantivyDocument>(WRITER_MEM_BUDGET)?;
+
+        let mut merge_policy = LogMergePolicy::default();
+        merge_policy.set_del_docs_ratio_before_merge(0.1);
+
+        writer.set_merge_policy(Box::new(merge_policy));
+
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
+            // It's tempting to use Manual here as we call refresh periodically
+            // from a timer thread.  However, refresh just means that you can see
+            // all uncommitted documents, not that all merges have completed.  This
+            // means that background merges that are happening that could speed up
+            // queries aren't avaialble when manual is used.  Instead we use
+            // on commit - the cost of this is minor since it's a FS notification
+            // and reloading the segment list is fairly cheap and infrequent.
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
 
         Ok(IndexHandle::new_handle(
