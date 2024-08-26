@@ -24,7 +24,10 @@ class PartKeyTantivyIndex(ref: DatasetRef,
                           shardNum: Int,
                           retentionMillis: Long, // only used to calculate fallback startTime
                           diskLocation: Option[File] = None,
-                          lifecycleManager: Option[IndexMetadataStore] = None
+                          lifecycleManager: Option[IndexMetadataStore] = None,
+                          columnCacheCount: Long = 1000,
+                          queryCacheMaxSize: Long = 50 * 1000 * 1000,
+                          queryCacheEstimatedItemSize: Long = 31250
                          ) extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager) {
 
   // Compute field names for native schema code
@@ -44,7 +47,8 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
   // Native handle for cross JNI operations
   private var indexHandle: Long = loadIndexData(() => TantivyNativeMethods.newIndexHandle(indexDiskLocation.toString,
-    schemaFields, schemaMapFields, schemaMultiColumnFacets))
+    schemaFields, schemaMapFields, schemaMultiColumnFacets, columnCacheCount, queryCacheMaxSize,
+    queryCacheEstimatedItemSize))
 
   logger.info(s"Created tantivy index for dataset=$ref shard=$shardNum at $indexDiskLocation")
 
@@ -309,7 +313,8 @@ protected object TantivyNativeMethods {
 
   @native
   def newIndexHandle(diskLocation: String, schemaFields: Array[String],
-                     schemaMapFields: Array[String], schemaMultiColumnFacets: Array[String]): Long
+                     schemaMapFields: Array[String], schemaMultiColumnFacets: Array[String],
+                     columnCacheSize: Long, queryCacheMaxSize: Long, queryCacheItemSize: Long): Long
 
   // Free memory used by an index handle
   @native

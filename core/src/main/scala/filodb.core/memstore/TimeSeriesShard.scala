@@ -286,6 +286,10 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val disableIndexCaching = filodbConfig.getBoolean("memstore.disable-index-caching")
   private val partKeyIndexType = filodbConfig.getString("memstore.part-key-index-type")
+  private val tantivyColumnCacheCount = filodbConfig.getLong("memstore.tantivy.column-cache-count")
+  private val tantivyQueryCacheSize = filodbConfig.getMemorySize("memstore.tantivy.query-cache-max-bytes")
+  private val tantivyQueryCacheEstimatedItemSize =
+    filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
 
 
   /////// END CONFIGURATION FIELDS ///////////////////
@@ -317,7 +321,9 @@ class TimeSeriesShard(val ref: DatasetRef,
       indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
       storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
     case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
-      shardNum, storeConfig.diskTTLSeconds * 1000)
+      shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
+      queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
+      queryCacheEstimatedItemSize = tantivyQueryCacheEstimatedItemSize.toBytes)
     case x => sys.error(s"Unsupported part key index type: '$x'")
   }
 

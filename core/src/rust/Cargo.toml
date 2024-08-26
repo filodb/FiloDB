@@ -1,34 +1,9 @@
-[package]
-name = "filodb_core"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-dhat = "0.3.3"
-hashbrown = "0.14.5"
-jni = "0.21.1"
-nohash-hasher = "0.2.0"
-nom = "7.1.3"
-num-derive = "0.4.2"
-num-traits = "0.2.19"
-quick_cache = { version = "0.6.2", features = ["stats"] }
-regex = "1.10.5"
-tantivy = "0.22.0"
-tantivy-common = "0.7.0"
-tantivy-fst = "0.5.0"
-thiserror = "1.0.62"
-
-[dev-dependencies]
-bytes = "1.6.1"
+[workspace]
+resolver = "2"
+members = ["filodb_core", "tantivy_utils"]
 
 # Keep debug symbols in the final binary
 # This makes the binary slightly larger (~20MB), but makes profiling much more useful
 # and has no runtime impact
 [profile.release]
 debug = true
-
-[features]
-dhat-heap = []

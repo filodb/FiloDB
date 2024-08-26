@@ -11,17 +11,15 @@ use tantivy::{
         BytesOptions, FacetOptions, Field, JsonObjectOptions, NumericOptions, Schema,
         SchemaBuilder, TextFieldIndexing, TextOptions,
     },
-    Index, ReloadPolicy, TantivyDocument,
+    IndexBuilder, IndexSettings, ReloadPolicy, TantivyDocument,
 };
+use tantivy_utils::field_constants::{self, facet_field_name, LABEL_LIST};
 
 use crate::{
     errors::{JavaException, JavaResult},
     exec::jni_exec,
     jnienv::JNIEnvExt,
-    state::{
-        field_constants::{self, facet_field_name, LABEL_LIST},
-        IndexHandle,
-    },
+    state::IndexHandle,
 };
 
 pub const WRITER_MEM_BUDGET: usize = 50 * 1024 * 1024;
@@ -35,6 +33,9 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
     schema_fields: JObjectArray,
     map_fields: JObjectArray,
     multi_column_facet_fields: JObjectArray,
+    column_cache_size: jlong,
+    query_cache_max_size: jlong,
+    query_cache_estimated_item_size: jlong,
 ) -> jlong {
     jni_exec(&mut env, |env| {
         let disk_location: String = env.get_string(&disk_location)?.into();
@@ -45,7 +46,14 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             build_schema(env, &schema_fields, &map_fields, &multi_column_facet_fields)?;
 
         // Open index
-        let index = Index::open_or_create(directory, schema.clone())?;
+        let settings = IndexSettings {
+            ..Default::default()
+        };
+
+        let index = IndexBuilder::new()
+            .schema(schema.clone())
+            .settings(settings)
+            .open_or_create(directory.clone())?;
 
         let writer = index.writer::<TantivyDocument>(WRITER_MEM_BUDGET)?;
         let reader = index
@@ -58,6 +66,10 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             default_field,
             writer,
             reader,
+            directory,
+            column_cache_size as u64,
+            query_cache_max_size as u64,
+            query_cache_estimated_item_size as u64,
         ))
     })
 }
@@ -95,7 +107,9 @@ fn build_schema(
 
     let numeric_options = NumericOptions::default().set_indexed().set_fast();
 
-    let byte_options = BytesOptions::default().set_fast().set_indexed();
+    // Bytes values are faster to read via the doc store vs fast fields and we don't need any of the fast
+    // field only features like iterating by sorted values
+    let byte_options = BytesOptions::default().set_indexed().set_stored();
 
     builder.add_text_field(field_constants::DOCUMENT_ID, text_options.clone());
     builder.add_i64_field(field_constants::PART_ID, numeric_options.clone());

@@ -15,15 +15,13 @@ use tantivy::{
     schema::Facet,
     TantivyDocument, Term,
 };
+use tantivy_utils::field_constants::{self, facet_field_name};
 
 use crate::{
     errors::JavaResult,
     exec::jni_exec,
     jnienv::JNIEnvExt,
-    state::{
-        field_constants::{self, facet_field_name},
-        IndexHandle, IngestingDocument,
-    },
+    state::{IndexHandle, IngestingDocument},
 };
 
 mod fields;
