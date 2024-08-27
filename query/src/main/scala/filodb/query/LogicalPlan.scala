@@ -44,6 +44,10 @@ sealed trait LogicalPlan {
 sealed trait RawSeriesLikePlan extends LogicalPlan {
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
+
+  def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String, tags: Set[String]): RawSeriesLikePlan
+
+  def rawSeriesFilters(): Seq[ColumnFilter]
 }
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
@@ -70,6 +74,13 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
   def endMs: Long
 
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
+
+  /**
+   * @param isInclude
+   * @param tags
+   * @return
+   */
+  def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String, tags: Set[String]): PeriodicSeriesPlan
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -121,6 +132,30 @@ case class RawSeries(rangeSelector: RangeSelector,
     val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     this.copy(filters = updatedFilters)
   }
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): RawSeriesLikePlan = {
+    // First check if we can optimize the filters
+    if (isInclude) {
+      // includeTags scenario - ALL( the filters 'column' value ) is a SUBSET of ( tags )
+      val newFilters = filters.map { case ColumnFilter(column, _) => column }.toSet
+      if (newFilters.subsetOf(tags)) {
+        // Update the metric name used here
+        replaceRawSeriesFilters(Seq(ColumnFilter("_metric_", Equals(aggregatedMetric))))
+      }
+    }
+    else {
+      // excludeTags scenario - Any( the filters 'column' value ) SHOULD NOT INTERSECT with ( tags )
+      val intersectedFilters = filters.filter { case ColumnFilter(column, _) => tags.contains(column) }
+      if (intersectedFilters.isEmpty) {
+        // Update the metric name used here
+        replaceRawSeriesFilters(Seq(ColumnFilter("_metric_", Equals(aggregatedMetric))))
+      }
+    }
+    this
+  }
+
+  override def rawSeriesFilters(): Seq[ColumnFilter] = filters
 }
 
 case class LabelValues(labelNames: Seq[String],
@@ -238,6 +273,10 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
     val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     this.copy(filters = updatedFilters)
   }
+
+  // TODO: check here
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = this
 }
 
 /**
@@ -261,6 +300,11 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(rawSeries = rawSeries.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -323,6 +367,11 @@ case class SubqueryWithWindowing(
     val updatedFunctionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan])
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(innerPeriodicSeries = innerPeriodicSeries.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -361,6 +410,11 @@ case class TopLevelSubquery(
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(innerPeriodicSeries = innerPeriodicSeries.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -390,6 +444,15 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO
+    val newRawSeries = series.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags)
+    this.copy(
+      columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, newRawSeries.rawSeriesFilters()),
+      series = newRawSeries)
+  }
 }
 
 /**
@@ -438,6 +501,12 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO: check for the aggregate clause as well
+    // How do we ensure the parent level aggregation check doesn't affect the lower level aggregation updates
+    this
+  }
 }
 
 /**
@@ -468,6 +537,14 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def isRoutable: Boolean = lhs.isRoutable || rhs.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(
+      lhs = lhs.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags),
+      rhs = rhs.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags)
+    )
+  }
 }
 
 /**
@@ -485,6 +562,14 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
               scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(
+      vector = vector.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags),
+      scalarArg = scalarArg.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags).asInstanceOf[ScalarPlan]
+    )
+  }
 }
 
 /**
@@ -503,6 +588,14 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO: check if the functionArgs also need to be updated
+    this.copy(
+      vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags)
+    )
+  }
 }
 
 /**
@@ -518,6 +611,15 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): RawSeriesLikePlan = {
+    // TODO: check if the functionArgs also need to be updated
+    this.copy(
+      vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags).asInstanceOf[RawSeries]
+    )
+  }
+
+  override def rawSeriesFilters(): Seq[ColumnFilter] = vectors.rawSeriesFilters()
 }
 
 /**
@@ -533,6 +635,11 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+      this.copy(vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -546,6 +653,11 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -576,6 +688,12 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO: check if the functionArgs also need to be updated
+    this.copy(vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -588,6 +706,9 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
   override def stepMs: Long = rangeParams.stepSecs * 1000
   override def endMs: Long = rangeParams.endSecs * 1000
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this // No Filter
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = this
 }
 
 /**
@@ -602,6 +723,9 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   override def stepMs: Long = timeStepParams.stepSecs * 1000
   override def endMs: Long = timeStepParams.endSecs * 1000
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = this
 }
 
 //scalastyle:off number.of.types
@@ -617,6 +741,12 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def isRoutable: Boolean = scalars.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(scalars =
     scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    this.copy(
+      scalars = scalars.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags).asInstanceOf[ScalarPlan])
+  }
 }
 
 /**
@@ -637,6 +767,16 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
                       asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
+
+  // TODO: Check if this is correct
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
+    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+    this.copy(lhs = updatedLhs, rhs = updatedRhs)
+  }
 }
 
 /**
@@ -653,6 +793,12 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO: if this is even optimizable since the user wants to check if a particular timeseries is absent
+    this.copy(vectors = vectors.optimizeWithHierarchicalTags(isInclude, aggregatedMetric, tags))
+  }
 }
 
 /**
@@ -669,6 +815,12 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
+
+  override def optimizeWithHierarchicalTags(isInclude: Boolean, aggregatedMetric: String,
+                                            tags: Set[String]): PeriodicSeriesPlan = {
+    // TODO: check if this is optimizable
+    this
+  }
 }
 
 object LogicalPlan {
