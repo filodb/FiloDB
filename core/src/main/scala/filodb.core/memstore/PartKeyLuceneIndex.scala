@@ -394,7 +394,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       val value = new String(valueBase.asInstanceOf[Array[Byte]],
         unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
         UTF8StringMedium.numBytes(valueBase, valueOffset), StandardCharsets.UTF_8)
-      addIndexedField(key, value)
+      if (key != Schemas.TypeLabel) addIndexedField(key, value)
+      else logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
+      // I would have liked to log the entire PK to debug, but it is not accessible from here.
+      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
     }
   }
 
