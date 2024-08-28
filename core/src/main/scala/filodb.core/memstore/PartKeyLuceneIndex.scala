@@ -394,11 +394,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       val value = new String(valueBase.asInstanceOf[Array[Byte]],
         unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
         UTF8StringMedium.numBytes(valueBase, valueOffset), StandardCharsets.UTF_8)
-      if (key != Schemas.TypeLabel) addIndexedField(key, value)
-      else logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
-      // I would have liked to log the entire PK to debug, but it is not accessible from here.
-      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
-    }
+      addIndexedField(key, value, clientData = true)
+      }
   }
 
   /**
@@ -414,7 +411,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
           val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
           val value = new String(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset,
             numBytes, StandardCharsets.UTF_8)
-          addIndexedField(colName.toString, value)
+          addIndexedField(colName.toString, value, clientData = true)
         }
         def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
       }
@@ -429,7 +426,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         NoOpIndexer
     }
   }.toArray
-
 
   def getCurrentIndexState(): (IndexState.Value, Option[Long]) =
     lifecycleManager.map(_.currentState(this.ref, this.shardNum)).getOrElse((IndexState.Empty, None))
@@ -624,8 +620,23 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     ret
   }
 
-  private def addIndexedField(labelName: String, value: String): Unit = {
-    luceneDocument.get().addField(labelName, value)
+  /**
+   *
+   * @param clientData pass true if the field data has come from metric source, and false if internally setting the
+   *                   field data. This is used to determine if the type field data should be indexed or not.
+   */
+  private def addIndexedField(labelName: String, value: String, clientData: Boolean): Unit = {
+    if (clientData && addMetricTypeField) {
+      // do not index any existing _type_ tag since this is reserved and should not be passed in by clients
+      if (labelName != Schemas.TypeLabel)
+        luceneDocument.get().addField(labelName, value)
+      else
+        logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
+      // I would have liked to log the entire PK to debug, but it is not accessible from here.
+      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
+    } else {
+      luceneDocument.get().addField(labelName, value)
+    }
   }
 
   def addPartKey(partKeyOnHeapBytes: Array[Byte],
@@ -683,7 +694,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
-    if (addMetricTypeField) addIndexedField(Schemas.TypeLabel, schemaName)
+    if (addMetricTypeField)
+      addIndexedField(Schemas.TypeLabel, schemaName, clientData = false)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
