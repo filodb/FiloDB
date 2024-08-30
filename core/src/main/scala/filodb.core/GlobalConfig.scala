@@ -4,6 +4,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import scala.jdk.CollectionConverters._
 
+import filodb.core.metadata.DatasetOptions
+
 /**
   * Loads the overall configuration in a specific order:
   * - System properties
@@ -52,4 +54,13 @@ object GlobalConfig extends StrictLogging {
   // Column filter used to check the enabling/disabling the use of max-min columns
   val maxMinTenantColumnFilter = systemConfig.getString("filodb.query.max-min-tenant-column-filter")
 
+  // default dataset-options config
+  val datasetOptions: Option[DatasetOptions] =
+    systemConfig.hasPath("filodb.partition-schema.options") match {
+      case false => None
+      case true => {
+        val datasetOptionsConfig = systemConfig.getConfig("filodb.partition-schema.options")
+        Some(DatasetOptions.fromConfig(datasetOptionsConfig))
+      }
+    }
 }
