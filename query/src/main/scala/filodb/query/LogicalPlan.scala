@@ -50,7 +50,7 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
   def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean,
-                                                 aggregatedMetric: String, tags: Set[String]): RawSeriesLikePlan
+                                                 metricName: String, tags: Set[String]): RawSeriesLikePlan
 
   def rawSeriesFilters(): Seq[ColumnFilter]
 }
@@ -627,9 +627,10 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    // TODO: check if the functionArgs also need to be updated
     this.copy(
-      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(
+        isInclude, metricName, tags).asInstanceOf[FunctionArgsPlan])
     )
   }
 }
@@ -647,12 +648,13 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, aggregatedMetric: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): RawSeriesLikePlan = {
-    // TODO: check if the functionArgs also need to be updated
     this.copy(
-      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, aggregatedMetric, tags)
-        .asInstanceOf[RawSeries]
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+        .asInstanceOf[RawSeries],
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+        .asInstanceOf[FunctionArgsPlan])
     )
   }
 
@@ -728,8 +730,11 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    // TODO: check if the functionArgs also need to be updated
-    this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+    this.copy(
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+                .asInstanceOf[FunctionArgsPlan])
+    )
   }
 }
 
@@ -806,15 +811,14 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 
-  // TODO: Check if this is correct
+
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.
-      useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName,
-      tags).asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
-    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.
-      useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName,
-      tags).asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.useHigherLevelAggregatedMetricIfApplicable(
+      isInclude, metricName, tags).asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
+
+    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.useHigherLevelAggregatedMetricIfApplicable(
+      isInclude, metricName, tags).asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 }
@@ -836,8 +840,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    // TODO: if this is even optimizable since the user wants to check if a particular timeseries is absent
-    this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+    // TODO: check if it can be done, since the user wants to check if a particular time-series is absent
+    this
   }
 }
 
@@ -858,7 +862,7 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    // TODO: check if this is optimizable
+    // TODO: check if this can done
     this
   }
 }
