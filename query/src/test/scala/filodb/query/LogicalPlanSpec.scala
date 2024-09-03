@@ -342,4 +342,26 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     LogicalPlan.getMetricColumnFilterTag(Seq("tag1", "_metric_"), "_metric_") shouldEqual "_metric_"
     LogicalPlan.getMetricColumnFilterTag(Seq("tag1", "tag2"), "_metric_") shouldEqual "_metric_"
   }
+
+  it ("getNextLevelAggregatedMetricName should return expected metric name") {
+
+    // Case 1: Should not update if metric doesn't have the aggregated metric identifier
+    LogicalPlan.getNextLevelAggregatedMetricName("__name__" , "agg_2",
+      Seq(ColumnFilter("__name__", Equals("metric1")), ColumnFilter("job", Equals("spark")))) shouldEqual Some("metric1")
+
+    // Case 2: Should update if metric has the aggregated metric identifier
+    LogicalPlan.getNextLevelAggregatedMetricName("__name__", "agg_2",
+      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
+      Some("metric1:::agg_2")
+
+    // Case 3: Should not update if metricColumnFilter and column filters don't match
+    LogicalPlan.getNextLevelAggregatedMetricName("_metric_", "agg_2",
+      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
+      None
+
+    // Case 4: Similar to case 1 but with a different metric identifier
+    LogicalPlan.getNextLevelAggregatedMetricName("_metric_", "agg_2",
+      Seq(ColumnFilter("_metric_", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
+      Some("metric1:::agg_2")
+  }
 }

@@ -3,7 +3,6 @@ package filodb.query
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.GlobalConfig
-import filodb.core.metadata.DatasetOptions
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 
@@ -36,6 +35,14 @@ sealed trait LogicalPlan {
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
       case c: TsCardinalities          => c  // immutable & no members need to be updated
+    }
+  }
+
+  def useHigherLevelAggregatedMetric(isInclude: Boolean, metricSuffix: String, tags: Set[String]): LogicalPlan = {
+    this match {
+      case p: PeriodicSeriesPlan       => p.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
+      case r: RawSeriesLikePlan        => r.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
+      case _                          => this
     }
   }
 }
@@ -1113,10 +1120,13 @@ object LogicalPlan extends StrictLogging {
   }
 
   def getNextLevelAggregatedMetricName(metricColumnFilter: String, metricSuffix: String,
-                                       filters: Seq[ColumnFilter]): String = {
-    // TODO: make it a config
-    val metricName = getColumnValues(filters, metricColumnFilter).head
-    metricName.replaceFirst(":::.*", ":::" + metricSuffix)
+                                       filters: Seq[ColumnFilter]): Option[String] = {
+    val metricNameSeq = getColumnValues(filters, metricColumnFilter)
+    metricNameSeq match {
+      case Seq() => None
+      // TODO: make it a config
+      case _ => Some(metricNameSeq.head.replaceFirst(":::.*", ":::" + metricSuffix))
+    }
   }
 
   def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(isInclude: Boolean,
@@ -1129,7 +1139,10 @@ object LogicalPlan extends StrictLogging {
     if (isHigherLevelAggregationApplicable(isInclude, filterTags, tags)) {
       val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
       val updatedMetricName = getNextLevelAggregatedMetricName(metricColumnFilter, metricSuffix, filters)
-      upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
+      updatedMetricName match {
+        case Some(metricName) => upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(metricName))))
+        case None => filters
+      }
     } else {
       filters
     }
