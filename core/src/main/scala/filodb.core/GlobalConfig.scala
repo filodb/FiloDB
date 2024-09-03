@@ -63,4 +63,6 @@ object GlobalConfig extends StrictLogging {
         Some(DatasetOptions.fromConfig(datasetOptionsConfig))
       }
     }
+
+  val PromMetricLabel = "__name__"
 }

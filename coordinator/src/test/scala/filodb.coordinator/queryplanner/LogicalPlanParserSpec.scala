@@ -4,7 +4,8 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{IntervalSelector, RawSeries, SeriesKeysByFilters}
+import filodb.query.LogicalPlan.getColumnFilterGroup
+import filodb.query.{Aggregate, BinaryJoin, IntervalSelector, RawSeries, SeriesKeysByFilters}
 
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
@@ -293,5 +294,37 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual "(http_requests_total{job=\"app\"} + 2.1)"
+  }
+
+  it("LogicalPlan update for hierarchical aggregation queries with Aggregate and BinaryJoin") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val nextLevelAggregatedMetricSuffix = "agg_2"
+    val nextLevelAggregationTags = Set("job", "application")
+    // CASE 1 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - Both lhs and rhs should be updated
+    val binaryJoinAggregationBothOptimization = "sum(metric1:::agg{job=\"app\"}) + sum(metric2:::agg{job=\"app\"})"
+    var lp1 = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
+    var lp1Updated = lp1.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    lp1Updated.isInstanceOf[BinaryJoin] shouldEqual true
+    lp1Updated.asInstanceOf[BinaryJoin].lhs.isInstanceOf[Aggregate] shouldEqual true
+    lp1Updated.asInstanceOf[BinaryJoin].rhs.isInstanceOf[Aggregate] shouldEqual true
+    var filterGroups = getColumnFilterGroup(lp1Updated)
+    filterGroups.map(
+      filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(true)
+    )
+    // CASE 2 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - rhs should be updated
+    val binaryJoinAggregationRHSOptimization = "sum(metric1:::agg{instance=\"abc\"}) + sum(metric2:::agg{job=\"app\"})"
+    lp1 = Parser.queryRangeToLogicalPlan(binaryJoinAggregationRHSOptimization, t)
+    lp1Updated = lp1.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    filterGroups = getColumnFilterGroup(lp1Updated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(true)
+    )
+    filterGroups = getColumnFilterGroup(lp1Updated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(false)
+    )
   }
 }

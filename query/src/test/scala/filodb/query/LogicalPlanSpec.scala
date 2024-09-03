@@ -336,4 +336,10 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     queryParamsMap.get("verbose").get shouldEqual "true"
     queryParamsMap.get("match[]").get shouldEqual "{_ws_=\"a\",_ns_=\"b\",__name__=\"c\"}"
   }
+
+  it ("getMetricColumnFilterTag should return expected column") {
+    LogicalPlan.getMetricColumnFilterTag(Seq("tag1", "__name__"), "_metric_") shouldEqual "__name__"
+    LogicalPlan.getMetricColumnFilterTag(Seq("tag1", "_metric_"), "_metric_") shouldEqual "_metric_"
+    LogicalPlan.getMetricColumnFilterTag(Seq("tag1", "tag2"), "_metric_") shouldEqual "_metric_"
+  }
 }

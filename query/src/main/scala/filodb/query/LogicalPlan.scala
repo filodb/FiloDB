@@ -50,7 +50,7 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
   def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean,
-                                                 metricName: String, tags: Set[String]): RawSeriesLikePlan
+                                                 metricSuffix: String, tags: Set[String]): RawSeriesLikePlan
 
   def rawSeriesFilters(): Seq[ColumnFilter]
 }
@@ -86,7 +86,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
    * @return
    */
   def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean,
-                                                 metricName: String, tags: Set[String]): PeriodicSeriesPlan
+                                                 metricSuffix: String, tags: Set[String]): PeriodicSeriesPlan
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -139,10 +139,10 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): RawSeriesLikePlan = {
     val updatedFilters = LogicalPlan.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      isInclude, metricName, filters, tags)
+      isInclude, metricSuffix, filters, tags)
     this.copy(filters = updatedFilters)
   }
 
@@ -265,10 +265,10 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     val updatedFilters = LogicalPlan.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      isInclude, metricName, filters, tags)
+      isInclude, metricSuffix, filters, tags)
     this.copy(filters = updatedFilters)
   }
 }
@@ -295,9 +295,9 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+    this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
   }
 }
 
@@ -362,10 +362,10 @@ case class SubqueryWithWindowing(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(innerPeriodicSeries = innerPeriodicSeries.useHigherLevelAggregatedMetricIfApplicable(
-      isInclude, metricName, tags))
+      isInclude, metricSuffix, tags))
   }
 }
 
@@ -406,10 +406,10 @@ case class TopLevelSubquery(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(innerPeriodicSeries = innerPeriodicSeries.useHigherLevelAggregatedMetricIfApplicable(
-      isInclude, metricName, tags))
+      isInclude, metricSuffix, tags))
   }
 }
 
@@ -441,10 +441,10 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     // TODO
-    val newRawSeries = series.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+    val newRawSeries = series.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
     this.copy(
       columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, newRawSeries.rawSeriesFilters()),
       series = newRawSeries)
@@ -497,7 +497,7 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     clauseOpt match {
       case Some(clause) =>
@@ -505,7 +505,7 @@ case class Aggregate(operator: AggregationOperator,
           case AggregateClause.ClauseType.By =>
             // Check if ALL the tags present in the by clause are part of includeTags or are not part of excludeTags
             if (LogicalPlan.isHigherLevelAggregationApplicable(isInclude, clause.labels, tags)) {
-              this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+              this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
             }
             else {
               // The group by clause tags used is not present in the higher level aggregation metric and hence can't
@@ -529,7 +529,7 @@ case class Aggregate(operator: AggregationOperator,
             else {
               // Check if ALL the tags present in excludeTags are are part of without clause tags/labels
               if (tags.subsetOf(clause.labels.toSet)) {
-                this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+                this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
               }
               else {
                 this
@@ -539,7 +539,7 @@ case class Aggregate(operator: AggregationOperator,
       case None =>
         // In this case if we have no AggregationClause. Check for lower level raw-series to see if we can use
         // the next aggregation level
-        this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+        this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
     }
   }
 }
@@ -573,11 +573,11 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(
-      lhs = lhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
-      rhs = rhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+      lhs = lhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
+      rhs = rhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
     )
   }
 }
@@ -598,12 +598,12 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
     this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
               scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(
-      vector = vector.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
+      vector = vector.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
       scalarArg = scalarArg.useHigherLevelAggregatedMetricIfApplicable(
-        isInclude, metricName, tags).asInstanceOf[ScalarPlan]
+        isInclude, metricSuffix, tags).asInstanceOf[ScalarPlan]
     )
   }
 }
@@ -625,12 +625,12 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(
-      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
       functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(
-        isInclude, metricName, tags).asInstanceOf[FunctionArgsPlan])
+        isInclude, metricSuffix, tags).asInstanceOf[FunctionArgsPlan])
     )
   }
 }
@@ -648,12 +648,12 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): RawSeriesLikePlan = {
     this.copy(
-      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
         .asInstanceOf[RawSeries],
-      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
         .asInstanceOf[FunctionArgsPlan])
     )
   }
@@ -675,9 +675,9 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-      this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+      this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
   }
 }
 
@@ -693,9 +693,9 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags))
+    this.copy(vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
   }
 }
 
@@ -728,11 +728,11 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(
-      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags),
-      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricName, tags)
+      vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
                 .asInstanceOf[FunctionArgsPlan])
     )
   }
@@ -749,7 +749,7 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
   override def endMs: Long = rangeParams.endSecs * 1000
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this // No Filter
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = this
 }
 
@@ -766,7 +766,7 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   override def endMs: Long = timeStepParams.endSecs * 1000
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = this
 }
 
@@ -784,11 +784,11 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(scalars =
     scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     this.copy(
       scalars = scalars.useHigherLevelAggregatedMetricIfApplicable(
-        isInclude, metricName, tags).asInstanceOf[ScalarPlan])
+        isInclude, metricSuffix, tags).asInstanceOf[ScalarPlan])
   }
 }
 
@@ -812,13 +812,13 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
   }
 
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     val updatedLhs = if (lhs.isRight) Right(lhs.right.get.useHigherLevelAggregatedMetricIfApplicable(
-      isInclude, metricName, tags).asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
+      isInclude, metricSuffix, tags).asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
 
     val updatedRhs = if (rhs.isRight) Right(rhs.right.get.useHigherLevelAggregatedMetricIfApplicable(
-      isInclude, metricName, tags).asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+      isInclude, metricSuffix, tags).asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 }
@@ -838,7 +838,7 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     // TODO: check if it can be done, since the user wants to check if a particular time-series is absent
     this
@@ -860,7 +860,7 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricName: String,
+  override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
     // TODO: check if this can done
     this
@@ -1054,25 +1054,41 @@ object LogicalPlan extends StrictLogging {
     }
   }
 
+  def getColumnValues(columnFilters: Seq[ColumnFilter], labelName: String): Seq[String] = {
+    columnFilters.flatMap(cFilter => {
+      if (cFilter.column == labelName) {
+        cFilter.filter.valuesStrings.map(_.toString)
+      } else {
+        Seq.empty
+      }
+    })
+  }
+
+  def getMetricColumnFilterTag(filterTags: Seq[String], datasetMetricColumn: String): String = {
+    filterTags.find(_ == datasetMetricColumn).getOrElse(
+      filterTags.find(_ == GlobalConfig.PromMetricLabel).getOrElse(datasetMetricColumn)
+    )
+  }
+
   def upsertFilters(filters: Seq[ColumnFilter], newFilters: Seq[ColumnFilter]): Seq[ColumnFilter] = {
     val filterColumns = newFilters.map(_.column)
     val updatedFilters = filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     updatedFilters
   }
 
-  def isHigherLevelAggregationApplicableWithIncludeTags(datasetOptions: DatasetOptions,
-                                                        filterTags: Seq[String], tags: Set[String]): Boolean = {
+  def isHigherLevelAggregationApplicableWithIncludeTags(shardKeyColumnTags: Seq[String],
+                                                        filterTags: Seq[String], includeTags: Set[String]): Boolean = {
     // filter out shard key columns and make a set of all columns in filters
     val allTagsInFiltersSet = filterTags.filterNot {
-      tag => datasetOptions.shardKeyColumns.contains(tag)
+      tag => shardKeyColumnTags.contains(tag)
     }.toSet
-    allTagsInFiltersSet.subsetOf(tags)
+    allTagsInFiltersSet.subsetOf(includeTags)
   }
 
-  def isHigherLevelAggregationApplicableWithExcludeTags(datasetOptions: DatasetOptions,
-                                                        filterTags: Seq[String], tags: Set[String]): Boolean = {
+  def isHigherLevelAggregationApplicableWithExcludeTags(shardKeyColumnTags: Seq[String],
+                                                        filterTags: Seq[String], excludeTags: Set[String]): Boolean = {
     val tagsNotPresentInExcludeTagsSet = filterTags.filterNot {
-      tag => datasetOptions.shardKeyColumns.contains(tag) || tags.contains(tag)
+      tag => shardKeyColumnTags.contains(tag) || excludeTags.contains(tag)
     }.toSet
     tagsNotPresentInExcludeTagsSet.isEmpty
   }
@@ -1084,21 +1100,36 @@ object LogicalPlan extends StrictLogging {
         logger.info("Dataset options config not found. Skipping optimization !")
         false
       case Some(datasetOptions) =>
+        val updatedShardKeyColumns = datasetOptions.shardKeyColumns :+ getMetricColumnFilterTag(
+          filterTags,
+          datasetOptions.metricColumn)
         if (isInclude) {
-          isHigherLevelAggregationApplicableWithIncludeTags(datasetOptions, filterTags, tags)
+          isHigherLevelAggregationApplicableWithIncludeTags(updatedShardKeyColumns, filterTags, tags)
         }
         else {
-          isHigherLevelAggregationApplicableWithExcludeTags(datasetOptions, filterTags, tags)
+          isHigherLevelAggregationApplicableWithExcludeTags(updatedShardKeyColumns, filterTags, tags)
         }
     }
   }
 
+  def getNextLevelAggregatedMetricName(metricColumnFilter: String, metricSuffix: String,
+                                       filters: Seq[ColumnFilter]): String = {
+    // TODO: make it a config
+    val metricName = getColumnValues(filters, metricColumnFilter).head
+    metricName.replaceFirst(":::.*", ":::" + metricSuffix)
+  }
+
   def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(isInclude: Boolean,
-                                                                 metricName: String,
+                                                                 metricSuffix: String,
                                                                  filters: Seq[ColumnFilter],
                                                                  tags: Set[String]): Seq[ColumnFilter] = {
-    if (isHigherLevelAggregationApplicable(isInclude, filters.map(x => x.column), tags)) {
-      upsertFilters(filters, Seq(ColumnFilter(GlobalConfig.datasetOptions.get.metricColumn, Equals(metricName))))
+    // get metric name filter i.e either datasetOptions.get.metricColumn or PromMetricLabel - We need to support both
+    // the cases
+    val filterTags = filters.map(x => x.column)
+    if (isHigherLevelAggregationApplicable(isInclude, filterTags, tags)) {
+      val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
+      val updatedMetricName = getNextLevelAggregatedMetricName(metricColumnFilter, metricSuffix, filters)
+      upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
     } else {
       filters
     }
