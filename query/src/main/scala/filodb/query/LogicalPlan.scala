@@ -582,10 +582,23 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String,
                                                           tags: Set[String]): PeriodicSeriesPlan = {
-    this.copy(
-      lhs = lhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
-      rhs = rhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
-    )
+    on match {
+      case None => this.copy(
+        lhs = lhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
+        rhs = rhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
+      )
+      case Some(onLabels) => {
+       if (LogicalPlan.isHigherLevelAggregationApplicable(isInclude, onLabels, tags)) {
+         this.copy(
+           lhs = lhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags),
+           rhs = rhs.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
+         )
+       } else {
+         this
+       }
+      }
+    }
+    // TODO: add check for ignoring, include. Also, what is include and how are queries using it?
   }
 }
 
@@ -1107,6 +1120,7 @@ object LogicalPlan extends StrictLogging {
         logger.info("Dataset options config not found. Skipping optimization !")
         false
       case Some(datasetOptions) =>
+        // TODO: Clarify if special treatment to be given to ws,ns column based on rules ?
         val updatedShardKeyColumns = datasetOptions.shardKeyColumns :+ getMetricColumnFilterTag(
           filterTags,
           datasetOptions.metricColumn)
