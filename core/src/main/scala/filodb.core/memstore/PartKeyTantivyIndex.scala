@@ -146,7 +146,8 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     val queryBuilder = new TantivyQueryBuilder()
     val query = queryBuilder.buildQuery(colFilters)
 
-    val results = TantivyNativeMethods.labelNames(indexHandle, query, 100, startTime, endTime)
+    val results = TantivyNativeMethods.labelNames(indexHandle, query, LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT,
+      startTime, endTime)
 
     labelValuesQueryLatency.record(System.nanoTime() - start)
 
@@ -521,6 +522,12 @@ class TantivyQueryBuilder extends PartKeyQueryBuilder with StrictLogging {
 
   def buildQuery(columnFilters: Seq[ColumnFilter]): Array[Byte] = {
     visitQuery(columnFilters)
+
+    buffer.toArray
+  }
+
+  def buildQueryWithStartAndEnd(columnFilters: Seq[ColumnFilter], start: Long, end: Long): Array[Byte] = {
+    visitQueryWithStartAndEnd(columnFilters, start, end)
 
     buffer.toArray
   }

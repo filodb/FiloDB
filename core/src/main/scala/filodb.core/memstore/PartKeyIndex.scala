@@ -313,11 +313,13 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    */
   def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String]
 
+  protected final val LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT = 100
+
   /**
    * Use faceting to get field/index values given a column filter and time range
    */
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
-                           colName: String, limit: Int = 100): Seq[String]
+                           colName: String, limit: Int = LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT): Seq[String]
 
   /**
    * Add new part key to index

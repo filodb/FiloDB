@@ -124,4 +124,22 @@ class PartKeyTantivyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAft
       6, // Match All
       0) // End boolean
   }
+
+  it("should encode start and end time properly") {
+    val builder = new TantivyQueryBuilder()
+
+    // Simple equals filter
+    val filters = List(ColumnFilter("col1", EqualsRegex(".*")))
+    val query = builder.buildQueryWithStartAndEnd(filters, 1, Long.MaxValue)
+
+    query should contain theSameElementsInOrderAs List(1,// Boolean
+      1, // Must
+      6, // Match All
+      1, // Must
+      7, // Long Range
+      11, 0, 95, 95, 101, 110, 100, 84, 105, 109, 101, 95, 95, // __endTime__
+      1, 0, 0, 0, 0, 0, 0, 0, // 0x1
+      -1, -1, -1, -1, -1, -1, -1, 127, // Long.MAX_VALUE
+      0) // End boolean
+  }
 }
