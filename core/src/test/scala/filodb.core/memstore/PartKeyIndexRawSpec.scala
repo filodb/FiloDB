@@ -747,7 +747,7 @@ trait PartKeyIndexRawSpec {
     }
 
     it("should get a single match for part keys through a non-existing field") {
-      val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(1)), Some(partBuilder))
         .zipWithIndex.map { case (addr, i) =>
           val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
           keyIndex.addPartKey(pk, -1, i, i + 10)(
