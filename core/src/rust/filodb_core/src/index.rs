@@ -2,7 +2,7 @@
 
 use jni::{
     objects::{JClass, JObjectArray, JString},
-    sys::jlong,
+    sys::{jfloat, jlong},
     JNIEnv,
 };
 use tantivy::{
@@ -37,6 +37,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
     column_cache_size: jlong,
     query_cache_max_size: jlong,
     query_cache_estimated_item_size: jlong,
+    deleted_doc_merge_threshold: jfloat,
 ) -> jlong {
     jni_exec(&mut env, |env| {
         let disk_location: String = env.get_string(&disk_location)?.into();
@@ -61,7 +62,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
         let writer = index.writer::<TantivyDocument>(WRITER_MEM_BUDGET)?;
 
         let mut merge_policy = LogMergePolicy::default();
-        merge_policy.set_del_docs_ratio_before_merge(0.1);
+        merge_policy.set_del_docs_ratio_before_merge(deleted_doc_merge_threshold);
 
         writer.set_merge_policy(Box::new(merge_policy));
 

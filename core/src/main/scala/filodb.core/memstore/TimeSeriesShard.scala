@@ -290,7 +290,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val tantivyQueryCacheSize = filodbConfig.getMemorySize("memstore.tantivy.query-cache-max-bytes")
   private val tantivyQueryCacheEstimatedItemSize =
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
-
+  private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -323,7 +323,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
       shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
       queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
-      queryCacheEstimatedItemSize = tantivyQueryCacheEstimatedItemSize.toBytes)
+      queryCacheEstimatedItemSize = tantivyQueryCacheEstimatedItemSize.toBytes,
+      deletedDocMergeThreshold = tantivyDeletedDocMergeThreshold.toFloat)
     case x => sys.error(s"Unsupported part key index type: '$x'")
   }
 
