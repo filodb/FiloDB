@@ -2,11 +2,12 @@
 
 use jni::{
     objects::{JClass, JObjectArray, JString},
-    sys::jlong,
+    sys::{jfloat, jlong},
     JNIEnv,
 };
 use tantivy::{
     directory::MmapDirectory,
+    indexer::LogMergePolicy,
     schema::{
         BytesOptions, FacetOptions, Field, JsonObjectOptions, NumericOptions, Schema,
         SchemaBuilder, TextFieldIndexing, TextOptions,
@@ -36,9 +37,12 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
     column_cache_size: jlong,
     query_cache_max_size: jlong,
     query_cache_estimated_item_size: jlong,
+    deleted_doc_merge_threshold: jfloat,
 ) -> jlong {
     jni_exec(&mut env, |env| {
         let disk_location: String = env.get_string(&disk_location)?.into();
+        std::fs::create_dir_all(&disk_location)?;
+
         let directory = MmapDirectory::open(disk_location)?;
 
         // Build the schema for documents
@@ -56,9 +60,22 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             .open_or_create(directory.clone())?;
 
         let writer = index.writer::<TantivyDocument>(WRITER_MEM_BUDGET)?;
+
+        let mut merge_policy = LogMergePolicy::default();
+        merge_policy.set_del_docs_ratio_before_merge(deleted_doc_merge_threshold);
+
+        writer.set_merge_policy(Box::new(merge_policy));
+
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
+            // It's tempting to use Manual here as we call refresh periodically
+            // from a timer thread.  However, refresh just means that you can see
+            // all uncommitted documents, not that all merges have completed.  This
+            // means that background merges that are happening that could speed up
+            // queries aren't avaialble when manual is used.  Instead we use
+            // on commit - the cost of this is minor since it's a FS notification
+            // and reloading the segment list is fairly cheap and infrequent.
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
 
         Ok(IndexHandle::new_handle(
