@@ -10,6 +10,7 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import org.apache.commons.lang3.SystemUtils
 import org.apache.lucene.util.BytesRef
 import spire.implicits.cforRange
@@ -44,6 +45,15 @@ class PartKeyTantivyIndex(ref: DatasetRef,
                           queryCacheEstimatedItemSize: Long = 31250,
                           deletedDocMergeThreshold: Float = 0.1f
                          ) extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager) {
+
+  private val cacheHitRate = Kamon.gauge("index-tantivy-cache-hit-rate")
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  private val refreshLatency = Kamon.histogram("index-tantivy-commit-refresh-latency",
+      MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
 
   // Compute field names for native schema code
   private val schemaFields = schema.columns.filter { c =>
@@ -82,7 +92,19 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     flushThreadPool = new ScheduledThreadPoolExecutor(1)
 
-    flushThreadPool.scheduleAtFixedRate(() => refreshReadersBlocking(), flushDelayMinSeconds,
+    flushThreadPool.scheduleAtFixedRate(() => {
+      // Commit / refresh
+      val start = System.nanoTime()
+      refreshReadersBlocking()
+      val elapsed = System.nanoTime() - start
+      refreshLatency.record(elapsed)
+
+      // Emit cache stats
+      val cache_stats = TantivyNativeMethods.getCacheHitRates(indexHandle)
+
+      cacheHitRate.withTag("label", "query").update(cache_stats(0))
+      cacheHitRate.withTag("label", "column").update(cache_stats(1))
+    }, flushDelayMinSeconds,
       flushDelayMinSeconds, TimeUnit.SECONDS)
   }
 
@@ -662,6 +684,11 @@ protected object TantivyNativeMethods {
   // Remove partition IDs and return approximate deleted count
   @native
   def removePartitionsEndedBefore(handle: Long, endedBefore: Long, returnApproxDeletedCount: Boolean): Int
+
+  // Get cache hit rates for stats
+  // Array of (query cache, column cache)
+  @native
+  def getCacheHitRates(handle: Long): Array[Double]
 
   // Dump stats - mainly meant for testing
   @native

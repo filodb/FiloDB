@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use jni::{
     objects::JClass,
-    sys::{jlong, jstring},
+    sys::{jdoubleArray, jlong, jstring},
     JNIEnv,
 };
 
@@ -37,6 +37,43 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_dump
         let java_str = env.new_string(output)?;
 
         Ok(java_str.into_raw())
+    })
+}
+
+/// Get cache hit rates
+#[no_mangle]
+pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_getCacheHitRates(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jdoubleArray {
+    jni_exec(&mut env, |env| {
+        let index = IndexHandle::get_ref_from_handle(handle);
+
+        let (column_hits, column_misses) = index.column_cache.stats();
+        let (query_hits, query_misses) = index.query_cache_stats();
+
+        let column_total = column_hits + column_misses;
+        let query_total = query_hits + query_misses;
+        let column_hit_rate = if column_total == 0 {
+            1.0f64
+        } else {
+            (column_hits as f64) / (column_total) as f64
+        };
+
+        let query_hit_rate = if query_total == 0 {
+            1.0f64
+        } else {
+            (query_hits as f64) / (query_total) as f64
+        };
+
+        // Contract with JVM code is (query hit rate, column hit rate)
+        let hit_rates = [query_hit_rate, column_hit_rate];
+
+        let result = env.new_double_array(hit_rates.len() as i32)?;
+        env.set_double_array_region(&result, 0, &hit_rates)?;
+
+        Ok(result.into_raw())
     })
 }
 
