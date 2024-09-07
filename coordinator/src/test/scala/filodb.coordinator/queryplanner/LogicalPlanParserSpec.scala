@@ -367,6 +367,15 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
         .shouldEqual("my_counter:::agg")
     )
 
+    // sum( sum() by (job, application)  +  sum() by (job, application) ) by (job, application, mode)
+
+    //
+    // sum( foo {job="", application=""} ) by (job, application, mode)
+
+
+    // sum(my_gauge{job="spark", application="filodb"}) by (job, application)
+
+    // sum ( sgn(foo{}) )
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) by (job, application) and on(job, application, mode) sum(my_counter{job=\"spark\", application=\"filodb\"}) by (job, application)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)

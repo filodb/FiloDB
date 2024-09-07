@@ -65,4 +65,11 @@ object GlobalConfig extends StrictLogging {
     }
 
   val PromMetricLabel = "__name__"
+
+  val hierarchicalConfig: Option[Config] = {
+    systemConfig.hasPath("filodb.query.hierarchical") match {
+      case false => None
+      case true => Some(systemConfig.getConfig("filodb.query.hierarchical"))
+    }
+  }
 }
