@@ -305,8 +305,12 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String, tags: Set[String],
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // TODO: Create a config/function which talks to RawSeriesLikePlan which are allowed to be optimized
-    this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
+    LogicalPlan.isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(this) match {
+      case true =>
+        this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags))
+      case false =>
+        this
+    }
   }
 }
 
@@ -450,13 +454,26 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
               series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
+  lazy val isRangeFunctionAllowed: Boolean = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) =>
+      hierarchicalConfig
+        .getStringList("allowed-range-functions")
+        .contains(function.entryName)
+    case None => false
+  }
+
   override def useHigherLevelAggregatedMetricIfApplicable(isInclude: Boolean, metricSuffix: String, tags: Set[String],
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // Check 1: This plan has a raw series as a child, so we need to check if this plan is allowed for raw series update
+    if (LogicalPlan.isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(this) &&
+      isRangeFunctionAllowed) {
       val newRawSeries = series.useHigherLevelAggregatedMetricIfApplicable(isInclude, metricSuffix, tags)
       this.copy(
         columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, newRawSeries.rawSeriesFilters()),
         series = newRawSeries)
-
+    } else {
+      this
+    }
   }
 }
 
@@ -506,15 +523,16 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
+  lazy val isOperatorAllowed = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) => hierarchicalConfig
+      .getStringList("allowed-aggregation-operators")
+      .contains(operator.entryName)
+    case None => false
+  }
+
   // Check if the higher level aggregation metric is applicable for this Aggregate plan
   def checkAggregateQueryEligibleForHigherLevelAggregatedMetric(isInclude: Boolean, tags: Set[String]): Boolean = {
     // Check 1: Check if the aggregation operator is enabled
-    val isOperatorAllowed = GlobalConfig.hierarchicalConfig match {
-      case Some(hierarchicalConfig) => hierarchicalConfig
-        .getStringList("allowed-aggregation-operators")
-        .contains(operator.entryName)
-      case None => false
-    }
     // Check 2: Check if the `by` and `without` clause labels satisfy the include/exclude tag constraints
     isOperatorAllowed match {
       case true =>
@@ -1155,11 +1173,14 @@ object LogicalPlan extends StrictLogging {
     }
   }
 
-  def isPeriodicSeriesPlanUsingRawSeries(logicalPlan: PeriodicSeriesPlan): Boolean = {
-    logicalPlan.getClass match {
-      case PeriodicSeries.getClass => true
-      case PeriodicSeriesWithWindowing.getClass => true
-      case _ => false
+  def isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
+                                                      logicalPlan: PeriodicSeriesPlan): Boolean = {
+    GlobalConfig.hierarchicalConfig match {
+      case Some(hierarchicalConfig) =>
+        hierarchicalConfig
+          .getStringList("allowed-periodic-series-plans-with-raw-series")
+          .contains(logicalPlan.getClass.toString)
+      case None => false
     }
   }
 
