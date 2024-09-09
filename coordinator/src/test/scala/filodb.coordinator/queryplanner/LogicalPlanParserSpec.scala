@@ -16,6 +16,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
   it("should generate query from LogicalPlan") {
     parseAndAssertResult("""http_requests_total{job="app"}""") ()
+    parseAndAssertResult("""http_requests_total{job="app"} limit 1""") ()
+    parseAndAssertResult("""sum(http_requests_total{job="app"}) limit 1""") ()
     parseAndAssertResult("""sum(http_requests_total{job="app"})""") ()
     parseAndAssertResult("""sum(count(http_requests_total{job="app"}))""")()
     parseAndAssertResult("""sum(http_requests_total{job="app",instance="inst-1"}) by (instance)""")()
