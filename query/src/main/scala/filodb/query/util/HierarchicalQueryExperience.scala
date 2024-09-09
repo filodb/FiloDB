@@ -10,8 +10,7 @@ import filodb.query.LogicalPlan
 final case class HierarchicalQueryExperience(isInclude: Boolean,
                                              metricRegex: String,
                                              metricSuffix: String,
-                                             tags: Set[String],
-                                             parentLogicalPlans: Seq[String])
+                                             tags: Set[String])
 object HierarchicalQueryExperience extends StrictLogging {
 
   /**

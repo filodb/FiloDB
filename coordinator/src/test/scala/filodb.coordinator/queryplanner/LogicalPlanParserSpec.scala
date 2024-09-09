@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan.getColumnFilterGroup
+import filodb.query.util.HierarchicalQueryExperience
 import filodb.query.{Aggregate, BinaryJoin, IntervalSelector, RawSeries, SeriesKeysByFilters}
 
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
@@ -303,7 +304,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 1 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - Both lhs and rhs should be updated
     val binaryJoinAggregationBothOptimization = "sum(metric1:::agg{job=\"app\"}) + sum(metric2:::agg{job=\"app\"})"
     var lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val params = HierarchicalQueryExperience(true, ":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     lpUpdated.isInstanceOf[BinaryJoin] shouldEqual true
     lpUpdated.asInstanceOf[BinaryJoin].lhs.isInstanceOf[Aggregate] shouldEqual true
     lpUpdated.asInstanceOf[BinaryJoin].rhs.isInstanceOf[Aggregate] shouldEqual true
@@ -315,7 +317,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - rhs should be updated
     val binaryJoinAggregationRHSOptimization = "sum(metric1:::agg{instance=\"abc\"}) + sum(metric2:::agg{job=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationRHSOptimization, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
     filterGroups.map(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -330,7 +332,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // not an aggregated metric, even if both the metrics qualify for aggregation
     val binaryJoinAggregationLHSOptimization = "sum(metric1:::agg{job=\"abc\"}) + sum(metric2{job=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationLHSOptimization, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
     filterGroups.map(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -351,7 +353,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
     var query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) by (instance, version)) by (version)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val params = HierarchicalQueryExperience(true, ":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.map(
       filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -360,25 +363,16 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - should NOT update since the by clause labels are not part of include tags
     query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) by (instance, version, id)) by (version)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.map(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_counter:::agg")
     )
 
-    // sum( sum() by (job, application)  +  sum() by (job, application) ) by (job, application, mode)
-
-    //
-    // sum( foo {job="", application=""} ) by (job, application, mode)
-
-
-    // sum(my_gauge{job="spark", application="filodb"}) by (job, application)
-
-    // sum ( sgn(foo{}) )
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) by (job, application) and on(job, application, mode) sum(my_counter{job=\"spark\", application=\"filodb\"}) by (job, application)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(true, nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.map(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
