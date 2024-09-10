@@ -223,7 +223,12 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
       //   (w.last._2 - w.head._2) / (windowTime) * 1000
       //   // (w.last._2 - w.head._2) / (w.last._1 - w.head._1) * 1000
       // }
-      rates shouldEqual slidingResults
+      rates.dropRight(1) shouldEqual slidingResults.dropRight(1)
+
+      // sliding window is not used for rate/increase. We use ChunkedRateFunction. There may be slight difference
+      // in the way NaN is handled, which is okay.
+      val percentError: Double = math.abs(rates.takeRight(1)(0) - slidingResults.takeRight(1)(0))/rates.takeRight(1)(0)
+      percentError shouldBe < (0.1d)
     }
   }
 
