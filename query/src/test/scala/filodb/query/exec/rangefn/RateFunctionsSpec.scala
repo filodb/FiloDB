@@ -225,9 +225,13 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
       // }
       rates.dropRight(1) shouldEqual slidingResults.dropRight(1)
 
+      // rate should be positive
+      val resultLen = rates.length
+      rates(resultLen - 1) shouldBe > (0d) // positive
+
       // sliding window is not used for rate/increase. We use ChunkedRateFunction. There may be slight difference
       // in the way NaN is handled, which is okay.
-      val percentError: Double = math.abs(rates.takeRight(1)(0) - slidingResults.takeRight(1)(0))/rates.takeRight(1)(0)
+      val percentError: Double = math.abs(rates(resultLen - 1) - slidingResults(resultLen - 1))/rates(resultLen - 1)
       percentError shouldBe < (0.1d)
     }
   }
