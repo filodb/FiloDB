@@ -5,7 +5,6 @@ import filodb.core.query.Filter.{Equals, EqualsRegex, In, NotEquals, NotEqualsRe
 import filodb.query.BinaryOperator.DIV
 import filodb.query.Cardinality.OneToOne
 import filodb.query.RangeFunctionId.SumOverTime
-import filodb.query.util.HierarchicalQueryExperience
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -335,41 +334,5 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     queryParamsMap.get("datasets").get shouldEqual userDatasets
     queryParamsMap.get("verbose").get shouldEqual "true"
     queryParamsMap.get("match[]").get shouldEqual "{_ws_=\"a\",_ns_=\"b\",__name__=\"c\"}"
-  }
-
-  it ("getMetricColumnFilterTag should return expected column") {
-    HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "__name__"), "_metric_") shouldEqual "__name__"
-    HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "_metric_"), "_metric_") shouldEqual "_metric_"
-    HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "tag2"), "_metric_") shouldEqual "_metric_"
-  }
-
-  it ("getNextLevelAggregatedMetricName should return expected metric name") {
-
-    // Case 1: Should not update if metric doesn't have the aggregated metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("__name__" , "agg_2",
-      Seq(ColumnFilter("__name__", Equals("metric1")), ColumnFilter("job", Equals("spark")))) shouldEqual Some("metric1")
-
-    // Case 2: Should update if metric has the aggregated metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("__name__", "agg_2",
-      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      Some("metric1:::agg_2")
-
-    // Case 3: Should not update if metricColumnFilter and column filters don't match
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("_metric_", "agg_2",
-      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      None
-
-    // Case 4: Similar to case 1 but with a different metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("_metric_", "agg_2",
-      Seq(ColumnFilter("_metric_", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      Some("metric1:::agg_2")
-  }
-
-  it ("isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric return expected values") {
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-      Seq("BinaryJoin", "Aggregate", "ScalarOperation")) shouldEqual true
-
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-      Seq("BinaryJoin", "ScalarOperation")) shouldEqual false
   }
 }

@@ -149,7 +149,7 @@ case class RawSeries(rangeSelector: RangeSelector,
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan = {
     val updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      params.isInclude, params.metricSuffix, filters, params.tags)
+      params, filters)
     this.copy(filters = updatedFilters)
   }
 

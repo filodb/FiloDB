@@ -13,21 +13,32 @@ final case class HierarchicalQueryExperience(isInclude: Boolean,
                                              tags: Set[String])
 object HierarchicalQueryExperience extends StrictLogging {
 
+  // Get the shard key columns from the dataset options along with all the metric labels used
+  lazy val shardKeyColumns: Option[Set[String]] = GlobalConfig.datasetOptions match {
+    case Some(datasetOptions) =>
+      Some((datasetOptions.shardKeyColumns ++ Seq( datasetOptions.metricColumn, GlobalConfig.PromMetricLabel)).toSet)
+    case None => None
+  }
+
   /**
-   * @param filterTags
-   * @param datasetMetricColumn
-   * @return
+   * Helper function to get the ColumnFilter tag/label for the metric. This is needed to correctly update the filter.
+   * @param filterTags - Seq[String] - List of ColumnFilter tags/labels
+   * @param datasetMetricColumn - String - Metric ColumnFilter tag/label from the configured dataset options
+   * @return - String - ColumnFilter tag/label for the metric
    */
   def getMetricColumnFilterTag(filterTags: Seq[String], datasetMetricColumn: String): String = {
+    // get metric name filter i.e either datasetOptions.get.metricColumn or PromMetricLabel - We need to support both
+    // the cases
     filterTags.find(_ == datasetMetricColumn).getOrElse(
       filterTags.find(_ == GlobalConfig.PromMetricLabel).getOrElse(datasetMetricColumn)
     )
   }
 
   /**
-   * @param filters
-   * @param newFilters
-   * @return
+   * Helper function to update the filters with new filters.
+   * @param filters - Seq[ColumnFilter] - Existing filters
+   * @param newFilters - Seq[ColumnFilter] - New filters to be added/updated
+   * @return - Seq[ColumnFilter] - Updated filters
    */
   def upsertFilters(filters: Seq[ColumnFilter], newFilters: Seq[ColumnFilter]): Seq[ColumnFilter] = {
     val filterColumns = newFilters.map(_.column)
@@ -36,72 +47,76 @@ object HierarchicalQueryExperience extends StrictLogging {
   }
 
   /**
-   * @param shardKeyColumnTags
-   * @param filterTags
-   * @param includeTags
-   * @return
+   * Checks if the higher level aggregation is applicable with IncludeTags.
+   * @param tagsToIgnoreForCheck - Seq[String] - List of shard key columns. These columns are not part of check. This
+   *                             include tags which are compulsory for the query like _metric_, _ws_, _ns_.
+   * @param filterTags - Seq[String] - List of filter tags/labels in the query or in the aggregation clause
+   * @param includeTags - Set[String] - Include tags as specified in the aggregation rule
+   * @return - Boolean
    */
-  def isHigherLevelAggregationApplicableWithIncludeTags(shardKeyColumnTags: Seq[String],
+  def isHigherLevelAggregationApplicableWithIncludeTags(tagsToIgnoreForCheck: Set[String],
                                                         filterTags: Seq[String], includeTags: Set[String]): Boolean = {
     // filter out shard key columns and make a set of all columns in filters
     val allTagsInFiltersSet = filterTags.filterNot {
-      tag => shardKeyColumnTags.contains(tag)
+      tag => tagsToIgnoreForCheck.contains(tag)
     }.toSet
     allTagsInFiltersSet.subsetOf(includeTags)
   }
 
   /**
-   * @param shardKeyColumnTags
-   * @param filterTags
-   * @param excludeTags
-   * @return
+   * Checks if the higher level aggregation is applicable with ExcludeTags. Here we need to check if the column filter
+   * tags present in query or aggregation clause, should not be a part of ExcludeTags.
+   *
+   * @param tagsToIgnoreForCheck - Seq[String] - List of shard key columns. These columns are not part of check. This
+   *                             include tags which are compulsory for the query like _metric_, _ws_, _ns_.
+   * @param filterTags - Seq[String] - List of filter tags/labels in the query or in the aggregation clause
+   * @param excludeTags - Set[String] - Exclude tags as specified in the aggregation rule
+   * @return - Boolean
    */
-  def isHigherLevelAggregationApplicableWithExcludeTags(shardKeyColumnTags: Seq[String],
+  def isHigherLevelAggregationApplicableWithExcludeTags(tagsToIgnoreForCheck: Set[String],
                                                         filterTags: Seq[String], excludeTags: Set[String]): Boolean = {
-    val tagsNotPresentInExcludeTagsSet = filterTags.filterNot {
-      tag => shardKeyColumnTags.contains(tag) || excludeTags.contains(tag)
+    val columnFilterTagsPresentInExcludeTags = filterTags.filterNot {
+      tag => tagsToIgnoreForCheck.contains(tag) || (!excludeTags.contains(tag))
     }.toSet
-    tagsNotPresentInExcludeTagsSet.isEmpty
+    columnFilterTagsPresentInExcludeTags.isEmpty
   }
 
-  /**
-   * @param isInclude
-   * @param filterTags
-   * @param tags
-   * @return
+  /** Checks if the higher level aggregation is applicable for the given Include/Exclude tags.
+   * @param isInclude - Boolean
+   * @param filterTags - Seq[String] - List of filter tags/labels in the query or in the aggregation clause
+   * @param tags - Set[String] - Include or Exclude tags as specified in the aggregation rule
+   * @return - Boolean
    */
   def isHigherLevelAggregationApplicable(isInclude: Boolean,
                                          filterTags: Seq[String], tags: Set[String]): Boolean = {
-    GlobalConfig.datasetOptions match {
+    shardKeyColumns match {
       case None =>
-        logger.info("Dataset options config not found. Skipping optimization !")
+        logger.info("[HierarchicalQueryExperience] Dataset options config not found. Skipping optimization !")
         false
-      case Some(datasetOptions) =>
-        val updatedShardKeyColumns = datasetOptions.shardKeyColumns :+ getMetricColumnFilterTag(
-          filterTags,
-          datasetOptions.metricColumn)
+      case Some(tagsToIgnoreForCheck) =>
         if (isInclude) {
-          isHigherLevelAggregationApplicableWithIncludeTags(updatedShardKeyColumns, filterTags, tags)
+          isHigherLevelAggregationApplicableWithIncludeTags(tagsToIgnoreForCheck, filterTags, tags)
         }
         else {
-          isHigherLevelAggregationApplicableWithExcludeTags(updatedShardKeyColumns, filterTags, tags)
+          isHigherLevelAggregationApplicableWithExcludeTags(tagsToIgnoreForCheck, filterTags, tags)
         }
     }
   }
 
-  /**
-   * @param metricColumnFilter
-   * @param metricSuffix
-   * @param filters
-   * @return
+  /** Returns the next level aggregated metric name.
+   * @param metricColumnFilter - String - Metric ColumnFilter tag/label
+   * @param params - HierarchicalQueryExperience - Contains
+   * @param filters - Seq[ColumnFilter] - label filters of the query/lp
+   * @return - Option[String] - Next level aggregated metric name
    */
-  def getNextLevelAggregatedMetricName(metricColumnFilter: String, metricSuffix: String,
+  def getNextLevelAggregatedMetricName(metricColumnFilter: String, params: HierarchicalQueryExperience,
                                        filters: Seq[ColumnFilter]): Option[String] = {
+    // Get the metric name from the filters
     val metricNameSeq = LogicalPlan.getColumnValues(filters, metricColumnFilter)
     metricNameSeq match {
       case Seq() => None
-      // TODO: make it a config
-      case _ => Some(metricNameSeq.head.replaceFirst(":::.*", ":::" + metricSuffix))
+      case _ => Some(metricNameSeq.head.replaceFirst(params.metricRegex + ".*",
+        params.metricRegex + params.metricSuffix))
     }
   }
 
@@ -171,18 +186,17 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @param tags - Include or Exclude tags as specified in the aggregation rule
    * @return - Seq[ColumnFilter] - Updated filters
    */
-  def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(isInclude: Boolean,
-                                                                 metricSuffix: String,
-                                                                 filters: Seq[ColumnFilter],
-                                                                 tags: Set[String]): Seq[ColumnFilter] = {
-    // get metric name filter i.e either datasetOptions.get.metricColumn or PromMetricLabel - We need to support both
-    // the cases
+  def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params: HierarchicalQueryExperience,
+                                                                 filters: Seq[ColumnFilter]): Seq[ColumnFilter] = {
     val filterTags = filters.map(x => x.column)
-    if (isHigherLevelAggregationApplicable(isInclude, filterTags, tags)) {
+    if (isHigherLevelAggregationApplicable(params.isInclude, filterTags, params.tags)) {
       val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
-      val updatedMetricName = getNextLevelAggregatedMetricName(metricColumnFilter, metricSuffix, filters)
+      val updatedMetricName = getNextLevelAggregatedMetricName(metricColumnFilter, params, filters)
       updatedMetricName match {
-        case Some(metricName) => upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(metricName))))
+        case Some(metricName) =>
+          val updatedFilters = upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(metricName))))
+          logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
+          updatedFilters
         case None => filters
       }
     } else {
