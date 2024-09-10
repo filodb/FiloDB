@@ -20,8 +20,8 @@ import filodb.core.memstore.PartKeyIndexRaw.{bytesRefToUnsafeOffset, createTempD
 import filodb.core.memstore.PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset
 import filodb.core.memstore.PartKeyQueryBuilder.removeRegexAnchors
 import filodb.core.memstore.ratelimit.CardinalityTracker
+import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
 import filodb.core.query.Filter.{And, Equals, EqualsRegex, In, NotEquals, NotEqualsRegex}
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
@@ -62,7 +62,8 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
                                shardNum: Int,
                                schema: PartitionSchema,
                                diskLocation: Option[File] = None,
-                               protected val lifecycleManager: Option[IndexMetadataStore] = None)
+                               protected val lifecycleManager: Option[IndexMetadataStore] = None,
+                               protected val addMetricTypeField: Boolean = true)
   extends StrictLogging {
 
   protected val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
@@ -184,7 +185,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
             val value = new String(valueBase.asInstanceOf[Array[Byte]],
               unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
               UTF8StringMedium.numBytes(valueBase, valueOffset), StandardCharsets.UTF_8)
-            addIndexedMapField(colName, key, value)
+            addIndexedMapFieldFromClientData(colName, key, value)
           }
         }
 
@@ -226,6 +227,22 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
     })
   }
 
+  /**
+   * Add an indexed field + value defined in a map field to the document being prepared
+   */
+  protected def addIndexedMapFieldFromClientData(mapColumn: String, labelName: String, value: String): Unit = {
+    if (addMetricTypeField) {
+      // do not index any existing _type_ tag since this is reserved and should not be passed in by clients
+      if (labelName != Schemas.TypeLabel)
+        addIndexedMapField(mapColumn, labelName, value)
+      else
+        logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
+      // I would have liked to log the entire PK to debug, but it is not accessible from here.
+      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
+    } else {
+      addIndexedMapField(mapColumn, labelName, value)
+    }
+  }
 
   /**
    * Add an indexed field + value to the document being prepared
@@ -233,7 +250,8 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
   protected def addIndexedField(key: String, value: String): Unit
 
   /**
-   * Add an indexed field + value defined in a map field to the document being prepared
+   * Add an indexed field + value defined in a map field to the document being prepared - internal
+   * logic specific to index
    */
   protected def addIndexedMapField(mapColumn: String, key: String, value: String): Unit
 
@@ -421,8 +439,10 @@ abstract class PartKeyIndexDownsampled(ref: DatasetRef,
                                        shardNum: Int,
                                        schema: PartitionSchema,
                                        diskLocation: Option[File] = None,
-                                       lifecycleManager: Option[IndexMetadataStore] = None)
-  extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager) {
+                                       lifecycleManager: Option[IndexMetadataStore] = None,
+                                       addMetricTypeField: Boolean = true)
+  extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager,
+    addMetricTypeField = addMetricTypeField) {
 
   def getCurrentIndexState(): (IndexState.Value, Option[Long])
 

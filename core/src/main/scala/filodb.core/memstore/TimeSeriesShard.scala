@@ -326,7 +326,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
       queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
       queryCacheEstimatedItemSize = tantivyQueryCacheEstimatedItemSize.toBytes,
-      deletedDocMergeThreshold = tantivyDeletedDocMergeThreshold.toFloat)
+      deletedDocMergeThreshold = tantivyDeletedDocMergeThreshold.toFloat,
+      addMetricTypeField = typeFieldIndexingEnabled)
     case x => sys.error(s"Unsupported part key index type: '$x'")
   }
 

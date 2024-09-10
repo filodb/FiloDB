@@ -43,8 +43,10 @@ class PartKeyTantivyIndex(ref: DatasetRef,
                           columnCacheCount: Long = 1000,
                           queryCacheMaxSize: Long = 50 * 1000 * 1000,
                           queryCacheEstimatedItemSize: Long = 31250,
-                          deletedDocMergeThreshold: Float = 0.1f
-                         ) extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager) {
+                          deletedDocMergeThreshold: Float = 0.1f,
+                          addMetricTypeField: Boolean = true
+                         ) extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager,
+                              addMetricTypeField = addMetricTypeField) {
 
   private val cacheHitRate = Kamon.gauge("index-tantivy-cache-hit-rate")
     .withTag("dataset", ref.dataset)
@@ -398,7 +400,8 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
-    addIndexedField(Schemas.TypeLabel, schemaName)
+    if (addMetricTypeField)
+      addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange {
       0 until numPartColumns
