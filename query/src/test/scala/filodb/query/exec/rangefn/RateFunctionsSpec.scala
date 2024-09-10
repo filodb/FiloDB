@@ -188,6 +188,45 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("rate should work for even with single value NaN end of timeseries chunks") {
+    val data = (1 to 500).map(_ * 10 + rand.nextInt(10)).map(_.toDouble)
+    val tuples = data.zipWithIndex.map { case (d, t) => (defaultStartTS + t * pubFreq, d) }
+    val rv = timeValueRVPk(tuples)  // should be a couple chunks
+
+    // simulate creation of chunk with single NaN value
+    addChunkToRV(rv, Seq(defaultStartTS + 500 * pubFreq -> Double.NaN))
+
+    // add single row NaN chunk
+    // addChunkToRV(rv, tuples.takeRight(1))
+
+    (0 until 10).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val slidingRate = slidingWindowIt(data, rv, RateFunction, windowSize, step)
+      val slidingResults = slidingRate.map(_.getDouble(1)).toBuffer
+      slidingRate.close()
+
+      val rateChunked = chunkedWindowIt(data, rv, new ChunkedRateFunction, windowSize, step)
+      val resultRows = rateChunked.map { r => (r.getLong(0), r.getDouble(1)) }.toBuffer
+      val rates = resultRows.map(_._2)
+
+      // Since the input data and window sizes are randomized, it is not possible to precompute results
+      // beforehand.  Coming up with a formula to figure out the right rate is really hard.
+      // Thus we take an approach of comparing the sliding and chunked results to ensure they are identical.
+
+      // val windowTime = (windowSize.toLong - 1) * pubFreq
+      // val expected = tuples.sliding(windowSize, step).toBuffer
+      //                      .zip(resultRows).map { case (w, (ts, _)) =>
+      //   // For some reason rate is based on window, not timestamps  - so not w.last._1
+      //   (w.last._2 - w.head._2) / (windowTime) * 1000
+      //   // (w.last._2 - w.head._2) / (w.last._1 - w.head._1) * 1000
+      // }
+      rates shouldEqual slidingResults
+    }
+  }
+
   val promHistDS = Dataset("histogram", Seq("metric:string", "tags:map"),
                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"))
   val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS.schema.data, TestData.storeConf)

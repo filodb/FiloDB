@@ -522,11 +522,14 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
       val nxt = iter.next()
       val t = nxt.getLong(0)
       val v = nxt.getDouble(1)
-      if (t > cur.timestamp) { // if next sample is later than current sample
-        nextVal.setValues(t, v)
-        hasNextVal = true
-      } else {
-        Query.droppedSamples.increment()
+      // skip if value is NaN, to handle end of time-series markers
+      if (!v.isNaN) {
+        if (t > cur.timestamp) { // if next sample is later than current sample
+          nextVal.setValues(t, v)
+          hasNextVal = true
+        } else {
+          Query.droppedSamples.increment()
+        }
       }
     }
   }
