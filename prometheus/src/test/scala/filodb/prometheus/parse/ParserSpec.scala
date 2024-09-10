@@ -705,6 +705,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(300000),false),1524855988000,1000000,1524855988000,Some(300000),None),List(),None)",
       """{__name__="foo\\\"\n\t",job="myjob"}[5m]""" ->
         "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo\\\"\n\t)), ColumnFilter(job,Equals(myjob))),List(),Some(300000),None,false)",
+      """{__name__="foo",job="myjob\."}[5m]""" ->
+        "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo)), ColumnFilter(job,Equals(myjob.))),List(),Some(300000),None,false)",
       "{__name__=\"foo\",job=\"myjob\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo)), ColumnFilter(job,Equals(myjob))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None)",
       "{__name__=\"foo\",job=\"myjob\"}[5m]" ->

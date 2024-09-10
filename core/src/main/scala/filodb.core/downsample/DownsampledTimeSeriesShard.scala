@@ -83,6 +83,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
+  private val typeFieldIndexingEnabled = filodbConfig.getBoolean("memstore.type-field-indexing-enabled")
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
@@ -102,7 +103,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val partKeyIndex: PartKeyIndexDownsampled = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
-    indexMetadataStore
+    indexMetadataStore, addMetricTypeField = typeFieldIndexingEnabled
   )
 
   private val indexUpdatedHour = new AtomicLong(0)

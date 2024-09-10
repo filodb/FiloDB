@@ -74,7 +74,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          diskLocation: Option[File] = None,
                          lifecycleManager: Option[IndexMetadataStore] = None,
                          useMemoryMappedImpl: Boolean = true,
-                         disableIndexCaching: Boolean = false
+                         disableIndexCaching: Boolean = false,
+                         addMetricTypeField: Boolean = true
                         ) extends PartKeyIndexDownsampled(ref, shardNum, schema, diskLocation, lifecycleManager) {
 
   import PartKeyLuceneIndex._
@@ -417,8 +418,23 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     ret
   }
 
-  protected def addIndexedField(labelName: String, value: String): Unit = {
-    luceneDocument.get().addField(labelName, value)
+  /**
+   *
+   * @param clientData pass true if the field data has come from metric source, and false if internally setting the
+   *                   field data. This is used to determine if the type field data should be indexed or not.
+   */
+  protected def addIndexedField(labelName: String, value: String, clientData: Boolean): Unit = {
+    if (clientData && addMetricTypeField) {
+      // do not index any existing _type_ tag since this is reserved and should not be passed in by clients
+      if (labelName != Schemas.TypeLabel)
+        luceneDocument.get().addField(labelName, value)
+      else
+        logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
+      // I would have liked to log the entire PK to debug, but it is not accessible from here.
+      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
+    } else {
+      luceneDocument.get().addField(labelName, value)
+    }
   }
 
   protected def addIndexedMapField(mapColumn: String, key: String, value: String): Unit = {
@@ -467,7 +483,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
-    addIndexedField(Schemas.TypeLabel, schemaName)
+    if (addMetricTypeField)
+      addIndexedField(Schemas.TypeLabel, schemaName, clientData = false)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
