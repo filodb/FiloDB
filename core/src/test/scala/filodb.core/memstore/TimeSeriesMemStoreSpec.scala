@@ -66,7 +66,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0), ("_type_",0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0)))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 0
 
     val minSet = rawData.map(_(1).asInstanceOf[Double]).toSet
@@ -202,7 +202,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     splits should have length (2)
 
     memStore.indexNames(dataset2.ref, 10).toSet should equal (
-      Set(("n", 0), ("series", 0), ("n", 1), ("series", 1), ("_type_",0), ("_type_",1)))
+      Set(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
 
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(splits.head, Seq(filter)))
@@ -465,7 +465,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore.refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0), ("_type_",0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0)))
 
     memStore.truncate(dataset1.ref, numShards = 4)
 
