@@ -1,7 +1,5 @@
 package filodb.query
 
-import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 import filodb.query.util.HierarchicalQueryExperience
@@ -38,6 +36,11 @@ sealed trait LogicalPlan {
     }
   }
 
+  /**
+   * Optimize the logical plan by using the higher level aggregated metric if applicable
+   * @param params HierarchicalQueryExperience object - contains details of the higher level aggregation rule and metric
+   * @return Updated LogicalPlan if Applicable. Else return the same LogicalPlan
+   */
   def useHigherLevelAggregatedMetric(params: HierarchicalQueryExperience): LogicalPlan = {
     // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
     this match {
@@ -60,6 +63,9 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
 
   def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan
 
+  /**
+   * @return Raw series column filters
+   */
   def rawSeriesFilters(): Seq[ColumnFilter]
 }
 
@@ -88,11 +94,6 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 
-  /**
-   * @param isInclude
-   * @param tags
-   * @return
-   */
   def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan
 }
@@ -147,6 +148,11 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
+  /**
+   * Updates the metric ColumnFilter if the higher level aggregation rule is applicable
+   * @param params HierarchicalQueryExperience object - contains details of the higher level aggregation rule and metric
+   * @return Updated RawSeriesLikePlan if Applicable. Else return the same RawSeriesLikePlan
+   */
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan = {
     val updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
       params, filters)
@@ -303,10 +309,12 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // Check 1: Check if this plan is allowed for raw series update
     HierarchicalQueryExperience.isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
       this.getClass.getSimpleName) &&
+    // Check 2: Check if the parent logical plans are allowed for hierarchical aggregation update
     HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-        parentLogicalPlans) match {
+      parentLogicalPlans) match {
       case true =>
         this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(params))
       case false => this
@@ -377,6 +385,7 @@ case class SubqueryWithWindowing(
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // recurse to the leaf level
     this.copy(innerPeriodicSeries = innerPeriodicSeries.useHigherLevelAggregatedMetricIfApplicable(
       params, parentLogicalPlans :+ this.getClass.getSimpleName))
   }
@@ -421,6 +430,7 @@ case class TopLevelSubquery(
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // recurse to the leaf level
     this.copy(innerPeriodicSeries = innerPeriodicSeries.useHigherLevelAggregatedMetricIfApplicable(
       params, parentLogicalPlans :+ this.getClass.getSimpleName))
   }
@@ -520,10 +530,16 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  // Check if the higher level aggregation metric is applicable for this Aggregate plan
+  /**
+   * Helper function to check the following:
+   *  Check 1: Check if the aggregation operator is enabled
+   *  Check 2: Check if the `by` and `without` clause labels satisfy the include/exclude tag constraints
+   *
+   * @param isInclude true if includeTags are specified, false if excludeTags are specified
+   * @param tags higher aggregation rule tags/labels as defined in aggregation rule
+   * @return true if the current aggregate query can be optimized, false otherwise
+   */
   def checkAggregateQueryEligibleForHigherLevelAggregatedMetric(isInclude: Boolean, tags: Set[String]): Boolean = {
-    // Check 1: Check if the aggregation operator is enabled
-    // Check 2: Check if the `by` and `without` clause labels satisfy the include/exclude tag constraints
     HierarchicalQueryExperience.isAggregationOperatorAllowed(operator.entryName) match {
       case true =>
         clauseOpt match {
@@ -635,6 +651,7 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // No special handling for ScalarVectorBinaryOperation. Just pass the call to vector and and scalar plan recursively
     val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
     this.copy(
       vector = vector.useHigherLevelAggregatedMetricIfApplicable(
@@ -663,6 +680,7 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // No special handling for ApplyInstantFunction. Just pass the call to vectors and functionArgs recursively
     val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
     this.copy(
       vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(
@@ -686,7 +704,6 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan = {
-    // TODO: use raw series
     this.copy(
       vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(
         params).asInstanceOf[RawSeries])
@@ -850,7 +867,6 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 
-
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
     val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
@@ -907,7 +923,7 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   }
 }
 
-object LogicalPlan extends StrictLogging {
+object LogicalPlan {
   /**
     * Get leaf Logical Plans
     */
@@ -944,7 +960,6 @@ object LogicalPlan extends StrictLogging {
       case _ => false
     }
   }
-
 
   def getColumnValues(logicalPlan: LogicalPlan, labelName: String): Set[String] = {
     getColumnValues(getColumnFilterGroup(logicalPlan), labelName)

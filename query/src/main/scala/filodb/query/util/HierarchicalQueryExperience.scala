@@ -35,6 +35,20 @@ object HierarchicalQueryExperience extends StrictLogging {
     case None => None
   }
 
+  // Get the allowed periodic series plans which have access to RawSeries from the hierarchical config
+  lazy val allowedPeriodicSeriesPlansWithRawSeries: Option[Set[String]] = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) =>
+      Some(hierarchicalConfig.getStringList("allowed-periodic-series-plans-with-raw-series").asScala.toSet)
+    case None => None
+  }
+
+  // Get the allowed parent logical plans for optimization from the hierarchical config
+  lazy val allowedLogicalPlansForOptimization: Option[Set[String]] = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) =>
+      Some(hierarchicalConfig.getStringList("allowed-parent-logical-plans").asScala.toSet)
+    case None => None
+  }
+
   /**
    * Helper function to get the ColumnFilter tag/label for the metric. This is needed to correctly update the filter.
    * @param filterTags - Seq[String] - List of ColumnFilter tags/labels
@@ -175,13 +189,9 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @return - Boolean
    */
   def isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-                                       parentLogicalPlans: Seq[String]): Boolean = {
-    GlobalConfig.hierarchicalConfig match {
-      case Some(hierarchicalConfig) =>
-        parentLogicalPlans.exists(hierarchicalConfig
-          .getStringList("allowed-parent-logical-plans").contains)
-      case None => false
-    }
+             parentLogicalPlans: Seq[String]): Boolean = allowedLogicalPlansForOptimization match {
+    case Some(allowedLogicalPlans) => parentLogicalPlans.exists(allowedLogicalPlans.contains)
+    case None => false
   }
 
   /**
@@ -190,14 +200,9 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @return - Boolean
    */
   def isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-                                                 logicalPlanName: String): Boolean = {
-    GlobalConfig.hierarchicalConfig match {
-      case Some(hierarchicalConfig) =>
-        hierarchicalConfig
-          .getStringList("allowed-periodic-series-plans-with-raw-series")
-          .contains(logicalPlanName)
+              logicalPlanName: String): Boolean = allowedPeriodicSeriesPlansWithRawSeries match {
+      case Some(allowedPeriodSeriesPlans) => allowedPeriodSeriesPlans.contains(logicalPlanName)
       case None => false
-    }
   }
 
   /**

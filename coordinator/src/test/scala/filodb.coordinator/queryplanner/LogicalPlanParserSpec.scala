@@ -345,13 +345,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
   }
 
-  it("LogicalPlan update for hierarchical aggregation queries with by clause") {
+  it("LogicalPlan update for hierarchical aggregation queries with by clause and include tags") {
     // common parameters
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
     val params = HierarchicalQueryExperience(true, ":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
-
     // CASE 1 - Aggregate with by clause - should update the metric name as `by` clause labels are part of include tags
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (version, instance)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -361,7 +360,6 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_counter:::agg_2")
     )
-
     // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
     query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) by (instance, version)) by (version)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -389,8 +387,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(true)
     )
-
-    // CASE 5 - lhs should not be updated since it is not a aggregated metric - binary join case
+    // CASE 5 - lhs should not be updated since it does not match regex pattern - binary join case
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) by (job, application) and on(job, application) sum(my_counter:::agg{job=\"spark\", application=\"filodb\"}) by (job, application)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lpUpdated = lp.useHigherLevelAggregatedMetric(params)
@@ -404,7 +401,6 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_counter:::agg_2")
     )
-
     // CASE 6 - rhs should not be updated since it has column filters which is not present in include tags
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (job, application) and on(job, application) sum(my_counter:::agg{job=\"spark\", application=\"filodb\", id=\"1\"}) by (job, application)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -418,6 +414,238 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     filterGroups.map(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_counter:::agg")
+    )
+  }
+
+  it("LogicalPlan update for hierarchical aggregation queries with by clause and exclude tags") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val nextLevelAggregatedMetricSuffix = "agg_2"
+    val nextLevelAggregationExcludeTags = Set("instance", "version")
+    val params = HierarchicalQueryExperience(false, ":::", nextLevelAggregatedMetricSuffix,
+      nextLevelAggregationExcludeTags)
+    // CASE 1 - should update the metric name as `by` clause labels are not part of exclude tags
+    var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (host)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg_2")
+    )
+    // CASE 2 - should NOT update the metric name as column filters are not part of exclude tags
+    query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\", version=\"2.0\"}[5m]))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
+    query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"})) by (host)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 3 - should NOT update since the by clause labels intersect with exclude tags
+    query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (version, instance, id)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 4 - should update since the by clause labels are not part of exclude tags - binary join case
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host) + sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(true)
+    )
+    // CASE 5 - lhs should not be updated since it does not match regex pattern - binary join case
+    query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) by (id, host) - sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("your_gauge:::agg_2")
+    )
+    // CASE 6 - rhs should not be updated since it has column filters which are part of exclude tags
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host) / sum(your_gauge:::agg{job=\"spark\", application=\"filodb\", version=\"1\"}) by (id, host)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge:::agg_2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("your_gauge:::agg")
+    )
+  }
+
+  it ("LogicalPlan update for hierarchical aggregation queries with without clause and exclude tags") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val nextLevelAggregatedMetricSuffix = "agg_2"
+    val nextLevelAggregationExcludeTags = Set("instance", "version")
+    val params = HierarchicalQueryExperience(false, ":::", nextLevelAggregatedMetricSuffix,
+      nextLevelAggregationExcludeTags)
+    // CASE 1 - should update since the exclude tags are subset of the without clause labels
+    var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version, instance)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg_2")
+    )
+    // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
+    query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (instance, version))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 3 - should NOT update since the column filter label is part of exclude tags
+    query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\", version=\"2\"}[5m]))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 4 - should update since the exclude tags are subset of the without clause labels
+    query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version, instance, id)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg_2")
+    )
+    // CASE 5 - should not update since the exclude tags are not subset of the without clause labels
+    query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    // CASE 6 - should update since the exclude tags are subset of without clause labels - binary join case
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) and ignoring(version, instance) sum(my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(nextLevelAggregatedMetricSuffix).shouldEqual(true)
+    )
+    // CASE 7 - lhs should not be updated since it does not match regex pattern - binary join case
+    query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) without (version, instance) and ignoring(version, instance) sum(my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg_2")
+    )
+    // CASE 8 - rhs should not be updated since it has column filters which is part of exclude tags
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) and ignoring(version, instance) sum(my_counter:::agg{job=\"spark\", application=\"filodb\", version=\"1\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge:::agg_2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+  }
+
+  it ("LogicalPlan update for hierarchical aggregation queries with without clause and include tags") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val nextLevelAggregatedMetricSuffix = "agg_2"
+    val nextLevelAggregationTags = Set("job", "application", "instance", "version")
+    val params = HierarchicalQueryExperience(true, ":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    // All the cases should not be updated since without clause with include tags is not supported as of now
+    var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version, instance)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (instance, version))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) + sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith(":::agg").shouldEqual(true)
+    )
+    query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) without (version, instance) - sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("your_gauge:::agg")
+    )
+    query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) / sum(your_gauge:::agg{job=\"spark\", application=\"filodb\", version=\"1\"}) without (version, instance)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge:::agg")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.map(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("your_gauge:::agg")
     )
   }
 }
