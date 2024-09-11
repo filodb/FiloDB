@@ -43,12 +43,7 @@ object RustPlugin extends AutoPlugin {
       features
     },
     rustOptimize := {
-      val optimize = Option(System.getProperty("rust.optimize")).getOrElse(
-        if (rustArchitectures.value.length > 1) {
-          "true"
-        } else {
-          "false"
-        })
+      val optimize = Option(System.getProperty("rust.optimize")).getOrElse("true")
 
       optimize.toBoolean
     },
