@@ -1,6 +1,7 @@
 package filodb.query.util
 
 import com.typesafe.scalalogging.StrictLogging
+import scala.jdk.CollectionConverters.asScalaBufferConverter
 
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
@@ -20,6 +21,20 @@ object HierarchicalQueryExperience extends StrictLogging {
     case None => None
   }
 
+  // Get the allowed aggregation operators from the hierarchical config
+  lazy val allowedAggregationOperators: Option[Set[String]] = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) =>
+      Some(hierarchicalConfig.getStringList("allowed-aggregation-operators").asScala.toSet)
+    case None => None
+  }
+
+  // Get the allowed range functions from the hierarchical config
+  lazy val allowedRangeFunctions: Option[Set[String]] = GlobalConfig.hierarchicalConfig match {
+    case Some(hierarchicalConfig) =>
+      Some(hierarchicalConfig.getStringList("allowed-range-functions").asScala.toSet)
+    case None => None
+  }
+
   /**
    * Helper function to get the ColumnFilter tag/label for the metric. This is needed to correctly update the filter.
    * @param filterTags - Seq[String] - List of ColumnFilter tags/labels
@@ -29,13 +44,25 @@ object HierarchicalQueryExperience extends StrictLogging {
   def getMetricColumnFilterTag(filterTags: Seq[String], datasetMetricColumn: String): String = {
     // get metric name filter i.e either datasetOptions.get.metricColumn or PromMetricLabel - We need to support both
     // the cases
-    filterTags.find(_ == datasetMetricColumn).getOrElse(
-      filterTags.find(_ == GlobalConfig.PromMetricLabel).getOrElse(datasetMetricColumn)
-    )
+    filterTags.find( tag => tag == datasetMetricColumn || tag == GlobalConfig.PromMetricLabel)
+      .getOrElse(datasetMetricColumn)
   }
 
   /**
-   * Helper function to update the filters with new filters.
+   * Helper function to update the filters with new filters. Example:
+   * filters = Seq(
+   *      ColumnFilter("tag1", Equals("value1")),
+   *      ColumnFilter("tag2", Equals("value2")))
+   *
+   * newFilters = Seq(
+   *      ColumnFilter("tag2", Equals("value2Updated")),
+   *      ColumnFilter("tag4", Equals("value4")))
+   *
+   * Updated filters = Seq(
+   *      ColumnFilter("tag1", Equals("value1")),
+   *      ColumnFilter("tag2", Equals("value2Updated")),
+   *      ColumnFilter("tag4", Equals("value4")))
+   *
    * @param filters - Seq[ColumnFilter] - Existing filters
    * @param newFilters - Seq[ColumnFilter] - New filters to be added/updated
    * @return - Seq[ColumnFilter] - Updated filters
@@ -56,11 +83,7 @@ object HierarchicalQueryExperience extends StrictLogging {
    */
   def isHigherLevelAggregationApplicableWithIncludeTags(tagsToIgnoreForCheck: Set[String],
                                                         filterTags: Seq[String], includeTags: Set[String]): Boolean = {
-    // filter out shard key columns and make a set of all columns in filters
-    val allTagsInFiltersSet = filterTags.filterNot {
-      tag => tagsToIgnoreForCheck.contains(tag)
-    }.toSet
-    allTagsInFiltersSet.subsetOf(includeTags)
+    filterTags.forall( tag => tagsToIgnoreForCheck.contains(tag) || includeTags.contains(tag))
   }
 
   /**
@@ -77,8 +100,8 @@ object HierarchicalQueryExperience extends StrictLogging {
                                                         filterTags: Seq[String], excludeTags: Set[String]): Boolean = {
     val columnFilterTagsPresentInExcludeTags = filterTags.filterNot {
       tag => tagsToIgnoreForCheck.contains(tag) || (!excludeTags.contains(tag))
-    }.toSet
-    columnFilterTagsPresentInExcludeTags.isEmpty
+    }.isEmpty
+    columnFilterTagsPresentInExcludeTags
   }
 
   /** Checks if the higher level aggregation is applicable for the given Include/Exclude tags.
@@ -103,7 +126,11 @@ object HierarchicalQueryExperience extends StrictLogging {
     }
   }
 
-  /** Returns the next level aggregated metric name.
+  /** Returns the next level aggregated metric name. Example
+   *  metricRegex = :::
+   *  metricSuffix = agg_2
+   *  Exiting metric name - metric1:::agg
+   *  After update - metric1:::agg -> metric1:::agg_2
    * @param metricColumnFilter - String - Metric ColumnFilter tag/label
    * @param params - HierarchicalQueryExperience - Contains
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
@@ -115,7 +142,8 @@ object HierarchicalQueryExperience extends StrictLogging {
     val metricNameSeq = LogicalPlan.getColumnValues(filters, metricColumnFilter)
     metricNameSeq match {
       case Seq() => None
-      case _ => Some(metricNameSeq.head.replaceFirst(params.metricRegex + ".*",
+      case _ => Some(metricNameSeq.head.replaceFirst(
+        params.metricRegex + ".*",
         params.metricRegex + params.metricSuffix))
     }
   }
@@ -125,10 +153,8 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @param operatorName - String - Aggregation operator name. Ex - sum, avg, min, max, count.
    * @return - Boolean
    */
-  def isAggregationOperatorAllowed(operatorName: String): Boolean = GlobalConfig.hierarchicalConfig match {
-    case Some(hierarchicalConfig) => hierarchicalConfig
-      .getStringList("allowed-aggregation-operators")
-      .contains(operatorName)
+  def isAggregationOperatorAllowed(operatorName: String): Boolean = allowedAggregationOperators match {
+    case Some(allowedAggregationOperatorsSet) => allowedAggregationOperatorsSet.contains(operatorName)
     case None => false
   }
 
@@ -137,11 +163,8 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @param rangeFunctionEntryName - String - Range function name. Ex - rate, increase etc.
    * @return - Boolean
    */
-  def isRangeFunctionAllowed(rangeFunctionEntryName: String): Boolean = GlobalConfig.hierarchicalConfig match {
-    case Some(hierarchicalConfig) =>
-      hierarchicalConfig
-        .getStringList("allowed-range-functions")
-        .contains(rangeFunctionEntryName)
+  def isRangeFunctionAllowed(rangeFunctionEntryName: String): Boolean = allowedRangeFunctions match {
+    case Some(allowedRangeFunctionsSet) => allowedRangeFunctionsSet.contains(rangeFunctionEntryName)
     case None => false
   }
 

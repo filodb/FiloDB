@@ -11,6 +11,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
     HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "__name__"), "_metric_") shouldEqual "__name__"
     HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "_metric_"), "_metric_") shouldEqual "_metric_"
     HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "tag2"), "_metric_") shouldEqual "_metric_"
+    HierarchicalQueryExperience.getMetricColumnFilterTag(Seq("tag1", "tag2"), "__name__") shouldEqual "__name__"
   }
 
   it("getNextLevelAggregatedMetricName should return expected metric name") {
