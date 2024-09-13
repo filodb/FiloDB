@@ -46,7 +46,7 @@ sealed trait LogicalPlan {
     this match {
       // We start with no parent plans from the root
       case p: PeriodicSeriesPlan   => p.useHigherLevelAggregatedMetricIfApplicable(params, Seq())
-      case r: RawSeriesLikePlan    => r.useHigherLevelAggregatedMetricIfApplicable(params)
+      case r: RawSeriesLikePlan    => r.useHigherLevelAggregatedMetricIfApplicable(params, Seq())
       case _                       => this
     }
   }
@@ -61,7 +61,8 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
-  def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan
+  def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
+                                                 parentLogicalPlans: Seq[String]): RawSeriesLikePlan
 
   /**
    * @return Raw series column filters
@@ -153,10 +154,23 @@ case class RawSeries(rangeSelector: RangeSelector,
    * @param params HierarchicalQueryExperience object - contains details of the higher level aggregation rule and metric
    * @return Updated RawSeriesLikePlan if Applicable. Else return the same RawSeriesLikePlan
    */
-  override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan = {
-    val updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      params, filters)
-    this.copy(filters = updatedFilters)
+  override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
+                                                          parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
+    // Example leaf periodic series plans which has access to raw series - PeriodicSeries, PeriodicSeriesWithWindowing,
+    // ApplyInstantFunctionRaw. This can be configured as required.
+    val leafPeriodicSeriesPlan = parentLogicalPlans.lastOption
+    leafPeriodicSeriesPlan match {
+      case Some(leafPeriodicPlan) =>
+        // Check 1: Check if the leaf periodic series plan is allowed for raw series update
+        HierarchicalQueryExperience.isLeafPeriodicSeriesPlanAllowedForRawSeriesUpdate(leafPeriodicPlan) match {
+          case true =>
+            val updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
+              params, filters)
+            this.copy(filters = updatedFilters)
+          case false => this
+        }
+      case None => this
+    }
   }
 
   override def rawSeriesFilters(): Seq[ColumnFilter] = filters
@@ -309,14 +323,12 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // Check 1: Check if this plan is allowed for raw series update
-    HierarchicalQueryExperience.isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-      this.getClass.getSimpleName) &&
-    // Check 2: Check if the parent logical plans are allowed for hierarchical aggregation update
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
+    // Check 1: Check if the parent logical plans are allowed for hierarchical aggregation update
+    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(
       parentLogicalPlans) match {
       case true =>
-        this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(params))
+        this.copy(rawSeries = rawSeries.useHigherLevelAggregatedMetricIfApplicable(params,
+          parentLogicalPlans :+ this.getClass.getSimpleName))
       case false => this
     }
   }
@@ -467,15 +479,13 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
                                                           parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
     // Checks:
-    // 1. This plan has a raw series as a child, so we need to check if this plan is allowed for raw series update
-    // 2. Check if the range function is allowed
-    // 3. Check if any of the parent plan is allowed for raw series update
-    HierarchicalQueryExperience.isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-      this.getClass.getSimpleName) && HierarchicalQueryExperience.isRangeFunctionAllowed(function.entryName) &&
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-        parentLogicalPlans) match {
+    // 1. Check if the range function is allowed
+    // 2. Check if any of the parent plan is allowed for raw series update
+    HierarchicalQueryExperience.isRangeFunctionAllowed(function.entryName) &&
+    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(parentLogicalPlans) match {
       case true =>
-        val newRawSeries = series.useHigherLevelAggregatedMetricIfApplicable(params)
+        val newRawSeries = series.useHigherLevelAggregatedMetricIfApplicable(
+          params, parentLogicalPlans :+ this.getClass.getSimpleName)
         this.copy(
           columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, newRawSeries.rawSeriesFilters()),
           series = newRawSeries)
@@ -703,10 +713,15 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience): RawSeriesLikePlan = {
+  override def useHigherLevelAggregatedMetricIfApplicable(params: HierarchicalQueryExperience,
+                                                          parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
+    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
     this.copy(
       vectors = vectors.useHigherLevelAggregatedMetricIfApplicable(
-        params).asInstanceOf[RawSeries])
+        params, parentLogicalPlansUpdated).asInstanceOf[RawSeries],
+      functionArgs = functionArgs.map(_.useHigherLevelAggregatedMetricIfApplicable(
+        params, parentLogicalPlansUpdated).asInstanceOf[FunctionArgsPlan])
+    )
   }
 
   override def rawSeriesFilters(): Seq[ColumnFilter] = vectors.rawSeriesFilters()

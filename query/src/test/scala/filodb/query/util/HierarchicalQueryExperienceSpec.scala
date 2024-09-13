@@ -39,10 +39,10 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
   }
 
   it("isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric return expected values") {
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
+    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(
       Seq("BinaryJoin", "Aggregate", "ScalarOperation")) shouldEqual true
 
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
+    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(
       Seq("BinaryJoin", "ScalarOperation")) shouldEqual false
   }
 
@@ -59,6 +59,11 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
     HierarchicalQueryExperience.isAggregationOperatorAllowed("max") shouldEqual true
     HierarchicalQueryExperience.isAggregationOperatorAllowed("avg") shouldEqual false
     HierarchicalQueryExperience.isAggregationOperatorAllowed("count") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("topk") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("bottomk") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("stddev") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("stdvar") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("quantile") shouldEqual false
   }
 
   it("should update the filters") {

@@ -188,22 +188,22 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @param parentLogicalPlans - Seq[String] - List of parent LogicalPlans. Ex - Seq("BinaryJoin", "Aggregate")
    * @return - Boolean
    */
-  def isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-             parentLogicalPlans: Seq[String]): Boolean = allowedLogicalPlansForOptimization match {
-    case Some(allowedLogicalPlans) => parentLogicalPlans.exists(allowedLogicalPlans.contains)
-    case None => false
-  }
+  def isParentPeriodicSeriesPlanAllowed(parentLogicalPlans: Seq[String]): Boolean =
+    allowedLogicalPlansForOptimization match {
+      case Some(allowedLogicalPlans) => parentLogicalPlans.exists(allowedLogicalPlans.contains)
+      case None => false
+    }
 
   /**
    * Checks if the PeriodicSeriesPlan which has access to RawSeries is allowed to update/optimize the metric name
    * @param logicalPlanName - PeriodicSeriesPlan name. Ex - PeriodicSeriesWithWindowing, PeriodicSeries
    * @return - Boolean
    */
-  def isPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric(
-              logicalPlanName: String): Boolean = allowedPeriodicSeriesPlansWithRawSeries match {
+  def isLeafPeriodicSeriesPlanAllowedForRawSeriesUpdate(logicalPlanName: String): Boolean =
+    allowedPeriodicSeriesPlansWithRawSeries match {
       case Some(allowedPeriodSeriesPlans) => allowedPeriodSeriesPlans.contains(logicalPlanName)
       case None => false
-  }
+    }
 
   /**
    * Updates the metric column filter if higher level aggregation is applicable
