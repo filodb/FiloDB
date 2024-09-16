@@ -458,9 +458,9 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   it("test isMaxMinEnabledForWorkspace correctly returns expected values") {
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxMinDS.ref, 0,
       Seq(), AllChunkScan, "_metric_", colName = Some("h"))
-    execPlan.isMaxMinEnabledForWorkspace(Some("demo")) shouldEqual true
-    execPlan.isMaxMinEnabledForWorkspace(Some(GlobalConfig.workspacesDisabledForMaxMin.get.head)) shouldEqual false
-    execPlan.isMaxMinEnabledForWorkspace(None) shouldEqual false
+    execPlan.isMaxMinColumnsEnabled(Some("demo")) shouldEqual true
+    execPlan.isMaxMinColumnsEnabled(Some(GlobalConfig.workspacesDisabledForMaxMin.get.head)) shouldEqual false
+    execPlan.isMaxMinColumnsEnabled(None) shouldEqual false
   }
 
   it("should return chunk metadata from MemStore") {
