@@ -16,7 +16,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("getNextLevelAggregatedMetricName should return expected metric name") {
 
-    val params = HierarchicalQueryExperience(true, ":::", "agg_2", Set("job", "instance"))
+    val params = IncludeAggRule(":::", "agg_2", Set("job", "instance"))
 
     // Case 1: Should not update if metric doesn't have the aggregated metric identifier
     HierarchicalQueryExperience.getNextLevelAggregatedMetricName("__name__", params,
@@ -66,40 +66,28 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
     HierarchicalQueryExperience.isAggregationOperatorAllowed("quantile") shouldEqual false
   }
 
-  it("should update the filters") {
-    val filters = Seq(ColumnFilter("tag1", Equals("value1")), ColumnFilter("tag2", Equals("value2")))
-    val newFilters = Seq(ColumnFilter("tag2", Equals("value2Updated")),
-      ColumnFilter("tag3", Equals("value3")), ColumnFilter("tag4", Equals("value4")))
-    HierarchicalQueryExperience.upsertFilters(filters, newFilters) shouldEqual
-      Seq(ColumnFilter("tag1", Equals("value1")), ColumnFilter("tag2", Equals("value2Updated")),
-        ColumnFilter("tag3", Equals("value3")), ColumnFilter("tag4", Equals("value4")))
-  }
-
   it("should check if higher level aggregation is applicable with IncludeTags") {
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithIncludeTags(
-      Set("_ws_", "_ns_", "_metric_"), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_"),
-      Set("tag1", "tag2")) shouldEqual true
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
 
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithIncludeTags(
-      Set("_ws_", "_ns_", "__name__"), Seq("tag1", "tag2", "_ws_", "_ns_", "__name__"),
-      Set("tag1", "tag2", "tag3")) shouldEqual true
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2", "tag3")), Seq("tag1", "tag2", "_ws_", "_ns_", "__name__")) shouldEqual true
 
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithIncludeTags(
-      Set("_ws_", "_ns_", "__name__"), Seq("tag3", "tag4", "_ws_", "_ns_", "__name__"),
-      Set("tag1", "tag2", "tag3")) shouldEqual false
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2", "tag3")), Seq("tag3", "tag4", "_ws_", "_ns_", "__name__")) shouldEqual false
   }
 
   it("should check if higher level aggregation is applicable with ExcludeTags") {
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithExcludeTags(
-      Set("_ws_", "_ns_", "_metric_"), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_"),
-      Set("tag1", "tag2")) shouldEqual false
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
 
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithExcludeTags(
-      Set("_ws_", "_ns_", "__name__"), Seq("tag1", "_ws_", "_ns_", "__name__"),
-      Set("tag1", "tag3")) shouldEqual false
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag3")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
 
-    HierarchicalQueryExperience.isHigherLevelAggregationApplicableWithExcludeTags(
-      Set("_ws_", "_ns_", "__name__"), Seq("tag3", "tag4", "_ws_", "_ns_", "__name__"),
-      Set("tag1", "tag2")) shouldEqual true
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
+
+    HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
+      ExcludeAggRule(":::", "agg_2", Set("tag3", "tag4")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
   }
 }
