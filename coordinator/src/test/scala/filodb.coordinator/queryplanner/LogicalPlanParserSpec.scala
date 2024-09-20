@@ -777,7 +777,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
         .shouldEqual("my_gauge:::agg_2")
     )
     // CASE 5: should not update since excludeTags are used
-    query = "sum by (excludeAggTag1,aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\"}))"
+    query = "sum by (excludeAggTag1,aggTag2) (sum by (excludeAggTag1,aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
