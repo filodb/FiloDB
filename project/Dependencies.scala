@@ -80,7 +80,8 @@ object Dependencies {
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
-    "com.twitter"                  %% "chill"             % "0.9.3"
+    "com.twitter"                  %% "chill"             % "0.9.3",
+    "org.apache.commons"           % "commons-lang3"      % "3.14.0"
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(

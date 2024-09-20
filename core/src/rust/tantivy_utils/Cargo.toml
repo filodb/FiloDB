@@ -1,0 +1,12 @@
+[package]
+name = "tantivy_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hashbrown = "0.14.5"
+nohash-hasher = "0.2.0"
+quick_cache = { version = "0.6.2", features = ["stats"] }
+tantivy = "0.22.0"
+tantivy-common = "0.7.0"
+tantivy-fst = "0.5.0"

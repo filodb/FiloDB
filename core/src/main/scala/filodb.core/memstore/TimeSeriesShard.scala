@@ -285,8 +285,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val disableIndexCaching = filodbConfig.getBoolean("memstore.disable-index-caching")
+  private val partKeyIndexType = filodbConfig.getString("memstore.part-key-index-type")
   private val typeFieldIndexingEnabled = filodbConfig.getBoolean("memstore.type-field-indexing-enabled")
-
+  private val tantivyColumnCacheCount = filodbConfig.getLong("memstore.tantivy.column-cache-count")
+  private val tantivyQueryCacheSize = filodbConfig.getMemorySize("memstore.tantivy.query-cache-max-bytes")
+  private val tantivyQueryCacheEstimatedItemSize =
+    filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
+  private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -312,10 +317,19 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex: PartKeyIndexRaw = new PartKeyLuceneIndex(ref, schemas.part,
-    indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
-    storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching,
-    addMetricTypeField = typeFieldIndexingEnabled)
+  private[memstore] final val partKeyIndex: PartKeyIndexRaw = partKeyIndexType match {
+    case "lucene" => new PartKeyLuceneIndex(ref, schemas.part,
+      indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
+      storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching,
+      addMetricTypeField = typeFieldIndexingEnabled)
+    case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
+      shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
+      queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
+      queryCacheEstimatedItemSize = tantivyQueryCacheEstimatedItemSize.toBytes,
+      deletedDocMergeThreshold = tantivyDeletedDocMergeThreshold.toFloat,
+      addMetricTypeField = typeFieldIndexingEnabled)
+    case x => sys.error(s"Unsupported part key index type: '$x'")
+  }
 
   private val cardTracker: CardinalityTracker = initCardTracker()
 
@@ -1222,7 +1236,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     partIter.skippedPartIDs.foreach { pId =>
       partKeyIndex.partKeyFromPartId(pId).foreach { pk =>
-        val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pk.offset)
+        val unsafePkOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(pk.offset)
         val schema = schemas(RecordSchema.schemaID(pk.bytes, unsafePkOffset))
         val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
           schemas.part.options.shardKeyColumns)
@@ -1907,7 +1921,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     partitions.get(partID) match {
       case TimeSeriesShard.OutOfMemPartition =>
         partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
-          val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
+          val unsafeKeyOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(pkBytesRef.offset)
           RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
         }.getOrElse(-1)
       case p: TimeSeriesPartition => p.schema.schemaHash

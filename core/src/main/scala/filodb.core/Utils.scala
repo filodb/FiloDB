@@ -1,9 +1,11 @@
 package filodb.core
 
+import java.io.{File, IOException}
 import java.lang.management.ManagementFactory
 
 import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
+import scala.util.{Failure, Try}
 
 object Utils extends StrictLogging {
   private val threadMbean = ManagementFactory.getThreadMXBean
@@ -36,5 +38,35 @@ object Utils extends StrictLogging {
     }
     logger.info(s"Available memory calculated or configured as $availableMem")
     availableMem
+  }
+
+  // Recursively delete a folder
+  def deleteRecursively(f: File, deleteRoot: Boolean = false): Try[Boolean] = {
+    val subDirDeletion: Try[Boolean] =
+      if (f.isDirectory)
+        f.listFiles match {
+          case xs: Array[File] if xs != null && !xs.isEmpty =>
+            val subDirDeletions: Array[Try[Boolean]] = xs map (f => deleteRecursively(f, true))
+            subDirDeletions reduce ((reduced, thisOne) => {
+              thisOne match {
+                // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
+                case scala.util.Success(_) if reduced == scala.util.Success(true) => thisOne
+                case Failure(_) => thisOne
+                case _ => reduced
+              }
+            })
+          case _ => scala.util.Success(true)
+        }
+      else
+        scala.util.Success(true)
+
+    subDirDeletion match {
+      case scala.util.Success(_) =>
+        if (deleteRoot) {
+          if (f.delete()) scala.util.Success(true) else Failure(new IOException(s"Unable to delete $f"))
+        } else scala.util.Success(true)
+      case right@Failure(_) => right
+    }
+
   }
 }
