@@ -1,6 +1,7 @@
 //! Collector for part key binary data
 
 use std::cmp::min;
+use std::mem::size_of;
 
 use crate::collectors::column_cache::ColumnCache;
 use crate::field_constants::{END_TIME, PART_KEY, START_TIME};
