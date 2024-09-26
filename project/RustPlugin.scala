@@ -200,6 +200,8 @@ object RustPlugin extends AutoPlugin {
     val RustPattern = "([^-]+)-([^-]+)-([^-]+).*".r
     arch match {
       case "host" => s"$getHostKernel/${SystemUtils.OS_ARCH}"
+      // Java uses amd64, Rust uses x86_64
+      case RustPattern("x86_64", _, kernel) => s"$kernel/amd64"
       case RustPattern(arch, _, kernel) => s"$kernel/$arch"
       case x => sys.error(s"Unsupported architecture $x")
     }
