@@ -65,6 +65,12 @@ class SingleClusterPlanner(val dataset: Dataset,
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
 
+  // failed failover counter captures failovers which are not possible because at least one shard
+  // is down both on the primary and DR clusters, the query will get executed only when the
+  // partial results are acceptable otherwise an exception is thrown
+  val shardUnavailableFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
+    .withTag("cluster", clusterName)
+    .withTag("type", "shardUnavailable")
 
   val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
     .withTag("cluster", clusterName)
@@ -192,10 +198,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     if (!shardInfo.active) {
       if (queryContext.plannerParams.allowPartialResults)
         logger.debug(s"Shard: $shard is not available however query is proceeding as partial results is enabled")
-      else
+      else {
+        shardUnavailableFailoverCounter.increment()
         throw new filodb.core.query.ServiceUnavailableException(
           s"Remote Buddy Shard: $shard is not available"
         )
+      }
     }
     val dispatcher = RemoteActorPlanDispatcher(shardInfo.address, clusterName)
     dispatcher
