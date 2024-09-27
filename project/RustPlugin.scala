@@ -119,16 +119,18 @@ object RustPlugin extends AutoPlugin {
 
       // For each architecture find artifacts
       for (archTarget <- rustArchitectures.value) {
+        val normalizedArch = normalizeRustTarget(archTarget)
+
         // Special case - host
-        val archFolder = if (archTarget == "host") {
+        val archFolder = if (normalizedArch == "host") {
           targetFolder / releaseDir
         } else {
           // General case
-          targetFolder / archTarget / releaseDir
+          targetFolder / normalizedArch / releaseDir
         }
 
         // get os arch / kernel, build path
-        val resourceArchTarget = mapRustTargetToJVMTarget(archTarget)
+        val resourceArchTarget = mapRustTargetToJVMTarget(normalizedArch)
 
         // Find library files in folder
         // We place every produced library in a resource path like
@@ -204,6 +206,23 @@ object RustPlugin extends AutoPlugin {
       case RustPattern("x86_64", _, kernel) => s"$kernel/amd64"
       case RustPattern(arch, _, kernel) => s"$kernel/$arch"
       case x => sys.error(s"Unsupported architecture $x")
+    }
+  }
+
+  // Normalize a target string by stripping excess info, like GLIBC version
+  private def normalizeRustTarget(target: String): String = {
+    // Handle strings like x86_64-unknown-linux-gnu.2.17,
+    // which contain a GLIBC version suffix
+    //
+    // We want to drop the suffix to get x86_64-unknown-linux-gnu
+    val RustPattern = "([^-]+)-([^-]+)-([^.]+).*".r
+
+    target match {
+      // Valid inputs
+      case "host" => target
+      case RustPattern(arch, vendor, kernel) => s"$arch-$vendor-$kernel"
+      // Not matched
+      case x => sys.error(s"Unsupported target $x")
     }
   }
 
