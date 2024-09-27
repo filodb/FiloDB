@@ -19,7 +19,7 @@ import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 object HighAvailabilityPlanner {
-  final val FailoverCounterName = "single-cluster-plans-materialized"
+  final val FailoverCounterName = "single-cluster-failovers-materialized"
 }
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
