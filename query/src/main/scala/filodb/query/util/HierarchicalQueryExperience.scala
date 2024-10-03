@@ -2,13 +2,12 @@ package filodb.query.util
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import scala.jdk.CollectionConverters.asScalaBufferConverter
+
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardinalities}
-
 
 /**
  * Aggregation rule definition. Contains the following information:
