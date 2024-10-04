@@ -52,6 +52,10 @@ impl ColumnCache {
         }
     }
 
+    pub fn clear(&self) {
+        self.cache.clear();
+    }
+
     pub fn stats(&self) -> (u64, u64) {
         (self.cache.hits(), self.cache.misses())
     }

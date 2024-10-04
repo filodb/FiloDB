@@ -87,7 +87,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_newI
             column_cache_size as u64,
             query_cache_max_size as u64,
             query_cache_estimated_item_size as u64,
-        ))
+        )?)
     })
 }
 

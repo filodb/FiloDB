@@ -8,9 +8,9 @@ use std::{
 use filesize::PathExt;
 use jni::sys::jlong;
 use tantivy::{
-    directory::MmapDirectory,
+    directory::{MmapDirectory, WatchCallback, WatchHandle},
     schema::{Field, OwnedValue, Schema},
-    IndexReader, IndexWriter, Searcher, TantivyDocument, TantivyError,
+    Directory, IndexReader, IndexWriter, Searcher, TantivyDocument, TantivyError,
 };
 use tantivy_utils::{
     collectors::{
@@ -40,6 +40,8 @@ pub struct IndexHandle {
     pub column_cache: ColumnCache,
     // Mmap dir - used for stats only
     pub mmap_directory: MmapDirectory,
+    // Watch handle - notifies when to clear the column cache
+    _watch_handle: WatchHandle,
 
     // Fields that need synchronization
     //
@@ -59,8 +61,15 @@ impl IndexHandle {
         column_cache_size: u64,
         query_cache_max_size: u64,
         query_cache_estimated_item_size: u64,
-    ) -> jlong {
+    ) -> tantivy::Result<jlong> {
         let estimated_item_count: u64 = query_cache_max_size / query_cache_estimated_item_size;
+        let column_cache = ColumnCache::new(column_cache_size as usize);
+
+        let cache = column_cache.clone();
+        // When the index segment list changes, clear the column cache to release those mmaped files
+        let watch_handle = mmap_directory.watch(WatchCallback::new(move || {
+            cache.clear();
+        }))?;
 
         let obj = Box::new(Self {
             schema,
@@ -69,11 +78,12 @@ impl IndexHandle {
             reader,
             changes_pending: AtomicBool::new(false),
             query_cache: QueryCache::new(estimated_item_count, query_cache_max_size),
-            column_cache: ColumnCache::new(column_cache_size as usize),
+            column_cache,
             mmap_directory,
+            _watch_handle: watch_handle,
         });
 
-        Box::into_raw(obj) as jlong
+        Ok(Box::into_raw(obj) as jlong)
     }
 
     /// Decode handle back into a reference
