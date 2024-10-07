@@ -177,10 +177,11 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
       cols(i + 1) = ColumnInfo(s"top${(i + 1)/2}-Val", ColumnType.DoubleColumn)
       i += 2
     }
-    ResultSchema(cols, 1)
+    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+      fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }
