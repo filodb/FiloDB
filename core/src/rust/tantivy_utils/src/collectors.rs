@@ -1,6 +1,7 @@
 //! Common collectors
 
 pub mod column_cache;
+pub mod index_collector;
 pub mod limited_collector;
 pub mod part_id_collector;
 pub mod part_key_collector;

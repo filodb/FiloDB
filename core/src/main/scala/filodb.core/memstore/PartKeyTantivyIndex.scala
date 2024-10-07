@@ -22,7 +22,7 @@ import filodb.core.memstore.PartKeyIndexRaw.{bytesRefToUnsafeOffset, ignoreIndex
 import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 object PartKeyTantivyIndex {
   def startMemoryProfiling(): Unit = {
@@ -163,7 +163,22 @@ class PartKeyTantivyIndex(ref: DatasetRef,
   override def indexValues(fieldName: String, topK: Int): Seq[TermInfo] = {
     val results = TantivyNativeMethods.indexValues(indexHandle, fieldName, topK)
 
-    results.toSeq
+
+    val buffer = ByteBuffer.wrap(results)
+    buffer.order(ByteOrder.LITTLE_ENDIAN)
+
+    val parsedResults = new ArrayBuffer[TermInfo]()
+
+    while (buffer.hasRemaining) {
+      val count = buffer.getLong
+      val strLen = buffer.getInt
+      val strBytes = new Array[Byte](strLen)
+      buffer.get(strBytes)
+
+      parsedResults += TermInfo(ZeroCopyUTF8String.apply(strBytes), count.toInt)
+    }
+
+    parsedResults
   }
 
   override def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
@@ -649,7 +664,7 @@ protected object TantivyNativeMethods {
 
   // Get the list of unique values for a field
   @native
-  def indexValues(handle: Long, fieldName: String, topK: Int): Array[TermInfo]
+  def indexValues(handle: Long, fieldName: String, topK: Int): Array[Byte]
 
   // Get the list of unique indexed field names
   @native

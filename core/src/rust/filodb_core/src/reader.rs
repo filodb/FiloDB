@@ -4,15 +4,17 @@ use std::sync::atomic::Ordering;
 
 use hashbrown::HashSet;
 use jni::{
-    objects::{JByteArray, JClass, JIntArray, JObject, JString, JValue},
+    objects::{JByteArray, JClass, JIntArray, JObject, JString},
     sys::{jbyteArray, jint, jintArray, jlong, jlongArray, jobjectArray},
     JNIEnv,
 };
 use tantivy::{collector::FacetCollector, schema::FieldType};
-use tantivy_utils::collectors::part_key_record_collector::PartKeyRecordCollector;
 use tantivy_utils::collectors::string_field_collector::StringFieldCollector;
 use tantivy_utils::collectors::time_collector::TimeCollector;
 use tantivy_utils::collectors::time_range_filter::TimeRangeFilter;
+use tantivy_utils::collectors::{
+    index_collector::collect_from_index, part_key_record_collector::PartKeyRecordCollector,
+};
 use tantivy_utils::collectors::{
     limited_collector::UnlimitedCollector, part_id_collector::PartIdCollector,
 };
@@ -28,9 +30,6 @@ use crate::{
     query_parser::filodb_query::FiloDBQuery,
     state::IndexHandle,
 };
-
-const TERM_INFO_CLASS: &str = "filodb/core/memstore/TermInfo";
-const UTF8STR_CLASS: &str = "filodb/memory/format/ZeroCopyUTF8String";
 
 #[no_mangle]
 pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_indexRamBytes(
@@ -260,9 +259,14 @@ fn query_label_values(
 
         let collector =
             StringFieldCollector::new(&field, limit, term_limit, handle.column_cache.clone());
-        let filter_collector =
-            TimeRangeFilter::new(&collector, start, end, handle.column_cache.clone());
-        Ok(handle.execute_cachable_query(query, filter_collector)?)
+
+        if matches!(query, FiloDBQuery::All) {
+            Ok(collect_from_index(&handle.searcher(), collector)?)
+        } else {
+            let filter_collector =
+                TimeRangeFilter::new(&collector, start, end, handle.column_cache.clone());
+            Ok(handle.execute_cachable_query(query, filter_collector)?)
+        }
     } else {
         // Invalid field, no values
         Ok(vec![])
@@ -312,7 +316,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
     handle: jlong,
     field: JString,
     top_k: jint,
-) -> jobjectArray {
+) -> jbyteArray {
     jni_exec(&mut env, |env| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
@@ -331,33 +335,24 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
             i64::MAX,
         )?;
 
-        let results_len = std::cmp::min(top_k, results.len());
-        let java_ret =
-            env.new_object_array(results_len as i32, TERM_INFO_CLASS, JObject::null())?;
-        for (i, (value, count)) in results.into_iter().take(top_k).enumerate() {
-            let len = value.as_bytes().len();
-            let term_bytes = env.new_byte_array(len as i32)?;
-            let bytes_ptr = value.as_bytes().as_ptr() as *const i8;
-            let bytes_ptr = unsafe { std::slice::from_raw_parts(bytes_ptr, len) };
-
-            env.set_byte_array_region(&term_bytes, 0, bytes_ptr)?;
-
-            let term_str = env
-                .call_static_method(
-                    UTF8STR_CLASS,
-                    "apply",
-                    "([B)Lfilodb/memory/format/ZeroCopyUTF8String;",
-                    &[JValue::Object(&term_bytes)],
-                )?
-                .l()?;
-
-            let term_info_obj = env.new_object(
-                TERM_INFO_CLASS,
-                "(Lfilodb/memory/format/ZeroCopyUTF8String;I)V",
-                &[JValue::Object(&term_str), JValue::Int(count as i32)],
-            )?;
-            env.set_object_array_element(&java_ret, i as i32, &term_info_obj)?;
+        // String length, plus count, plus string data
+        let results_len: usize = results
+            .iter()
+            .take(top_k)
+            .map(|(value, _)| value.len() + std::mem::size_of::<i32>() + std::mem::size_of::<i64>())
+            .sum();
+        let mut serialzied_bytes = Vec::with_capacity(results_len);
+        for (value, count) in results.into_iter().take(top_k) {
+            serialzied_bytes.extend(count.to_le_bytes());
+            serialzied_bytes.extend((value.len() as i32).to_le_bytes());
+            serialzied_bytes.extend(value.as_bytes());
         }
+
+        let java_ret = env.new_byte_array(results_len as i32)?;
+        let bytes_ptr = serialzied_bytes.as_ptr() as *const i8;
+        let bytes_ptr = unsafe { std::slice::from_raw_parts(bytes_ptr, results_len) };
+
+        env.set_byte_array_region(&java_ret, 0, bytes_ptr)?;
 
         Ok(java_ret.into_raw())
     })
