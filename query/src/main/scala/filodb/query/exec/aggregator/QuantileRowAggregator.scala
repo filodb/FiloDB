@@ -79,10 +79,11 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
     cols(0) = source.columns(0)
     // TODO need a first class blob column
     cols(1) = ColumnInfo("tdig", ColumnType.StringColumn)
-    ResultSchema(cols, 1)
+    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+      fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }
