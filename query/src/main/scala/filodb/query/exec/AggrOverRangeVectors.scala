@@ -74,7 +74,7 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
   override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
     if (r1.isEmpty) r2
     else if (r2.isEmpty) r1
-    else if (r1 != r2) {
+    else if (r1 == r2 && (!r1.hasSameColumnsAs(r2)) || r1.fixedVectorLen != r2.fixedVectorLen) {
       throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
     } else r1
   }
