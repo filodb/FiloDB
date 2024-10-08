@@ -1,5 +1,6 @@
 package filodb.query
 
+import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 import filodb.query.util.{AggRule, HierarchicalQueryExperience}
@@ -225,7 +226,8 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
 
 object TsCardinalities {
   val LABEL_WORKSPACE = "_ws_"
-  val SHARD_KEY_LABELS = Seq(LABEL_WORKSPACE, "_ns_", "__name__")
+  val LABEL_NAMESPACE = "_ns_"
+  val SHARD_KEY_LABELS = Seq(LABEL_WORKSPACE, LABEL_NAMESPACE, GlobalConfig.PromMetricLabel)
 }
 
 /**

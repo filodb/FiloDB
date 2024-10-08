@@ -2,9 +2,12 @@ package filodb.query.util
 
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+import kamon.Kamon
+import kamon.testkit.InstrumentInspection.Syntax.counterInstrumentInspection
 
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
+
 class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("getMetricColumnFilterTag should return expected column") {
@@ -89,5 +92,41 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
       ExcludeAggRule(":::", "agg_2", Set("tag3", "tag4")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
+  }
+
+  it("checkAggregateQueryEligibleForHigherLevelAggregatedMetric should increment counter if metric updated") {
+    val excludeParams = ExcludeAggRule(":::", "agg_2", Set("notAggTag1", "notAggTag2"))
+    Kamon.init()
+    var counter = Kamon.counter("hierarchical-query-plans-optimized")
+
+    // CASE 1: Should update if metric have the aggregated metric identifier
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
+    var updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
+      excludeParams, Seq(
+        ColumnFilter("__name__", Equals("metric1:::agg")),
+        ColumnFilter("_ws_", Equals("testws")),
+        ColumnFilter("_ns_", Equals("testns")),
+        ColumnFilter("aggTag", Equals("value"))))
+    updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+      .shouldEqual("metric1:::agg_2")
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 1
+
+
+    // CASE 2: Should not update if metric doesn't have the aggregated metric identifier
+    // reset the counter
+    counter = Kamon.counter("hierarchical-query-plans-optimized")
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
+    updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
+      excludeParams, Seq(
+        ColumnFilter("__name__", Equals("metric1:::agg")),
+        ColumnFilter("_ws_", Equals("testws")),
+        ColumnFilter("_ns_", Equals("testns")),
+        ColumnFilter("notAggTag1", Equals("value")))) // using exclude tag, so should not optimize
+    updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+      .shouldEqual("metric1:::agg")
+    // count should not increment
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
+
+    Kamon.stop()
   }
 }

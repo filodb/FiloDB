@@ -1,12 +1,13 @@
 package filodb.query.util
 
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import scala.jdk.CollectionConverters.asScalaBufferConverter
 
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
-import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan}
+import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardinalities}
 
 /**
  * Aggregation rule definition. Contains the following information:
@@ -58,6 +59,8 @@ case class ExcludeAggRule(metricRegex: String, metricSuffix: String, tags: Set[S
 }
 
 object HierarchicalQueryExperience extends StrictLogging {
+
+  val hierarchicalQueryOptimizedCounter = Kamon.counter("hierarchical-query-plans-optimized")
 
   // Get the shard key columns from the dataset options along with all the metric labels used
   lazy val shardKeyColumnsOption: Option[Set[String]] = GlobalConfig.datasetOptions match {
@@ -152,7 +155,7 @@ object HierarchicalQueryExperience extends StrictLogging {
   /** Returns the next level aggregated metric name. Example
    *  metricRegex = :::
    *  metricSuffix = agg_2
-   *  Exiting metric name - metric1:::agg
+   *  Existing metric name - metric1:::agg
    *  After update - metric1:::agg -> metric1:::agg_2
    * @param metricColumnFilter - String - Metric ColumnFilter tag/label
    * @param params - HierarchicalQueryExperience - Contains
@@ -231,14 +234,42 @@ object HierarchicalQueryExperience extends StrictLogging {
       val updatedMetricName = getNextLevelAggregatedMetricName(metricColumnFilter, params, filters)
       updatedMetricName match {
         case Some(metricName) =>
-          val updatedFilters = upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(metricName))))
-          logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
-          updatedFilters
+          // Checking if the metric actually ends with the next level aggregation metricSuffix.
+          // If so, update the filters and emit metric
+          // else, return the filters as is
+          metricName.endsWith(params.metricSuffix) match {
+            case true =>
+              val updatedFilters = upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(metricName))))
+              logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
+              incrementHierarcicalQueryOptimizedCounter(updatedFilters)
+              updatedFilters
+            case false => filters
+          }
         case None => filters
       }
     } else {
       filters
     }
+  }
+
+  /**
+   * Track the queries optimized by workspace and namespace
+   * @param filters
+   */
+  private def incrementHierarcicalQueryOptimizedCounter(filters: Seq[ColumnFilter]): Unit = {
+    // track query optimized per workspace and namespace in the counter
+    val metric_ws = LogicalPlan.getColumnValues(filters, TsCardinalities.LABEL_WORKSPACE) match {
+      case Seq() => ""
+      case ws => ws.head
+    }
+    val metric_ns = LogicalPlan.getColumnValues(filters, TsCardinalities.LABEL_NAMESPACE) match {
+      case Seq() => ""
+      case ns => ns.head
+    }
+    hierarchicalQueryOptimizedCounter
+      .withTag("metric_ws", metric_ws)
+      .withTag("metric_ns", metric_ns)
+      .increment()
   }
 
   /**

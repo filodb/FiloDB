@@ -40,7 +40,8 @@ object Dependencies {
   val circeParser       = "io.circe"                   %% "circe-parser"         % "0.9.3"
 
   lazy val commonDeps = Seq(
-    "io.kamon" %% "kamon-bundle" % kamonBundleVersion,
+    "io.kamon" %% "kamon-bundle"  % kamonBundleVersion,
+    "io.kamon" %% "kamon-testkit" % kamonBundleVersion % Test,
     logbackDep % Test,
     scalaTest  % Test,
     "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
