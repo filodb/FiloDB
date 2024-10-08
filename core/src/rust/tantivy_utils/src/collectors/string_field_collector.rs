@@ -187,6 +187,10 @@ impl<'a> IndexCollector for StringFieldCollector<'a> {
                 // Skip prefix
                 key_bytes = &key_bytes[prefix.len() + 2..];
             }
+            if key_bytes.is_empty() {
+                continue;
+            }
+
             let key = str::from_utf8(key_bytes)
                 .map_err(|e| TantivyError::InternalError(e.to_string()))?;
 

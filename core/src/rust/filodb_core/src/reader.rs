@@ -5,18 +5,16 @@ use std::sync::atomic::Ordering;
 use hashbrown::HashSet;
 use jni::{
     objects::{JByteArray, JClass, JIntArray, JObject, JString},
-    sys::{jbyteArray, jint, jintArray, jlong, jlongArray, jobjectArray},
+    sys::{jbyteArray, jint, jintArray, jlong, jlongArray},
     JNIEnv,
 };
-use tantivy::{collector::FacetCollector, schema::FieldType};
+use tantivy::schema::FieldType;
+use tantivy_utils::collectors::part_id_collector::PartIdCollector;
 use tantivy_utils::collectors::string_field_collector::StringFieldCollector;
 use tantivy_utils::collectors::time_collector::TimeCollector;
 use tantivy_utils::collectors::time_range_filter::TimeRangeFilter;
 use tantivy_utils::collectors::{
     index_collector::collect_from_index, part_key_record_collector::PartKeyRecordCollector,
-};
-use tantivy_utils::collectors::{
-    limited_collector::UnlimitedCollector, part_id_collector::PartIdCollector,
 };
 use tantivy_utils::collectors::{
     part_key_collector::PartKeyCollector, part_key_record_collector::PartKeyRecord,
@@ -146,21 +144,28 @@ fn fetch_label_names(
     query: FiloDBQuery,
     handle: &IndexHandle,
     results: &mut HashSet<String>,
+    limit: i32,
     start: i64,
     end: i64,
 ) -> JavaResult<()> {
-    // Get LABEL_NAMES facet
-    let mut collector = FacetCollector::for_field(facet_field_name(field_constants::LABEL_LIST));
-    collector.add_facet("/");
-    let collector = UnlimitedCollector::new(collector);
+    let field = facet_field_name(field_constants::LABEL_LIST);
+    let collector = StringFieldCollector::new(
+        &field,
+        limit as usize,
+        usize::MAX,
+        handle.column_cache.clone(),
+    );
 
-    let filter_collector =
-        TimeRangeFilter::new(&collector, start, end, handle.column_cache.clone());
+    let query_results = if matches!(query, FiloDBQuery::All) {
+        collect_from_index(&handle.searcher(), collector)?
+    } else {
+        let filter_collector =
+            TimeRangeFilter::new(&collector, start, end, handle.column_cache.clone());
+        handle.execute_cachable_query(query, filter_collector)?
+    };
 
-    let query_results = handle.execute_cachable_query(query, filter_collector)?;
-    let query_results: Vec<_> = query_results.get("/").collect();
     for (facet, _count) in query_results {
-        results.insert(facet.to_path()[0].to_string());
+        results.insert(facet.to_string());
     }
 
     Ok(())
@@ -175,7 +180,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
     limit: jint,
     start: jlong,
     end: jlong,
-) -> jobjectArray {
+) -> jbyteArray {
     jni_exec(&mut env, |env| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
@@ -184,25 +189,41 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
         let query_bytes = env.get_byte_array(&query)?;
 
         let query = FiloDBQuery::Complex(query_bytes.into_boxed_slice().into());
-        fetch_label_names(query, handle, &mut results, start, end)?;
+        fetch_label_names(query, handle, &mut results, limit, start, end)?;
 
-        let len = std::cmp::min(results.len(), limit as usize);
-
-        let java_ret = env.new_object_array(len as i32, "java/lang/String", JObject::null())?;
-        for (i, item) in results.drain().take(len).enumerate() {
-            env.set_object_array_element(&java_ret, i as i32, env.new_string(item)?)?;
-        }
-
-        Ok(java_ret.into_raw())
+        encode_string_array(env, results)
     })
 }
+
+fn encode_string_array(env: &mut JNIEnv, arr: HashSet<String>) -> JavaResult<jbyteArray> {
+    let len: usize = arr
+        .iter()
+        .map(|s| std::mem::size_of::<u32>() + s.len())
+        .sum();
+
+    let mut serialzied_bytes = Vec::with_capacity(len);
+    for s in arr.iter() {
+        serialzied_bytes.extend((s.len() as i32).to_le_bytes());
+        serialzied_bytes.extend(s.as_bytes());
+    }
+
+    let java_ret = env.new_byte_array(len as i32)?;
+    let bytes_ptr = serialzied_bytes.as_ptr() as *const i8;
+    let bytes_ptr = unsafe { std::slice::from_raw_parts(bytes_ptr, len) };
+
+    env.set_byte_array_region(&java_ret, 0, bytes_ptr)?;
+
+    Ok(java_ret.into_raw())
+}
+
+const LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT: i32 = 100;
 
 #[no_mangle]
 pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_indexNames(
     mut env: JNIEnv,
     _class: JClass,
     handle: jlong,
-) -> jobjectArray {
+) -> jbyteArray {
     jni_exec(&mut env, |env| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
@@ -222,15 +243,16 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inde
         }
 
         let query = FiloDBQuery::All;
-        fetch_label_names(query, handle, &mut results, 0, i64::MAX)?;
+        fetch_label_names(
+            query,
+            handle,
+            &mut results,
+            LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT,
+            0,
+            i64::MAX,
+        )?;
 
-        let java_ret =
-            env.new_object_array(results.len() as i32, "java/lang/String", JObject::null())?;
-        for (i, item) in results.drain().enumerate() {
-            env.set_object_array_element(&java_ret, i as i32, env.new_string(item)?)?;
-        }
-
-        Ok(java_ret.into_raw())
+        encode_string_array(env, results)
     })
 }
 
@@ -283,7 +305,7 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
     top_k: jint,
     start: jlong,
     end: jlong,
-) -> jobjectArray {
+) -> jbyteArray {
     jni_exec(&mut env, |env| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
@@ -297,13 +319,22 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_labe
 
         let results = query_label_values(query, handle, field, top_k, usize::MAX, start, end)?;
 
-        let results_len = std::cmp::min(top_k, results.len());
-        let java_ret =
-            env.new_object_array(results_len as i32, "java/lang/String", JObject::null())?;
-        for (i, (value, _)) in results.into_iter().take(top_k).enumerate() {
-            let term_str = env.new_string(&value)?;
-            env.set_object_array_element(&java_ret, i as i32, &term_str)?;
+        let len: usize = results
+            .iter()
+            .map(|(s, _)| std::mem::size_of::<u32>() + s.len())
+            .sum();
+
+        let mut serialzied_bytes = Vec::with_capacity(len);
+        for (s, _) in results.iter() {
+            serialzied_bytes.extend((s.len() as i32).to_le_bytes());
+            serialzied_bytes.extend(s.as_bytes());
         }
+
+        let java_ret = env.new_byte_array(len as i32)?;
+        let bytes_ptr = serialzied_bytes.as_ptr() as *const i8;
+        let bytes_ptr = unsafe { std::slice::from_raw_parts(bytes_ptr, len) };
+
+        env.set_byte_array_region(&java_ret, 0, bytes_ptr)?;
 
         Ok(java_ret.into_raw())
     })
