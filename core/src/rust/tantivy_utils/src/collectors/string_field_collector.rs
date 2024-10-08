@@ -71,7 +71,11 @@ impl<'a> Collector for StringFieldCollector<'a> {
         &self,
         segment_fruits: Vec<HashMap<String, u64>>,
     ) -> tantivy::Result<Vec<(String, u64)>> {
-        let mut results = HashMap::with_capacity(self.limit);
+        let mut results = if self.limit < usize::MAX {
+            HashMap::with_capacity(self.limit)
+        } else {
+            HashMap::new()
+        };
 
         for mut map in segment_fruits.into_iter() {
             for (value, count) in map.drain() {
@@ -159,7 +163,11 @@ impl<'a> IndexCollector for StringFieldCollector<'a> {
             return Err(TantivyError::FieldNotFound(self.field.to_string()));
         };
 
-        let mut ret = HashMap::with_capacity(self.limit);
+        let mut ret = if self.limit < usize::MAX {
+            HashMap::with_capacity(self.limit)
+        } else {
+            HashMap::new()
+        };
 
         if limiter.at_limit() {
             return Ok(ret);
