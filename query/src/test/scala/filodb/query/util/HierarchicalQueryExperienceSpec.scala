@@ -19,26 +19,15 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("getNextLevelAggregatedMetricName should return expected metric name") {
 
-    val params = IncludeAggRule(":::", "agg_2", Set("job", "instance"))
+    val params = IncludeAggRule("agg_2", Set("job", "instance"))
 
     // Case 1: Should not update if metric doesn't have the aggregated metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("__name__", params,
-      Seq(ColumnFilter("__name__", Equals("metric1")), ColumnFilter("job", Equals("spark")))) shouldEqual Some("metric1")
+    HierarchicalQueryExperience.getNextLevelAggregatedMetricName(
+      "metric1", ":::", params.metricSuffix) shouldEqual "metric1"
 
     // Case 2: Should update if metric has the aggregated metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("__name__", params,
-      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      Some("metric1:::agg_2")
-
-    // Case 3: Should not update if metricColumnFilter and column filters don't match
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("_metric_", params,
-      Seq(ColumnFilter("__name__", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      None
-
-    // Case 4: Similar to case 1 but with a different metric identifier
-    HierarchicalQueryExperience.getNextLevelAggregatedMetricName("_metric_", params,
-      Seq(ColumnFilter("_metric_", Equals("metric1:::agg")), ColumnFilter("job", Equals("spark")))) shouldEqual
-      Some("metric1:::agg_2")
+    HierarchicalQueryExperience.getNextLevelAggregatedMetricName(
+      "metric1:::agg", ":::", params.metricSuffix) shouldEqual "metric1:::agg_2"
   }
 
   it("isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric return expected values") {
@@ -71,38 +60,39 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("should check if higher level aggregation is applicable with IncludeTags") {
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
+      IncludeAggRule("agg_2", Set("tag1", "tag2")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2", "tag3")), Seq("tag1", "tag2", "_ws_", "_ns_", "__name__")) shouldEqual true
+      IncludeAggRule("agg_2", Set("tag1", "tag2", "tag3")), Seq("tag1", "tag2", "_ws_", "_ns_", "__name__")) shouldEqual true
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      IncludeAggRule(":::", "agg_2", Set("tag1", "tag2", "tag3")), Seq("tag3", "tag4", "_ws_", "_ns_", "__name__")) shouldEqual false
+      IncludeAggRule("agg_2", Set("tag1", "tag2", "tag3")), Seq("tag3", "tag4", "_ws_", "_ns_", "__name__")) shouldEqual false
   }
 
   it("should check if higher level aggregation is applicable with ExcludeTags") {
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
+      ExcludeAggRule("agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag3")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
+      ExcludeAggRule("agg_2", Set("tag1", "tag3")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      ExcludeAggRule(":::", "agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
+      ExcludeAggRule("agg_2", Set("tag1", "tag2")),Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual false
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
-      ExcludeAggRule(":::", "agg_2", Set("tag3", "tag4")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
+      ExcludeAggRule("agg_2", Set("tag3", "tag4")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
   }
 
   it("checkAggregateQueryEligibleForHigherLevelAggregatedMetric should increment counter if metric updated") {
-    val excludeParams = ExcludeAggRule(":::", "agg_2", Set("notAggTag1", "notAggTag2"))
+    val excludeRule = ExcludeAggRule("agg_2", Set("notAggTag1", "notAggTag2"))
+    val params = HierarchicalQueryExperienceParams(":::", Map("agg" -> excludeRule))
     Kamon.init()
     var counter = Kamon.counter("hierarchical-query-plans-optimized")
 
     // CASE 1: Should update if metric have the aggregated metric identifier
     counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
     var updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      excludeParams, Seq(
+      params, Seq(
         ColumnFilter("__name__", Equals("metric1:::agg")),
         ColumnFilter("_ws_", Equals("testws")),
         ColumnFilter("_ns_", Equals("testns")),
@@ -117,7 +107,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
     counter = Kamon.counter("hierarchical-query-plans-optimized")
     counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
     updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-      excludeParams, Seq(
+      params, Seq(
         ColumnFilter("__name__", Equals("metric1:::agg")),
         ColumnFilter("_ws_", Equals("testws")),
         ColumnFilter("_ns_", Equals("testns")),

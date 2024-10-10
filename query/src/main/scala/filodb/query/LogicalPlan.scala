@@ -571,12 +571,16 @@ case class Aggregate(operator: AggregationOperator,
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
                                                parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
     // Modify the map to retain all the AggRules which satisfies the current Aggregate clause labels.
-    params.aggRules.retain((_, aggRule) => HierarchicalQueryExperience
-      .checkAggregateQueryEligibleForHigherLevelAggregatedMetric(aggRule, operator, clauseOpt))
-    params.aggRules match {
-      case Map.empty => this
-      case _ => this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ this.getClass.getSimpleName))
+    // TODO: add unit test for this
+    val updatedMap = params.aggRules.filter(x => HierarchicalQueryExperience
+      .checkAggregateQueryEligibleForHigherLevelAggregatedMetric(x._2, operator, clauseOpt))
+    if (updatedMap.isEmpty) {
+      // none of the aggregation rules matched with the
+      this
+    } else {
+      val updatedParams = params.copy(aggRules = updatedMap)
+      this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
+        updatedParams, parentLogicalPlans :+ this.getClass.getSimpleName))
     }
   }
 }

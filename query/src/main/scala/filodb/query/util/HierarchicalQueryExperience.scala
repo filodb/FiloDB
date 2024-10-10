@@ -15,12 +15,8 @@ import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardin
  * 2. map of current aggregation metric suffix -> nextLevelAggregation's AggRule to be used
  *    For example: agg -> AggRule { metricSuffix = agg_2, tags = Set("tag1", "tag2") }
  */
-sealed trait HierarchicalQueryExperienceParams {
-
-  val metricRegex: String
-
-  val aggRules: collection.mutable.Map[String, AggRule]
-}
+case class HierarchicalQueryExperienceParams(metricRegex: String,
+                                             aggRules: Map[String, AggRule]) { }
 
 /**
  * Aggregation rule definition. Contains the following information:
