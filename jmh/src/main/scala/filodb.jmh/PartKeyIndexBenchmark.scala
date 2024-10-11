@@ -178,6 +178,38 @@ abstract class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(8)
+  def indexNames(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.indexNames(10000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def indexValues(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.indexValues("instance", 10000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def getLabelNames(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+        ColumnFilter("_ws_", Filter.Equals("demo")))
+      partKeyIndex.labelNamesEfficient(filter, now, currentLookupTime())
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
   def getMetricNames(): Unit = {
     cforRange ( 0 until 8 ) { i =>
       val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),

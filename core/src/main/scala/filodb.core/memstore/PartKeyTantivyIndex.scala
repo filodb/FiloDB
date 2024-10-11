@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import java.io.File
 import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
 
@@ -22,7 +23,7 @@ import filodb.core.memstore.PartKeyIndexRaw.{bytesRefToUnsafeOffset, ignoreIndex
 import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 object PartKeyTantivyIndex {
   def startMemoryProfiling(): Unit = {
@@ -155,7 +156,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
   }
 
   override def indexNames(limit: Int): Seq[String] = {
-    TantivyNativeMethods.indexNames(indexHandle).filterNot {
+    decodeStringArray(TantivyNativeMethods.indexNames(indexHandle)).filterNot {
       n => ignoreIndexNames.contains(n) || n.startsWith(FACET_FIELD_PREFIX)
     }
   }
@@ -163,7 +164,38 @@ class PartKeyTantivyIndex(ref: DatasetRef,
   override def indexValues(fieldName: String, topK: Int): Seq[TermInfo] = {
     val results = TantivyNativeMethods.indexValues(indexHandle, fieldName, topK)
 
-    results.toSeq
+    val buffer = ByteBuffer.wrap(results)
+    buffer.order(ByteOrder.LITTLE_ENDIAN)
+
+    val parsedResults = new ArrayBuffer[TermInfo]()
+
+    while (buffer.hasRemaining) {
+      val count = buffer.getLong
+      val strLen = buffer.getInt
+      val strBytes = new Array[Byte](strLen)
+      buffer.get(strBytes)
+
+      parsedResults += TermInfo(ZeroCopyUTF8String.apply(strBytes), count.toInt)
+    }
+
+    parsedResults
+  }
+
+  private def decodeStringArray(arr: Array[Byte]): Seq[String] = {
+    val buffer = ByteBuffer.wrap(arr)
+    buffer.order(ByteOrder.LITTLE_ENDIAN)
+
+    val parsedResults = new ArrayBuffer[String]()
+
+    while (buffer.hasRemaining) {
+      val strLen = buffer.getInt
+      val strBytes = new Array[Byte](strLen)
+      buffer.get(strBytes)
+
+      parsedResults += new String(strBytes, StandardCharsets.UTF_8)
+    }
+
+    parsedResults
   }
 
   override def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
@@ -176,7 +208,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     labelValuesQueryLatency.record(System.nanoTime() - start)
 
-    results.toSeq
+    decodeStringArray(results)
   }
 
   override def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
@@ -189,7 +221,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
     labelValuesQueryLatency.record(System.nanoTime() - start)
 
-    results.toSeq
+    decodeStringArray(results)
   }
 
   override def addPartKey(partKeyOnHeapBytes: Array[Byte], partId: Int, startTime: Long, endTime: Long,
@@ -645,19 +677,19 @@ protected object TantivyNativeMethods {
 
   // Get the list of unique indexed field names
   @native
-  def indexNames(handle: Long): Array[String]
+  def indexNames(handle: Long): Array[Byte]
 
   // Get the list of unique values for a field
   @native
-  def indexValues(handle: Long, fieldName: String, topK: Int): Array[TermInfo]
+  def indexValues(handle: Long, fieldName: String, topK: Int): Array[Byte]
 
   // Get the list of unique indexed field names
   @native
-  def labelNames(handle: Long, query: Array[Byte], limit: Int, start: Long, end: Long): Array[String]
+  def labelNames(handle: Long, query: Array[Byte], limit: Int, start: Long, end: Long): Array[Byte]
 
   // Get the list of unique values for a field
   @native
-  def labelValues(handle: Long, query: Array[Byte], colName: String, limit: Int, start: Long, end: Long): Array[String]
+  def labelValues(handle: Long, query: Array[Byte], colName: String, limit: Int, start: Long, end: Long): Array[Byte]
 
   // Get the list of part IDs given a query
   @native
