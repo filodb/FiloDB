@@ -96,7 +96,8 @@ object HierarchicalQueryExperience extends StrictLogging {
   }
 
   // Get the allowed periodic series plans which have access to RawSeries from the hierarchical config
-  private lazy val allowedPeriodicSeriesPlansWithRawSeries: Option[Set[String]] = GlobalConfig.hierarchicalConfig match {
+  private lazy val allowedPeriodicSeriesPlansWithRawSeries: Option[Set[String]] =
+    GlobalConfig.hierarchicalConfig match {
     case Some(hierarchicalConfig) =>
       Some(hierarchicalConfig.getStringList("allowed-periodic-series-plans-with-raw-series").asScala.toSet)
     case None => None
