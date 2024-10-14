@@ -571,7 +571,6 @@ case class Aggregate(operator: AggregationOperator,
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
                                                parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
     // Modify the map to retain all the AggRules which satisfies the current Aggregate clause labels.
-    // TODO: add unit test for this
     val updatedMap = params.aggRules.filter(x => HierarchicalQueryExperience
       .checkAggregateQueryEligibleForHigherLevelAggregatedMetric(x._2, operator, clauseOpt))
     if (updatedMap.isEmpty) {
