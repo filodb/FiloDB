@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan.getColumnFilterGroup
-import filodb.query.util.{ExcludeAggRule, IncludeAggRule}
+import filodb.query.util.{ExcludeAggRule, HierarchicalQueryExperienceParams, IncludeAggRule}
 import filodb.query.{Aggregate, BinaryJoin, IntervalSelector, RawSeries, SeriesKeysByFilters}
 
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
@@ -304,8 +304,9 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 1 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - Both lhs and rhs should be updated
     val binaryJoinAggregationBothOptimization = "sum(metric1:::agg{aggTag=\"app\"}) + sum(metric2:::agg{aggTag=\"app\"})"
     var lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     lpUpdated.isInstanceOf[BinaryJoin] shouldEqual true
     lpUpdated.asInstanceOf[BinaryJoin].lhs.isInstanceOf[Aggregate] shouldEqual true
     lpUpdated.asInstanceOf[BinaryJoin].rhs.isInstanceOf[Aggregate] shouldEqual true
@@ -317,7 +318,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - rhs should be updated
     val binaryJoinAggregationRHSOptimization = "sum(metric1:::agg{nonAggTag=\"abc\"}) + sum(metric2:::agg{aggTag=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationRHSOptimization, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -332,7 +333,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // not an aggregated metric, even if both the metrics qualify for aggregation
     val binaryJoinAggregationLHSOptimization = "sum(metric1:::agg{aggTag=\"abc\"}) + sum(metric2{aggTag=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationLHSOptimization, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -350,11 +351,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("aggTag", "aggTag2", "aggTag3", "aggTag4")
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
     // CASE 1 - Aggregate with by clause - should update the metric name as `by` clause labels are part of include tags
     var query = "sum(rate(my_counter:::agg{aggTag=\"spark\", aggTag2=\"app\"}[5m])) by (aggTag4, aggTag3)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -363,7 +365,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
     query = "sum(bottomk(2, my_counter:::agg{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag3, aggTag4)) by (aggTag4)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -372,7 +374,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 3 - should NOT update since the by clause labels are not part of include tags
     query = "sum(rate(my_counter:::agg{aggTag=\"spark\", aggTag2=\"app\"}[5m])) by (aggTag4, aggTag3, nonAggTag)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -381,7 +383,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 4 - should update since the by clause labels are part of include tags - binary join case
     query = "sum(my_gauge:::agg{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag, aggTag2) and on(aggTag, aggTag2) sum(my_counter:::agg{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag, aggTag2)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -390,7 +392,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 5 - lhs should not be updated since it does not match regex pattern - binary join case
     query = "sum(my_gauge{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag, aggTag2) and on(aggTag, aggTag2) sum(my_counter:::agg{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag, aggTag2)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -404,7 +406,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 6 - rhs should not be updated since it has column filters which is not present in include tags
     query = "sum(my_gauge:::agg{aggTag=\"spark\", aggTag2=\"filodb\"}) by (aggTag, aggTag2) and on(aggTag, aggTag2) sum(my_counter:::agg{aggTag=\"spark\", aggTag2=\"filodb\", nonAggTag=\"1\"}) by (aggTag, aggTag2)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -422,11 +424,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationExcludeTags = Set("excludeAggTag", "excludeAggTag2")
-    val params = ExcludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags)
+    val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags)
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> excludeAggRule))
     // CASE 1 - should update the metric name as `by` clause labels are not part of exclude tags
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (host)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -435,7 +438,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - should NOT update the metric name as column filters are not part of exclude tags
     query = "sum(rate(my_counter:::agg{nonAggTag=\"spark\", application=\"app\", excludeAggTag2=\"2.0\"}[5m]))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -444,7 +447,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
     query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"})) by (host)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -453,7 +456,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 3 - should NOT update since the by clause labels intersect with exclude tags
     query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (excludeAggTag2, excludeAggTag, id)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -462,7 +465,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 4 - should update since the by clause labels are not part of exclude tags - binary join case
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host) + sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -471,7 +474,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 5 - lhs should not be updated since it does not match regex pattern - binary join case
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) by (id, host) - sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -485,7 +488,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 6 - rhs should not be updated since it has column filters which are part of exclude tags
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) by (id, host) / sum(your_gauge:::agg{job=\"spark\", application=\"filodb\", excludeAggTag2=\"1\"}) by (id, host)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -503,11 +506,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationExcludeTags = Set("excludeAggTag", "excludeAggTag2")
-    val params = ExcludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags)
+    val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags)
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> excludeAggRule))
     // CASE 1 - should update since the exclude tags are subset of the without clause labels
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (excludeAggTag2, excludeAggTag)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -516,7 +520,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2 - should NOT update since bottomk aggregation operator is not allowed as of now
     query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (excludeAggTag, excludeAggTag2))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -525,7 +529,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 3 - should NOT update since the column filter label is part of exclude tags
     query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\", excludeAggTag2=\"2\"}[5m]))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -534,7 +538,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 4 - should update since the exclude tags are subset of the without clause labels
     query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (excludeAggTag2, excludeAggTag, id)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -543,7 +547,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 5 - should not update since the exclude tags are not subset of the without clause labels
     query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (excludeAggTag2)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -552,7 +556,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 6 - should update since the exclude tags are subset of without clause labels - binary join case
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (excludeAggTag2, excludeAggTag) and ignoring(excludeAggTag2, excludeAggTag) sum(my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (excludeAggTag2, excludeAggTag)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -561,7 +565,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 7 - lhs should not be updated since it does not match regex pattern - binary join case
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) without (excludeAggTag2, excludeAggTag) and ignoring(excludeAggTag2, excludeAggTag) sum(my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (excludeAggTag2, excludeAggTag)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -575,7 +579,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 8 - rhs should not be updated since it has column filters which is part of exclude tags
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (excludeAggTag2, excludeAggTag) and ignoring(excludeAggTag2, excludeAggTag) sum(my_counter:::agg{job=\"spark\", application=\"filodb\", excludeAggTag2=\"1\"}) without (excludeAggTag2, excludeAggTag)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -593,11 +597,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
     // All the cases should not be updated since without clause with include tags is not supported as of now
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version, instance)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -605,7 +610,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
     query = "sum(bottomk(2, my_counter:::agg{job=\"spark\", application=\"filodb\"}) without (instance, version))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -613,7 +618,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) + sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -621,7 +626,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
     query = "sum(my_gauge{job=\"spark\", application=\"filodb\"}) without (version, instance) - sum(your_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -634,7 +639,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
     query = "sum(my_gauge:::agg{job=\"spark\", application=\"filodb\"}) without (version, instance) / sum(your_gauge:::agg{job=\"spark\", application=\"filodb\", version=\"1\"}) without (version, instance)"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -652,11 +657,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
     // CASE 1: Raw queries lp should not be updated directly
     var query = "my_counter:::agg{job=\"spark\", application=\"app\"}[5m]"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -665,7 +671,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2: Simple range query without aggregates lp should not be updated directly
     query = "rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -678,12 +684,13 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
     // CASE 1: count aggregate should not be allowed
     var query = "count(my_gauge:::agg{job=\"spark\", application=\"app\"})"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
     lp.isInstanceOf[Aggregate] shouldEqual true
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -693,7 +700,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m]))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -703,7 +710,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     query = "avg(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m]))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -713,7 +720,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     query = "min(my_gauge:::agg{job=\"spark\", application=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -723,7 +730,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     query = "max(my_gauge:::agg{job=\"spark\", application=\"app\"})"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -736,11 +743,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val t = TimeStepParams(700, 1000, 10000)
     val nextLevelAggregatedMetricSuffix = "agg_2"
     var nextLevelAggregationTags = Set("aggTag1", "aggTag2", "aggTag3")
-    val params = IncludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
     // CASE 1: should update the metric name as `by` clause labels are part of include tags
     var query = "sum(sum(my_counter:::agg{aggTag1=\"spark\", aggTag2=\"app\"}) by (aggTag1, aggTag2, aggTag3))"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
-    var lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     var filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -749,7 +757,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 2: should not update since count aggregate operator is not allowed
     query = "sum by (aggTag1, aggTag2) (count by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\",aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -758,7 +766,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // CASE 3: should update since min aggregate operator is allowed
     query = "sum by (aggTag1, aggTag2) (min by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\",aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
-    lpUpdated = lp.useHigherLevelAggregatedMetric(params)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
     filterGroups.foreach(
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
@@ -766,7 +774,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
     // using excludeTags
     nextLevelAggregationTags = Set("excludeAggTag1", "excludeAggTag2")
-    val excludeParams = ExcludeAggRule(":::", nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> excludeAggRule))
     // CASE 4: should update since excludeTags are not used
     query = "sum by (aggTag1, aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -785,5 +794,170 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_gauge:::agg")
     )
+  }
+
+  it("LogicalPlan update for BinaryJoin with multiple agg rules and suffixes") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"))
+    val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"))
+    // Query with multiple agg rules and suffixes
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    // CASE 1 - should update - simple binary join with two different aggregated metrics and suffixes, both of which are satisfying the next level aggregation metric constraints
+    var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"})"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("_2").shouldEqual(true)
+    )
+    // CASE 2 - should NOT update as rhs is using an exclude tag
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) + sum(your_gauge:::suffix2{excludeTag1=\"spark\", notExcludeTag2=\"filodb\"})"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    var updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1_2").shouldEqual(true)
+    updatedMetricNamesSet.contains("your_gauge:::suffix2").shouldEqual(true) // not updated
+    // CASE 3 - should NOT update as lhs is not using an include tag
+    query = "sum(my_gauge:::suffix1{notIncludeTag1=\"spark\", includeTag2=\"filodb\"}) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"})"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1").shouldEqual(true) // not updated
+    updatedMetricNamesSet.contains("your_gauge:::suffix2_2").shouldEqual(true)
+    // CASE 4 - should NOT update as both lhs and rhs are not using appropriate tags for next level aggregation metric
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", notIncludeTag2=\"filodb\"}) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", excludeTag2=\"filodb\"})"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1").shouldEqual(true) // not updated
+    updatedMetricNamesSet.contains("your_gauge:::suffix2").shouldEqual(true) // not updated
+  }
+
+  it("LogicalPlan update for BinaryJoin with multiple agg rules and suffixes with by clauses") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"))
+    val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"))
+    // Query with multiple agg rules and suffixes
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    // CASE 1 - should update - both lhs and rhs are satisfying the next level aggregation metric constraints
+    var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExcludeTag1)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("_2").shouldEqual(true)
+    )
+    // CASE 2 - should NOT update as rhs is using an exclude tag
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (excludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    var updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1_2").shouldEqual(true)
+    updatedMetricNamesSet.contains("your_gauge:::suffix2").shouldEqual(true) // not updated
+    // CASE 3 - should NOT update as lhs is not using an include tag
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (notIncludeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1").shouldEqual(true) // not updated
+    updatedMetricNamesSet.contains("your_gauge:::suffix2_2").shouldEqual(true)
+    // CASE 4 - should NOT update as both lhs and rhs are not using appropriate tags for next level aggregation metric
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (notIncludeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (excludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1").shouldEqual(true) // not updated
+    updatedMetricNamesSet.contains("your_gauge:::suffix2").shouldEqual(true) // not updated
+  }
+
+  it("LogicalPlan update for BinaryJoin with multiple agg rules and suffixes with by and without clauses") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"))
+    val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"))
+    // Query with multiple agg rules and suffixes
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    // CASE 1 - should update - both lhs and rhs are satisfying the next level aggregation metric constraints
+    var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) without (excludeTag1, excludeTag2)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("_2").shouldEqual(true)
+    )
+    // CASE 2 - should NOT update as excludeRule tags is not subset of rhs without clause labels
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) without (excludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    var updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1_2").shouldEqual(true)
+    updatedMetricNamesSet.contains("your_gauge:::suffix2").shouldEqual(true) // not updated
+  }
+
+  it("LogicalPlan should not update when next level aggregation metric suffix is not matching agg rules") {
+    // common parameters
+    val t = TimeStepParams(700, 1000, 10000)
+    val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"))
+    val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"))
+    // Query with multiple agg rules and suffixes
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    // CASE 1 - should not update - both lhs and rhs metric are not using suffix passed for lp update
+    var query = "sum(my_gauge:::no_rule{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1)"
+    var lp = Parser.queryRangeToLogicalPlan(query, t)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    var updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::no_rule").shouldEqual(true)// not updated
+    // CASE 2 - should NOT update rhs as it is not using the given suffix
+    query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::no_rule2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExcludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::suffix1_2").shouldEqual(true)
+    updatedMetricNamesSet.contains("your_gauge:::no_rule2").shouldEqual(true) // not updated
+    // CASE 3 - should NOT update lhs as it is not using the given suffix
+    query = "sum(my_gauge:::no_rule{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExcludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::no_rule").shouldEqual(true)// not updated
+    updatedMetricNamesSet.contains("your_gauge:::suffix2_2").shouldEqual(true)
+    // CASE 3 - should NOT update lhs and rhs as it is not using the given suffix
+    query = "sum(my_gauge:::no_rule{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::no_rule2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExcludeTag1)"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    updatedMetricNamesSet = filterGroups.flatten.filter(x => x.column == "__name__")
+      .map(_.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    updatedMetricNamesSet.contains("my_gauge:::no_rule").shouldEqual(true) // not updated
+    updatedMetricNamesSet.contains("your_gauge:::no_rule2").shouldEqual(true) // not updated
   }
 }
