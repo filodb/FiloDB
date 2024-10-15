@@ -11,11 +11,11 @@ import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardin
 
 /**
  * Aggregation rule definition. Contains the following information:
- * 1. aggregation metric regex to be matched
+ * 1. aggregation metricDelimiter to be matched
  * 2. map of current aggregation metric suffix -> nextLevelAggregation's AggRule to be used
  *    For example: agg -> AggRule { metricSuffix = agg_2, tags = Set("tag1", "tag2") }
  */
-case class HierarchicalQueryExperienceParams(metricRegex: String,
+case class HierarchicalQueryExperienceParams(metricDelimiter: String,
                                              aggRules: Map[String, AggRule]) { }
 
 /**
@@ -165,17 +165,17 @@ object HierarchicalQueryExperience extends StrictLogging {
   }
 
   /** Returns the next level aggregated metric name. Example
-   *  metricRegex = :::
+   *  metricDelimiter = :::
    *  metricSuffix = agg_2
    *  Existing metric name - metric1:::agg
    *  After update - metric1:::agg -> metric1:::agg_2
    * @param metricName - String - Metric ColumnFilter tag/label
-   * @param metricRegex - HierarchicalQueryExperience - Contains
+   * @param metricDelimiter - HierarchicalQueryExperience - Contains
    * @param metricSuffix - Seq[ColumnFilter] - label filters of the query/lp
    * @return - Option[String] - Next level aggregated metric name
    */
-  def getNextLevelAggregatedMetricName(metricName : String, metricRegex: String, metricSuffix: String): String = {
-    metricName.replaceFirst(metricRegex + ".*", metricRegex + metricSuffix)
+  def getNextLevelAggregatedMetricName(metricName : String, metricDelimiter: String, metricSuffix: String): String = {
+    metricName.replaceFirst(metricDelimiter + ".*", metricDelimiter + metricSuffix)
   }
 
   /** Gets the current metric name from the given metricColumnFilter and filters
@@ -238,7 +238,7 @@ object HierarchicalQueryExperience extends StrictLogging {
 
   /**
    * Updates the metric column filter if higher level aggregation is applicable
-   * @param params - HierarchicalQueryExperienceParams - Contains metricRegex and aggRules
+   * @param params - HierarchicalQueryExperienceParams - Contains metricDelimiter and aggRules
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
    * @return - Seq[ColumnFilter] - Updated filters
    */
@@ -252,7 +252,7 @@ object HierarchicalQueryExperience extends StrictLogging {
         case Some(aggRule) =>
           if (isHigherLevelAggregationApplicable(aggRule._2, filterTags)) {
             val updatedMetricName = getNextLevelAggregatedMetricName(
-              currentMetricName.get, params.metricRegex, aggRule._2.metricSuffix)
+              currentMetricName.get, params.metricDelimiter, aggRule._2.metricSuffix)
             val updatedFilters = upsertFilters(
               filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
             logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
