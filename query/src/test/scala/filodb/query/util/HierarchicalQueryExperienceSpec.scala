@@ -47,8 +47,8 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("isAggregationOperatorAllowed should return expected values") {
     HierarchicalQueryExperience.isAggregationOperatorAllowed("sum") shouldEqual true
-    HierarchicalQueryExperience.isAggregationOperatorAllowed("min") shouldEqual true
-    HierarchicalQueryExperience.isAggregationOperatorAllowed("max") shouldEqual true
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("min") shouldEqual false
+    HierarchicalQueryExperience.isAggregationOperatorAllowed("max") shouldEqual false
     HierarchicalQueryExperience.isAggregationOperatorAllowed("avg") shouldEqual false
     HierarchicalQueryExperience.isAggregationOperatorAllowed("count") shouldEqual false
     HierarchicalQueryExperience.isAggregationOperatorAllowed("topk") shouldEqual false

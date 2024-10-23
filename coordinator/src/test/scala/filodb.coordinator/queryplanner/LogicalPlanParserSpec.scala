@@ -716,26 +716,6 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
         .shouldEqual("my_counter:::agg")
     )
-    // CASE 4: min aggregate should be allowed
-    query = "min(my_gauge:::agg{job=\"spark\", application=\"app\"})"
-    lp = Parser.queryRangeToLogicalPlan(query, t)
-    lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
-    filterGroups = getColumnFilterGroup(lpUpdated)
-    filterGroups.foreach(
-      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
-        .shouldEqual("my_gauge:::agg_2")
-    )
-    // CASE 5: max aggregate should be allowed
-    query = "max(my_gauge:::agg{job=\"spark\", application=\"app\"})"
-    lp = Parser.queryRangeToLogicalPlan(query, t)
-    lp.isInstanceOf[Aggregate] shouldEqual true
-    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
-    filterGroups = getColumnFilterGroup(lpUpdated)
-    filterGroups.foreach(
-      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
-        .shouldEqual("my_gauge:::agg_2")
-    )
   }
 
   it("LogicalPlan update for hierarchical nested aggregation queries") {
@@ -764,7 +744,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
         .shouldEqual("my_gauge:::agg")
     )
     // CASE 3: should update since min aggregate operator is allowed
-    query = "sum by (aggTag1, aggTag2) (min by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\",aggTag2=\"b\"}))"
+    query = "sum by (aggTag1, aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\",aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
     lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     filterGroups = getColumnFilterGroup(lpUpdated)
