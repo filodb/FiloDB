@@ -249,13 +249,13 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
       val otherBuckets = other.buckets.asInstanceOf[OTelExpHistogramBuckets]
       // if our buckets is subset of other buckets, then we can add the values
       if (ourBuckets.canAccommodate(otherBuckets)) {
-        ourBuckets.addValues(values2, otherBuckets, other.valueArray) // FIXME perf issue avoid array copy
+        ourBuckets.addValues(values2, otherBuckets, other)
         false
       } else {
         val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
         val newValues = new Array[Double](newBuckets.numBuckets) // new values array
-        newBuckets.addValues(newValues, ourBuckets, values2)
-        newBuckets.addValues(newValues, otherBuckets, other.valueArray) // FIXME perf issue avoid array copy
+        newBuckets.addValues(newValues, ourBuckets, this)
+        newBuckets.addValues(newValues, otherBuckets, other)
         buckets2 = newBuckets
         values2 = newValues
         false
@@ -582,10 +582,11 @@ final case class OTelExpHistogramBuckets(scale: Int,
    * bucket scheme and (a) this bucket scheme can accommodate otherBuckets.
    */
   def addValues(ourValues: Array[Double],
-                otherBuckets: OTelExpHistogramBuckets, otherValues: Array[Double]): Unit = {
+                otherBuckets: OTelExpHistogramBuckets,
+                otherHistogram: HistogramWithBuckets): Unit = {
     // TODO remove the require once code is stable
     require(ourValues.length == numBuckets)
-    require(otherValues.length == otherBuckets.numBuckets)
+    require(otherHistogram.numBuckets == otherBuckets.numBuckets)
     require(canAccommodate(otherBuckets))
     // for each ourValues, find the bucket index in otherValues and add the value
     val fac = Math.pow(2 , otherBuckets.scale - scale).toInt
@@ -597,15 +598,13 @@ final case class OTelExpHistogramBuckets(scale: Int,
       // TODO remove this require once code is stable
       require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001)
       if (otherArrayIndex >= 0 && otherArrayIndex < otherBuckets.numBuckets) {
-        ourValues(ourArrayIndex) += otherValues(otherArrayIndex)
+        ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherArrayIndex)
       } else if (otherArrayIndex >= otherBuckets.numBuckets) {
-        ourValues(ourArrayIndex) += otherValues(otherBuckets.numBuckets - 1)
+        ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherBuckets.numBuckets - 1)
       }
     }
   }
 }
-
-
 
 
 /**

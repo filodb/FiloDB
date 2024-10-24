@@ -242,9 +242,9 @@ class HistogramTest extends NativeVectorTest {
       bAdd.canAccommodate(b2) shouldEqual true
 
       val bAddValues = new Array[Double](bAdd.numBuckets)
-      bAdd.addValues(bAddValues, b1, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
+      bAdd.addValues(bAddValues, b1, MutableHistogram(b1, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)))
       bAddValues.toSeq shouldEqual Seq(0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 11.0, 11.0)
-      bAdd.addValues(bAddValues, b2, Array(1, 2, 3, 4, 5, 6, 7))
+      bAdd.addValues(bAddValues, b2, MutableHistogram(b2, Array(1, 2, 3, 4, 5, 6, 7)))
       bAddValues.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0)
 
       val b4 = OTelExpHistogramBuckets(5, 15, 50) // 1.414 to 3.018
@@ -259,13 +259,13 @@ class HistogramTest extends NativeVectorTest {
 
       val bAdd2 = bAdd.add(b4).add(b5)
       val bAdd2Values = new Array[Double](bAdd2.numBuckets)
-      bAdd2.addValues(bAdd2Values, bAdd, bAddValues)
+      bAdd2.addValues(bAdd2Values, bAdd, MutableHistogram(bAdd, bAddValues))
       bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0, 18.0, 18.0, 18.0, 18.0)
 
-      bAdd2.addValues(bAdd2Values, b4, (0 until 36 map (i => i.toDouble)).toArray)
+      bAdd2.addValues(bAdd2Values, b4, MutableHistogram(b4, (0 until 36 map (i => i.toDouble)).toArray))
       bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 24.0, 33.0, 42.0, 50.0, 53.0, 53.0, 53.0)
 
-      bAdd2.addValues(bAdd2Values, b5, Array(10.0, 11, 12, 13, 14, 15))
+      bAdd2.addValues(bAdd2Values, b5, MutableHistogram(b5, Array(10.0, 11, 12, 13, 14, 15)))
       bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 24.0, 33.0, 42.0, 61.0, 66.0, 68.0, 68.0)
 
     }
