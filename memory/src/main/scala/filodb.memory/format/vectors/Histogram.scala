@@ -1,11 +1,10 @@
 package filodb.memory.format.vectors
 
-import java.nio.ByteOrder.LITTLE_ENDIAN
-
+import filodb.memory.format._
 import org.agrona.{DirectBuffer, MutableDirectBuffer}
 import spire.syntax.cfor._
 
-import filodb.memory.format._
+import java.nio.ByteOrder.LITTLE_ENDIAN
 
 /**
  * A trait to represent bucket-based histograms as well as derived statistics such as sums or rates of
@@ -433,6 +432,7 @@ object HistogramBuckets {
   def apply(buffer: DirectBuffer, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(buffer.byteArray, buffer.addressOffset + 2, false)
     case HistFormat_Geometric1_Delta => geometric(buffer.byteArray, buffer.addressOffset + 2, true)
+    case HistFormat_Geometric2_Delta => otelExp(buffer.byteArray, buffer.addressOffset)
     case HistFormat_Custom_Delta     => custom(buffer.byteArray, buffer.addressOffset)
     case _                           => emptyBuckets
   }
@@ -441,6 +441,7 @@ object HistogramBuckets {
   def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
+    case HistFormat_Geometric2_Delta => otelExp(acc.base, acc.baseOffset + bucketsDef.addr)
     case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }
@@ -452,6 +453,13 @@ object HistogramBuckets {
                      UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
                      UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt,
                      minusOne)
+
+  def otelExp(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets = {
+    val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
+    val startPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+    val endPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
+    OTelExpHistogramBuckets(scale, startPosBucket, endPosBucket)
+  }
 
   /**
    * Creates a CustomBuckets definition.
@@ -508,7 +516,6 @@ final case class GeometricBuckets(firstBucket: Double,
   }
 }
 
-
 final case class OTelExpHistogramBuckets(scale: Int,
                                          startIndexPositiveBuckets: Int, // inclusive
                                          endIndexPositiveBuckets: Int // inclusive
@@ -534,16 +541,14 @@ final case class OTelExpHistogramBuckets(scale: Int,
       Math.pow(base, index + 1)
   }
 
-  import HistogramBuckets._
-
   final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
     require(scale < 100 && scale > -100, s"Unsupported scale $scale")
     require(numBuckets < 65536, s"Too many buckets: $numBuckets")
-    val scalePos = pos + 2
     buf.putShort(pos, (2 + 4 + 4).toShort)
+    val scalePos = pos + 2
     buf.putShort(scalePos, scale.toShort, LITTLE_ENDIAN)
-    buf.putInt(scalePos + OffsetBucketDetails, startIndexPositiveBuckets, LITTLE_ENDIAN)
-    buf.putInt(scalePos + OffsetBucketDetails, endIndexPositiveBuckets, LITTLE_ENDIAN)
+    buf.putInt(scalePos + 2, startIndexPositiveBuckets, LITTLE_ENDIAN)
+    buf.putInt(scalePos + 2 + 4, endIndexPositiveBuckets, LITTLE_ENDIAN)
     pos + 2 + 2 + 4 + 4
   }
 

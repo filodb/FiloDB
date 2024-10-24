@@ -102,13 +102,14 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Null = 0x00.toByte
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
+  val HistFormat_Geometric2_Delta = 0x09.toByte
   val HistFormat_Custom_Delta = 0x05.toByte
   val HistFormat_Geometric_XOR = 0x08.toByte    // Double values XOR compressed
   val HistFormat_Custom_XOR = 0x0a.toByte
 
   def isValidFormatCode(code: Byte): Boolean =
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
-    (code == HistFormat_Custom_Delta)
+    (code == HistFormat_Custom_Delta) || (code == HistFormat_Geometric2_Delta)
 
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
@@ -148,6 +149,7 @@ object BinaryHistogram extends StrictLogging {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
       case c: CustomBuckets                  => HistFormat_Custom_Delta
+      case o: OTelExpHistogramBuckets        => HistFormat_Geometric2_Delta
     }
 
     buf.putByte(2, formatCode)
