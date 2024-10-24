@@ -215,5 +215,69 @@ class HistogramTest extends NativeVectorTest {
         current = d
       }
     }
+
+    it("should create OTel exponential buckets and add them correctly") {
+      val b1 = OTelExpHistogramBuckets(3, -5, 5) // 0.707 to 1.68
+      b1.numBuckets shouldEqual 11
+      b1.startBucketTop shouldBe 0.7071067811865475 +- 0.0001
+      b1.endBucketTop shouldBe 1.6817928305074294 +- 0.0001
+
+      b1.bucketIndexToArrayIndex(-5) shouldEqual 0
+      b1.bucketIndexToArrayIndex(5) shouldEqual 10
+      b1.bucketTop(b1.bucketIndexToArrayIndex(-1)) shouldEqual 1.0
+
+      val b2 = OTelExpHistogramBuckets(2, -2, 4) // 0.8408 to 2.378
+      val b3 = OTelExpHistogramBuckets(2, -4, 4) // 0.594 to 2.378
+      b1.canAccommodate(b2) shouldEqual false
+      b2.canAccommodate(b1) shouldEqual false
+      b3.canAccommodate(b1) shouldEqual true
+      b3.canAccommodate(b2) shouldEqual true
+
+      val bAdd = b1.add(b2)
+      bAdd.numBuckets shouldEqual 9
+      bAdd.scale shouldEqual 2
+      bAdd.startBucketTop shouldBe 0.5946035575013606 +- 0.0001
+      bAdd.endBucketTop shouldBe 2.378414245732675 +- 0.0001
+      bAdd.canAccommodate(b1) shouldEqual true
+      bAdd.canAccommodate(b2) shouldEqual true
+
+      val bAddValues = new Array[Double](bAdd.numBuckets)
+      bAdd.addValues(bAddValues, b1, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
+      bAddValues.toSeq shouldEqual Seq(0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 11.0, 11.0)
+      bAdd.addValues(bAddValues, b2, Array(1, 2, 3, 4, 5, 6, 7))
+      bAddValues.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0)
+
+      val b4 = OTelExpHistogramBuckets(5, 15, 50) // 1.414 to 3.018
+      b4.numBuckets shouldEqual 36
+      b4.startBucketTop shouldBe 1.414213562373094 +- 0.0001
+      b4.endBucketTop shouldBe 3.0183288551868377 +- 0.0001
+
+      val b5 = OTelExpHistogramBuckets(3, 10, 15)
+      b5.numBuckets shouldEqual 6
+      b5.startBucketTop shouldBe 2.59367910930202 +- 0.0001
+      b5.endBucketTop shouldBe 4.000000000000002 +- 0.0001
+
+      val bAdd2 = bAdd.add(b4).add(b5)
+      val bAdd2Values = new Array[Double](bAdd2.numBuckets)
+      bAdd2.addValues(bAdd2Values, bAdd, bAddValues)
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0, 18.0, 18.0, 18.0, 18.0)
+
+      bAdd2.addValues(bAdd2Values, b4, (0 until 36 map (i => i.toDouble)).toArray)
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 24.0, 33.0, 42.0, 50.0, 53.0, 53.0, 53.0)
+
+      bAdd2.addValues(bAdd2Values, b5, Array(10.0, 11, 12, 13, 14, 15))
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 24.0, 33.0, 42.0, 61.0, 66.0, 68.0, 68.0)
+
+    }
+
+    it("should create non-overlapping OTel exponential buckets and add them correctly") {
+      val b1 = OTelExpHistogramBuckets(3, -5, 5)
+      val b2 = OTelExpHistogramBuckets(3, 15, 25)
+      val b3 = b1.add(b2)
+      b3.numBuckets shouldEqual 31
+      b3.startIndexPositiveBuckets shouldEqual -5
+      b3.endIndexPositiveBuckets shouldEqual 25
+    }
+
   }
 }

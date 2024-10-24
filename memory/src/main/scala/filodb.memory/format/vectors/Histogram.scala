@@ -191,13 +191,17 @@ object LongHistogram {
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values
  */
-final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Double]) extends HistogramWithBuckets {
-  final def bucketValue(no: Int): Double = values(no)
+final case class MutableHistogram(private var buckets2: HistogramBuckets,
+                                  private var values2: Array[Double]) extends HistogramWithBuckets {
+
+  final def buckets: HistogramBuckets = buckets2
+  final def values: Array[Double] = values2
+  final def bucketValue(no: Int): Double = values2(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
     buckets match {
-      case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
-      case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
+      case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values2.map(_.toLong), buf)
+      case _ => BinaryHistogram.writeDoubles(buckets, values2, buf)
     }
     buf
   }
@@ -205,7 +209,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   /**
    * Copies this histogram as a new copy so it can be used for aggregation or mutation. Allocates new storage.
    */
-  final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
+  final def copy: MutableHistogram = MutableHistogram(buckets, values2.clone)
 
   /**
    * Copies the values of this histogram from another histogram.  Other histogram must have same bucket scheme.
@@ -214,10 +218,10 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     require(other.buckets == buckets)
     other match {
       case m: MutableHistogram =>
-        System.arraycopy(m.values, 0, values, 0, values.size)
+        System.arraycopy(m.values2, 0, values2, 0, values2.size)
       case l: LongHistogram    =>
-        cforRange { 0 until values.size } { n =>
-          values(n) = l.values(n).toDouble
+        cforRange { 0 until values2.size } { n =>
+          values2(n) = l.values(n).toDouble
         }
     }
   }
@@ -229,18 +233,37 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * @param other Histogram to be added
    * @return true when input histogram has same schema and false when schema is different
    */
+  // scalastyle:off method.length
   final def addNoCorrection(other: HistogramWithBuckets): Boolean = {
     // Allow addition when type of bucket is different
-    if (buckets.similarForMath(other.buckets)) {
+    if (buckets2.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
-      if (java.lang.Double.isNaN(values(0))) java.util.Arrays.fill(values, 0.0)
+      if (java.lang.Double.isNaN(values2(0))) java.util.Arrays.fill(values2, 0.0)
       cforRange { 0 until numBuckets } { b =>
-        values(b) += other.bucketValue(b)
+        values2(b) += other.bucketValue(b)
       }
       true
-    } else {
+    } else if (buckets2.isInstanceOf[OTelExpHistogramBuckets] && other.buckets.isInstanceOf[OTelExpHistogramBuckets]) {
+
+      val ourBuckets = buckets2.asInstanceOf[OTelExpHistogramBuckets]
+      val otherBuckets = other.buckets.asInstanceOf[OTelExpHistogramBuckets]
+      // if our buckets is subset of other buckets, then we can add the values
+      if (ourBuckets.canAccommodate(otherBuckets)) {
+        ourBuckets.addValues(values2, otherBuckets, other.valueArray) // FIXME perf issue avoid array copy
+        false
+      } else {
+        val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
+        val newValues = new Array[Double](newBuckets.numBuckets) // new values array
+        newBuckets.addValues(newValues, ourBuckets, values2)
+        newBuckets.addValues(newValues, otherBuckets, other.valueArray) // FIXME perf issue avoid array copy
+        buckets2 = newBuckets
+        values2 = newValues
+        false
+      }
+    }
+    else {
       cforRange { 0 until numBuckets } { b =>
-        values(b) = Double.NaN
+        values2(b) = Double.NaN
       }
       false
       // TODO: In the future, support adding buckets of different scheme.  Below is an example
@@ -274,11 +297,11 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     */
   final def makeMonotonic(): Unit = {
     var max = 0d
-    cforRange { 0 until values.size } { b =>
+    cforRange { 0 until values2.size } { b =>
       // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
       // newer buckets are introduced and not all instances are updated with that bucket.
-      if (values(b) < max || java.lang.Double.isNaN(values(b))) values(b) = max // assign previous max
-      else if (values(b) > max) max = values(b) // update max
+      if (values2(b) < max || java.lang.Double.isNaN(values2(b))) values2(b) = max // assign previous max
+      else if (values2(b) > max) max = values2(b) // update max
     }
   }
 }
@@ -484,6 +507,106 @@ final case class GeometricBuckets(firstBucket: Double,
     }
   }
 }
+
+
+final case class OTelExpHistogramBuckets(scale: Int,
+                                         startIndexPositiveBuckets: Int, // inclusive
+                                         endIndexPositiveBuckets: Int // inclusive
+                                         // ignore negative and zero buckets for now;
+                                         // decide to add later by adding code to handle negative buckets similarly
+                                        ) extends HistogramBuckets {
+  require(endIndexPositiveBuckets >= startIndexPositiveBuckets,
+    s"Invalid bucket range: $startIndexPositiveBuckets to $endIndexPositiveBuckets")
+  val base: Double = Math.pow(2, Math.pow(2, -scale))
+  val startBucketTop: Double = bucketTop(0)
+  val endBucketTop: Double = bucketTop(endIndexPositiveBuckets - startIndexPositiveBuckets + 1 - 1)
+
+  override def numBuckets: Int = endIndexPositiveBuckets - startIndexPositiveBuckets + 1
+
+  def bucketIndexToArrayIndex(index: Int): Int = index - startIndexPositiveBuckets
+
+  final def bucketTop(no: Int): Double = {
+      // From OTel metrics proto docs:
+      // The histogram bucket identified by `index`, a signed integer,
+      // contains values that are greater than (base^index) and
+      // less than or equal to (base^(index+1)).
+      val index = startIndexPositiveBuckets + no
+      Math.pow(base, index + 1)
+  }
+
+  import HistogramBuckets._
+
+  final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
+    require(scale < 100 && scale > -100, s"Unsupported scale $scale")
+    require(numBuckets < 65536, s"Too many buckets: $numBuckets")
+    val scalePos = pos + 2
+    buf.putShort(pos, (2 + 4 + 4).toShort)
+    buf.putShort(scalePos, scale.toShort, LITTLE_ENDIAN)
+    buf.putInt(scalePos + OffsetBucketDetails, startIndexPositiveBuckets, LITTLE_ENDIAN)
+    buf.putInt(scalePos + OffsetBucketDetails, endIndexPositiveBuckets, LITTLE_ENDIAN)
+    pos + 2 + 2 + 4 + 4
+  }
+
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case c: OTelExpHistogramBuckets => this.scale == c.scale &&
+                                         this.startIndexPositiveBuckets == c.startIndexPositiveBuckets &&
+                                         this.endIndexPositiveBuckets == c.endIndexPositiveBuckets
+      case _                          => false
+    }
+  }
+
+  def canAccommodate(other: OTelExpHistogramBuckets): Boolean = {
+    // FIXME there can be double's == problems here
+    endBucketTop >= other.endBucketTop && startBucketTop <= other.startBucketTop
+  }
+
+  def add(o: OTelExpHistogramBuckets): OTelExpHistogramBuckets = {
+    if (canAccommodate(o)) {
+      this
+    } else {
+      val newScale = Math.min(scale, o.scale)
+      val newBase = Math.pow(2, Math.pow(2, -newScale))
+      val minBucketTopNeeded = Math.min(startBucketTop, o.startBucketTop)
+      val maxBucketTopNeeded = Math.max(endBucketTop, o.endBucketTop)
+      // TODO if number of buckets is too large, we should reduce the scale to contain memory usage
+      // it is possible 1 extra bucket is added because of rounding, but that is okay
+      val newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      val newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      OTelExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd)
+    }
+  }
+
+  /**
+   * Add the otherValues using otherBuckets scheme to ourValues. This method assumes (a) ourValues uses "this"
+   * bucket scheme and (a) this bucket scheme can accommodate otherBuckets.
+   */
+  def addValues(ourValues: Array[Double],
+                otherBuckets: OTelExpHistogramBuckets, otherValues: Array[Double]): Unit = {
+    // TODO remove the require once code is stable
+    require(ourValues.length == numBuckets)
+    require(otherValues.length == otherBuckets.numBuckets)
+    require(canAccommodate(otherBuckets))
+    // for each ourValues, find the bucket index in otherValues and add the value
+    val fac = Math.pow(2 , otherBuckets.scale - scale).toInt
+    cforRange { ourValues.indices } { i =>
+      val ourBucketIndexM1 = startIndexPositiveBuckets + i + 1
+      val otherBucketIndexM1 = ourBucketIndexM1 * fac
+      val ourArrayIndex = bucketIndexToArrayIndex(ourBucketIndexM1 - 1)
+      val otherArrayIndex = otherBuckets.bucketIndexToArrayIndex(otherBucketIndexM1 - 1)
+      // TODO remove this require once code is stable
+      require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001)
+      if (otherArrayIndex >= 0 && otherArrayIndex < otherBuckets.numBuckets) {
+        ourValues(ourArrayIndex) += otherValues(otherArrayIndex)
+      } else if (otherArrayIndex >= otherBuckets.numBuckets) {
+        ourValues(ourArrayIndex) += otherValues(otherBuckets.numBuckets - 1)
+      }
+    }
+  }
+}
+
+
+
 
 /**
  * A bucketing scheme with custom bucket/LE values.

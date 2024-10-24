@@ -172,6 +172,7 @@ object BinaryHistogram extends StrictLogging {
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
       case g: GeometricBuckets               => HistFormat_Geometric_XOR
       case c: CustomBuckets                  => HistFormat_Custom_XOR
+      case o: OTelExpHistogramBuckets        => HistFormat_Geometric_XOR
     }
 
     buf.putByte(2, formatCode)
