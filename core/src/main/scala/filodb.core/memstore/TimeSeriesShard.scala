@@ -285,6 +285,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val disableIndexCaching = filodbConfig.getBoolean("memstore.disable-index-caching")
+  private val typeFieldIndexingEnabled = filodbConfig.getBoolean("memstore.type-field-indexing-enabled")
 
 
   /////// END CONFIGURATION FIELDS ///////////////////
@@ -313,7 +314,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private[memstore] final val partKeyIndex: PartKeyIndexRaw = new PartKeyLuceneIndex(ref, schemas.part,
     indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
-    storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching)
+    storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching,
+    addMetricTypeField = typeFieldIndexingEnabled)
 
   private val cardTracker: CardinalityTracker = initCardTracker()
 
@@ -1853,7 +1855,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
       pair._1.utf8 -> pair._2.utf8
     }).toMap ++
-      Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
+      Map(Schemas.TypeLabel.utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
   }
 
   /**

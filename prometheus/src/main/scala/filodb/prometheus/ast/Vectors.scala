@@ -3,13 +3,14 @@ package filodb.prometheus.ast
 import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryUtils, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
 object Vectors {
   val PromMetricLabel = "__name__"
-  val TypeLabel       = "_type_"
+  val TypeLabel       = Schemas.TypeLabel
   val BucketFilterLabel = "_bucket_"
   val conf = GlobalConfig.systemConfig
   val queryConfig = conf.getConfig("filodb.query")

@@ -4,8 +4,8 @@ import remote.RemoteStorage._
 
 import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
+import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{QueryUtils, Result => _, _}
 import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
@@ -230,7 +230,7 @@ object PrometheusModel {
   def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {
     Map("_shards_" -> rvk.sourceShards.mkString(","),
       "_partIds_" -> rvk.partIds.mkString(","),
-      "_type_" -> rvk.schemaNames.mkString(","))
+      Schemas.TypeLabel -> rvk.schemaNames.mkString(","))
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
