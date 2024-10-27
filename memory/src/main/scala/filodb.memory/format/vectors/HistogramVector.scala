@@ -23,6 +23,7 @@ import filodb.memory.format.MemoryReader._
  *                  0x03   geometric   + NibblePacked delta Long values
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *                  0x05   custom LE/bucket values + NibblePacked delta Long values
+ *                  0x09   geometric_2 + NibblePacked delta Long values  (see [[OTelExpHistogramBuckets]])
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -63,6 +64,9 @@ object BinaryHistogram extends StrictLogging {
       case HistFormat_Geometric1_Delta =>
         val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_Geometric2_XOR =>
+        val bucketDef = HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case HistFormat_Custom_Delta =>
         val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
@@ -102,14 +106,16 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Null = 0x00.toByte
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
-  val HistFormat_Geometric2_Delta = 0x09.toByte
+  val HistFormat_Geometric2_XOR = 0x09.toByte
   val HistFormat_Custom_Delta = 0x05.toByte
   val HistFormat_Geometric_XOR = 0x08.toByte    // Double values XOR compressed
   val HistFormat_Custom_XOR = 0x0a.toByte
 
-  def isValidFormatCode(code: Byte): Boolean =
+  def isValidFormatCode(code: Byte): Boolean = {
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
-    (code == HistFormat_Custom_Delta) || (code == HistFormat_Geometric2_Delta)
+    (code == HistFormat_Custom_Delta) || (code == HistFormat_Geometric2_XOR)
+    // Question: why are other formats not here as valid ?
+  }
 
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
@@ -149,7 +155,7 @@ object BinaryHistogram extends StrictLogging {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
       case c: CustomBuckets                  => HistFormat_Custom_Delta
-      case o: OTelExpHistogramBuckets        => HistFormat_Geometric2_Delta
+      case o: OTelExpHistogramBuckets        => HistFormat_Geometric2_XOR
     }
 
     buf.putByte(2, formatCode)
@@ -174,7 +180,7 @@ object BinaryHistogram extends StrictLogging {
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
       case g: GeometricBuckets               => HistFormat_Geometric_XOR
       case c: CustomBuckets                  => HistFormat_Custom_XOR
-      case o: OTelExpHistogramBuckets        => HistFormat_Geometric_XOR
+      case o: OTelExpHistogramBuckets        => HistFormat_Geometric2_XOR
     }
 
     buf.putByte(2, formatCode)
