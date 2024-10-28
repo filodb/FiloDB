@@ -250,7 +250,7 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
       // if our buckets is subset of other buckets, then we can add the values
       if (ourBuckets.canAccommodate(otherBuckets)) {
         ourBuckets.addValues(values2, otherBuckets, other)
-        false
+        true
       } else {
         val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
         val newValues = new Array[Double](newBuckets.numBuckets) // new values array
@@ -258,7 +258,7 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
         newBuckets.addValues(newValues, otherBuckets, other)
         buckets2 = newBuckets
         values2 = newValues
-        false
+        true
       }
     }
     else {
@@ -577,18 +577,23 @@ final case class OTelExpHistogramBuckets(scale: Int,
     endBucketTop >= other.endBucketTop && startBucketTop <= other.startBucketTop
   }
 
-  def add(o: OTelExpHistogramBuckets): OTelExpHistogramBuckets = {
+  // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
+  def add(o: OTelExpHistogramBuckets, maxBuckets: Int = 128): OTelExpHistogramBuckets = {
     if (canAccommodate(o)) {
       this
     } else {
-      val newScale = Math.min(scale, o.scale)
-      val newBase = Math.pow(2, Math.pow(2, -newScale))
       val minBucketTopNeeded = Math.min(startBucketTop, o.startBucketTop)
       val maxBucketTopNeeded = Math.max(endBucketTop, o.endBucketTop)
-      // TODO if number of buckets is too large, we should reduce the scale to contain memory usage
-      // it is possible 1 extra bucket is added because of rounding, but that is okay
-      val newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
-      val newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      var newScale = Math.min(scale, o.scale)
+      var newBase = Math.pow(2, Math.pow(2, -newScale))
+      var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      while (newBucketIndexEnd - newBucketIndexStart > maxBuckets) {
+        newScale -= 1
+        newBase = Math.pow(2, Math.pow(2, -newScale))
+        newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
+        newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      }
       OTelExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd)
     }
   }

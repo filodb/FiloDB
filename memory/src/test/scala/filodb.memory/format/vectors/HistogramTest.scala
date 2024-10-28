@@ -283,5 +283,14 @@ class HistogramTest extends NativeVectorTest {
       b3.endIndexPositiveBuckets shouldEqual 25
     }
 
+    it("should reduce scale when more than 120 buckets to keep memory and compute in check") {
+      val b1 = OTelExpHistogramBuckets(6, -100, -80)
+      val b2 = OTelExpHistogramBuckets(6, 100, 125)
+      b1.add(b2, maxBuckets = 256) shouldEqual OTelExpHistogramBuckets(6, -100, 125)
+      b1.add(b2, maxBuckets = 128) shouldEqual OTelExpHistogramBuckets(5, -51, 63)
+      b1.add(b2, maxBuckets = 64) shouldEqual OTelExpHistogramBuckets(4, -26, 31)
+    }
+
+
   }
 }
