@@ -201,6 +201,7 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
     buckets match {
       case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values2.map(_.toLong), buf)
+      case g: OTelExpHistogramBuckets => BinaryHistogram.writeDelta(g, values2.map(_.toLong), buf)
       case _ => BinaryHistogram.writeDoubles(buckets, values2, buf)
     }
     buf
@@ -433,7 +434,7 @@ object HistogramBuckets {
   def apply(buffer: DirectBuffer, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(buffer.byteArray, buffer.addressOffset + 2, false)
     case HistFormat_Geometric1_Delta => geometric(buffer.byteArray, buffer.addressOffset + 2, true)
-    case HistFormat_Geometric2_XOR => otelExp(buffer.byteArray, buffer.addressOffset)
+    case HistFormat_Geometric2_Delta => otelExp(buffer.byteArray, buffer.addressOffset)
     case HistFormat_Custom_Delta     => custom(buffer.byteArray, buffer.addressOffset)
     case _                           => emptyBuckets
   }
@@ -442,7 +443,7 @@ object HistogramBuckets {
   def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
-    case HistFormat_Geometric2_XOR => otelExp(acc.base, acc.baseOffset + bucketsDef.addr)
+    case HistFormat_Geometric2_Delta => otelExp(acc.base, acc.baseOffset + bucketsDef.addr)
     case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }

@@ -61,7 +61,7 @@ class HistogramTest extends NativeVectorTest {
 
       val buckets3 = OTelExpHistogramBuckets(3, -5, 10)
       buckets3.serialize(writeBuf, 0) shouldEqual 2+2+2+4+4
-      HistogramBuckets(writeBuf, HistFormat_Geometric2_XOR) shouldEqual buckets3
+      HistogramBuckets(writeBuf, HistFormat_Geometric2_Delta) shouldEqual buckets3
     }
   }
 
