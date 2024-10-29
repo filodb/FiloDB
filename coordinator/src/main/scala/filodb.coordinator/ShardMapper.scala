@@ -246,7 +246,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Registers a new node to the given shards.  Modifies state in place.
    * Idempotent.
    */
-  private[coordinator] def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
+  def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
     shards foreach {
       case shard =>
         //we always override the mapping. There was code earlier which prevent from

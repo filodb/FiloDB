@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+//scalastyle:off
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
@@ -386,6 +387,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   // Target-Schema start
 
   it("should stitch results when target-schema changes during query range") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
@@ -444,6 +446,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should create a single plan and not stitch results when target-schema has not changed in query range") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
@@ -459,6 +462,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should stitch results when target-schema has not changed but spread changed in query range") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
@@ -474,6 +478,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should stitch results when target-schema has changed but spread did not change in query range") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar", instance="inst1"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2)) // Spread 4
@@ -489,6 +494,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should not stitch when all the target-schema labels are present in column filters in a binary join") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
@@ -508,6 +514,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should create single child plan for LHS where target-schema filters provided" +
     " and 4 (spread 2) children for RHS (no target-schema filters) of the binary join") {
+    engine.invalidateCaches()
     val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar", instance="inst1"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
@@ -605,6 +612,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it ("should pushdown BinaryJoins/Aggregates when valid") {
 
+    engine.invalidateCaches()
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1))
     }
