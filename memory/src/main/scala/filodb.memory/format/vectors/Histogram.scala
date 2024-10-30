@@ -142,7 +142,7 @@ object HistogramWithBuckets {
   val empty = LongHistogram(HistogramBuckets.emptyBuckets, Array[Long]())
 }
 
-final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) extends HistogramWithBuckets {
+final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[Long]) extends HistogramWithBuckets {
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
@@ -160,6 +160,9 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
              s"Expected: ${buckets}, Found: ${other.buckets}"
       )
     }
+    // TODO if otel histogram, the need to add values in a different way
+    // see if we can refactor since MutableHistogram also has this logic
+    assert(other.buckets == buckets)
     cforRange { 0 until numBuckets } { b =>
       values(b) += other.values(b)
     }
@@ -191,18 +194,16 @@ object LongHistogram {
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values
  */
-final case class MutableHistogram(private var buckets2: HistogramBuckets,
-                                  private var values2: Array[Double]) extends HistogramWithBuckets {
+final case class MutableHistogram(var buckets: HistogramBuckets,
+                                  var values: Array[Double]) extends HistogramWithBuckets {
 
-  final def buckets: HistogramBuckets = buckets2
-  final def values: Array[Double] = values2
-  final def bucketValue(no: Int): Double = values2(no)
+  final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
     buckets match {
-      case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values2.map(_.toLong), buf)
-      case g: OTelExpHistogramBuckets => BinaryHistogram.writeDelta(g, values2.map(_.toLong), buf)
-      case _ => BinaryHistogram.writeDoubles(buckets, values2, buf)
+      case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
+      case g: OTelExpHistogramBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
+      case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
     }
     buf
   }
@@ -210,7 +211,7 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
   /**
    * Copies this histogram as a new copy so it can be used for aggregation or mutation. Allocates new storage.
    */
-  final def copy: MutableHistogram = MutableHistogram(buckets, values2.clone)
+  final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
 
   /**
    * Copies the values of this histogram from another histogram.  Other histogram must have same bucket scheme.
@@ -219,10 +220,10 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
     require(other.buckets == buckets)
     other match {
       case m: MutableHistogram =>
-        System.arraycopy(m.values2, 0, values2, 0, values2.size)
+        System.arraycopy(m.values, 0, values, 0, values.size)
       case l: LongHistogram    =>
-        cforRange { 0 until values2.size } { n =>
-          values2(n) = l.values(n).toDouble
+        cforRange { 0 until values.size } { n =>
+          values(n) = l.values(n).toDouble
         }
     }
   }
@@ -237,34 +238,34 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
   // scalastyle:off method.length
   final def addNoCorrection(other: HistogramWithBuckets): Boolean = {
     // Allow addition when type of bucket is different
-    if (buckets2.similarForMath(other.buckets)) {
+    if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
-      if (java.lang.Double.isNaN(values2(0))) java.util.Arrays.fill(values2, 0.0)
+      if (java.lang.Double.isNaN(values(0))) java.util.Arrays.fill(values, 0.0)
       cforRange { 0 until numBuckets } { b =>
-        values2(b) += other.bucketValue(b)
+        values(b) += other.bucketValue(b)
       }
       true
-    } else if (buckets2.isInstanceOf[OTelExpHistogramBuckets] && other.buckets.isInstanceOf[OTelExpHistogramBuckets]) {
+    } else if (buckets.isInstanceOf[OTelExpHistogramBuckets] && other.buckets.isInstanceOf[OTelExpHistogramBuckets]) {
 
-      val ourBuckets = buckets2.asInstanceOf[OTelExpHistogramBuckets]
+      val ourBuckets = buckets.asInstanceOf[OTelExpHistogramBuckets]
       val otherBuckets = other.buckets.asInstanceOf[OTelExpHistogramBuckets]
       // if our buckets is subset of other buckets, then we can add the values
       if (ourBuckets.canAccommodate(otherBuckets)) {
-        ourBuckets.addValues(values2, otherBuckets, other)
+        ourBuckets.addValues(values, otherBuckets, other)
         true
       } else {
         val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
         val newValues = new Array[Double](newBuckets.numBuckets) // new values array
         newBuckets.addValues(newValues, ourBuckets, this)
         newBuckets.addValues(newValues, otherBuckets, other)
-        buckets2 = newBuckets
-        values2 = newValues
+        buckets = newBuckets
+        values = newValues
         true
       }
     }
     else {
       cforRange { 0 until numBuckets } { b =>
-        values2(b) = Double.NaN
+        values(b) = Double.NaN
       }
       false
       // TODO: In the future, support adding buckets of different scheme.  Below is an example
@@ -298,11 +299,11 @@ final case class MutableHistogram(private var buckets2: HistogramBuckets,
     */
   final def makeMonotonic(): Unit = {
     var max = 0d
-    cforRange { 0 until values2.size } { b =>
+    cforRange { 0 until values.size } { b =>
       // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
       // newer buckets are introduced and not all instances are updated with that bucket.
-      if (values2(b) < max || java.lang.Double.isNaN(values2(b))) values2(b) = max // assign previous max
-      else if (values2(b) > max) max = values2(b) // update max
+      if (values(b) < max || java.lang.Double.isNaN(values(b))) values(b) = max // assign previous max
+      else if (values(b) > max) max = values(b) // update max
     }
   }
 }

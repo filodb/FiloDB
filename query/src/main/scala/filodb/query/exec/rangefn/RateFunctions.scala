@@ -5,6 +5,7 @@ import spire.syntax.cfor._
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
 import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.vectors.OTelExpHistogramBuckets
 import filodb.query.exec.FiloQueryConfig
 
 object RateFunctions {
@@ -307,6 +308,18 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
                            isCounter, isRate)
         }
         sampleToEmit.setValues(windowEnd, bv.MutableHistogram(lowestValue.buckets, rateArray))
+      } else if (highestValue.buckets.isInstanceOf[OTelExpHistogramBuckets] &&
+                 lowestValue.buckets.isInstanceOf[OTelExpHistogramBuckets]) {
+        // Assume highestValue.buckets.scale <= lowestValue.buckets.scale since client always
+        // reduces scale over time. This is confirmed in java otel sdk.
+        val hvb = highestValue.buckets.asInstanceOf[OTelExpHistogramBuckets]
+        val lvb = lowestValue.buckets.asInstanceOf[OTelExpHistogramBuckets]
+        if (hvb.canAccommodate(lvb)) {
+          // TODO then handle rate calculation for different bucket scheme (due to difference in scale or buckets)
+          ???
+        } else {
+          sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+        }
       } else {
         sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
       }

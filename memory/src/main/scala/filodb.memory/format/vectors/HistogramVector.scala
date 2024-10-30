@@ -614,6 +614,7 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
 
   def detectDropAndCorrection(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr,
                               meta: CorrectionMeta): CorrectionMeta = meta match {
+    // TODO deal with exponential histogram counter correction
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
     case h @ HistogramCorrection(lastValue, correction) =>
       val firstValue = apply(0)
