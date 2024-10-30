@@ -434,7 +434,7 @@ object HistogramBuckets {
   def apply(buffer: DirectBuffer, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(buffer.byteArray, buffer.addressOffset + 2, false)
     case HistFormat_Geometric1_Delta => geometric(buffer.byteArray, buffer.addressOffset + 2, true)
-    case HistFormat_Geometric2_Delta => otelExp(buffer.byteArray, buffer.addressOffset)
+    case HistFormat_OtelExp_Delta    => otelExp(buffer.byteArray, buffer.addressOffset + 2)
     case HistFormat_Custom_Delta     => custom(buffer.byteArray, buffer.addressOffset)
     case _                           => emptyBuckets
   }
@@ -443,7 +443,7 @@ object HistogramBuckets {
   def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
-    case HistFormat_Geometric2_Delta => otelExp(acc.base, acc.baseOffset + bucketsDef.addr)
+    case HistFormat_OtelExp_Delta    => otelExp(acc.base, acc.baseOffset + bucketsDef.add(2).addr)
     case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }
@@ -458,9 +458,9 @@ object HistogramBuckets {
 
   def otelExp(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets = {
     // ignore short numBuckets at offset 0
-    val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
-    val startPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 4)
-    val endPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8)
+    val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
+    val startPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+    val endPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
     OTelExpHistogramBuckets(scale, startPosBucket, endPosBucket)
   }
 

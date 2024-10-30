@@ -25,6 +25,11 @@ object HistogramTest {
     LongHistogram(customScheme, buckets.take(customScheme.numBuckets).map(_.toLong))
   }
 
+  val otelExpBuckets = OTelExpHistogramBuckets(3, -3, 4)
+  val otelExpHistograms = rawHistBuckets.map { buckets =>
+    LongHistogram(otelExpBuckets, buckets.take(otelExpBuckets.numBuckets).map(_.toLong))
+  }
+
   val correction1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
   val correction2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
 
@@ -61,7 +66,7 @@ class HistogramTest extends NativeVectorTest {
 
       val buckets3 = OTelExpHistogramBuckets(3, -5, 10)
       buckets3.serialize(writeBuf, 0) shouldEqual 2+2+2+4+4
-      HistogramBuckets(writeBuf, HistFormat_Geometric2_Delta) shouldEqual buckets3
+      HistogramBuckets(writeBuf, HistFormat_OtelExp_Delta) shouldEqual buckets3
     }
   }
 
