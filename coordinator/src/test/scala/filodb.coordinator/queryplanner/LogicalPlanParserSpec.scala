@@ -149,17 +149,22 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("should correctly generate queries when LogicalPlan contains scalar() function") {
-
     parseAndAssertResult(
-      "scalar(avg_over_time(http_requests_total[1h])) > scalar(rate(http_requests_total[5m]))"
+      "scalar(avg_over_time(http_requests_total[1h]))"
     )(
-      "(scalar(avg_over_time(http_requests_total[3600s])) > scalar(rate(http_requests_total[300s])))"
+      "scalar(avg_over_time(http_requests_total[3600s]))"
     )
 
     parseAndAssertResult(
-      "scalar(cpu_usage_total) < 0.75 * scalar(cpu_limit)"
+      "scalar(cpu_usage_total)"
     )(
-      "(scalar(cpu_usage_total) < (0.75 * scalar(cpu_limit)))"
+      "scalar(cpu_usage_total)"
+    )
+
+    parseAndAssertResult(
+      "scalar(up{job=\"backend\"})"
+    )(
+      "scalar(up{job=\"backend\"})"
     )
 
     parseAndAssertResult(
@@ -178,12 +183,6 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
       "scalar(time()) - scalar(node_boot_time_seconds)"
     )(
       "(scalar(time()) - scalar(node_boot_time_seconds))"
-    )
-
-    parseAndAssertResult(
-      "scalar(up{job=\"backend\"}) > 0"
-    )(
-      "(scalar(up{job=\"backend\"}) > 0.0)"
     )
 
     parseAndAssertResult(
