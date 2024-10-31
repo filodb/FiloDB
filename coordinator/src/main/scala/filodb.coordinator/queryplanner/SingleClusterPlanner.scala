@@ -9,34 +9,24 @@ import kamon.Kamon
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
-import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
+import filodb.coordinator.queryplanner.PlannerUtil.{getTargetSchemaColumns, hasAllTargetSchemaFilters}
+import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{Filter, _}
-import filodb.core.query.Filter.{Equals, EqualsRegex}
+import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.{exec, _}
+import filodb.query._
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
-import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
 // scalastyle:off file.size.limit
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
-
-  // Find the TargetSchema that is applicable i.e effective for the current query window
-  private def findTargetSchema(targetSchemaChanges: Seq[TargetSchemaChange],
-                               startMs: Long, endMs: Long): Option[TargetSchemaChange] = {
-    val tsIndex = targetSchemaChanges.lastIndexWhere(t => t.time <= startMs)
-    if(tsIndex > -1)
-      Some(targetSchemaChanges(tsIndex))
-    else
-      None
-  }
 }
 
 /**
@@ -78,65 +68,6 @@ class SingleClusterPlanner(val dataset: Dataset,
 
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
-  }
-
-  /**
-   * Returns true iff a target-schema:
-   *   (1) matches any shard-key matched by the argument filters, and
-   *   (2) changes between the argument timestamps.
-   */
-  def isTargetSchemaChanging(shardKeyFilters: Seq[ColumnFilter],
-                             startMs: Long, endMs: Long,
-                             qContext: QueryContext): Boolean = {
-    val keyToValues = shardKeyFilters.map { filter =>
-      val values = filter match {
-        case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
-          QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
-        case ColumnFilter(col, equals: Equals) =>
-          Seq(equals.value.toString)
-      }
-      (filter.column, values)
-    }.toMap
-    QueryUtils.makeAllKeyValueCombos(keyToValues).exists { shardKeys =>
-      // Replace any EqualsRegex shard-key filters with Equals.
-      val equalsFilters = shardKeys.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSeq
-      val newFilters = LogicalPlanUtils.upsertFilters(shardKeyFilters, equalsFilters)
-      val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(newFilters)
-      targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
-    }
-  }
-
-  /**
-   * Returns true iff a target-schema should be used to identify query shards.
-   * A target-schema should be used iff all of:
-   *   (1) A target-schema is defined for the argument filters.
-   *   (2) The target-schema does not change between startMs and endMs.
-   *   (3) All required target-schema columns are present in the argument filters.
-   *
-   * @param filters      Query Column Filters
-   * @param targetSchema TargetSchema
-   * @return useTargetSchema - use target-schema to calculate query shards
-   */
-  def useTargetSchemaForShards(filters: Seq[ColumnFilter],
-                               startMs: Long, endMs: Long,
-                               qContext: QueryContext): Boolean = {
-    val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(filters)
-    val targetSchemaOpt = findTargetSchema(targetSchemaChanges, startMs, endMs)
-    if (targetSchemaOpt.isEmpty) {
-      return false
-    }
-
-    val shardKeyFilters = {
-      val filterOpts = dataset.options.nonMetricShardColumns.map(col => filters.find(_.column == col))
-      assert(filterOpts.forall(_.isDefined), "expected all shard-key filters present but found: " + filters)
-      filterOpts.map(_.get)
-    }
-    val tsChangeExists = isTargetSchemaChanging(shardKeyFilters, startMs, endMs, qContext)
-    val allTSColsPresent = targetSchemaOpt.get.schema
-      .forall(tschemaCol => filters.exists(cf =>
-        cf.column == tschemaCol && cf.filter.isInstanceOf[Equals]))
-
-    !tsChangeExists && allTSColsPresent
   }
 
   import SingleClusterPlanner._
@@ -349,19 +280,15 @@ class SingleClusterPlanner(val dataset: Dataset,
     val shardValues = shardPairs.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
 
     logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
-    val targetSchemaChange = targetSchemaProvider(qContext).targetSchemaFunc(filters)
-    val targetSchema = {
-      if (targetSchemaChange.nonEmpty) {
-        findTargetSchema(targetSchemaChange, startMs, endMs).map(tsc => tsc.schema).getOrElse(Seq.empty)
-      } else Seq.empty
-    }
-    val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
-    if(useTargetSchemaForShards(filters, startMs, endMs, qContext)) {
+    val targetSchema = getTargetSchemaColumns(filters, targetSchemaProvider(qContext), startMs, endMs)
+    val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric,
+      targetSchema.getOrElse(Seq.empty))
+    if(targetSchema.isDefined && hasAllTargetSchemaFilters(targetSchema.get, filters)) {
       val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column)
         && f.filter.isInstanceOf[Filter.Equals])
         .map(cf => cf.column ->
           cf.filter.asInstanceOf[Filter.Equals].value.toString).toMap
-      val partitionHash = RecordBuilder.partitionKeyHash(nonShardKeyLabelPairs, shardPairs.toMap, targetSchema,
+      val partitionHash = RecordBuilder.partitionKeyHash(nonShardKeyLabelPairs, shardPairs.toMap, targetSchema.get,
         dsOptions.metricColumn, metric)
       // since target-schema filter is provided in the query, ingestionShard can be used to find the single shard
       // that can answer the query.
@@ -400,16 +327,35 @@ class SingleClusterPlanner(val dataset: Dataset,
         (shardCol, trimmedValues)
       }
 
-      // Find the union of all shards for each shard-key.
-      val shardKeys = QueryUtils.makeAllKeyValueCombos(shardColToValues.toMap)
-      shardKeys.flatMap{ shardKey =>
+      // Find all *non*-shard-key filters matched by equality (pure or pipe-concatenated regex).
+      // Unlike above, this doesn't trim or throw exceptions.
+      val nonShardColToValues: Seq[(String, Seq[String])] = filters
+        .filterNot {f => shardColumns.contains(f.column)}
+        .map {
+          case ColumnFilter(col, Filter.Equals(filtVal: String)) =>
+            (col, Seq(filtVal))
+          case ColumnFilter(col, Filter.EqualsRegex(filtVal: String))
+            if QueryUtils.containsPipeOnlyRegex(filtVal) =>
+            val values = QueryUtils.splitAtUnescapedPipes(filtVal).distinct
+            (col, values)
+          case filter => (filter.column, Seq())
+        }
+        .filter(_._2.nonEmpty)
+
+      // Resolve (col -> seq[values]) pairs into all possible combinations of col->value sets.
+      // Create Equals filters for each entry and upsert into the argument filters; each
+      //   new set of filters can then be used to identify a set of shards.
+      val colToValues = (shardColToValues ++ nonShardColToValues).toMap
+      val colToValueMaps = QueryUtils.makeAllKeyValueCombos(colToValues)
+      colToValueMaps.flatMap{ colValueMap =>
         // Replace any EqualsRegex shard-key filters with Equals.
         val newFilters = filters.map{ filt =>
-            shardKey.get(filt.column)
+            colValueMap.get(filt.column)
               .map(value => ColumnFilter(filt.column, Filter.Equals(value)))
               .getOrElse(filt)
           }
-        shardsFromValues(shardKey.toSeq, newFilters, qContext, startMs, endMs)
+        val newShardKeyFilters = colValueMap.filter(label => shardColumns.contains(label._1))
+        shardsFromValues(newShardKeyFilters.toSeq, newFilters, qContext, startMs, endMs)
       }.distinct
     }
   }
@@ -901,10 +847,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       case _ => (0, Long.MaxValue)
     }
 
-    val shardKeyFilters = LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.nonMetricShardColumns)
-    assert(shardKeyFilters.size == 1, "RawSeries with more than one shard-key group: " + lp)
-    val targetSchemaChangesExist = isTargetSchemaChanging(shardKeyFilters.head, startMs, endMs, qContext)
-
     val execPlans = shardsFromFilters(renamedFilters, qContext, startMs, endMs).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       val ep = MultiSchemaPartitionsExec(
@@ -921,9 +863,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
 
     // Stitch only if spread changes during the query-window.
-    // When a target-schema changes during query window, data might be ingested in
-    //   different shards after the change.
-    PlanResult(execPlans, needsStitch || targetSchemaChangesExist)
+    PlanResult(execPlans, needsStitch)
   }
   // scalastyle:on method.length
 

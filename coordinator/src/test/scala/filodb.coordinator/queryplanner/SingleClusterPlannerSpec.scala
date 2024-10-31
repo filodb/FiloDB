@@ -9,7 +9,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, _}
-import filodb.core.query.Filter.{Equals, EqualsRegex, NotEquals}
+import filodb.core.query.Filter.{Equals, NotEquals}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -385,20 +385,21 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   // Target-Schema start
 
-  it("should stitch results when target-schema changes during query range") {
-    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
-    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
-      Seq(SpreadChange(0, 2))
-    }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
-      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
-    }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
-    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
-      targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
-    println(execPlan.children.size)
-    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
-  }
+  // Removed for now; target-schemas should not be applied when they change during a query range.
+  // it("should stitch results when target-schema changes during query range") {
+  //    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+  //    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+  //      Seq(SpreadChange(0, 2))
+  //    }
+  //    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+  //      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+  //    }
+  //    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+  //    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+  //      targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+  //    println(execPlan.children.size)
+  //    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  // }
 
   it("should apply the target schema appropriate to the query range") {
 
@@ -473,19 +474,46 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
-  it("should stitch results when target-schema has changed but spread did not change in query range") {
-    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar", instance="inst1"}""", TimeStepParams(20000, 100, 30000))
-    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
-      Seq(SpreadChange(0, 2)) // Spread 4
-    }
+  // Removed for now; target-schemas should not be applied when they change during a query range.
+  // it("should stitch results when target-schema has changed but spread did not change in query range") {
+  //   val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar", instance="inst1"}""", TimeStepParams(20000, 100, 30000))
+  //   def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+  //     Seq(SpreadChange(0, 2)) // Spread 4
+  //   }
+  //   def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+  //     Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000, Seq("job", "instance")))
+  //   }
+  //   val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+  //   (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+  //     targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+  //   execPlan.children.size shouldEqual 4 // target-schema does not apply when there are changes during a query-window
+  //   execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+  // }
+
+  it("should not apply target-schema when changes during query range") {
+    val query = """foo{job="bar", instance="inst1"}"""
+    val lpWithChanges = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+    val lpNoChanges = Parser.queryRangeToLogicalPlan(query, TimeStepParams(26000, 100, 36000))
     def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
       Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000, Seq("job", "instance")))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
-    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
-      targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
-    execPlan.children.size shouldEqual 4 // target-schema does not apply when there are changes during a query-window
-    execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+    val qContext = QueryContext(promQlQueryParams,
+      plannerParams = PlannerParams(
+        targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)))
+    )
+
+    val execPlanWithChanges = engine.materialize(lpWithChanges, qContext)
+    val execPlanNoChanges = engine.materialize(lpNoChanges, qContext)
+
+    validatePlan(execPlanWithChanges,
+    """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1700637671],raw)
+      |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(instance,Equals(inst1)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1700637671],raw)
+      |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(instance,Equals(inst1)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1700637671],raw)""".stripMargin)
+    validatePlan(execPlanNoChanges,
+    """T~PeriodicSamplesMapper(start=26000000, step=100000, end=36000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(25700000,36000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(instance,Equals(inst1)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#849919583],raw)""".stripMargin)
   }
 
   it("should not stitch when all the target-schema labels are present in column filters in a binary join") {
@@ -1051,28 +1079,28 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))""".stripMargin),
       // Should pushdown with regex when all target-schema cols are given in `by` clause.
-      ("""sum(foo{job="bar",app=~"abc|def"}) by (job,app)""",
-        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+      ("""sum(foo{job="bar",app=~"abc|defghij"}) by (job,app)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1617319944],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1617319944],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghij)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1617319944],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))""".stripMargin),
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghij)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin),
       // Should not pushdown with regex when some target-schema cols are missing from `by` clause.
-      ("""sum(foo{job="bar",app=~"abc|def"}) by (job)""",
+      ("""sum(foo{job="bar",app=~"abc|defghij"}) by (job)""",
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1376873951],raw)
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-481557981],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1376873951],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghij)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-481557981],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1376873951],raw)""".stripMargin),
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghij)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-481557981],raw)""".stripMargin),
 
       // ============== BEGIN COMPOUND TESTS ==================
 
@@ -1229,7 +1257,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       (spreadOverride = Some(FunctionalSpreadProvider(spread)),
         targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
       try {
-        validatePlan(execPlan, expected)
+        validatePlan(execPlan, expected, sort = true)
       } catch {
         case e: TestFailedException =>
           println(s"Plan validation failed for query: $query")
@@ -1758,28 +1786,28 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
       // Should pushdown with regex when all target-schema cols are given in `by` clause.
-      ("""sum(foo{job="bar",app=~"abc|def"}) by (app)""",
-        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+      ("""sum(foo{job="bar",app=~"abc|defghijk"}) by (app)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-593538160],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-593538160],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghijk)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-593538160],raw)
           |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,true,false,true))""".stripMargin),
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghijk)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),None,Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin),
       // Should not pushdown with regex when some target-schema cols are missing from `by` clause.
-      ("""sum(foo{job="bar",app=~"abc|def"}) by ()""",
+      ("""sum(foo{job="bar",app=~"abc|defghijk"}) by ()""",
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
-          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232087542],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghijk)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232087542],raw)
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1929473151],raw)""".stripMargin),
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|defghijk)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232087542],raw)""".stripMargin),
 
       // ============== BEGIN COMPOUND TESTS ==================
 
@@ -1936,7 +1964,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       (spreadOverride = Some(FunctionalSpreadProvider(spread)),
         targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
       try {
-        validatePlan(execPlan, expected)
+        validatePlan(execPlan, expected, sort = true)
       } catch {
         case e: TestFailedException =>
           println(s"Plan validation failed for query: $query")
@@ -2702,102 +2730,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // When these schemas are reduced, a SchemaMismatch should not be thrown.
     var reduced = concat.reduceSchemas(ResultSchema.empty, qres1.resultSchema)
     reduced = concat.reduceSchemas(reduced, qres2.resultSchema)
-  }
-
-  it ("should correctly determine when target-schema changes") {
-    val qContext = QueryContext(promQlQueryParams)
-    val startMs = 1000 * promQlQueryParams.startSecs
-    val endMs = 1000 * promQlQueryParams.endSecs
-    val filters = Seq(ColumnFilter("app", EqualsRegex("foo|bar")))
-    val isTschemaChanging = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
-      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
-      val scp = new SingleClusterPlanner(
-        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
-      scp.isTargetSchemaChanging(filters, startMs, endMs, qContext)
-    }
-
-    val none = (filters: Seq[ColumnFilter]) => Nil
-    isTschemaChanging(none) shouldEqual false
-
-    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello")))
-    isTschemaChanging(unchanging) shouldEqual false
-
-    val unchangingMultiple = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("hello", "goodbye")))
-    isTschemaChanging(unchangingMultiple) shouldEqual false
-
-    val unchangingDifferent = (filters: Seq[ColumnFilter]) => {
-      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
-        Seq(TargetSchemaChange(0, Seq("hello")))
-      } else {
-        Seq(TargetSchemaChange(0, Seq("goodbye")))
-      }
-    }
-    isTschemaChanging(unchangingDifferent) shouldEqual false
-
-    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("hello")))
-    isTschemaChanging(firstTschema) shouldEqual true
-
-    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
-      TargetSchemaChange(0, Seq("hello")),
-      TargetSchemaChange(startMs + 1000, Seq("goodbye")),
-    )
-    isTschemaChanging(tschemaChanges) shouldEqual true
-
-    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
-      TargetSchemaChange(0, Seq("hello")),
-      TargetSchemaChange(endMs + 1000, Seq("goodbye")),
-    )
-    isTschemaChanging(tschemaChangesAfter) shouldEqual false
-
-    val oneChanges = (filters: Seq[ColumnFilter]) => {
-      if (filters.exists(_.filter.valuesStrings.head == "foo")) {
-        Seq(
-          TargetSchemaChange(0, Seq("hello")),
-          TargetSchemaChange(startMs + 1000, Seq("goodbye")))
-      } else {
-        Seq(TargetSchemaChange(0, Seq("goodbye")))
-      }
-    }
-    isTschemaChanging(oneChanges) shouldEqual true
-  }
-
-  it("should correctly determine when to use target-schema to find shards") {
-    val qContext = QueryContext(promQlQueryParams)
-    val startMs = 1000 * promQlQueryParams.startSecs
-    val endMs = 1000 * promQlQueryParams.endSecs
-    val filters = Seq(ColumnFilter("job", Equals("foo")))
-    val useTschemaForShards = (tschemaProviderFunc: Seq[ColumnFilter] => Seq[TargetSchemaChange]) => {
-      val tschemaProvider = FunctionalTargetSchemaProvider(tschemaProviderFunc)
-      val scp = new SingleClusterPlanner(
-        dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-        queryConfig, clusterName = "raw", _targetSchemaProvider = tschemaProvider)
-      scp.useTargetSchemaForShards(filters, startMs, endMs, qContext)
-    }
-
-    val none = (filters: Seq[ColumnFilter]) => Nil
-    useTschemaForShards(none) shouldEqual false
-
-    val unchanging = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("job")))
-    useTschemaForShards(unchanging) shouldEqual true
-
-    val unchangingWrongCol = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(0, Seq("wrong")))
-    useTschemaForShards(unchangingWrongCol) shouldEqual false
-
-    val firstTschema = (filters: Seq[ColumnFilter]) => Seq(TargetSchemaChange(startMs + 1000, Seq("job")))
-    useTschemaForShards(firstTschema) shouldEqual false
-
-    val tschemaChanges = (filters: Seq[ColumnFilter]) => Seq(
-      TargetSchemaChange(0, Seq("job")),
-      TargetSchemaChange(startMs + 1000, Seq("job")),
-    )
-    useTschemaForShards(tschemaChanges) shouldEqual false
-
-    val tschemaChangesAfter = (filters: Seq[ColumnFilter]) => Seq(
-      TargetSchemaChange(0, Seq("job")),
-      TargetSchemaChange(endMs + 1000, Seq("job")),
-    )
-    useTschemaForShards(tschemaChangesAfter) shouldEqual true
   }
 
   it ("should correctly identify shards to query") {
