@@ -196,13 +196,14 @@ object LongHistogram {
  */
 final case class MutableHistogram(var buckets: HistogramBuckets,
                                   var values: Array[Double]) extends HistogramWithBuckets {
+  require(buckets.numBuckets == values.size, s"Invalid number of values: ${values.size} != ${buckets.numBuckets}")
 
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
     buckets match {
       case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
-      case g: OTelExpHistogramBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
+      case g: Base2ExpHistogramBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
       case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
     }
     buf
@@ -245,10 +246,12 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
         values(b) += other.bucketValue(b)
       }
       true
-    } else if (buckets.isInstanceOf[OTelExpHistogramBuckets] && other.buckets.isInstanceOf[OTelExpHistogramBuckets]) {
-
-      val ourBuckets = buckets.asInstanceOf[OTelExpHistogramBuckets]
-      val otherBuckets = other.buckets.asInstanceOf[OTelExpHistogramBuckets]
+    } else if (buckets.isInstanceOf[Base2ExpHistogramBuckets] &&
+               other.buckets.isInstanceOf[Base2ExpHistogramBuckets]) {
+      // If it was NaN before, reset to 0 to sum another hist
+      if (java.lang.Double.isNaN(values(0))) java.util.Arrays.fill(values, 0.0)
+      val ourBuckets = buckets.asInstanceOf[Base2ExpHistogramBuckets]
+      val otherBuckets = other.buckets.asInstanceOf[Base2ExpHistogramBuckets]
       // if our buckets is subset of other buckets, then we can add the values
       if (ourBuckets.canAccommodate(otherBuckets)) {
         ourBuckets.addValues(values, otherBuckets, other)
@@ -458,11 +461,12 @@ object HistogramBuckets {
                      minusOne)
 
   def otelExp(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets = {
-    // ignore short numBuckets at offset 0
     val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
-    val startPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
-    val endPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
-    OTelExpHistogramBuckets(scale, startPosBucket, endPosBucket)
+    val startPosBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+    val numPosBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 4)
+    val startNegBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
+    val numNegBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8)
+    Base2ExpHistogramBuckets(scale, startPosBucket, numPosBuckets, startNegBucket, numNegBuckets)
   }
 
   /**
@@ -520,29 +524,57 @@ final case class GeometricBuckets(firstBucket: Double,
   }
 }
 
-final case class OTelExpHistogramBuckets(scale: Int,
-                                         startIndexPositiveBuckets: Int, // inclusive
-                                         endIndexPositiveBuckets: Int // inclusive
-                                         // ignore negative and zero buckets for now;
-                                         // decide to add later by adding code to handle negative buckets similarly
+object Base2ExpHistogramBuckets {
+  // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
+  val maxBuckets = 200
+}
+
+/**
+ * Open Telemetry Base2 Exponential Histogram Bucket Scheme.
+ * See https://github.com/open-telemetry/opentelemetry-proto/blob/7312bdf63218acf27fe96430b7231de37fd091f2/
+ *             opentelemetry/proto/metrics/v1/metrics.proto#L500
+ * for the definition.
+ * The bucket scheme is based on the formula:
+ * `bucket(index) = base ^ (index + 1)`
+ * where index is the bucket index, and `base = 2 ^ 2 ^ -scale`
+ *
+ * Negative buckets are not supported yet, so startIndexNegativeBuckets and numNegativeBuckets are always 0.
+ * They are here since the proto has it (but the client SDKs do not), and we want to be able to support it
+ * when the spec changes
+ *
+ * @param scale
+ * @param startIndexPositiveBuckets
+ * @param numPositiveBuckets
+ * @param startIndexNegativeBuckets negative buckets are not supported yet, so this is always 0
+ * @param numNegativeBuckets negative buckets are not supported yet, so this is always 0
+ */
+final case class Base2ExpHistogramBuckets(scale: Int,
+                                          startIndexPositiveBuckets: Int,
+                                          numPositiveBuckets: Int,
+                                          startIndexNegativeBuckets: Int = 0,
+                                          numNegativeBuckets: Int = 0
                                         ) extends HistogramBuckets {
-  require(endIndexPositiveBuckets >= startIndexPositiveBuckets,
-    s"Invalid bucket range: $startIndexPositiveBuckets to $endIndexPositiveBuckets")
+  require(numPositiveBuckets <= Base2ExpHistogramBuckets.maxBuckets && numPositiveBuckets >= 0,
+    s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${Base2ExpHistogramBuckets.maxBuckets}")
+  require(numNegativeBuckets == 0 && startIndexNegativeBuckets == 0, "Negative buckets not supported yet")
+  require(startIndexPositiveBuckets > -500 && startIndexPositiveBuckets < 500)
   val base: Double = Math.pow(2, Math.pow(2, -scale))
-  val startBucketTop: Double = bucketTop(0)
-  val endBucketTop: Double = bucketTop(endIndexPositiveBuckets - startIndexPositiveBuckets + 1 - 1)
+  val startBucketTop: Double = bucketTop(1)
+  val endBucketTop: Double = bucketTop(numBuckets - 1)
 
-  override def numBuckets: Int = endIndexPositiveBuckets - startIndexPositiveBuckets + 1
+  override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count
 
-  def bucketIndexToArrayIndex(index: Int): Int = index - startIndexPositiveBuckets
+  def bucketIndexToArrayIndex(index: Int): Int = index - startIndexPositiveBuckets + 1
 
   final def bucketTop(no: Int): Double = {
+    if (no ==0) 0.0 else {
       // From OTel metrics proto docs:
       // The histogram bucket identified by `index`, a signed integer,
       // contains values that are greater than (base^index) and
       // less than or equal to (base^(index+1)).
-      val index = startIndexPositiveBuckets + no
+      val index = startIndexPositiveBuckets + no - 1
       Math.pow(base, index + 1)
+    }
   }
 
   final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
@@ -556,31 +588,33 @@ final case class OTelExpHistogramBuckets(scale: Int,
     // now bucket format specific data
     val bucketSchemeFieldsPos = pos + 4
     buf.putShort(bucketSchemeFieldsPos, scale.toShort, LITTLE_ENDIAN)
-    buf.putInt(bucketSchemeFieldsPos + 2, startIndexPositiveBuckets, LITTLE_ENDIAN)
-    buf.putInt(bucketSchemeFieldsPos + 2 + 4, endIndexPositiveBuckets, LITTLE_ENDIAN)
-    pos + 2 + 2 + 2 + 4 + 4
+    buf.putShort(bucketSchemeFieldsPos + 2, startIndexPositiveBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 4, numPositiveBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 6, startIndexNegativeBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 8, numNegativeBuckets.toShort, LITTLE_ENDIAN)
+    pos + 14
   }
 
   override def toString: String = {
     s"OTelExpHistogramBuckets(scale=$scale, startIndexPositiveBuckets=$startIndexPositiveBuckets, " +
-      s"endIndexPositiveBuckets=$endIndexPositiveBuckets) ${super.toString}"
+      s"numPositiveBuckets=$numPositiveBuckets) ${super.toString}"
   }
   override def similarForMath(other: HistogramBuckets): Boolean = {
     other match {
-      case c: OTelExpHistogramBuckets => this.scale == c.scale &&
+      case c: Base2ExpHistogramBuckets => this.scale == c.scale &&
                                          this.startIndexPositiveBuckets == c.startIndexPositiveBuckets &&
-                                         this.endIndexPositiveBuckets == c.endIndexPositiveBuckets
+                                         this.numPositiveBuckets == c.numPositiveBuckets
       case _                          => false
     }
   }
 
-  def canAccommodate(other: OTelExpHistogramBuckets): Boolean = {
-    // FIXME there can be double's == problems here
+  def canAccommodate(other: Base2ExpHistogramBuckets): Boolean = {
+    // Can we do better? There can be double's == problems here
     endBucketTop >= other.endBucketTop && startBucketTop <= other.startBucketTop
   }
 
-  // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
-  def add(o: OTelExpHistogramBuckets, maxBuckets: Int = 128): OTelExpHistogramBuckets = {
+  def add(o: Base2ExpHistogramBuckets,
+          maxBuckets: Int = Base2ExpHistogramBuckets.maxBuckets): Base2ExpHistogramBuckets = {
     if (canAccommodate(o)) {
       this
     } else {
@@ -596,7 +630,7 @@ final case class OTelExpHistogramBuckets(scale: Int,
         newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
         newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
       }
-      OTelExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd)
+      Base2ExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd - newBucketIndexStart + 1)
     }
   }
 
@@ -605,7 +639,7 @@ final case class OTelExpHistogramBuckets(scale: Int,
    * bucket scheme and (a) this bucket scheme can accommodate otherBuckets.
    */
   def addValues(ourValues: Array[Double],
-                otherBuckets: OTelExpHistogramBuckets,
+                otherBuckets: Base2ExpHistogramBuckets,
                 otherHistogram: HistogramWithBuckets): Unit = {
     // TODO remove the require once code is stable
     require(ourValues.length == numBuckets)
@@ -613,14 +647,17 @@ final case class OTelExpHistogramBuckets(scale: Int,
     require(canAccommodate(otherBuckets))
     // for each ourValues, find the bucket index in otherValues and add the value
     val fac = Math.pow(2 , otherBuckets.scale - scale).toInt
-    cforRange { ourValues.indices } { i =>
-      val ourBucketIndexM1 = startIndexPositiveBuckets + i + 1
-      val otherBucketIndexM1 = ourBucketIndexM1 * fac
-      val ourArrayIndex = bucketIndexToArrayIndex(ourBucketIndexM1 - 1)
-      val otherArrayIndex = otherBuckets.bucketIndexToArrayIndex(otherBucketIndexM1 - 1)
-      // TODO remove this require once code is stable
-      require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001)
-      if (otherArrayIndex >= 0 && otherArrayIndex < otherBuckets.numBuckets) {
+    ourValues(0) += otherHistogram.bucketValue(0) // add the zero bucket
+    cforRange { 0 until ourValues.length - 1 } { i =>
+      val ourBucketIndexPlus1 = startIndexPositiveBuckets + i + 1
+      val otherBucketIndexPlus1 = ourBucketIndexPlus1 * fac
+      val ourArrayIndex = bucketIndexToArrayIndex(ourBucketIndexPlus1 - 1)
+      val otherArrayIndex = otherBuckets.bucketIndexToArrayIndex(otherBucketIndexPlus1 - 1)
+      if (otherArrayIndex > 0 && otherArrayIndex < otherBuckets.numBuckets) {
+        // TODO remove this require once code is stable
+        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
+          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
+            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
         ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherArrayIndex)
       } else if (otherArrayIndex >= otherBuckets.numBuckets) {
         ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherBuckets.numBuckets - 1)
@@ -628,7 +665,6 @@ final case class OTelExpHistogramBuckets(scale: Int,
     }
   }
 }
-
 
 /**
  * A bucketing scheme with custom bucket/LE values.

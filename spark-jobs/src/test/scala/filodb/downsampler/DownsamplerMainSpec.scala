@@ -15,7 +15,7 @@ import filodb.core.{DatasetRef, MachineMetricsData}
 import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram, OTelExpHistogramBuckets}
+import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram, Base2ExpHistogramBuckets}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.query.exec._
 import filodb.query.{QueryError, QueryResult}
@@ -1100,27 +1100,27 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     expDeltaHistPartKeyBytes = part.partKeyBytes
 
-    val bucketScheme1 = OTelExpHistogramBuckets(3, -1, 1)
-    val bucketScheme2 = OTelExpHistogramBuckets(2, -1, 1)
+    val bucketScheme1 = Base2ExpHistogramBuckets(3, -1, 3)
+    val bucketScheme2 = Base2ExpHistogramBuckets(2, -1, 3)
     val rawSamples = Stream( // time, sum, count, hist, name, tags
-      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme1, Array(0L, 0, 1)), otelExpDeltaHistName, seriesTags),
-      Seq(74372801500L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 2, 2)), otelExpDeltaHistName, seriesTags),
-      Seq(74372802000L, 3d, 3d, LongHistogram(bucketScheme2, Array(2L, 3, 3)), otelExpDeltaHistName, seriesTags),
+      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372801500L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 2, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372802000L, 3d, 3d, LongHistogram(bucketScheme2, Array(0L, 2L, 3, 3)), otelExpDeltaHistName, seriesTags),
 
-      Seq(74372861000L, 4d, 3d, LongHistogram(bucketScheme2, Array(0L, 0, 3)), otelExpDeltaHistName, seriesTags),
-      Seq(74372861500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0, 1)), otelExpDeltaHistName, seriesTags),
-      Seq(74372862000L, 1d, 4d, LongHistogram(bucketScheme2, Array(0L, 3, 4)), otelExpDeltaHistName, seriesTags),
+      Seq(74372861000L, 4d, 3d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 3)), otelExpDeltaHistName, seriesTags),
+      Seq(74372861500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372862000L, 1d, 4d, LongHistogram(bucketScheme2, Array(0L, 0L, 3, 4)), otelExpDeltaHistName, seriesTags),
 
-      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0, 2)), otelExpDeltaHistName, seriesTags),
-      Seq(74372921500L, 5d, 7d, LongHistogram(bucketScheme1, Array(1L, 1, 7)), otelExpDeltaHistName, seriesTags),
-      Seq(74372922000L, 8d, 10d, LongHistogram(bucketScheme2, Array(0L, 8, 10)), otelExpDeltaHistName, seriesTags),
+      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372921500L, 5d, 7d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 7)), otelExpDeltaHistName, seriesTags),
+      Seq(74372922000L, 8d, 10d, LongHistogram(bucketScheme2, Array(0L, 0L, 8, 10)), otelExpDeltaHistName, seriesTags),
 
-      Seq(74372981000L, 2d, 2d, LongHistogram(bucketScheme2, Array(1L, 1, 2)), otelExpDeltaHistName, seriesTags),
-      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 1, 1)), otelExpDeltaHistName, seriesTags),
-      Seq(74372982000L, 14d, 14d, LongHistogram(bucketScheme2, Array(0L, 14, 14)), otelExpDeltaHistName, seriesTags),
+      Seq(74372981000L, 2d, 2d, LongHistogram(bucketScheme2, Array(0L, 1L, 1, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 1, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372982000L, 14d, 14d, LongHistogram(bucketScheme2, Array(0L, 0L, 14, 14)), otelExpDeltaHistName, seriesTags),
 
-      Seq(74373041000L, 3d, 4d, LongHistogram(bucketScheme1, Array(1L, 1, 4)), otelExpDeltaHistName, seriesTags),
-      Seq(74373042000L, 2d, 6d, LongHistogram(bucketScheme1, Array(3L, 4, 6)), otelExpDeltaHistName, seriesTags)
+      Seq(74373041000L, 3d, 4d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 4)), otelExpDeltaHistName, seriesTags),
+      Seq(74373042000L, 2d, 6d, LongHistogram(bucketScheme1, Array(0L, 3L, 4, 6)), otelExpDeltaHistName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1568,20 +1568,20 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val downsampledData1 = rv1.rows.map { r =>
       val h = r.getHistogram(3).asInstanceOf[LongHistogram]
-      val b = h.buckets.asInstanceOf[OTelExpHistogramBuckets]
-      (r.getLong(0), r.getDouble(1), r.getDouble(2), b)
+      val b = h.buckets.asInstanceOf[Base2ExpHistogramBuckets]
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), b, h.values.toSeq)
     }.toList
 
-    // time, sum, count, histogram
+    // time, sum, count, histogram, bucket values
     // new sample for every bucket-scheme and downsamplePeriod combination
     downsampledData1 shouldEqual Seq(
-      (74372801500L,2.0,3.0, OTelExpHistogramBuckets(3, -1, 1)),
-      (74372802000L,3.0,3.0,OTelExpHistogramBuckets(2, -1, 1)),
-      (74372861750L,6.0,8.0,OTelExpHistogramBuckets(2, -1, 1)),
-      (74372921500L,7.0,9.0,OTelExpHistogramBuckets(3, -1, 1)),
-      (74372922000L,8.0,10.0,OTelExpHistogramBuckets(2, -1, 1)),
-      (74372982000L,17.0,17.0,OTelExpHistogramBuckets(2, -1, 1)),
-      (74373042000L,5.0,10.0,OTelExpHistogramBuckets(3, -1, 1))
+      (74372801500L,2.0,3.0, Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 0, 2, 3)),
+      (74372802000L,3.0,3.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 0, 3, 8)),
+      (74372861750L,6.0,8.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 0, 3, 8)),
+      (74372921500L,7.0,9.0,Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 1, 1, 9)),
+      (74372922000L,8.0,10.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 1, 16, 17)),
+      (74372982000L,17.0,17.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 1, 16, 17)),
+      (74373042000L,5.0,10.0,Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 4, 5, 10))
     )
   }
 

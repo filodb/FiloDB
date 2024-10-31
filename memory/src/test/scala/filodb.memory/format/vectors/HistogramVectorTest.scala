@@ -107,8 +107,8 @@ class HistogramVectorTest extends NativeVectorTest {
 
   it("Bin Histogram from otel exponential histogram should go through serialize and query cycle correctly") {
     val appender = HistogramVector.appending(memFactory, 1024)
-    val otelExpBuckets = OTelExpHistogramBuckets(3, -20, 20)
-    val h = MutableHistogram(otelExpBuckets, Array.fill(41)(1L))
+    val otelExpBuckets = Base2ExpHistogramBuckets(3, -20, 41)
+    val h = MutableHistogram(otelExpBuckets, Array.fill(42)(1L))
     h.serialize(Some(buffer))
     appender.addData(buffer) shouldEqual Ack
     val mutableHisto = appender.reader.asHistReader.sum(0,0)

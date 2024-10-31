@@ -207,7 +207,7 @@ object TestTimeseriesProducer extends StrictLogging {
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
                        otelExponential: Boolean = false): Stream[InputRecord] = {
-    val histBucketScheme = if (otelExponential) bv.OTelExpHistogramBuckets(3, -40, 40)
+    val histBucketScheme = if (otelExponential) bv.Base2ExpHistogramBuckets(3, -40, 81)
                            else bv.GeometricBuckets(2.0, 3.0, 10)
     var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema) {
