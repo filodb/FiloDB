@@ -148,6 +148,51 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     res shouldEqual "sum(rate(http_requests_total{job=\"app\"}[300s:60s] @100))"
   }
 
+  it("should correctly generate queries when LogicalPlan contains scalar() function") {
+
+    parseAndAssertResult(
+      "scalar(avg_over_time(http_requests_total[1h])) > scalar(rate(http_requests_total[5m]))"
+    )(
+      "(scalar(avg_over_time(http_requests_total[3600s])) > scalar(rate(http_requests_total[300s])))"
+    )
+
+    parseAndAssertResult(
+      "scalar(cpu_usage_total) < 0.75 * scalar(cpu_limit)"
+    )(
+      "(scalar(cpu_usage_total) < (0.75 * scalar(cpu_limit)))"
+    )
+
+    parseAndAssertResult(
+      "scalar(node_filesystem_size_bytes) - scalar(node_filesystem_free_bytes)"
+    )(
+      "(scalar(node_filesystem_size_bytes) - scalar(node_filesystem_free_bytes))"
+    )
+
+    parseAndAssertResult(
+      "sum(scalar(rate(api_calls_total[5m])) + scalar(failed_calls_total))"
+    )(
+      "sum((scalar(rate(api_calls_total[300s])) + scalar(failed_calls_total)))"
+    )
+
+    parseAndAssertResult(
+      "scalar(time()) - scalar(node_boot_time_seconds)"
+    )(
+      "(scalar(time()) - scalar(node_boot_time_seconds))"
+    )
+
+    parseAndAssertResult(
+      "scalar(up{job=\"backend\"}) > 0"
+    )(
+      "(scalar(up{job=\"backend\"}) > 0.0)"
+    )
+
+    parseAndAssertResult(
+      "sum(rate(my_counter{_ws_=\"ws\",_ns_=\"ns\"}[5m])) / scalar(my_counter{_ws_=\"ws\",_ns_=\"ns\"})"
+    )(
+      "(sum(rate(my_counter{_ws_=\"ws\",_ns_=\"ns\"}[300s])) / scalar(my_counter{_ws_=\"ws\",_ns_=\"ns\"}))"
+    )
+  }
+
   it("should generate range query from LogicalPlan having @modifier") {
     var query = "http_requests_total{job=\"app\"} offset 5m @start()"
     var lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(2000, 10, 5000))
