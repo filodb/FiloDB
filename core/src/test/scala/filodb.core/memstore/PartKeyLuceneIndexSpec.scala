@@ -97,6 +97,17 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
     partNums7 should not equal debox.Buffer.empty[Int]
 
+    // tests to validate schema ID filter
+    val filter8 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("_type_", Equals("schemaID:46894".utf8)))
+    val partNums8 = keyIndex.partIdsFromFilters(filter8, start, end)
+    partNums8 shouldEqual debox.Buffer(7, 8, 9)
+
+    val filter9 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("_type_", Equals("prom-counter".utf8)))
+    val partNums9 = keyIndex.partIdsFromFilters(filter9, start, end)
+    partNums9.length shouldEqual 0
+
   }
 
   it("should fetch part key records from filters correctly") {
@@ -467,7 +478,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     keyIndex.refreshReadersBlocking()
 
-    keyIndex.indexNames(10).toList shouldEqual Seq("Actor2Code", "Actor2Name")
+    keyIndex.indexNames(10).toList shouldEqual Seq("_type_", "Actor2Code", "Actor2Name")
     keyIndex.indexValues("not_found").toSeq should equal (Nil)
 
     val infos = Seq("AFR", "CHN", "COP", "CVL", "EGYEDU").map(_.utf8).map(TermInfo(_, 1))
@@ -602,7 +613,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val labelValues1 = index3.labelNamesEfficient(filters1, 0, Long.MaxValue)
     labelValues1.toSet shouldEqual (0 until 5).map(c => s"dynamicLabel$c").toSet ++
                                    (0 until 10).map(c => s"infoLabel$c").toSet ++
-                                   Set("_ns_", "_ws_", "_metric_")
+                                   Set("_ns_", "_ws_", "_metric_", "_type_")
   }
 
   it("should be able to fetch label values efficiently using facets") {
