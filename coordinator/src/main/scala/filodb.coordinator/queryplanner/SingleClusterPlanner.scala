@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import akka.actor.ActorRef
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
@@ -65,6 +66,36 @@ class SingleClusterPlanner(val dataset: Dataset,
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
 
+  private val shardPushdownCache: Option[Cache[(LogicalPlan, Option[Seq[Int]]), Option[Set[Int]]]] =
+      if (queryConfig.cachingConfig.singleClusterPlannerCachingEnabled) {
+        Some(
+          Caffeine.newBuilder()
+          .maximumSize(queryConfig.cachingConfig.singleClusterPlannerCachingSize)
+          .recordStats()
+          .build()
+        )
+      } else {
+        None
+      }
+
+
+  private val tSchemaChangingCache: Option[Cache[(Seq[ColumnFilter], Long, Long), Some[Boolean]]] =
+    if (queryConfig.cachingConfig.singleClusterPlannerCachingEnabled) {
+      Some(
+        Caffeine.newBuilder()
+          .maximumSize(queryConfig.cachingConfig.singleClusterPlannerCachingSize)
+          .recordStats()
+          .build()
+      )
+    } else {
+      None
+    }
+
+  private[queryplanner] def invalidateCaches(): Unit = {
+    shardPushdownCache.foreach(_.invalidateAll())
+    tSchemaChangingCache.foreach(_.invalidateAll())
+  }
+
   // failed failover counter captures failovers which are not possible because at least one shard
   // is down both on the primary and DR clusters, the query will get executed only when the
   // partial results are acceptable otherwise an exception is thrown
@@ -80,14 +111,9 @@ class SingleClusterPlanner(val dataset: Dataset,
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
 
-  /**
-   * Returns true iff a target-schema:
-   *   (1) matches any shard-key matched by the argument filters, and
-   *   (2) changes between the argument timestamps.
-   */
-  def isTargetSchemaChanging(shardKeyFilters: Seq[ColumnFilter],
-                             startMs: Long, endMs: Long,
-                             qContext: QueryContext): Boolean = {
+  private def isTargetSchemaChangingInner(shardKeyFilters: Seq[ColumnFilter],
+                                  startMs: Long, endMs: Long,
+                                  qContext: QueryContext): Boolean = {
     val keyToValues = shardKeyFilters.map { filter =>
       val values = filter match {
         case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
@@ -97,12 +123,32 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
       (filter.column, values)
     }.toMap
+
     QueryUtils.makeAllKeyValueCombos(keyToValues).exists { shardKeys =>
       // Replace any EqualsRegex shard-key filters with Equals.
       val equalsFilters = shardKeys.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSeq
       val newFilters = LogicalPlanUtils.upsertFilters(shardKeyFilters, equalsFilters)
       val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(newFilters)
       targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
+    }
+  }
+
+
+  /**
+   * Returns true iff a target-schema:
+   *   (1) matches any shard-key matched by the argument filters, and
+   *   (2) changes between the argument timestamps.
+   */
+  def isTargetSchemaChanging(shardKeyFilters: Seq[ColumnFilter],
+                             startMs: Long, endMs: Long,
+                             qContext: QueryContext): Boolean = {
+    tSchemaChangingCache match {
+      case Some(cache) =>
+        cache.get((shardKeyFilters, startMs, endMs), _ => {
+          Some(isTargetSchemaChangingInner(shardKeyFilters, startMs, endMs, qContext))
+        }).getOrElse(true)
+      case None =>
+        isTargetSchemaChangingInner(shardKeyFilters, startMs, endMs, qContext)
     }
   }
 
@@ -515,11 +561,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  /**
-   * Returns a set of shards iff a plan can be pushed-down to each.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def getPushdownShards(qContext: QueryContext,
+  private def getPushdownShardsInner(qContext: QueryContext,
                                 plan: LogicalPlan): Option[Set[Int]] = {
     val getRawPushdownShards = (rs: RawSeries) => {
       if (qContext.plannerParams.shardOverrides.isEmpty) {
@@ -532,6 +574,22 @@ class SingleClusterPlanner(val dataset: Dataset,
       dataset.options.nonMetricShardColumns,
       getRawPushdownShards,
       rs => LogicalPlan.getRawSeriesFilters(rs))
+  }
+
+  /**
+   * Returns a set of shards iff a plan can be pushed-down to each.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def getPushdownShards(qContext: QueryContext,
+                                plan: LogicalPlan): Option[Set[Int]] = {
+    shardPushdownCache match {
+      case Some(cache) =>
+        cache.get((plan, qContext.plannerParams.shardOverrides), _ => {
+          getPushdownShardsInner(qContext, plan)
+        })
+      case None =>
+        getPushdownShardsInner(qContext, plan)
+    }
   }
 
   /**

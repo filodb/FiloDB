@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+//scalastyle:off
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
@@ -21,9 +22,9 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
-
 
 import scala.concurrent.duration._
 
@@ -51,7 +52,8 @@ object SingleClusterPlannerSpec {
   }
 }
 
-class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
+class SingleClusterPlannerSpec extends AnyFunSpec
+  with Matchers with ScalaFutures with BeforeAndAfterEach with  PlanValidationSpec {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -70,6 +72,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")
+
+  override def beforeEach(): Unit = {
+    engine.invalidateCaches()
+  }
 
   /*
   This is the PromQL
@@ -604,7 +610,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it ("should pushdown BinaryJoins/Aggregates when valid") {
-
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1))
     }
