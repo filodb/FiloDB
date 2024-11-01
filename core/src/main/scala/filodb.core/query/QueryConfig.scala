@@ -43,6 +43,10 @@ object QueryConfig {
       periodOfUncertaintyMs
       )
 
+    val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
+    val scCacheSize = queryConfig.as[Int]("single.cluster.cache.cache-size")
+    val cachingConfig = CachingConfig(scCachingEnabled, scCacheSize)
+
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
@@ -52,7 +56,7 @@ object QueryConfig {
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides, rc)
+      containerOverrides, rc, cachingConfig)
   }
 
   import scala.concurrent.duration._
@@ -84,6 +88,11 @@ case class RoutingConfig(
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis
                         )
 
+case class CachingConfig(
+                        singleClusterPlannerCachingEnabled: Boolean = true,
+                        singleClusterPlannerCachingSize: Int = 2048
+                        )
+
 case class QueryConfig(askTimeout: FiniteDuration,
                        staleSampleAfterMs: Long,
                        minStepMs: Long,
@@ -102,4 +111,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        grpcPartitionsDenyList: Set[String] = Set.empty,
                        plannerSelector: Option[String] = None,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
-                       routingConfig: RoutingConfig               = RoutingConfig())
+                       routingConfig: RoutingConfig               = RoutingConfig(),
+                       cachingConfig: CachingConfig               = CachingConfig())
