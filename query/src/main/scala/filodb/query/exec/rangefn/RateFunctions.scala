@@ -173,6 +173,10 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit = {
     val dblReader = reader.asDoubleReader
+    // if the chunk is a single row NaN value, then return. Prometheus end of time series marker.
+    // This is to make sure we don't set highestValue to zero. avoids negative rate/increase values.
+    if (startRowNum == 0 && endRowNum == 0 && dblReader.apply(acc, vector, startRowNum).isNaN)
+      return
     if (startTime < lowestTime || endTime > highestTime) {
       numSamples += endRowNum - startRowNum + 1
       if (startTime < lowestTime) {

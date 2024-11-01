@@ -1,25 +1,19 @@
 package filodb.core.memstore
 
 import java.io.File
-import java.io.IOException
+import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
-import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
-import scala.collection.immutable.HashSet
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-import scala.util.Failure
-import scala.util.Success
-import scala.util.Try
 
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
@@ -34,39 +28,21 @@ import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
 import spire.syntax.cfor._
 
-import filodb.core.{concurrentCache, DatasetRef}
+import filodb.core.DatasetRef
 import filodb.core.Types.PartitionKey
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordSchema}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.{PartitionSchema, Schemas}
-import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
-import filodb.core.query.Filter._
-import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
-  // NOTE: these partId fields need to be separate because Lucene 9.7.0 enforces consistent types for document
-  //   field values (i.e. a field cannot have both numeric and string values). Additional details can be found
-  //   here: https://github.com/apache/lucene/pull/11
-  final val PART_ID_DV = "__partIdDv__"
-  final val PART_ID_FIELD = "__partIdField__"
-  final val START_TIME = "__startTime__"
-  final val END_TIME = "__endTime__"
-  final val PART_KEY = "__partKey__"
-  final val LABEL_LIST = s"__labelList__"
-  final val FACET_FIELD_PREFIX = "$facet_"
-  final val LABEL_LIST_FACET = FACET_FIELD_PREFIX + LABEL_LIST
-
-  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID_FIELD, PART_ID_DV)
-
   val MAX_STR_INTERN_ENTRIES = 10000
   val MAX_TERMS_TO_ITERATE = 10000
   val FACET_FIELD_MAX_LEN = 1000
 
   val NOT_FOUND = -1
-
-  def bytesRefToUnsafeOffset(bytesRefOffset: Int): Int = bytesRefOffset + UnsafeUtils.arayOffset
 
   def unsafeOffsetToBytesRefOffset(offset: Long): Int = offset.toInt - UnsafeUtils.arayOffset
 
@@ -75,48 +51,12 @@ object PartKeyLuceneIndex {
       BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
   }
 
-  def defaultTempDir(ref: DatasetRef, shardNum: Int): File = {
-    val baseDir = new File(System.getProperty("java.io.tmpdir"))
-    val baseName = s"partKeyIndex-$ref-$shardNum-${System.currentTimeMillis()}-"
-    val tempDir = new File(baseDir, baseName)
-    tempDir
-  }
-
-  private def createTempDir(ref: DatasetRef, shardNum: Int): File = {
-    val tempDir = defaultTempDir(ref, shardNum)
-    tempDir.mkdir()
-    tempDir
-  }
-
   def partKeyByteRefToSHA256Digest(bytes: Array[Byte], offset: Int, length: Int): String = {
     import java.security.MessageDigest
     val md: MessageDigest = MessageDigest.getInstance("SHA-256")
     md.update(bytes, offset, length)
     val strDigest = Base64.getEncoder.encodeToString(md.digest())
     strDigest
-  }
-
-   private def removeRegexTailDollarSign(regex: String): String = {
-    // avoid unnecessary calculation when $ is not present at the end of the regex.
-    if (regex.nonEmpty && regex.last == '$' && Pattern.matches("""^(|.*[^\\])(\\\\)*\$$""", regex)) {
-      // (|.*[^\\]) means either empty or a sequence end with a character not \.
-      // (\\\\)* means any number of \\.
-      // remove the last $ if it is not \$.
-      // $ at locations other than the end will not be removed.
-      regex.substring(0, regex.length - 1)
-    } else {
-      regex
-    }
-  }
-
-  /**
-   * Remove leading anchor &#94; and ending anchor $.
-   *
-   * @param regex the orignal regex string.
-   * @return the regex string without anchors.
-   */
-  def removeRegexAnchors(regex: String): String = {
-    removeRegexTailDollarSign(regex.stripPrefix("^"))
   }
 }
 
@@ -131,69 +71,19 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None,
-                         val lifecycleManager: Option[IndexMetadataStore] = None,
+                         lifecycleManager: Option[IndexMetadataStore] = None,
                          useMemoryMappedImpl: Boolean = true,
                          disableIndexCaching: Boolean = false,
                          addMetricTypeField: Boolean = true
-                        ) extends StrictLogging with PartKeyIndexDownsampled {
+                        ) extends PartKeyIndexDownsampled(ref, shardNum, schema, diskLocation, lifecycleManager,
+                            addMetricTypeField = addMetricTypeField) {
 
   import PartKeyLuceneIndex._
-
-  val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
-  val queryIndexLookupLatency = Kamon.histogram("index-partition-lookup-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
-  val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
-  val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
-    MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  import PartKeyIndexRaw._
 
   val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
-
-  private val numPartColumns = schema.columns.length
-
-
-  val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
-    .getOrElse(createTempDir(ref, shardNum)).toPath
-
-  // If index rebuild is triggered or the state is Building, simply clean up the index directory and start
-  // index rebuild
-  if (
-    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum))
-  ) {
-    logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
-    deleteRecursively(indexDiskLocation.toFile) match {
-      case Success(_) => // Notify the handler that the directory is now empty
-        logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
-        notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-
-      case Failure(t) => // Update index state as TriggerRebuild again and rethrow the exception
-        logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
-          s"and index directory=$indexDiskLocation with stack trace", t)
-        notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
-        throw new IllegalStateException("Unable to clean up index directory", t)
-    }
-  }
-  //else {
-  // TODO here we assume there is non-empty index which we need to validate
-  //}
-
-  def  notifyLifecycleListener(state: IndexState.Value, time: Long): Unit =
-    lifecycleManager.foreach(_.updateState(ref, shardNum, state, time))
-
 
   val fsDirectory = if (useMemoryMappedImpl)
     new MMapDirectory(indexDiskLocation)
@@ -215,30 +105,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   private val indexWriter =
-    try {
-      new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
-    } catch {
-      case e: Exception =>
-        // If an exception is thrown here there is something wrong with the index or the directory
-        // We will attempt once by cleaning the directory and try instantiating the index again
-        logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
-          s"index directory will be cleaned up and index rebuilt", e)
-        deleteRecursively(indexDiskLocation.toFile) match {
-          case Success(_)       => // Notify the handler that the directory is now empty
-            logger.info(s"Cleaned directory for dataset=$ref," +
-              s"shard=$shardNum and index directory=$indexDiskLocation")
-            notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-          case Failure(t)       => logger.warn(s"Exception while deleting directory for dataset=$ref," +
-            s"shard=$shardNum and index directory=$indexDiskLocation with stack trace", t)
-            // If we still see failure, set the TriggerRebuild and rethrow the exception
-            notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
-            throw new IllegalStateException("Unable to clean up index directory", t)
-        }
-        // Retry again after cleaning up the index directory, if it fails again, something needs to be looked into.
-        new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
-    }
-
-  private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
+    loadIndexData(() => new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum))
 
   //scalastyle:off
   private val searcherManager =
@@ -268,35 +135,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private def facetEnabledForLabel(label: String) = {
     facetEnabledAllLabels || (facetEnabledShardKeyLabels && schema.options.shardKeyColumns.contains(label))
-  }
-
-  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Try[Boolean] = {
-    val subDirDeletion: Try[Boolean] =
-      if (f.isDirectory)
-        f.listFiles match {
-          case xs: Array[File] if xs != null  && !xs.isEmpty  =>
-            val subDirDeletions: Array[Try[Boolean]] = xs map (f => deleteRecursively(f, true))
-              subDirDeletions reduce((reduced, thisOne) => {
-                thisOne match {
-                  // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
-                  case Success(_) if reduced == Success(true)    => thisOne
-                  case Failure(_)                                => thisOne
-                  case _                                         => reduced
-                }
-              })
-          case _                               => Success(true)
-        }
-      else
-        Success(true)
-
-    subDirDeletion match  {
-      case Success(_)        =>
-        if (deleteRoot) {
-          if (f.delete()) Success(true) else Failure(new IOException(s"Unable to delete $f"))
-        } else Success(true)
-      case right @ Failure(_)  => right
-    }
-
   }
 
   case class ReusableLuceneDocument() {
@@ -384,48 +222,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     override def initialValue(): ReusableLuceneDocument = new ReusableLuceneDocument
   }
 
-  private val mapConsumer = new MapItemConsumer {
-    def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-      import filodb.core._
-      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 1,
-        UTF8StringShort.numBytes(keyBase, keyOffset)),
-        _.toString)
-      val value = new String(valueBase.asInstanceOf[Array[Byte]],
-        unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
-        UTF8StringMedium.numBytes(valueBase, valueOffset), StandardCharsets.UTF_8)
-      addIndexedField(key, value, clientData = true)
-      }
-  }
-
-  /**
-   * Map of partKey column to the logic for indexing the column (aka Indexer).
-   * Optimization to avoid match logic while iterating through each column of the partKey
-   */
-  private final val indexers = schema.columns.zipWithIndex.map { case (c, pos) =>
-    c.columnType match {
-      case StringColumn => new Indexer {
-        val colName = UTF8Str(c.name)
-        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          val strOffset = schema.binSchema.blobOffset(base, offset, pos)
-          val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
-          val value = new String(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset,
-            numBytes, StandardCharsets.UTF_8)
-          addIndexedField(colName.toString, value, clientData = true)
-        }
-        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
-      }
-      case MapColumn => new Indexer {
-        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          schema.binSchema.consumeMapItems(base, offset, pos, mapConsumer)
-        }
-        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
-      }
-      case other: Any =>
-        logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
-        NoOpIndexer
-    }
-  }.toArray
-
   def getCurrentIndexState(): (IndexState.Value, Option[Long]) =
     lifecycleManager.map(_.currentState(this.ref, this.shardNum)).getOrElse((IndexState.Empty, None))
 
@@ -446,14 +242,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
     val collector = new PartIdCollector(Int.MaxValue)
-    val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
+    val deleteQuery = LongPoint.newRangeQuery(END_TIME, 0, endedBefore)
 
     withNewSearcher(s => s.search(deleteQuery, collector))
     collector.result
   }
 
   def removePartitionsEndedBefore(endedBefore: Long, returnApproxDeletedCount: Boolean = true): Int = {
-    val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
+    val deleteQuery = LongPoint.newRangeQuery(END_TIME, 0, endedBefore)
     // SInce delete does not return the deleted document count, we query to get the count that match the filter criteria
     // and then delete the documents
     val approxDeletedCount = if (returnApproxDeletedCount) {
@@ -493,7 +289,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def indexNumEntries: Long = indexWriter.getDocStats().numDocs
 
-  def indexNumEntriesWithTombstones: Long = indexWriter.getDocStats().maxDoc
+  def indexMmapBytes: Long = {
+    ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean]).asScala
+      .find(_.getName == "mapped").get.getMemoryUsed
+  }
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
@@ -529,7 +328,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
-                           colName: String, limit: Int = 100): Seq[String] = {
+                           colName: String, limit: Int = LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT): Seq[String] = {
     require(facetEnabledForLabel(colName),
       s"Faceting not enabled for label $colName; labelValuesEfficient should not have been called")
 
@@ -619,23 +418,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     ret
   }
 
-  /**
-   *
-   * @param clientData pass true if the field data has come from metric source, and false if internally setting the
-   *                   field data. This is used to determine if the type field data should be indexed or not.
-   */
-  private def addIndexedField(labelName: String, value: String, clientData: Boolean): Unit = {
-    if (clientData && addMetricTypeField) {
-      // do not index any existing _type_ tag since this is reserved and should not be passed in by clients
-      if (labelName != Schemas.TypeLabel)
-        luceneDocument.get().addField(labelName, value)
-      else
-        logger.warn("Map column with name '_type_' is a reserved label. Not indexing it.")
-      // I would have liked to log the entire PK to debug, but it is not accessible from here.
-      // Ignoring for now, since the plan of record is to drop reserved labels at ingestion gateway.
-    } else {
-      luceneDocument.get().addField(labelName, value)
-    }
+  protected def addIndexedField(labelName: String, value: String): Unit = {
+    luceneDocument.get().addField(labelName, value)
+  }
+
+  protected def addIndexedMapField(mapColumn: String, key: String, value: String): Unit = {
+    luceneDocument.get().addField(key, value)
   }
 
   def addPartKey(partKeyOnHeapBytes: Array[Byte],
@@ -669,19 +457,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.updateDocument(term, docToAdd)
   }
 
-
-  private def partKeyString(docId: String,
-                            partKeyOnHeapBytes: Array[Byte],
-                            partKeyBytesRefOffset: Int = 0): String = {
-    val partHash = schema.binSchema.partitionHash(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
-    //scalastyle:off
-    s"shard=$shardNum partId=$docId partHash=$partHash [${
-      TimeSeriesPartition
-        .partKeyString(schema, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
-    }]"
-    //scalastyle:on
-  }
-
   private def makeDocument(partKeyOnHeapBytes: Array[Byte],
                            partKeyBytesRefOffset: Int,
                            partKeyNumBytes: Int,
@@ -694,7 +469,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(partKeyOnHeapBytes, UnsafeUtils.arayOffset))
     if (addMetricTypeField)
-      addIndexedField(Schemas.TypeLabel, schemaName, clientData = false)
+      addIndexedField(Schemas.TypeLabel, schemaName)
 
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
@@ -703,29 +478,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     luceneDocument.get().document
   }
 
-  private final val emptyStr = ""
-  // Multi-column facets to be created on "partition-schema" columns
-  private def createMultiColumnFacets(partKeyOnHeapBytes: Array[Byte], partKeyBytesRefOffset: Int): Unit = {
-    schema.options.multiColumnFacets.foreach(facetCols => {
-      facetCols match {
-        case (name, cols) => {
-          val concatFacetValue = cols.map { col =>
-            val colInfoOpt = schema.columnIdxLookup.get(col)
-            colInfoOpt match {
-              case Some((columnInfo, pos)) if columnInfo.columnType == StringColumn =>
-                val base = partKeyOnHeapBytes
-                val offset = bytesRefToUnsafeOffset(partKeyBytesRefOffset)
-                val strOffset = schema.binSchema.blobOffset(base, offset, pos)
-                val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
-                new String(base, strOffset.toInt - UnsafeUtils.arayOffset,
-                  numBytes, StandardCharsets.UTF_8)
-              case _ => emptyStr
-            }
-          }.mkString("\u03C0")
-          luceneDocument.get().addFacet(name, concatFacetValue, false)
-        }
-      }
-    })
+  protected override def addMultiColumnFacet(key: String, value: String): Unit = {
+    luceneDocument.get().addFacet(key, value, false)
   }
 
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
@@ -735,7 +489,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   def startTimeFromPartId(partId: Int): Long = {
-    val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
+    val collector = new NumericDocValueCollector(START_TIME)
     withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
@@ -759,10 +513,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.startTimes
   }
 
-  def commit(): Long = indexWriter.commit()
+  def commit(): Unit = indexWriter.commit()
 
   def endTimeFromPartId(partId: Int): Long = {
-    val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
+    val collector = new NumericDocValueCollector(END_TIME)
     withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID_FIELD, partId.toString)), collector))
     collector.singleResult
   }
@@ -822,78 +576,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
-  // scalastyle:off method.length
-  private def leafFilter(column: String, filter: Filter): Query = {
-
-    def equalsQuery(value: String): Query = {
-      if (value.nonEmpty) new TermQuery(new Term(column, value))
-      else leafFilter(column, NotEqualsRegex(".+")) // value="" means the label is absent or has an empty value.
-    }
-
-    filter match {
-      case EqualsRegex(value) =>
-        val regex = removeRegexAnchors(value.toString)
-        if (regex == "") {
-          // if label=~"" then match empty string or label not present condition too
-          leafFilter(column, NotEqualsRegex(".+"))
-        } else if (regex.replaceAll("\\.\\*", "") == "") {
-          // if label=~".*" then match all docs since promQL matches .* with absent label too
-          new MatchAllDocsQuery
-        } else if (!QueryUtils.containsRegexChars(regex)) {
-          // if all regex special chars absent, then treat like Equals
-          equalsQuery(regex)
-        } else if (QueryUtils.containsPipeOnlyRegex(regex)) {
-          // if pipe is only regex special char present, then convert to IN query
-          new TermInSetQuery(column, regex.split('|').map(t => new BytesRef(t)): _*)
-        } else if (regex.endsWith(".*") && regex.length > 2 &&
-                   !QueryUtils.containsRegexChars(regex.dropRight(2))) {
-          // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
-          new PrefixQuery(new Term(column, regex.dropRight(2)))
-        } else {
-          // regular non-empty regex query
-          new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        }
-
-      case NotEqualsRegex(value) =>
-        val term = new Term(column, removeRegexAnchors(value.toString))
-        val allDocs = new MatchAllDocsQuery
-        val booleanQuery = new BooleanQuery.Builder
-        booleanQuery.add(allDocs, Occur.FILTER)
-        booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
-        booleanQuery.build()
-
-      case Equals(value) =>
-        equalsQuery(value.toString)
-
-      case NotEquals(value) =>
-        val str = value.toString
-        val term = new Term(column, str)
-        val booleanQuery = new BooleanQuery.Builder
-        str.isEmpty match {
-          case true =>
-            val termAll = new Term(column, ".*")
-            booleanQuery.add(new RegexpQuery(termAll, RegExp.NONE), Occur.FILTER)
-          case false =>
-            val allDocs = new MatchAllDocsQuery
-            booleanQuery.add(allDocs, Occur.FILTER)
-        }
-        booleanQuery.add(new TermQuery(term), Occur.MUST_NOT)
-        booleanQuery.build()
-
-      case In(values) =>
-        new TermInSetQuery(column, values.toArray.map(t => new BytesRef(t.toString)): _*)
-
-      case And(lhs, rhs) =>
-        val andQuery = new BooleanQuery.Builder
-        andQuery.add(leafFilter(column, lhs), Occur.FILTER)
-        andQuery.add(leafFilter(column, rhs), Occur.FILTER)
-        andQuery.build()
-
-      case _ => throw new UnsupportedOperationException
-    }
-  }
-  //scalastyle:on method.length
-
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long,
@@ -950,15 +632,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   private def colFiltersToQuery(columnFilters: Seq[ColumnFilter], startTime: PartitionKey, endTime: PartitionKey) = {
-    val booleanQuery = new BooleanQuery.Builder
-    columnFilters.foreach { filter =>
-      val q = leafFilter(filter.column, filter.filter)
-      booleanQuery.add(q, Occur.FILTER)
-    }
-    booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
-    booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
-    val query = booleanQuery.build()
-    new ConstantScoreQuery(query) // disable scoring
+    val queryBuilder = new LuceneQueryBuilder()
+    queryBuilder.buildQueryWithStartAndEnd(columnFilters, startTime, endTime)
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
@@ -968,18 +643,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
 
     val startExecute = System.nanoTime()
-    val booleanQuery = new BooleanQuery.Builder
-    columnFilters.foreach { filter =>
-      val q = leafFilter(filter.column, filter.filter)
-      booleanQuery.add(q, Occur.FILTER)
-    }
-    val query = booleanQuery.build()
+    val queryBuilder = new LuceneQueryBuilder()
+    val query = queryBuilder.buildQuery(columnFilters)
+
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     var chosenPartId: Option[Int] = None
     def handleMatch(partId: Int, candidate: BytesRef): Unit = {
       // we need an equals check because there can potentially be another partKey with additional tags
       if (schema.binSchema.equals(partKeyBase, partKeyOffset,
-        candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
+        candidate.bytes, PartKeyIndexRaw.bytesRefToUnsafeOffset(candidate.offset))) {
         logger.debug(s"There is already a partId=$partId assigned for " +
           s"${schema.binSchema.stringify(partKeyBase, partKeyOffset)} in" +
           s" dataset=$ref shard=$shardNum")
@@ -1000,6 +672,100 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 }
 
+protected class LuceneQueryBuilder extends PartKeyQueryBuilder {
+
+  private val stack: mutable.ArrayStack[BooleanQuery.Builder] = mutable.ArrayStack()
+
+  private def toLuceneOccur(occur: PartKeyQueryOccur): Occur = {
+    occur match {
+      case OccurMust => Occur.MUST
+      case OccurMustNot => Occur.MUST_NOT
+    }
+  }
+
+  override protected def visitStartBooleanQuery(): Unit = {
+    stack.push(new BooleanQuery.Builder)
+  }
+
+  override protected def visitEndBooleanQuery(): Unit = {
+    val builder = stack.pop()
+    val query = builder.build()
+
+    val parent = stack.top
+    parent.add(query, Occur.FILTER)
+  }
+
+  override protected def visitEqualsQuery(column: String, term: String, occur: PartKeyQueryOccur): Unit = {
+    val query = new TermQuery(new Term(column, term))
+
+    val parent = stack.top
+    parent.add(query, toLuceneOccur(occur))
+  }
+
+  override protected def visitRegexQuery(column: String, pattern: String, occur: PartKeyQueryOccur): Unit = {
+    val query = new RegexpQuery(new Term(column, pattern), RegExp.NONE)
+
+    val parent = stack.top
+    parent.add(query, toLuceneOccur(occur))
+  }
+
+  override protected def visitTermInQuery(column: String, terms: Seq[String], occur: PartKeyQueryOccur): Unit = {
+    val query = new TermInSetQuery(column, terms.toArray.map(t => new BytesRef(t)): _*)
+
+    val parent = stack.top
+    parent.add(query, toLuceneOccur(occur))
+  }
+
+  override protected def visitPrefixQuery(column: String, prefix: String, occur: PartKeyQueryOccur): Unit = {
+    val query = new PrefixQuery(new Term(column, prefix))
+
+    val parent = stack.top
+    parent.add(query, toLuceneOccur(occur))
+  }
+
+  override protected def visitMatchAllQuery(): Unit = {
+    val query = new MatchAllDocsQuery
+
+    val parent = stack.top
+    parent.add(query, Occur.MUST)
+  }
+
+  override protected def visitRangeQuery(column: String, start: Long, end: Long,
+                                         occur: PartKeyQueryOccur): Unit = {
+    val query = LongPoint.newRangeQuery(column, start, end)
+
+    val parent = stack.top
+    parent.add(query, toLuceneOccur(occur))
+  }
+
+  def buildQuery(columnFilters: Seq[ColumnFilter]): Query = {
+    visitStartBooleanQuery()
+    visitQuery(columnFilters)
+
+    val builder = stack.pop()
+    if (stack.nonEmpty) {
+      // Should never happen given inputs, sanity check on invalid queries
+      throw new RuntimeException("Query stack not empty after processing")
+    }
+    val query = builder.build()
+    new ConstantScoreQuery(query) // disable scoring
+  }
+
+  def buildQueryWithStartAndEnd(columnFilters: Seq[ColumnFilter], startTime: PartitionKey,
+                                endTime: PartitionKey): Query = {
+    visitStartBooleanQuery()
+    visitQueryWithStartAndEnd(columnFilters, startTime, endTime)
+
+    val builder = stack.pop()
+    if (stack.nonEmpty) {
+      // Should never happen given inputs, sanity check on invalid queries
+      throw new RuntimeException("Query stack not empty after processing")
+    }
+    val query = builder.build()
+    new ConstantScoreQuery(query) // disable scoring
+  }
+}
+
 /**
  * In this lucene index collector, we read through the entire lucene index periodically and re-calculate
  * the cardinality count from scratch. This class iterates through each document in lucene, extracts a shard-key
@@ -1012,14 +778,14 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyIndexRaw.PART_KEY)
   }
 
   // gets called for each matching document in current segment
   override def collect(doc: Int): Unit = {
     if (partKeyDv.advanceExact(doc)) {
       val binaryValue = partKeyDv.binaryValue()
-      val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(binaryValue.offset)
+      val unsafePkOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(binaryValue.offset)
       val shardKey = partSchema.binSchema.colValues(
         binaryValue.bytes, unsafePkOffset, partSchema.options.shardKeyColumns)
 
@@ -1067,7 +833,7 @@ class SinglePartKeyCollector extends SimpleCollector {
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyIndexRaw.PART_KEY)
   }
 
   // gets called for each matching document in current segment
@@ -1091,7 +857,7 @@ class SinglePartIdCollector extends SimpleCollector {
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
+    partIdDv = context.reader().getNumericDocValues(PartKeyIndexRaw.PART_ID_DV)
   }
 
   // gets called for each matching document in current segment
@@ -1118,7 +884,7 @@ class SinglePartIdCollector extends SimpleCollector {
  */
 class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 
-  import PartKeyLuceneIndex._
+  import PartKeyIndexRaw._
 
   var endTimeDv: NumericDocValues = _
   var partIdDv: NumericDocValues = _
@@ -1178,7 +944,7 @@ class PartIdCollector(limit: Int) extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
+    partIdDv = context.reader().getNumericDocValues(PartKeyIndexRaw.PART_ID_DV)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1201,8 +967,8 @@ class PartIdStartTimeCollector extends SimpleCollector {
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
-    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
+    partIdDv = context.reader().getNumericDocValues(PartKeyIndexRaw.PART_ID_DV)
+    startTimeDv = context.reader().getNumericDocValues(PartKeyIndexRaw.START_TIME)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1225,9 +991,9 @@ class PartKeyRecordCollector(limit: Int) extends SimpleCollector {
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
-    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
-    endTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.END_TIME)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyIndexRaw.PART_KEY)
+    startTimeDv = context.reader().getNumericDocValues(PartKeyIndexRaw.START_TIME)
+    endTimeDv = context.reader().getNumericDocValues(PartKeyIndexRaw.END_TIME)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1252,8 +1018,8 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID_DV)
-    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+    partIdDv = context.reader().getNumericDocValues(PartKeyIndexRaw.PART_ID_DV)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyIndexRaw.PART_KEY)
   }
 
   override def collect(doc: Int): Unit = {
@@ -1277,7 +1043,7 @@ class PartKeyActionCollector(action: (BytesRef) => Unit) extends SimpleCollector
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyIndexRaw.PART_KEY)
   }
 
   override def collect(doc: Int): Unit = {

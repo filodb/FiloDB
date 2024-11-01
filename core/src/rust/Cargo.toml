@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["filodb_core", "tantivy_utils"]
+
+# Keep debug symbols in the final binary
+# This makes the binary slightly larger (~20MB), but makes profiling much more useful
+# and has no runtime impact
+[profile.release]
+debug = true

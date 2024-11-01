@@ -32,4 +32,7 @@ metastore_db/
 **/kafka/src/test/scala/filodb/kafka/shard*
 *lib*
 
+# Allow Rust's lib.rs since we're otherwise blocking *lib* above
+!lib.rs
+
 coordinator/src/test/resources/

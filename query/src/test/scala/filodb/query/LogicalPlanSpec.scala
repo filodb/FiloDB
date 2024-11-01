@@ -5,7 +5,6 @@ import filodb.core.query.Filter.{Equals, EqualsRegex, In, NotEquals, NotEqualsRe
 import filodb.query.BinaryOperator.DIV
 import filodb.query.Cardinality.OneToOne
 import filodb.query.RangeFunctionId.SumOverTime
-
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
