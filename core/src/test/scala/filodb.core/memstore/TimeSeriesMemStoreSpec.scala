@@ -394,6 +394,40 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+  it("should recover index data from col store ignoring bad schemas") {
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+
+    val pkPtrs = GdeltTestData.partKeyFromRecords(dataset1,
+      records(dataset1, linearMultiSeries().take(2)), Some(partBuilder))
+    val pks = pkPtrs.map(dataset1.partKeySchema.asByteArray(_)).toArray
+
+    // Corrupt the schema of the second item
+    pks(1)(4) = 0xFF.toByte
+    pks(1)(5) = 0xFF.toByte
+
+    val colStore = new NullColumnStore() {
+      override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
+        val keys = Seq(
+          PartKeyRecord(pks(0), 50, Long.MaxValue, 0),
+          PartKeyRecord(pks(1), 250, Long.MaxValue, 0)
+        )
+        Observable.fromIterable(keys)
+      }
+    }
+
+    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore())
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+      diskTTLSeconds = 1.hour.toSeconds.toInt,
+      flushInterval = 10.minutes), 1)
+    Thread sleep 1000
+
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
+    tsShard.recoverIndex().futureValue
+
+    tsShard.partitions.size shouldEqual 1 // only 1, skipping the bad schema
+    tsShard.partKeyIndex.indexNumEntries shouldEqual 1 // only 1, skipping the bad schema
+  }
+
   it("should lookupPartitions and return correct PartLookupResult") {
     memStore.setup(dataset2.ref, schemas2h, 0, TestData.storeConf, 1)
     val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
