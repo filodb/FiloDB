@@ -97,7 +97,10 @@ object LogicalPlanParser {
     f match {
       case d: ScalarFixedDoublePlan   => d.scalar.toString
       case t: ScalarTimeBasedPlan     => s"${t.function.entryName}$OpeningRoundBracket$ClosingRoundBracket"
-      case s: ScalarVaryingDoublePlan => convertToQuery(s.vectors)
+      case s: ScalarVaryingDoublePlan =>
+        val functionName = s.function.entryName
+        val vectorsQuery = convertToQuery(s.vectors)
+        s"$functionName$OpeningRoundBracket$vectorsQuery$ClosingRoundBracket"
       case s: ScalarBinaryOperation   => scalarBinaryOperationToQuery(s)
     }
   }
