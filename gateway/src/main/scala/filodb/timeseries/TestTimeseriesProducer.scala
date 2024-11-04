@@ -100,15 +100,19 @@ object TestTimeseriesProducer extends StrictLogging {
                                dataset: Dataset,
                                shardMapper: ShardMapper,
                                spread: Int,
-                               publishIntervalSec: Int): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
+                               publishIntervalSec: Int,
+                               expHist: Boolean = false,
+                               numBuckets: Int = 20): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
     val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
 
     val producingFut = Future {
-      timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
-        .take(numSamples)
+      val data = if (expHist) genHistogramData(startTimeMs, numTimeSeries,
+        Schemas.otelDeltaHistogram, numBuckets = numBuckets, otelExponential = true)
+      else timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
+      data.take(numSamples)
         .foreach { rec =>
           val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
-          while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
+          while (!shardQueues(shard).offer(rec)) {  Thread sleep 50 }
         }
     }
     (producingFut, containerStream)
@@ -206,9 +210,10 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
+                       numBuckets : Int = 20,
                        otelExponential: Boolean = false): Stream[InputRecord] = {
-    val histBucketScheme = if (otelExponential) bv.Base2ExpHistogramBuckets(3, -40, 81)
-                           else bv.GeometricBuckets(2.0, 3.0, 10)
+    val histBucketScheme = if (otelExponential) bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets/2)
+                           else bv.GeometricBuckets(2.0, 3.0, numBuckets)
     var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema) {
                   "http_request_latency_delta"

@@ -267,7 +267,7 @@ object GatewayServer extends StrictLogging {
                                         producing(shard) = false
                                         output
                                       }
-                                    }
+                                    }.filter { case (_, j) => j.nonEmpty }
     logger.info(s"Created $numShards container builder queues with $parallelism parallel workers...")
     (shardQueues, containerStream)
   }

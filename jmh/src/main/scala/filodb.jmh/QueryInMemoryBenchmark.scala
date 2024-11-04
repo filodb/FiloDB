@@ -9,7 +9,6 @@ import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -28,10 +27,11 @@ import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 object Params {
-  final val numShards = 32
+  final val numShards = 8
   final val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   final val numSeries = 100
   final val numQueries = 100
+  val spread = 3
 }
 
 //scalastyle:off regex
@@ -43,7 +43,6 @@ object Params {
  */
 @State(Scope.Thread)
 class QueryInMemoryBenchmark extends StrictLogging {
-  Kamon.init()   // Needed for metrics logging
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.INFO)
 
   import filodb.coordinator._
@@ -51,13 +50,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
   import Params._
-  import filodb.standalone.SimpleProfiler
-  val prof = new SimpleProfiler(10, 120, 50)
 
   val startTime = System.currentTimeMillis - (3600*1000)
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
-  val spread = 5
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf")
@@ -113,7 +109,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
-  prof.start()
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset, Schemas(dataset.schema), shardMapper, 0,
@@ -144,7 +139,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
     println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
-    prof.stop()
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
