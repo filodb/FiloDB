@@ -69,7 +69,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
                                                           | groups-per-shard = 4
                                                           | demand-paging-enabled = false
                   """.stripMargin))
-  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf, overrideSchema = false)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
   coordinator ! command
 
@@ -81,7 +81,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   final val numSamplesPerTs = 720   // 2 hours * 3600 / 10 sec interval
   final val numSeries = 100
   final val numQueries = 100
-  final val numBuckets = 320
+  final val numBuckets = 160
   val spread = 3
 
   // Manually pump in data ourselves so we know when it's done.
@@ -89,7 +89,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
     numMetricNames = 1, numSamplesPerTs * numSeries, dataset, shardMapper, spread,
-    publishIntervalSec = 10, expHist = true)
+    publishIntervalSec = 10, numBuckets = numBuckets, expHist = true)
   val ingestTask = containerStream.groupBy(_._1)
     // Asynchronously subcribe and ingest each shard
     .mapParallelUnordered(numShards) { groupedStream =>
@@ -102,7 +102,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
       Task.fromFuture(cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
     }.countL.runToFuture
   Await.result(producingFut, 90.seconds)
-  Thread sleep 2000
+  Thread sleep 10000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
@@ -115,7 +115,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
    * They are designed to match all the time series (common case) under a particular metric and job
    */
   val histQuantileQuery =
-    """histogram_quantile(0.7, sum(rate(http_request_latency_delta{_ws_="demo",_ns_="App-2"}[5m])))"""
+    """sum(rate(http_request_latency_delta{_ws_="demo", _ns_="App-0"}[5m]))"""
   val queries = Seq(histQuantileQuery)
   val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val queryStep = 120        // # of seconds between each query sample "step"
@@ -127,11 +127,14 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
 
   var queriesSucceeded = 0
   var queriesFailed = 0
+  var queryZeroResults = 0
 
   @TearDown
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
-    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
+    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed Zero Results: $queryZeroResults")
+    if (queriesFailed > 0) throw new RuntimeException(s"Queries failed: $queriesFailed")
+    if (queryZeroResults > 0) throw new RuntimeException(s"Queries with zero results: $queryZeroResults")
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
@@ -145,31 +148,11 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
       val time = System.currentTimeMillis
       val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.foreach {
-        case q: QueryResult2 => queriesSucceeded += 1
+        case q: QueryResult2 => if (q.result.nonEmpty) queriesSucceeded += 1 else queryZeroResults += 1
         case e: QError       => queriesFailed += 1
       }
       f
     }
     Await.result(Future.sequence(futures), 60.seconds)
   }
-
-
-//  val querySched = Scheduler.singleThread(s"benchmark-query")
-//
-//  // NOTE: cannot really be compared with above because this is query witin one shard only!!  However running the
-//  // query single threaded makes it easier to figure out where the performance hit is.
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(numQueries)
-//  def singleThreadedRawQuery(): Long = {
-//    val querySession = QuerySession(qContext, queryConfig)
-//
-//    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
-//        execPlan.execute(cluster.memStore, querySession)(querySched)
-//      }.executeOn(querySched)
-//      .countL.runToFuture
-//    Await.result(f, 60.seconds)
-//  }
-
 }

@@ -80,7 +80,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
-  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf, overrideSchema = false)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
   coordinator ! command
 
@@ -134,11 +134,14 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   var queriesSucceeded = 0
   var queriesFailed = 0
+  var queryZeroResults = 0
 
   @TearDown
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
-    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
+    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed Zero Results: $queryZeroResults")
+    if (queriesFailed > 0) throw new RuntimeException(s"Queries failed: $queriesFailed")
+    if (queryZeroResults > 0) throw new RuntimeException(s"Queries with zero results: $queryZeroResults")
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
@@ -152,7 +155,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
       val time = System.currentTimeMillis
       val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.foreach {
-        case q: QueryResult2 => queriesSucceeded += 1
+        case q: QueryResult2 => if (q.result.nonEmpty) queriesSucceeded += 1 else queryZeroResults += 1
         case e: QError       => queriesFailed += 1
       }
       f
@@ -177,7 +180,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
       val time = System.currentTimeMillis
       val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.foreach {
-        case q: QueryResult2 => queriesSucceeded += 1
+        case q: QueryResult2 => if (q.result.nonEmpty) queriesSucceeded += 1 else queryZeroResults += 1
         case e: QError       => queriesFailed += 1
       }
       f
