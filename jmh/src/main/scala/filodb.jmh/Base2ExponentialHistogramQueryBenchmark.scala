@@ -115,7 +115,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
    * They are designed to match all the time series (common case) under a particular metric and job
    */
   val histQuantileQuery =
-    """sum(rate(http_request_latency_delta{_ws_="demo", _ns_="App-0"}[5m]))"""
+    """histogram_quantile(0.7, sum(rate(http_request_latency_delta{_ws_="demo", _ns_="App-0"}[5m])))"""
   val queries = Seq(histQuantileQuery)
   val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val queryStep = 120        // # of seconds between each query sample "step"
@@ -137,12 +137,11 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
     if (queryZeroResults > 0) throw new RuntimeException(s"Queries with zero results: $queryZeroResults")
   }
 
-  // Window = 5 min and step=2.5 min, so 50% overlap
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
-  def histQuantileQueries(): Unit = {
+  def histQuantileRangeQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val qCmd = queryCommands(n % queryCommands.length)
       val time = System.currentTimeMillis
