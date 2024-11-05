@@ -101,6 +101,27 @@ class HistogramTest extends NativeVectorTest {
       mutableHistograms(0).quantile(0.95) shouldEqual 64
     }
 
+    it("should calculate histogram_fraction correctly") {
+      val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+
+      // multiple buckets with extrapolation
+      hist.histogramFraction(0.8, 1.2) shouldEqual 0.3899750004807707 +- 0.00001
+
+      // multiple buckets without extrapolation
+      hist.histogramFraction(bucketScheme.bucketTop(3),
+        bucketScheme.bucketTop(7)) shouldEqual ((hist.bucketValue(7) - hist.bucketValue(3)) / hist.topBucketValue) +- 0.00001
+
+      // zero bucket
+      hist.histogramFraction(0, 0) shouldEqual 0.0833333 +- 0.00001
+
+      // beyond last bucket
+      hist.histogramFraction(2.0, 2.1) shouldEqual 0.0
+
+      // one bucket
+      hist.histogramFraction(1.0, 1.09) shouldEqual 0.08288542333480116 +- 0.00001
+    }
+
     it("should calculate more accurate quantile with MaxMinHistogram using max column") {
       val h = MaxMinHistogram(mutableHistograms(0), 90)
       h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!

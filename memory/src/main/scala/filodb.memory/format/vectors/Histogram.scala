@@ -33,6 +33,8 @@ trait Histogram extends Ordered[Histogram] {
    */
   def bucketValue(no: Int): Double
 
+  def hasExponentialBuckets: Boolean
+
   /**
    * Returns an MutableDirectBuffer pointing to a serialized BinaryHistogram representation of this histogram.
    * @param buf if Some(buf) supplied, then that buf is either written into or re-used to wrap where the serialized
@@ -59,6 +61,7 @@ trait Histogram extends Ordered[Histogram] {
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
    */
   def quantile(q: Double): Double = {
+    // TODO take care of calculating quantile in an exponential way for otel exp buckets
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2) Double.NaN
@@ -84,6 +87,84 @@ trait Histogram extends Ordered[Histogram] {
       }
     }
     result
+  }
+
+  //scalastyle:off cyclomatic.complexity
+  //scalastyle:off method.length
+  def histogramFraction(lower: Double, upper: Double): Double = {
+    require(lower >= 0 && upper >= 0, s"lower & upper params should be >= 0: lower=$lower, upper=$upper")
+    if (numBuckets == 0 || lower.isNaN || upper.isNaN || topBucketValue == 0) {
+      return Double.NaN
+    }
+    val count = topBucketValue
+
+    if (lower == 0 && upper == 0) {
+      return bucketValue(0) / count
+    }
+    if (lower >= upper) {
+      return 0.0
+    }
+
+    var lowerRank = 0.0
+    var upperRank = 0.0
+    var lowerSet = false
+    var upperSet = false
+    val it = (0 until numBuckets).iterator
+
+    while (it.hasNext && (!lowerSet || !upperSet)) {
+      val b = it.next()
+      val zeroBucket = (b == 0)
+      val bucketUpper = bucketTop(b)
+      val bucketLower = if (b == 0) 0.0 else bucketTop(b - 1)
+      val bucketVal = bucketValue(b)
+      val prevBucketVal = if (b == 0) 0.0 else bucketValue(b - 1)
+
+      def log2(v: Double) = Math.log(v) / Math.log(2)
+
+      // Define interpolation functions
+      def interpolateLinearly(v: Double): Double = {
+        val fraction = (v - bucketLower) / (bucketUpper - bucketLower)
+        (bucketVal - prevBucketVal) * fraction
+      }
+
+      def interpolateExponentially(v: Double) = {
+        val logLower = log2(Math.abs(bucketLower))
+        val logUpper = log2(Math.abs(bucketUpper))
+        val logV = log2(Math.abs(v))
+        val fraction = if (v > 0) (logV - logLower) / (logUpper - logLower)
+                       else 1 - ((logV - logUpper) / (logLower - logUpper))
+        prevBucketVal + (bucketVal - prevBucketVal) * fraction
+      }
+
+      if (!lowerSet && bucketLower == lower) {
+        // We have hit the lower value at the lower bucket boundary.
+        lowerRank = prevBucketVal
+        lowerSet = true
+      }
+      if (!upperSet && bucketUpper == upper) {
+        // We have hit the upper value at the lower bucket boundary.
+        upperRank = bucketVal
+        upperSet = true
+      }
+
+      if (!lowerSet && bucketLower < lower && bucketUpper > lower) {
+        // The lower value is in this bucket
+        lowerRank = if (!hasExponentialBuckets || zeroBucket) interpolateLinearly(lower)
+                    else interpolateExponentially(lower)
+        lowerSet = true
+      }
+      if (!upperSet && bucketLower < upper && bucketUpper > upper) {
+        // The upper value is in this bucket
+        upperRank = if (!hasExponentialBuckets || zeroBucket) interpolateLinearly(upper)
+                    else interpolateExponentially(upper)
+        upperSet = true
+      }
+    }
+
+    if (!lowerSet || lowerRank > count) lowerRank = count
+    if (!upperSet || upperRank > count) upperRank = count
+
+    (upperRank - lowerRank) / count
   }
 
   /**
@@ -135,6 +216,7 @@ trait HistogramWithBuckets extends Histogram {
     }
     values
   }
+  def hasExponentialBuckets: Boolean = buckets.isInstanceOf[Base2ExpHistogramBuckets]
 }
 
 object HistogramWithBuckets {
@@ -342,7 +424,7 @@ object MutableHistogram {
  * UPDATE: Adding support for min value as well to make sure the quantile is never below the minimum specified value.
  * By default, the minimum value is set to 0.0
  */
-final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: Double = 0.0)
+final case class MaxMinHistogram(innerHist: HistogramWithBuckets, max: Double, min: Double = 0.0)
   extends HistogramWithBuckets {
   final def buckets: HistogramBuckets = innerHist.buckets
   final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
@@ -375,6 +457,8 @@ final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: 
     }
     result
   }
+
+
 }
 
 /**
