@@ -2,11 +2,14 @@ package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.atomic.AtomicLong
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.joda.time.DateTime
+import scala.util.Using
+
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -16,7 +19,7 @@ import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.Histogram
 
-import scala.util.Using
+
 
 /**
   * Identifier for a single RangeVector.
