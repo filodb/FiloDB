@@ -17,6 +17,7 @@ message SerializedRangeVector {
 
 message RepeatValueVector {
   RangeVectorKey key                = 1;
+  // Record containers are kept for backward compatibility and wont be supported in subsequent versions
   repeated bytes recordContainers   = 2;
   RecordSchema recordSchema         = 3;
   optional RvRange rvRange          = 4;

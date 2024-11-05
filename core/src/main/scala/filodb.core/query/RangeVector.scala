@@ -2,13 +2,11 @@ package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.atomic.AtomicLong
-
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.joda.time.DateTime
-
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -17,6 +15,8 @@ import filodb.memory.{BinaryRegionLarge, MemFactory, UTF8StringMedium, UTF8Strin
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.Histogram
+
+import scala.util.Using
 
 /**
   * Identifier for a single RangeVector.
@@ -213,12 +213,6 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
   override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
-  lazy val containers: Seq[RecordContainer] = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
-    rowReader.map(builder.addFromReader(_, schema, 0))
-    builder.allContainers.toList
-  }
-
   val recordSchema: RecordSchema = schema
 
   // There is potential for optimization.
@@ -260,7 +254,23 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
   /**
    * Estimates the total size (in bytes) of all rows after serialization.
    */
-  override def estimateSerializedRowBytes: Long = containers.size
+  override def estimateSerializedRowBytes: Long =
+    this.schema.columns.zipWithIndex.map { case (col, idx) =>
+      col.colType match {
+        case DoubleColumn       => SerializableRangeVector.SizeOfDouble
+        case LongColumn         => SerializableRangeVector.SizeOfLong
+        case IntColumn          => SerializableRangeVector.SizeOfInt
+        case StringColumn       => this.rowReader.map(rr => rr.getString(idx).length).getOrElse(0)
+        case TimestampColumn    => SerializableRangeVector.SizeOfLong
+        case BinaryRecordColumn => this.rowReader.map(rr => rr.getBlobNumBytes(idx)).getOrElse(0)
+        // We will take the worst case where histogram has buckets, each bucket has 2 doubles, one for the bucket
+        //  itself and one for the bin count. We will have 4 more columns for sum, total, min and max,
+        case HistogramColumn    => this.rowReader.map(
+                                      rr => rr.getHistogram(idx).numBuckets * SerializableRangeVector.SizeOfDouble * 2
+                                            + SerializableRangeVector.SizeOfDouble * 4).getOrElse(0)
+        case MapColumn          => 0 // Not supported yet
+      }
+    }.sum
 }
 
 object RepeatValueVector extends StrictLogging {
@@ -272,21 +282,14 @@ object RepeatValueVector extends StrictLogging {
             queryStats: QueryStats): RepeatValueVector = {
     val startNs = Utils.currentThreadCpuTimeNanos
     try {
-      var nextRow: Option[RowReader] = None
-      try {
-        ChunkMap.validateNoSharedLocks(execPlan)
-        val rows = rv.rows()
-        if (rows.hasNext) {
-           nextRow = Some(rows.next())
-        }
-      } finally {
-        rv.rows().close()
-        // clear exec plan
-        // When the query is done, clean up lingering shared locks caused by iterator limit.
-        ChunkMap.releaseAllSharedLocks()
-      }
-      new RepeatValueVector(rv.key, startMs, stepMs, endMs, nextRow, schema)
+      ChunkMap.validateNoSharedLocks(execPlan)
+      Using(rv.rows()){
+        rows =>
+          val nextRow = if (rows.hasNext) Some(rows.next()) else None
+          new RepeatValueVector(rv.key, startMs, stepMs, endMs, nextRow, schema)
+      }.get
     } finally {
+      ChunkMap.releaseAllSharedLocks()
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }
   }
