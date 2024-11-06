@@ -120,6 +120,9 @@ class HistogramTest extends NativeVectorTest {
 
       // one bucket
       hist.histogramFraction(1.0, 1.09) shouldEqual 0.08288542333480116 +- 0.00001
+
+      // all buckets
+      hist.histogramFraction(0, 2) shouldEqual 1.0
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max column") {
