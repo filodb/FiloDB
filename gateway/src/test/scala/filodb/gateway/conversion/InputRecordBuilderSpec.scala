@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
   val builder2 = new RecordBuilder(MemFactory.onHeapFactory)
+  val builder3 = new RecordBuilder(MemFactory.onHeapFactory)
 
   val baseTags = Map("dataset" -> "timeseries",
                      "host" -> "MacBook-Pro-229.local",
@@ -110,9 +111,9 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     val more = Seq("posBucketOffset" -> bucketScheme.startIndexPositiveBuckets.toDouble,
                    "scale" -> bucketScheme.scale.toDouble)
 
-    InputRecord.writeOtelExponentialHistRecord(builder2, metric, baseTags, 100000L,
+    InputRecord.writeOtelExponentialHistRecord(builder3, metric, baseTags, 100000L,
                                                bucketKVs ++ sumCountMinMaxKVs ++ more, isDelta = true)
-    builder2.allContainers.head.iterate(Schemas.otelDeltaHistogram.ingestionSchema).foreach { row =>
+    builder3.allContainers.head.iterate(Schemas.otelDeltaHistogram.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getDouble(4) shouldEqual min
