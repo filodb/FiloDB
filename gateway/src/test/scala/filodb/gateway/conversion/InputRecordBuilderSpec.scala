@@ -4,7 +4,7 @@ package filodb.gateway.conversion
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
-import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, CustomBuckets, LongHistogram}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -94,6 +94,32 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       row.getDouble(4) shouldEqual min
       row.getDouble(5) shouldEqual max
       row.getHistogram(3) shouldEqual expected
+    }
+  }
+
+  it("should otelExpDeltaHistogram to BR and be able to deserialize it") {
+    val bucketScheme = Base2ExpHistogramBuckets(3, -5, 10)
+    val bucketsCounts = Array(6L, 4, 3, 8, 9, 2, 4, 5, 6, 7, 3) // not cumulative
+    val expected = LongHistogram(bucketScheme, bucketsCounts)
+
+    val bucketKVs = bucketsCounts.zipWithIndex.map {
+      case (bucketCount, i) => i.toString -> bucketCount.toDouble
+    }.toSeq
+
+    // add posBucketOffset and scale
+    val more = Seq("posBucketOffset" -> bucketScheme.startIndexPositiveBuckets.toDouble,
+                   "scale" -> bucketScheme.scale.toDouble)
+
+    InputRecord.writeOtelExponentialHistRecord(builder2, metric, baseTags, 100000L,
+                                               bucketKVs ++ sumCountMinMaxKVs ++ more, isDelta = true)
+    builder2.allContainers.head.iterate(Schemas.otelDeltaHistogram.ingestionSchema).foreach { row =>
+      row.getDouble(1) shouldEqual sum
+      row.getDouble(2) shouldEqual count
+      row.getDouble(4) shouldEqual min
+      row.getDouble(5) shouldEqual max
+      val hist = row.getHistogram(3).asInstanceOf[LongHistogram]
+      hist.buckets shouldEqual expected.buckets
+      hist.values shouldEqual Array(6L, 10, 13, 21, 30, 32, 36, 41, 47, 54, 57) // should be converted to cumulative
     }
   }
 
