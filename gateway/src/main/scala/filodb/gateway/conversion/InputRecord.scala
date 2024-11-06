@@ -266,11 +266,7 @@ object InputRecord {
       case (k, v) => (k.toInt, v.toLong)
     }.sorted
 
-    // convert buckets to non-decreasing (Otel exponential histogram buckets are not cumulative)
     val bucketValues = sortedBuckets.map(_._2).toArray
-    for { i <- 1 until bucketValues.length } {
-      bucketValues(i) += bucketValues(i - 1)
-    }
 
     if (sortedBuckets.nonEmpty) {
       // length - 1 because the zero bucket is not included in the positive bucket count

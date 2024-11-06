@@ -100,7 +100,7 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
 
   it("should otelExpDeltaHistogram to BR and be able to deserialize it") {
     val bucketScheme = Base2ExpHistogramBuckets(3, -5, 10)
-    val bucketsCounts = Array(6L, 4, 3, 8, 9, 2, 4, 5, 6, 7, 3) // not cumulative
+    val bucketsCounts = Array(1L, 2, 3,4, 5, 6, 7, 8, 9, 10, 11) // require cumulative counts
     val expected = LongHistogram(bucketScheme, bucketsCounts)
 
     val bucketKVs = bucketsCounts.zipWithIndex.map {
@@ -120,7 +120,7 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
       row.getDouble(5) shouldEqual max
       val hist = row.getHistogram(3).asInstanceOf[LongHistogram]
       hist.buckets shouldEqual expected.buckets
-      hist.values shouldEqual Array(6L, 10, 13, 21, 30, 32, 36, 41, 47, 54, 57) // should be converted to cumulative
+      hist.values shouldEqual Array(1L, 2, 3,4, 5, 6, 7, 8, 9, 10, 11)
     }
   }
 
