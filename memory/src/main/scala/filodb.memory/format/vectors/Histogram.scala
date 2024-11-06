@@ -89,6 +89,10 @@ trait Histogram extends Ordered[Histogram] {
     result
   }
 
+  /**
+   * Adapted from histogram_fraction in Prometheus codebase, but modified to handle
+   * the fact that bucket values are cumulative.
+   */
   //scalastyle:off cyclomatic.complexity
   //scalastyle:off method.length
   def histogramFraction(lower: Double, upper: Double): Double = {
