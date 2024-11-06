@@ -23,7 +23,7 @@ import filodb.memory.format.MemoryReader._
  *                  0x03   geometric   + NibblePacked delta Long values
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *                  0x05   custom LE/bucket values + NibblePacked delta Long values
- *                  0x09   geometric_2 + NibblePacked delta Long values  (see [[Base2ExpHistogramBuckets]])
+ *                  0x09   otelExp_Delta + NibblePacked delta Long values  (see [[Base2ExpHistogramBuckets]])
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -114,7 +114,7 @@ object BinaryHistogram extends StrictLogging {
   def isValidFormatCode(code: Byte): Boolean = {
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
     (code == HistFormat_Custom_Delta) || (code == HistFormat_OtelExp_Delta)
-    // Question: why are other formats not here as valid ?
+    // Question: why are other formats like HistFormat_Geometric_XOR not here as valid ?
   }
 
   /**
@@ -150,7 +150,7 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
-    require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
+    require(buckets.numBuckets == values.length, s"Values array size of ${values.length} != ${buckets.numBuckets}")
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else  buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
