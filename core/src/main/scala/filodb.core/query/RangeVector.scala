@@ -216,6 +216,14 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
   override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
+  // This will now be used only during serialization of this vector in protos
+  // This is room for optimization here as we cant instantiate anything under 2048 bytes which is the MinContainerSize
+  lazy val containers: Seq[RecordContainer] = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
+    rowReader.map(builder.addFromReader(_, schema, 0))
+    builder.allContainers.toList
+  }
+
   val recordSchema: RecordSchema = schema
 
   // There is potential for optimization.

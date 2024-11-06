@@ -927,6 +927,10 @@ object ProtoConverters {
       rv.outputRange.map(_.toProto).map(builder.setRvRange)
       builder.setRecordSchema(rv.recordSchema.toProto)
       builder.setKey(rv.key.toProto)
+      builder.addAllRecordContainers(rv.containers.map(
+        container => ByteString.copyFrom(
+          if (container.hasArray) container.array else container.trimmedArray)
+      ).asJava)
       builder.build()
     }
   }
