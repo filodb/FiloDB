@@ -128,7 +128,7 @@ trait Histogram extends Ordered[Histogram] {
       // Define interpolation functions
       def interpolateLinearly(v: Double): Double = {
         val fraction = (v - bucketLower) / (bucketUpper - bucketLower)
-        (bucketVal - prevBucketVal) * fraction
+        prevBucketVal + (bucketVal - prevBucketVal) * fraction
       }
 
       def interpolateExponentially(v: Double) = {
