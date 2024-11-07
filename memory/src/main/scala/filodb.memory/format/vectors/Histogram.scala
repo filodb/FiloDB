@@ -61,7 +61,6 @@ trait Histogram extends Ordered[Histogram] {
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
    */
   def quantile(q: Double): Double = {
-    // TODO take care of calculating quantile in an exponential way for otel exp buckets
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2) Double.NaN
@@ -71,9 +70,9 @@ trait Histogram extends Ordered[Histogram] {
       // using rank, find the le bucket which would have the identified rank
       val b = firstBucketGTE(rank)
 
-      // now calculate quantile.  If bucket is last one then return second-to-last bucket top
+      // now calculate quantile.  If bucket is last one and last bucket is +Inf then return second-to-last bucket top
       // as we cannot interpolate to +Inf.
-      if (b == numBuckets-1) return bucketTop(numBuckets-2)
+      if (b == numBuckets-1 && bucketTop(numBuckets - 1).isPosInfinity) return bucketTop(numBuckets-2)
       else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
         // interpolate quantile within le bucket
@@ -83,11 +82,21 @@ trait Histogram extends Ordered[Histogram] {
           count -= bucketValue(b-1)
           rank -= bucketValue(b-1)
         }
-        bucketStart + (bucketEnd-bucketStart)*(rank/count)
+        val fraction = rank/count
+        if (!hasExponentialBuckets || bucketStart == 0) {
+          bucketStart + (bucketEnd-bucketStart) * fraction
+        } else {
+          val logBucketEnd = log2(bucketEnd)
+          val logBucketStart = log2(bucketStart)
+          val logRank = logBucketStart + (logBucketEnd - logBucketStart) * fraction
+          Math.pow(2, logRank)
+        }
       }
     }
     result
   }
+
+  private def log2(v: Double) = Math.log(v) / Math.log(2)
 
   /**
    * Adapted from histogram_fraction in Prometheus codebase, but modified to handle
@@ -125,8 +134,6 @@ trait Histogram extends Ordered[Histogram] {
       val bucketLower = if (b == 0) 0.0 else bucketTop(b - 1)
       val bucketVal = bucketValue(b)
       val prevBucketVal = if (b == 0) 0.0 else bucketValue(b - 1)
-
-      def log2(v: Double) = Math.log(v) / Math.log(2)
 
       // Define interpolation functions
       def interpolateLinearly(v: Double): Double = {

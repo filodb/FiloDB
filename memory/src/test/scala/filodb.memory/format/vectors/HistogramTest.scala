@@ -71,34 +71,50 @@ class HistogramTest extends NativeVectorTest {
   }
 
   describe("Histogram") {
-      it("should add two histograms with the same bucket scheme correctly") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val hist2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
-        hist1.add(hist2)
 
-        hist1.values shouldEqual Array(3, 6, 9, 12, 15, 18, 21, 26)
+    it("should add two histograms with the same bucket scheme correctly") {
+      val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
+      val hist2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
+      hist1.add(hist2)
+
+      hist1.values shouldEqual Array(3, 6, 9, 12, 15, 18, 21, 26)
+    }
+
+    it("should not add histograms with different bucket schemes") {
+      val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
+      val histWithDifferentBuckets = LongHistogram(customScheme, Array(1, 2, 3, 4, 5, 6, 7))
+
+      val thrown = intercept[IllegalArgumentException] {
+        hist1.add(histWithDifferentBuckets)
       }
 
-      it("should not add histograms with different bucket schemes") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val histWithDifferentBuckets = LongHistogram(customScheme, Array(1, 2, 3, 4, 5, 6, 7))
+      thrown.getMessage shouldEqual s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
+        s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
+    }
 
-        val thrown = intercept[IllegalArgumentException] {
-          hist1.add(histWithDifferentBuckets)
-        }
-
-        thrown.getMessage shouldEqual s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
-          s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
-      }
-    it("should calculate quantile correctly") {
+    it("should calculate quantile correctly for custom and geometric bucket histograms") {
       mutableHistograms.zip(quantile50Result).foreach { case (h, res) =>
         val quantile = h.quantile(0.50)
         info(s"For histogram ${h.values.toList} -> quantile = $quantile")
         quantile shouldEqual res
       }
 
-      // Cannot return anything more than 2nd-to-last bucket (ie 64)
-      mutableHistograms(0).quantile(0.95) shouldEqual 64
+      // Cannot return anything more than 2nd-to-last bucket (ie 64) when last bucket is infinity
+      customHistograms(0).quantile(0.95) shouldEqual 10
+    }
+
+
+    it("should calculate quantile correctly for exponential bucket histograms") {
+      val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+
+      // multiple buckets with interpolation
+      hist.quantile(0.5) shouldEqual 1.0 +- 0.00001
+      hist.quantile(0.75) shouldEqual 1.2968395546510099 +- 0.00001
+      hist.quantile(0.25) shouldEqual 0.7711054127039704 +- 0.00001
+      hist.quantile(0.99) shouldEqual 1.6643974694230492 +- 0.00001
+      hist.quantile(0.01) shouldEqual 0.0 // zero bucket
+      hist.quantile(0.085) shouldEqual 0.014142135623730961 +- 0.00001
     }
 
     it("should calculate histogram_fraction correctly for exponential histograms using exponential interpolation") {
