@@ -6,6 +6,7 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
@@ -165,23 +166,32 @@ final case class PeriodicSamplesMapper(startMs: Long,
   //scalastyle:on method.length
 
   /**
-   * If a counter function is used (increase or rate) along with a step multiple notation,
-   * the idea is to extend lookback by one publish interval so that the increase between
-   * adjacent lookback windows is also accounted for. This error would be especially
-   * pronounced if [1i] notation was used and step == lookback.
+   * If a rate function is used in the downsample dataset where publish interval is known,
+   * and the requested window length is less than 2*publishInterval then extend lookback automatically
+   * so we don't return empty result for rate.
+   * Typically, you don't modify the query parameters, but this is a special case only for the downsample
+   * dataset. We do this only for rate since it is already a per-second normalized value. Doing this for increase
+   * will lead to incorrect results.
    */
-  private def extendLookback(rv: RangeVector, window: Long): Long = {
-    window
-    // TODO There is a code path is used by Histogram bucket extraction path where
-    // underlying vector need not be a RawDataRangeVector. For those cases, we may
-    // not able to reliably extend lookback.
-    // Much more thought and work needed - so punting the bug
-//    val pubInt = rv match {
-//      case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
-//          => rvrd.publishInterval.getOrElse(0L)
-//      case _ => 0L
-//    }
-//    window + pubInt
+  private[exec] def extendLookback(rv: RangeVector, window: Long): Long = {
+    if (functionId.contains(InternalRangeFunction.Rate)) { // only extend for rate function
+      val pubInt = rv match {
+        case rvrd: RawDataRangeVector =>
+          if (rvrd.partition.schema == Schemas.promCounter ||
+              rvrd.partition.schema == Schemas.promHistogram ||
+              rvrd.partition.schema == Schemas.otelCumulativeHistogram ||
+              rvrd.partition.schema == Schemas.otelCumulativeHistogram) // only extend for cumulative schemas
+            rvrd.partition.publishInterval.getOrElse(0L)
+          else 0L
+        case _ => 0L
+      }
+      if (window < 2 * pubInt) 2 * pubInt // 2 * publish interval since we want 2 samples for rate
+      else window
+    } else {
+      window
+    }
+    // TODO consider returning an error when known publish interval is less than 2*windowLength for increase function
+    // instead of silently returning empty rate (and implicitly zero for sum functions) for the window
   }
 
   // Transform source double or long to double schema
