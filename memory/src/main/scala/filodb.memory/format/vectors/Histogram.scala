@@ -91,11 +91,14 @@ trait Histogram extends Ordered[Histogram] {
 
   /**
    * Adapted from histogram_fraction in Prometheus codebase, but modified to handle
-   * the fact that bucket values are cumulative.
+   * the fact that bucket values are cumulative. Also, if min and max are provided,
+   * then interpolation accuracy is improved.
    */
   //scalastyle:off cyclomatic.complexity
   //scalastyle:off method.length
-  def histogramFraction(lower: Double, upper: Double): Double = {
+  def histogramFraction(lower: Double, upper: Double,
+                        min: Double = Double.NegativeInfinity,
+                        max: Double = Double.PositiveInfinity): Double = {
     require(lower >= 0 && upper >= 0, s"lower & upper params should be >= 0: lower=$lower, upper=$upper")
     if (numBuckets == 0 || lower.isNaN || upper.isNaN || topBucketValue == 0) {
       return Double.NaN
@@ -127,13 +130,17 @@ trait Histogram extends Ordered[Histogram] {
 
       // Define interpolation functions
       def interpolateLinearly(v: Double): Double = {
-        val fraction = (v - bucketLower) / (bucketUpper - bucketLower)
+        val low = Math.max(bucketLower, min)
+        val high = Math.min(bucketUpper, max)
+        val fraction = (v - low) / (high - low)
         prevBucketVal + (bucketVal - prevBucketVal) * fraction
       }
 
       def interpolateExponentially(v: Double) = {
-        val logLower = log2(Math.abs(bucketLower))
-        val logUpper = log2(Math.abs(bucketUpper))
+        val low = Math.max(bucketLower, min)
+        val high = Math.min(bucketUpper, max)
+        val logLower = log2(Math.abs(low))
+        val logUpper = log2(Math.abs(high))
         val logV = log2(Math.abs(v))
         val fraction = if (v > 0) (logV - logLower) / (logUpper - logLower)
                        else 1 - ((logV - logUpper) / (logLower - logUpper))

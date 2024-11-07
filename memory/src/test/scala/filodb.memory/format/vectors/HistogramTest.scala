@@ -108,6 +108,9 @@ class HistogramTest extends NativeVectorTest {
       // multiple buckets with interpolation
       hist.histogramFraction(0.8, 1.2) shouldEqual 0.3899750004807707 +- 0.00001
 
+      // multiple buckets with interpolation using min and max leads to improved accuracy
+      hist.histogramFraction(0.8, 1.2, 0.76, 1.21) shouldEqual 0.42472117149283567 +- 0.00001
+
       // multiple buckets without interpolation
       hist.histogramFraction(bucketScheme.bucketTop(3),
         bucketScheme.bucketTop(7)) shouldEqual ((hist.bucketValue(7) - hist.bucketValue(3)) / hist.topBucketValue) +- 0.00001
@@ -131,6 +134,9 @@ class HistogramTest extends NativeVectorTest {
 
       // multiple buckets with linear interpolation
       hist.histogramFraction(4.5, 6.6) shouldEqual 0.175 +- 0.00001
+
+      // multiple buckets with interpolation using min and max leads to improved accuracy
+      hist.histogramFraction(4.5, 6.6, 4.1, 6.8) shouldEqual 0.19212962962962962 +- 0.00001
 
       // multiple buckets without interpolation
       hist.histogramFraction(bucketScheme.bucketTop(3),
