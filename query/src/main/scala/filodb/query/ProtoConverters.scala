@@ -929,7 +929,7 @@ object ProtoConverters {
       builder.setKey(rv.key.toProto)
       builder.addAllRecordContainers(rv.containers.map(
         container => ByteString.copyFrom(
-        if (container.hasArray) container.array else container.trimmedArray)
+          if (container.hasArray) container.array else container.trimmedArray)
       ).asJava)
       builder.build()
     }
