@@ -156,7 +156,8 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
   final def add(other: LongHistogram): Unit = {
     if (other.buckets != buckets) {
       throw new IllegalArgumentException(
-           s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. Expected: ${buckets}, Found: ${other.buckets}"
+           s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
+             s"Expected: ${buckets}, Found: ${other.buckets}"
       )
     }
     cforRange { 0 until numBuckets } { b =>

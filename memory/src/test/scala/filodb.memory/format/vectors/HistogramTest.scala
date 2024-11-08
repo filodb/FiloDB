@@ -78,7 +78,8 @@ class HistogramTest extends NativeVectorTest {
           hist1.add(histWithDifferentBuckets)
         }
 
-        thrown.getMessage shouldEqual "Mismatch in bucket sizes. Cannot add histograms with different bucket configurations."
+        thrown.getMessage shouldEqual s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
+          s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
       }
     it("should calculate quantile correctly") {
       mutableHistograms.zip(quantile50Result).foreach { case (h, res) =>
