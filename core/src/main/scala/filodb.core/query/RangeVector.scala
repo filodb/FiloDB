@@ -212,7 +212,7 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
                               startMs: Long, stepMs: Long, endMs: Long,
                               rowReader: Option[RowReader],
-                              schema: RecordSchema) extends SerializableRangeVector {
+                              schema: RecordSchema) extends SerializableRangeVector with StrictLogging {
   override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
@@ -279,7 +279,9 @@ final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
         case HistogramColumn    => this.rowReader.map(
                                       rr => rr.getHistogram(idx).numBuckets * SerializableRangeVector.SizeOfDouble * 2
                                             + SerializableRangeVector.SizeOfDouble * 4).getOrElse(0)
-        case MapColumn          => 0 // Not supported yet
+        case MapColumn          =>
+                                    logger.warn("MapColumn estimate RepeatValueVector not yet supported")
+                                    0 // Not supported yet
       }
     }.sum
 }
