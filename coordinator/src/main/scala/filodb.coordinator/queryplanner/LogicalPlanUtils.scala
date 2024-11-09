@@ -247,6 +247,14 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
+  /**
+   * @param logicalPlan LogicalPlan
+   * @return maximum offset in milliseconds
+   */
+  def getMaxOffetInMillis(logicalPlan: LogicalPlan): Long = {
+    getOffsetMillis(logicalPlan).max
+  }
+
   def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
     // getLookBackMillis is used primarily for LongTimeRangePlanner,
     // SubqueryWtihWindowing returns lookback but TopLevelSubquery does not. The conceptual meaning of the lookback
@@ -258,6 +266,14 @@ object LogicalPlanUtils extends StrictLogging {
       case rs: RawSeries => Seq(rs.lookbackMs.getOrElse(WindowConstants.staleDataLookbackMillis))
       case _             => Seq(0)
     }
+  }
+
+  /**
+   * @param logicalPlan LogicalPlan
+   * @return maximum lookback in milliseconds
+   */
+  def getMaxLookBackInMillis(logicalPlan: LogicalPlan): Long = {
+    getLookBackMillis(logicalPlan).max
   }
 
   def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Set[String] = {
