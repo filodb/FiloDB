@@ -1,5 +1,6 @@
 package filodb.core.query
 
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
@@ -7,9 +8,17 @@ import scala.collection.mutable.ArrayBuffer
  * Storage for utility functions.
  */
 object QueryUtils {
-  val REGEX_CHARS = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+  val REGEX_CHARS: Array[Char] = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
+  private val COMBO_CACHE_SIZE = 2048
 
   private val regexCharsMinusPipe = (REGEX_CHARS.toSet - '|').toArray
+
+  private val comboCache: Cache[Map[String, Seq[String]], Seq[Map[String, String]]] =
+    Caffeine.newBuilder()
+      .maximumSize(COMBO_CACHE_SIZE)
+      .recordStats()
+      .build()
+
 
   /**
    * Returns true iff the argument string contains any special regex chars.
@@ -72,7 +81,7 @@ object QueryUtils {
       splits.append(left)
       remaining = right
       // count of all characters before the remaining suffix (+1 to account for pipe)
-      offset = offset + left.size + 1
+      offset = offset + left.length + 1
     }
     splits.append(remaining)
     splits
@@ -89,11 +98,13 @@ object QueryUtils {
   def makeAllKeyValueCombos(keyToValues: Map[String, Seq[String]]): Seq[Map[String, String]] = {
     // Store the entries with some order, then find all possible value combos s.t. each combo's
     //   ith value is a value of the ith key.
-    val entries = keyToValues.toSeq
-    val keys = entries.map(_._1)
-    val vals = entries.map(_._2.toSeq)
-    val combos = QueryUtils.combinations(vals)
-    // Zip the ordered keys with the ordered values.
-    combos.map(keys.zip(_).toMap)
+    comboCache.get(keyToValues, _ => {
+      val entries = keyToValues.toSeq
+      val keys = entries.map(_._1)
+      val vals = entries.map(_._2.toSeq)
+      val combos = QueryUtils.combinations(vals)
+      // Zip the ordered keys with the ordered values.
+      combos.map(keys.zip(_).toMap)
+    })
   }
 }

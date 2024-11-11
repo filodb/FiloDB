@@ -195,7 +195,8 @@ object Dependencies {
   //  )
 
   lazy val jmhDeps = Seq(
-    "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey)
+    "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey),
+    "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion
   )
 
   lazy val gatlingDeps = Seq(
