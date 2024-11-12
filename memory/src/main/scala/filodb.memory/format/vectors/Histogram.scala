@@ -7,6 +7,7 @@ import spire.syntax.cfor._
 
 import filodb.memory.format._
 
+
 /**
  * A trait to represent bucket-based histograms as well as derived statistics such as sums or rates of
  * increasing histograms.
@@ -14,6 +15,7 @@ import filodb.memory.format._
  * or equal to the bucketTop ("upper bound"), thus it is cumulative with increasing bucket number.
  * Furthermore the LAST bucket should contain the total number of observations overall.
  */
+//scalastyle:off file.size.limit
 trait Histogram extends Ordered[Histogram] {
   def numBuckets: Int
 
