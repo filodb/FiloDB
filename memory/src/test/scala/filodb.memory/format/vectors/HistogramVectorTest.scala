@@ -1,11 +1,9 @@
 package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
-
 import org.agrona.concurrent.UnsafeBuffer
-
 import filodb.memory.format._
-import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta}
+import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta, HistFormat_OtelExp_Delta}
 
 class HistogramVectorTest extends NativeVectorTest {
   import HistogramTest._
@@ -70,6 +68,54 @@ class HistogramVectorTest extends NativeVectorTest {
     (0 until customHistograms.length).foreach { i =>
       reader(i) shouldEqual customHistograms(i)
     }
+  }
+
+  it("should accept LongHistograms with otel exp scheme and query them back") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    otelExpHistograms.foreach { custHist =>
+      custHist.serialize(Some(buffer))
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual otelExpHistograms.length
+
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual otelExpHistograms.length
+
+    (0 until otelExpHistograms.length).foreach { i =>
+      reader(i) shouldEqual otelExpHistograms(i)
+    }
+  }
+
+  it("should accept MutableHistograms with otel exp scheme and query them back") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    val mutHistograms = otelExpHistograms.map(h => MutableHistogram(h.buckets, h.valueArray))
+    mutHistograms.foreach { custHist =>
+      custHist.serialize(Some(buffer))
+      appender.addData(buffer) shouldEqual Ack
+    }
+    appender.length shouldEqual mutHistograms.length
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual mutHistograms.length
+
+    (0 until otelExpHistograms.length).foreach { i =>
+      val h = reader(i)
+      h.buckets shouldEqual otelExpHistograms.head.buckets
+      h shouldEqual mutHistograms(i)
+    }
+  }
+
+  it("Bin Histogram from otel exponential histogram should go through serialize and query cycle correctly") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    val otelExpBuckets = Base2ExpHistogramBuckets(3, -20, 41)
+    val h = MutableHistogram(otelExpBuckets, Array.fill(42)(1L))
+    h.serialize(Some(buffer))
+    appender.addData(buffer) shouldEqual Ack
+    val mutableHisto = appender.reader.asHistReader.sum(0,0)
+    val binHist = BinHistogram(mutableHisto.serialize())
+    binHist.formatCode shouldEqual HistFormat_OtelExp_Delta
+    val deserHist = binHist.toHistogram
+    deserHist shouldEqual h
   }
 
   it("should optimize histograms and be able to query optimized vectors") {

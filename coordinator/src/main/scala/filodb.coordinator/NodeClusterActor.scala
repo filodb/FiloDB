@@ -55,6 +55,7 @@ object NodeClusterActor {
    * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
    *               manually push records into NodeCoordinator.
    * @param storeConfig a StoreConfig for the MemStore.
+   * @param overrideSchema if true, will override the schema in the MetaStore with the schema in the Dataset.
    * @return DatasetVerified - meaning the dataset and columns are valid.  Does not mean ingestion is
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
@@ -62,7 +63,8 @@ object NodeClusterActor {
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource,
                                 storeConfig: StoreConfig,
-                                downsampleConfig: DownsampleConfig = DownsampleConfig.disabled) {
+                                downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
+                                overrideSchema: Boolean = true) {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)

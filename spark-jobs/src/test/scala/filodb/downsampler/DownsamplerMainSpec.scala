@@ -15,7 +15,7 @@ import filodb.core.{DatasetRef, MachineMetricsData}
 import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
+import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram, Base2ExpHistogramBuckets}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.query.exec._
 import filodb.query.{QueryError, QueryResult}
@@ -33,7 +33,6 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.apache.spark.sql.types._
-
 
 import java.io.File
 import java.time
@@ -133,7 +132,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   var histNaNPartKeyBytes: Array[Byte] = _
 
   val deltaHistName = "my_delta_histogram"
+  val otelExpDeltaHistName = "my_exp_delta_histogram"
   val deltaHistNameNaN = "my_histogram_NaN"
+  var expDeltaHistPartKeyBytes: Array[Byte] = _
   var deltaHistPartKeyBytes: Array[Byte] = _
   var deltaHistNaNPartKeyBytes: Array[Byte] = _
 
@@ -1088,6 +1089,53 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     rawColStore.writePartKeys(rawDataset.ref, shard, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
+  it("should write otel exponential delta histogram data to cassandra") {
+
+    val rawDataset = Dataset("prometheus", Schemas.deltaHistogram)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.deltaHistogram, otelExpDeltaHistName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.deltaHistogram, partKey, shardInfo, 1)
+
+    expDeltaHistPartKeyBytes = part.partKeyBytes
+
+    val bucketScheme1 = Base2ExpHistogramBuckets(3, -1, 3)
+    val bucketScheme2 = Base2ExpHistogramBuckets(2, -1, 3)
+    val rawSamples = Stream( // time, sum, count, hist, name, tags
+      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372801500L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 2, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372802000L, 3d, 3d, LongHistogram(bucketScheme2, Array(0L, 2L, 3, 3)), otelExpDeltaHistName, seriesTags),
+
+      Seq(74372861000L, 4d, 3d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 3)), otelExpDeltaHistName, seriesTags),
+      Seq(74372861500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372862000L, 1d, 4d, LongHistogram(bucketScheme2, Array(0L, 0L, 3, 4)), otelExpDeltaHistName, seriesTags),
+
+      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372921500L, 5d, 7d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 7)), otelExpDeltaHistName, seriesTags),
+      Seq(74372922000L, 8d, 10d, LongHistogram(bucketScheme2, Array(0L, 0L, 8, 10)), otelExpDeltaHistName, seriesTags),
+
+      Seq(74372981000L, 2d, 2d, LongHistogram(bucketScheme2, Array(0L, 1L, 1, 2)), otelExpDeltaHistName, seriesTags),
+      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 1, 1)), otelExpDeltaHistName, seriesTags),
+      Seq(74372982000L, 14d, 14d, LongHistogram(bucketScheme2, Array(0L, 0L, 14, 14)), otelExpDeltaHistName, seriesTags),
+
+      Seq(74373041000L, 3d, 4d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 4)), otelExpDeltaHistName, seriesTags),
+      Seq(74373042000L, 2d, 6d, LongHistogram(bucketScheme1, Array(0L, 3L, 4, 6)), otelExpDeltaHistName, seriesTags)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.deltaHistogram.ingestionSchema, base, offset)
+      part.ingest(lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
+    val pk = PartKeyRecord(deltaHistPartKeyBytes, 74372801000L, currTime, shard)
+    rawColStore.writePartKeys(rawDataset.ref, shard, Observable.now(pk), 259200, pkUpdateHour).futureValue
+  }
+
   it ("should write prom histogram data with NaNs to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
@@ -1495,6 +1543,45 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       (74372922000L, 15d, 19d, Seq(1d, 9d, 19d)),
       (74372982000L, 17d, 17d, Seq(1d, 16d, 17d)),
       (74373042000L, 5d, 10d, Seq(4d, 5d, 10d))
+    )
+  }
+
+  it("should read and verify exponential delta histogram data in cassandra using " +
+    "PagedReadablePartition for 1-min downsampled data") {
+
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
+        batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
+        0,
+        SinglePartitionScan(expDeltaHistPartKeyBytes))
+      .toListL.runToFuture.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.deltaHistogram.downsample.get, 0, 0,
+      downsampledPartData1, 5.minutes.toMillis.toInt)
+
+    downsampledPart1.partKeyBytes shouldEqual expDeltaHistPartKeyBytes
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual false
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
+      new AtomicLong(), Long.MaxValue, "query-id")
+
+    val downsampledData1 = rv1.rows.map { r =>
+      val h = r.getHistogram(3).asInstanceOf[LongHistogram]
+      val b = h.buckets.asInstanceOf[Base2ExpHistogramBuckets]
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), b, h.values.toSeq)
+    }.toList
+
+    // time, sum, count, histogram, bucket values
+    // new sample for every bucket-scheme and downsamplePeriod combination
+    downsampledData1 shouldEqual Seq(
+      (74372801500L,2.0,3.0, Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 0, 2, 3)),
+      (74372802000L,3.0,3.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 0, 3, 8)),
+      (74372861750L,6.0,8.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 0, 3, 8)),
+      (74372921500L,7.0,9.0,Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 1, 1, 9)),
+      (74372922000L,8.0,10.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 1, 16, 17)),
+      (74372982000L,17.0,17.0,Base2ExpHistogramBuckets(2, -1, 3), Seq(0, 1, 16, 17)),
+      (74373042000L,5.0,10.0,Base2ExpHistogramBuckets(3, -1, 3), Seq(0, 4, 5, 10))
     )
   }
 
