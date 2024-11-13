@@ -62,7 +62,9 @@ trait Histogram extends Ordered[Histogram] {
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
    */
-  def quantile(q: Double): Double = {
+  def quantile(q: Double,
+               min: Double = Double.NegativeInfinity,
+               max: Double = Double.PositiveInfinity): Double = {
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2) Double.NaN
@@ -78,7 +80,7 @@ trait Histogram extends Ordered[Histogram] {
       else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
         // interpolate quantile within le bucket
-        var (bucketStart, bucketEnd, count) = (0d, bucketTop(b), bucketValue(b))
+        var (bucketStart, bucketEnd, count) = (Math.max(0d, min), Math.min(bucketTop(b), max), bucketValue(b))
         if (b > 0) {
           bucketStart = bucketTop(b-1)
           count -= bucketValue(b-1)
@@ -264,7 +266,6 @@ final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[
     }
     // TODO if otel histogram, the need to add values in a different way
     // see if we can refactor since MutableHistogram also has this logic
-    assert(other.buckets == buckets)
     cforRange { 0 until numBuckets } { b =>
       values(b) += other.values(b)
     }
@@ -431,54 +432,6 @@ object MutableHistogram {
     case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)
     case other: Histogram         => ???
   }
-}
-
-/**
- * MaxMinHistogram improves quantile calculation accuracy with a known max value recorded from the client.
- * Whereas normally Prom histograms have +Inf as the highest bucket, and we cannot interpolate above the last
- * non-Inf bucket, having a max allows us to interpolate from the rank up to the max.
- * When the max value is lower, we interpolate between the bottom of the bucket and the max value.
- * Both changes mean that the 0.90+ quantiles return much closer to the max value, instead of interpolating or clipping.
- * The quantile result can never be above max, regardless of the bucket scheme.
- *
- * UPDATE: Adding support for min value as well to make sure the quantile is never below the minimum specified value.
- * By default, the minimum value is set to 0.0
- */
-final case class MaxMinHistogram(innerHist: HistogramWithBuckets, max: Double, min: Double = 0.0)
-  extends HistogramWithBuckets {
-  final def buckets: HistogramBuckets = innerHist.buckets
-  final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
-
-  def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
-
-  override def quantile(q: Double): Double = {
-    val result = if (q < 0) Double.NegativeInfinity
-    else if (q > 1) Double.PositiveInfinity
-    else if (numBuckets < 2) Double.NaN
-    else {
-      // find rank for the quantile using total number of occurrences (which is the last bucket value)
-      var rank = q * topBucketValue
-      // using rank, find the le bucket which would have the identified rank
-      val bucketNum = firstBucketGTE(rank)
-
-      // now calculate quantile.  No need to special case top bucket since we will always cap top at max
-      if (bucketNum == 0 && bucketTop(0) <= 0) return bucketTop(0)
-      else {
-        // interpolate quantile within le bucket
-        var (bucketStart, bucketEnd, count) = (Math.max(0d, min),
-          Math.min(bucketTop(bucketNum), max), bucketValue(bucketNum))
-        if (bucketNum > 0) {
-          bucketStart = bucketTop(bucketNum-1)
-          count -= bucketValue(bucketNum-1)
-          rank -= bucketValue(bucketNum-1)
-        }
-        bucketStart + (bucketEnd-bucketStart)*(rank/count)
-      }
-    }
-    result
-  }
-
-
 }
 
 /**

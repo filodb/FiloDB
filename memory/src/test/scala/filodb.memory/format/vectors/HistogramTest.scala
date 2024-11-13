@@ -169,34 +169,34 @@ class HistogramTest extends NativeVectorTest {
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max column") {
-      val h = MaxMinHistogram(mutableHistograms(0), 90)
-      h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!
+      val h = mutableHistograms(0)
+      h.quantile(0.95, 0 ,90) shouldEqual 72.2 +- 0.1   // more accurate due to max!
 
       // Not just last bucket, but should always be clipped at max regardless of bucket scheme
       val values = Array[Double](10, 15, 17, 20, 25, 25, 25, 25)
-      val h2 = MaxMinHistogram(MutableHistogram(bucketScheme, values), 10)
-      h2.quantile(0.95) shouldEqual 9.5 +- 0.1   // more accurate due to max!
+      val h2 = MutableHistogram(bucketScheme, values)
+      h2.quantile(0.95, 0, 10) shouldEqual 9.5 +- 0.1   // more accurate due to max!
 
       val values3 = Array[Double](1, 1, 1, 1, 1, 4, 7, 7, 9, 9) ++ Array.fill(54)(12.0)
-      val h3 = MaxMinHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0)
-      h3.quantile(0.99) shouldEqual 1593.2 +- 0.1
-      h3.quantile(0.90) shouldEqual 1379.4 +- 0.1
+      val h3 = MutableHistogram(HistogramBuckets.binaryBuckets64, values3)
+      h3.quantile(0.99, 0, 1617.0) shouldEqual 1593.2 +- 0.1
+      h3.quantile(0.90, 0, 1617.0) shouldEqual 1379.4 +- 0.1
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max and min column") {
-      val h = MaxMinHistogram(mutableHistograms(0), 100, 10)
-      h.quantile(0.95) shouldEqual 75.39 +- 0.1 // more accurate due to max, min!
+      val h = mutableHistograms(0)
+      h.quantile(0.95, 10, 100) shouldEqual 75.39 +- 0.1 // more accurate due to max, min!
 
       // Not just last bucket, but should always be clipped at max regardless of bucket scheme
       val values = Array[Double](10, 15, 17, 20, 25, 25, 25, 25)
-      val h2 = MaxMinHistogram(MutableHistogram(bucketScheme, values), 10, 2)
-      h2.quantile(0.95) shouldEqual 9.5 +- 0.1 // more accurate due to max, min!
+      val h2 = MutableHistogram(bucketScheme, values)
+      h2.quantile(0.95, 2, 10) shouldEqual 9.5 +- 0.1 // more accurate due to max, min!
 
       val values3 = Array[Double](1, 1, 1, 1, 1, 4, 7, 7, 9, 9) ++ Array.fill(54)(12.0)
-      val h3 = MaxMinHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0, 1.0)
-      h3.quantile(0.99) shouldEqual 1593.2 +- 0.1
-      h3.quantile(0.90) shouldEqual 1379.4 +- 0.1
-      h3.quantile(0.01) shouldEqual 1.0 +- 0.1 // must use the starting reference from min
+      val h3 = MutableHistogram(HistogramBuckets.binaryBuckets64, values3)
+      h3.quantile(0.99, 1.0, 1617.0) shouldEqual 1593.2 +- 0.1
+      h3.quantile(0.90, 1.0, 1617.0) shouldEqual 1379.4 +- 0.1
+      h3.quantile(0.01, 1.0, 1617.0) shouldEqual 1.0 +- 0.1 // must use the starting reference from min
     }
 
     it("should serialize to and from BinaryHistograms and compare correctly") {
