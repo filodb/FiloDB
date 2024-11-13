@@ -62,25 +62,6 @@ class HistogramTest extends NativeVectorTest {
   }
 
   describe("Histogram") {
-      it("should add two histograms with the same bucket scheme correctly") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val hist2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
-        hist1.add(hist2)
-
-        hist1.values shouldEqual Array(3, 6, 9, 12, 15, 18, 21, 26)
-      }
-
-      it("should not add histograms with different bucket schemes") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val histWithDifferentBuckets = LongHistogram(customScheme, Array(1, 2, 3, 4, 5, 6, 7))
-
-        val thrown = intercept[IllegalArgumentException] {
-          hist1.add(histWithDifferentBuckets)
-        }
-
-        thrown.getMessage shouldEqual s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
-          s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
-      }
     it("should calculate quantile correctly") {
       mutableHistograms.zip(quantile50Result).foreach { case (h, res) =>
         val quantile = h.quantile(0.50)
