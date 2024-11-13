@@ -1,5 +1,6 @@
 import Dependencies._
 import FiloSettings._
+import RustPlugin._
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 import io.gatling.sbt.GatlingPlugin
 import pl.project13.scala.sbt.JmhPlugin
@@ -45,6 +46,7 @@ object Submodules {
   )
 
   lazy val core = (project in file("core"))
+    .enablePlugins(RustPlugin)
     .dependsOn(memory % "compile->compile; test->test")
     .settings(
       commonSettings,

@@ -263,7 +263,7 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
           logger.debug(s"Creating TSPartition for ODP from part ID $id in dataset=$ref shard=$shardNum")
           // If not there, then look up in Lucene and get the details
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
-                unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
+                unsafeKeyOffset = PartKeyIndexRaw.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
                 group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
                 sch  <- Option(schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset)))
                           } yield {

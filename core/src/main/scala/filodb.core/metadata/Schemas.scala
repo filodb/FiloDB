@@ -308,7 +308,8 @@ final case class Schemas(part: PartitionSchema,
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
-    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
+    // The schema provided does not match existing, give the the sample a weight of histogram.
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag.getOrElse((schemaId, c), 20.0)).sum
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
     estDataSize
   }
@@ -327,7 +328,8 @@ final case class Schemas(part: PartitionSchema,
     chunkMethod: ChunkScanMethod
   ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
-    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
+    // The schema provided does not match existing, give the the sample a weight of histogram.
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag.getOrElse((schemaId, c), 20.0)).sum
     var estDataSize = 0d
     pkRecs.foreach { pkRec =>
       val intersection = Math.min(chunkMethod.endTime, pkRec.endTime) - Math.max(chunkMethod.startTime, pkRec.startTime)

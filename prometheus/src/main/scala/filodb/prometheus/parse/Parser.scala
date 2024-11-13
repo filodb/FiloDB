@@ -221,7 +221,7 @@ object ParserUtil {
       if (c == '\\') {
         val next = str.charAt(offset); offset += 1
         c = next match {
-          case '\\' | '\'' | '"' => next
+          case '\\' | '\'' | '"' | '.' => next
           case 'f' => '\f'
           case 'n' => '\n'
           case 'r' => '\r'

@@ -95,6 +95,8 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
     - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`
 4. [Apache Kafka](http://kafka.apache.org/) 0.10.x or above
+5. [Rust](https://www.rust-lang.org/tools/install) to build native components
+6. A working C compiler for your system (GCC or Clang)
  
 Optional:
 
