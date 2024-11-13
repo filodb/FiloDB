@@ -9,7 +9,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 
 object Vectors {
-  val PromMetricLabel = "__name__"
+  val PromMetricLabel = GlobalConfig.PromMetricLabel
   val TypeLabel       = Schemas.TypeLabel
   val BucketFilterLabel = "_bucket_"
   val conf = GlobalConfig.systemConfig

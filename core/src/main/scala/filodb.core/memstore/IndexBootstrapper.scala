@@ -52,7 +52,14 @@ class RawIndexBootstrapper(colStore: ColumnStore) {
     colStore.scanPartKeys(ref, shardNum)
       .map { pk =>
         val partId = assignPartId(pk)
-        index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+        // -1 is returned if we skiped the part key for any reason, such as
+        // unknown schema or memory issues
+        //
+        // assignPartId will log these cases, so no extra logging is needed
+        // here
+        if (partId != -1) {
+          index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+        }
       }
       .countL
       .map { count =>

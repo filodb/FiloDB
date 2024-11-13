@@ -1,6 +1,7 @@
 package filodb.downsampler.index
 
 import scala.concurrent.Await
+import scala.concurrent.duration.DurationInt
 
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
@@ -88,8 +89,11 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       sparkTasksFailed.increment
       throw e
     }
+
+    // quick & dirty hack to ensure that the completed metric gets published
     if (dsSettings.shouldSleepForMetricsFlush)
-      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
+      Await.result(Kamon.stopModules(), 62.seconds)
+
   }
 
   def migrateWithDownsamplePartKeys(partKeys: Observable[PartKeyRecord], shard: Int,
