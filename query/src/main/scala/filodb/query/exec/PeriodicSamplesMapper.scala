@@ -6,7 +6,6 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
@@ -177,10 +176,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     if (functionId.contains(InternalRangeFunction.Rate)) { // only extend for rate function
       val pubInt = rv match {
         case rvrd: RawDataRangeVector =>
-          if (rvrd.partition.schema == Schemas.promCounter ||
-              rvrd.partition.schema == Schemas.promHistogram ||
-              rvrd.partition.schema == Schemas.otelCumulativeHistogram ||
-              rvrd.partition.schema == Schemas.otelCumulativeHistogram) // only extend for cumulative schemas
+          if (rvrd.partition.schema.hasCumulativeTemporalityColumn) // only extend for cumulative schemas
             rvrd.partition.publishInterval.getOrElse(0L)
           else 0L
         case _ => 0L
