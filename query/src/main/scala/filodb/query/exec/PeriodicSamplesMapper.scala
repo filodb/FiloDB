@@ -87,15 +87,15 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val chunkedHRangeFunc = rangeFuncGen().asChunkedH
           val minResolutionMs = rdrv.minResolutionMs
-          if (chunkedHRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && windowLength < minResolutionMs * 2)
+          val extendedWindow = extendLookback(rdrv, windowLength)
+          if (chunkedHRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && extendedWindow < minResolutionMs * 2)
             throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
               s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
               s"yield intended results for rate/increase functions since each lookback window can contain " +
               s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
-          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, chunkedHRangeFunc, querySession, histRow), outputRvRange)
+                    extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
@@ -104,15 +104,16 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val minResolutionMs = rdrv.minResolutionMs * 2
           val chunkedDRangeFunc = rangeFuncGen().asChunkedD
-          if (chunkedDRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && windowLength < rdrv.minResolutionMs * 2)
+          val extendedWindow = extendLookback(rdrv, windowLength)
+          if (chunkedDRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] &&
+              extendedWindow < rdrv.minResolutionMs * 2)
             throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
               s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
               s"yield intended results for rate/increase functions since each lookback window can contain " +
               s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
-          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, chunkedDRangeFunc, querySession), outputRvRange)
+                    extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>

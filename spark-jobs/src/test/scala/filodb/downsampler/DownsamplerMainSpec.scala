@@ -1921,6 +1921,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val exec = MultiSchemaPartitionsExec(qc,
       InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
       AllChunkScan, "_metric_")
+    // window should be auto-extended to 10m
     exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(310000),
       Some(InternalRangeFunction.Rate), qc))
 
@@ -1935,7 +1936,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampleTSStore.shutdown()
   }
 
-  it("should encounter error when doing rate on DownsampledTimeSeriesShard when lookback < 5m resolution ") {
+  it("should encounter error when doing increase on DownsampledTimeSeriesShard when lookback < 10m resolution ") {
 
     val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
       settings.filodbConfig)
@@ -1953,7 +1954,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
       AllChunkScan, "_metric_")
     exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(290000),
-      Some(InternalRangeFunction.Rate), qc))
+      Some(InternalRangeFunction.Increase), qc))
 
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
