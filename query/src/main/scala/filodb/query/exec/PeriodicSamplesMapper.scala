@@ -102,7 +102,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
             s"windowLength=$windowLength")
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val minResolutionMs = rdrv.minResolutionMs * 2
+          val minResolutionMs = rdrv.minResolutionMs
           val chunkedDRangeFunc = rangeFuncGen().asChunkedD
           val extendedWindow = extendLookback(rdrv, windowLength)
           if (chunkedDRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] &&
