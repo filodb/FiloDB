@@ -1922,7 +1922,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
       AllChunkScan, "_metric_")
     // window should be auto-extended to 10m
-    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(310000),
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(610000),
       Some(InternalRangeFunction.Rate), qc))
 
     val querySession = QuerySession(QueryContext(), queryConfig)

@@ -174,21 +174,22 @@ final case class PeriodicSamplesMapper(startMs: Long,
    * will lead to incorrect results.
    */
   private[exec] def extendLookback(rv: RangeVector, window: Long): Long = {
-    if (functionId.contains(InternalRangeFunction.Rate)) { // only extend for rate function
-      val pubInt = rv match {
-        case rvrd: RawDataRangeVector =>
-          if (rvrd.partition.schema.hasCumulativeTemporalityColumn) // only extend for cumulative schemas
-            rvrd.partition.publishInterval.getOrElse(0L)
-          else 0L
-        case _ => 0L
-      }
-      if (window < 2 * pubInt) 2 * pubInt // 2 * publish interval since we want 2 samples for rate
-      else window
-    } else {
-      window
-    }
-    // TODO consider returning an error when known publish interval is less than 2*windowLength for increase function
-    // instead of silently returning empty rate (and implicitly zero for sum functions) for the window
+    window
+// following code is commented, but uncomment when we want to extend window for rate function
+
+//    if (functionId.contains(InternalRangeFunction.Rate)) { // only extend for rate function
+//      val pubInt = rv match {
+//        case rvrd: RawDataRangeVector =>
+//          if (rvrd.partition.schema.hasCumulativeTemporalityColumn) // only extend for cumulative schemas
+//            rvrd.partition.publishInterval.getOrElse(0L)
+//          else 0L
+//        case _ => 0L
+//      }
+//      if (window < 2 * pubInt) 2 * pubInt // 2 * publish interval since we want 2 samples for rate
+//      else window
+//    } else {
+//      window
+//    }
   }
 
   // Transform source double or long to double schema
