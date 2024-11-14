@@ -284,7 +284,7 @@ final case class Schemas(part: PartitionSchema,
   }
 
   private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case (k, v) =>
-    s"${schemaName(k._1)} ColId:${k._2} : $v"
+    s"${schemaName(k._1)} ${k._1} ColId:${k._2} : $v"
   }
 
   Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")

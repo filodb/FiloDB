@@ -25,6 +25,11 @@ object HistogramTest {
     LongHistogram(customScheme, buckets.take(customScheme.numBuckets).map(_.toLong))
   }
 
+  val otelExpBuckets = Base2ExpHistogramBuckets(3, -3, 7)
+  val otelExpHistograms = rawHistBuckets.map { buckets =>
+    LongHistogram(otelExpBuckets, buckets.take(otelExpBuckets.numBuckets).map(_.toLong))
+  }
+
   val correction1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
   val correction2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
 
@@ -58,38 +63,109 @@ class HistogramTest extends NativeVectorTest {
 
       customScheme.serialize(writeBuf, 0) shouldEqual 26
       HistogramBuckets(writeBuf, HistFormat_Custom_Delta) shouldEqual customScheme
+
+      val buckets3 = Base2ExpHistogramBuckets(3, -5, 16)
+      buckets3.serialize(writeBuf, 0) shouldEqual 14
+      HistogramBuckets(writeBuf, HistFormat_OtelExp_Delta) shouldEqual buckets3
     }
   }
 
   describe("Histogram") {
-      it("should add two histograms with the same bucket scheme correctly") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val hist2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
-        hist1.add(hist2)
 
-        hist1.values shouldEqual Array(3, 6, 9, 12, 15, 18, 21, 26)
+    it("should add two histograms with the same bucket scheme correctly") {
+      val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
+      val hist2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
+      hist1.add(hist2)
+
+      hist1.values shouldEqual Array(3, 6, 9, 12, 15, 18, 21, 26)
+    }
+
+    it("should not add histograms with different bucket schemes") {
+      val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
+      val histWithDifferentBuckets = LongHistogram(customScheme, Array(1, 2, 3, 4, 5, 6, 7))
+
+      val thrown = intercept[IllegalArgumentException] {
+        hist1.add(histWithDifferentBuckets)
       }
 
-      it("should not add histograms with different bucket schemes") {
-        val hist1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
-        val histWithDifferentBuckets = LongHistogram(customScheme, Array(1, 2, 3, 4, 5, 6, 7))
+      thrown.getMessage shouldEqual s"Cannot add histograms with different bucket configurations. " +
+        s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
+    }
 
-        val thrown = intercept[IllegalArgumentException] {
-          hist1.add(histWithDifferentBuckets)
-        }
-
-        thrown.getMessage shouldEqual s"Cannot add histograms with different bucket configurations. " +
-          s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
-      }
-    it("should calculate quantile correctly") {
+    it("should calculate quantile correctly for custom and geometric bucket histograms") {
       mutableHistograms.zip(quantile50Result).foreach { case (h, res) =>
         val quantile = h.quantile(0.50)
         info(s"For histogram ${h.values.toList} -> quantile = $quantile")
         quantile shouldEqual res
       }
 
-      // Cannot return anything more than 2nd-to-last bucket (ie 64)
-      mutableHistograms(0).quantile(0.95) shouldEqual 64
+      // Cannot return anything more than 2nd-to-last bucket (ie 64) when last bucket is infinity
+      customHistograms(0).quantile(0.95) shouldEqual 10
+    }
+
+
+    it("should calculate quantile correctly for exponential bucket histograms") {
+      val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+
+      // multiple buckets with interpolation
+      hist.quantile(0.5) shouldEqual 1.0 +- 0.00001
+      hist.quantile(0.75) shouldEqual 1.2968395546510099 +- 0.00001
+      hist.quantile(0.25) shouldEqual 0.7711054127039704 +- 0.00001
+      hist.quantile(0.99) shouldEqual 1.6643974694230492 +- 0.00001
+      hist.quantile(0.01) shouldEqual 0.0 // zero bucket
+      hist.quantile(0.085) shouldEqual 0.014142135623730961 +- 0.00001
+    }
+
+    it("should calculate histogram_fraction correctly for exponential histograms using exponential interpolation") {
+      val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+
+      // multiple buckets with interpolation
+      hist.histogramFraction(0.8, 1.2) shouldEqual 0.3899750004807707 +- 0.00001
+
+      // multiple buckets with interpolation using min and max leads to improved accuracy
+      hist.histogramFraction(0.8, 1.2, 0.76, 1.21) shouldEqual 0.42472117149283567 +- 0.00001
+
+      // multiple buckets without interpolation
+      hist.histogramFraction(bucketScheme.bucketTop(3),
+        bucketScheme.bucketTop(7)) shouldEqual ((hist.bucketValue(7) - hist.bucketValue(3)) / hist.topBucketValue) +- 0.00001
+
+      // zero bucket
+      hist.histogramFraction(0, 0) shouldEqual 0.0833333 +- 0.00001
+
+      // beyond last bucket
+      hist.histogramFraction(2.0, 2.1) shouldEqual 0.0
+
+      // one bucket
+      hist.histogramFraction(1.0, 1.09) shouldEqual 0.08288542333480116 +- 0.00001
+
+      // all buckets
+      hist.histogramFraction(0, 2) shouldEqual 1.0
+    }
+
+    it("should calculate histogram_fraction correctly for custom bucket histograms using linear interpolation") {
+      val bucketScheme = CustomBuckets(Array(1,2,3,4,5,6,7,8,9,10,11,Double.PositiveInfinity))
+      val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+
+      // multiple buckets with linear interpolation
+      hist.histogramFraction(4.5, 6.6) shouldEqual 0.175 +- 0.00001
+
+      // multiple buckets with interpolation using min and max leads to improved accuracy
+      hist.histogramFraction(4.5, 6.6, 4.1, 6.8) shouldEqual 0.19212962962962962 +- 0.00001
+
+      // multiple buckets without interpolation
+      hist.histogramFraction(bucketScheme.bucketTop(3),
+        bucketScheme.bucketTop(7)) shouldEqual ((hist.bucketValue(7) - hist.bucketValue(3)) / hist.topBucketValue) +- 0.00001
+
+      // beyond last bucket
+      hist.histogramFraction(11.1, 12.1) shouldEqual 0.0
+
+      // one bucket
+      hist.histogramFraction(1.0, 1.09) shouldEqual 0.0075 +- 0.00001
+
+      // all buckets
+      hist.histogramFraction(0, Double.PositiveInfinity) shouldEqual 1.0
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max column") {
@@ -215,5 +291,91 @@ class HistogramTest extends NativeVectorTest {
         current = d
       }
     }
+
+    it("should return correct values for Base2ExpHistogramBuckets.bucketIndexToArrayIndex(index: Int): Int") {
+      val b1 = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      b1.bucketIndexToArrayIndex(-5) shouldEqual 1
+      b1.bucketIndexToArrayIndex(-4) shouldEqual 2
+      b1.bucketIndexToArrayIndex(0) shouldEqual 6
+      b1.bucketIndexToArrayIndex(5) shouldEqual 11
+    }
+
+    it("should create OTel exponential buckets and add them correctly") {
+      val b1 = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
+      b1.numBuckets shouldEqual 12
+      b1.startBucketTop shouldBe 0.7071067811865475 +- 0.0001
+      b1.endBucketTop shouldBe 1.6817928305074294 +- 0.0001
+
+      b1.bucketIndexToArrayIndex(-5) shouldEqual 1
+      b1.bucketIndexToArrayIndex(5) shouldEqual 11
+      b1.bucketTop(b1.bucketIndexToArrayIndex(-1)) shouldEqual 1.0
+
+      val b2 = Base2ExpHistogramBuckets(2, -2, 7) // 0.8408 to 2.378
+      val b3 = Base2ExpHistogramBuckets(2, -4, 9) // 0.594 to 2.378
+      b1.canAccommodate(b2) shouldEqual false
+      b2.canAccommodate(b1) shouldEqual false
+      b3.canAccommodate(b1) shouldEqual true
+      b3.canAccommodate(b2) shouldEqual true
+
+      val bAdd = b1.add(b2)
+      bAdd.numBuckets shouldEqual 10
+      bAdd.scale shouldEqual 2
+      bAdd.startBucketTop shouldBe 0.5946035575013606 +- 0.0001
+      bAdd.endBucketTop shouldBe 2.378414245732675 +- 0.0001
+      bAdd.canAccommodate(b1) shouldEqual true
+      bAdd.canAccommodate(b2) shouldEqual true
+
+      val bAddValues = new Array[Double](bAdd.numBuckets)
+      bAdd.addValues(bAddValues, b1, MutableHistogram(b1, Array(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)))
+      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 11.0, 11.0)
+      bAdd.addValues(bAddValues, b2, MutableHistogram(b2, Array(0, 1, 2, 3, 4, 5, 6, 7)))
+      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0)
+
+      val b4 = Base2ExpHistogramBuckets(5, 15, 36) // 1.414 to 3.018
+      b4.numBuckets shouldEqual 37
+      b4.startBucketTop shouldBe 1.414213562373094 +- 0.0001
+      b4.endBucketTop shouldBe 3.0183288551868377 +- 0.0001
+
+      val b5 = Base2ExpHistogramBuckets(3, 10, 6)
+      b5.numBuckets shouldEqual 7
+      b5.startBucketTop shouldBe 2.59367910930202 +- 0.0001
+      b5.endBucketTop shouldBe 4.000000000000002 +- 0.0001
+
+      val bAdd2 = bAdd.add(b4).add(b5)
+      val bAdd2Values = new Array[Double](bAdd2.numBuckets)
+      bAdd2.addValues(bAdd2Values, bAdd, MutableHistogram(bAdd, bAddValues))
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0, 18.0, 18.0, 18.0, 18.0)
+
+      bAdd2.addValues(bAdd2Values, b4, MutableHistogram(b4, (0 until 37 map (i => i.toDouble)).toArray))
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 43.0, 51.0, 54.0, 54.0, 54.0)
+
+      bAdd2.addValues(bAdd2Values, b5, MutableHistogram(b5, Array(0.0, 10.0, 11, 12, 13, 14, 15)))
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 43.0, 62.0, 67.0, 69.0, 69.0)
+
+    }
+
+    it("should create non-overlapping OTel exponential buckets and add them correctly") {
+      val b1 = Base2ExpHistogramBuckets(3, -5, 11)
+      val b2 = Base2ExpHistogramBuckets(3, 15, 11)
+      val b3 = b1.add(b2)
+      b3.numBuckets shouldEqual 32
+      b3.startIndexPositiveBuckets shouldEqual -5
+    }
+
+    it("should reduce scale when more than 120 buckets to keep memory and compute in check") {
+      val b1 = Base2ExpHistogramBuckets(6, -50, 21)
+      val b2 = Base2ExpHistogramBuckets(6, 100, 26)
+      val add1 = b1.add(b2, maxBuckets = 128)
+      add1 shouldEqual Base2ExpHistogramBuckets(5, -26, 90)
+      add1.canAccommodate(b1) shouldEqual true
+      add1.canAccommodate(b2) shouldEqual true
+
+      val add2 = b1.add(b2, maxBuckets = 64)
+      add2 shouldEqual Base2ExpHistogramBuckets(4, -14, 46)
+      add2.canAccommodate(b1) shouldEqual true
+      add2.canAccommodate(b2) shouldEqual true
+    }
+
+
   }
 }
