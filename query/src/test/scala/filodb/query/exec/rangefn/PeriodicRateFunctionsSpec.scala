@@ -190,35 +190,36 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     it.next.getDouble(1) shouldEqual expectedDelta
   }
 
-  it("should extend lookback window for rate function when lookback < 2 * publishInterval if it exists") {
-    val publishInterval = 1.minute.toMillis.toInt
-    val rawData = RawPartData(Array.empty, Seq.empty)
-    // simulate downsampled partition with resolution set as publishInterval
-    val p1 = new PagedReadablePartition(Schemas.promCounter, 0, -1, rawData, publishInterval)
-    val rv = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p1, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
+  ignore (" disabled since the lookback extension is disabled for now. See PeriodicSamplesMapper::extendLookback") {
+    it("should extend lookback window for rate function when lookback < 2 * publishInterval if it exists") {
+      val publishInterval = 1.minute.toMillis.toInt
+      val rawData = RawPartData(Array.empty, Seq.empty)
+      // simulate downsampled partition with resolution set as publishInterval
+      val p1 = new PagedReadablePartition(Schemas.promCounter, 0, -1, rawData, publishInterval)
+      val rv = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p1, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
 
-    // looback is extended to 2 * publishInterval when less than 2 * publishInterval
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
-    periodicSamplesVectorFnMapper.extendLookback(rv, 3) shouldEqual 2 * publishInterval
+      // looback is extended to 2 * publishInterval when less than 2 * publishInterval
+      val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+        Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+      periodicSamplesVectorFnMapper.extendLookback(rv, 3) shouldEqual 2 * publishInterval
 
-    // lookback is not extended when lookback >= 2 * publishInterval
-    val periodicSamplesVectorFnMapper2 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
-    periodicSamplesVectorFnMapper2.extendLookback(rv, publishInterval * 2 + 1) shouldEqual (2 * publishInterval + 1)
+      // lookback is not extended when lookback >= 2 * publishInterval
+      val periodicSamplesVectorFnMapper2 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+        Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+      periodicSamplesVectorFnMapper2.extendLookback(rv, publishInterval * 2 + 1) shouldEqual (2 * publishInterval + 1)
 
-    // lookback is not extended for increase function
-    val periodicSamplesVectorFnMapper3 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(publishInterval), Some(Increase), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
-    periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
+      // lookback is not extended for increase function
+      val periodicSamplesVectorFnMapper3 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+        Some(publishInterval), Some(Increase), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+      periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
-    // lookback is not extended for delta schemas
-    val p2 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, publishInterval)
-    val rv2 = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p2, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
-    periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
+      // lookback is not extended for delta schemas
+      val p2 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, publishInterval)
+      val rv2 = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p2, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
+      periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
+    }
   }
-
   it("appropriate increase function is used for prom-counter type") {
     val samples = Seq(
       100000L -> 100d,
