@@ -187,6 +187,11 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   def name: String = data.name
 
+  def hasCumulativeTemporalityColumn: Boolean = data.columns.exists {
+    case d: DataColumn => d.isCumulativeTemporality
+    case _ => false
+  }
+
   /**
     * Fetches reader for a binary vector
     */
