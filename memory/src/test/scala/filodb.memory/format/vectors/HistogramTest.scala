@@ -88,7 +88,7 @@ class HistogramTest extends NativeVectorTest {
         hist1.add(histWithDifferentBuckets)
       }
 
-      thrown.getMessage shouldEqual s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
+      thrown.getMessage shouldEqual s"Cannot add histograms with different bucket configurations. " +
         s"Expected: ${hist1.buckets}, Found: ${histWithDifferentBuckets.buckets}"
     }
 

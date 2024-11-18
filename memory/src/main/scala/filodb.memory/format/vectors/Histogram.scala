@@ -258,7 +258,7 @@ final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[
   final def add(other: LongHistogram): Unit = {
     if (other.buckets != buckets) {
       throw new IllegalArgumentException(
-           s"Mismatch in bucket sizes. Cannot add histograms with different bucket configurations. " +
+           s"Cannot add histograms with different bucket configurations. " +
              s"Expected: ${buckets}, Found: ${other.buckets}"
       )
     }
