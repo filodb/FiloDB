@@ -6,7 +6,7 @@ import scala.jdk.CollectionConverters.asScalaBufferConverter
 
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardinalities}
 
 /**
@@ -237,6 +237,19 @@ object HierarchicalQueryExperience extends StrictLogging {
     }
 
   /**
+   * @param filters - Seq[ColumnFilter] - label filters of the query/lp
+   * @return - Seq[String] - List of filter tags/labels after filtering out the .* regex. We want to optimize the
+   *         aggregation queries which have .* regex in the filters as they are selecting all the relevant time-series
+   *         and hence not applicable for filter check in the aggregation rules.
+   */
+  def getColumnsAfterFilteringOutDotStarRegexFilters(filters: Seq[ColumnFilter]): Seq[String] = {
+    filters.filter {
+      case ColumnFilter(_, EqualsRegex(value)) if value.toString == ".*" => false
+      case _ => true
+    }.map(x => x.column)
+  }
+
+  /**
    * Updates the metric column filter if higher level aggregation is applicable
    * @param params - HierarchicalQueryExperienceParams - Contains metricDelimiter and aggRules
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
@@ -244,7 +257,7 @@ object HierarchicalQueryExperience extends StrictLogging {
    */
   def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params: HierarchicalQueryExperienceParams,
                                                                  filters: Seq[ColumnFilter]): Seq[ColumnFilter] = {
-    val filterTags = filters.map(x => x.column)
+    val filterTags = getColumnsAfterFilteringOutDotStarRegexFilters(filters)
     val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
     val currentMetricName = getMetricName(metricColumnFilter, filters)
     if (currentMetricName.isDefined) {
