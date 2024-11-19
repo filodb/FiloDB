@@ -5,8 +5,8 @@ import kamon.Kamon
 import scala.jdk.CollectionConverters.asScalaBufferConverter
 
 import filodb.core.GlobalConfig
-import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.query.Filter.Equals
+import filodb.core.query.ColumnFilter
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardinalities}
 
 /**
@@ -244,7 +244,7 @@ object HierarchicalQueryExperience extends StrictLogging {
    */
   def getColumnsAfterFilteringOutDotStarRegexFilters(filters: Seq[ColumnFilter]): Seq[String] = {
     filters.filter {
-      case ColumnFilter(_, Filter.EqualsRegex(value)) if value.toString == ".*" => false
+      case ColumnFilter(_, EqualsRegex(value)) if value.toString == ".*" => false
       case _ => true
     }.map(x => x.column)
   }
