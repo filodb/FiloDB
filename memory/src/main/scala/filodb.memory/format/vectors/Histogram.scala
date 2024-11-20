@@ -63,29 +63,35 @@ trait Histogram extends Ordered[Histogram] {
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
    */
   def quantile(q: Double,
-               min: Double = Double.NegativeInfinity,
+               min: Double = 0, // negative observations not supported yet
                max: Double = Double.PositiveInfinity): Double = {
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
-    else if (numBuckets < 2) Double.NaN
+    else if (numBuckets < 2 || topBucketValue <= 0) Double.NaN
     else {
       // find rank for the quantile using total number of occurrences (which is the last bucket value)
       var rank = q * topBucketValue
       // using rank, find the le bucket which would have the identified rank
-      val b = firstBucketGTE(rank)
+      val bucket = firstBucketGTE(rank)
+
+      // current bucket lower and upper bound; negative observations not supported yet - to be done later
+      var bucketStart = if (bucket == 0) 0 else bucketTop(bucket-1)
+      var bucketEnd = bucketTop(bucket)
+      // if min and max are in this bucket, adjust the bucket start and end
+      if (min > bucketStart && min <= bucketEnd) bucketStart = min
+      if (max > bucketStart && max <= bucketEnd) bucketEnd = max
 
       // now calculate quantile.  If bucket is last one and last bucket is +Inf then return second-to-last bucket top
       // as we cannot interpolate to +Inf.
-      if (b == numBuckets-1 && bucketTop(numBuckets - 1).isPosInfinity) return bucketTop(numBuckets-2)
-      else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
-      else {
-        // interpolate quantile within le bucket
-        var (bucketStart, bucketEnd, count) = (Math.max(0d, min), Math.min(bucketTop(b), max), bucketValue(b))
-        if (b > 0) {
-          bucketStart = bucketTop(b-1)
-          count -= bucketValue(b-1)
-          rank -= bucketValue(b-1)
-        }
+      if (bucket == numBuckets-1 && bucketTop(numBuckets - 1).isPosInfinity) {
+        return bucketTop(bucket-1)
+      } else if (bucket == 0 && bucketTop(0) <= 0) {
+        return bucketTop(0) // zero or negative bucket
+      } else {
+
+        // interpolate quantile within boundaries of "bucket"
+        val count = if (bucket == 0) bucketValue(bucket) else bucketValue(bucket) - bucketValue(bucket-1)
+        rank -= (if (bucket == 0) 0 else bucketValue(bucket-1))
         val fraction = rank/count
         if (!hasExponentialBuckets || bucketStart == 0) {
           bucketStart + (bucketEnd-bucketStart) * fraction
@@ -135,9 +141,9 @@ trait Histogram extends Ordered[Histogram] {
       val b = it.next()
       val zeroBucket = (b == 0)
       val bucketUpper = bucketTop(b)
-      val bucketLower = if (b == 0) 0.0 else bucketTop(b - 1)
+      val bucketLower = if (zeroBucket) 0.0 else bucketTop(b - 1)
       val bucketVal = bucketValue(b)
-      val prevBucketVal = if (b == 0) 0.0 else bucketValue(b - 1)
+      val prevBucketVal = if (zeroBucket) 0.0 else bucketValue(b - 1)
 
       // Define interpolation functions
       def interpolateLinearly(v: Double): Double = {
@@ -699,11 +705,12 @@ final case class Base2ExpHistogramBuckets(scale: Int,
       val maxBucketTopNeeded = Math.max(endBucketTop, o.endBucketTop)
       var newScale = Math.min(scale, o.scale)
       var newBase = Math.max(base, o.base)
-      var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
-      var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      // minus one below since there is  "+1" in `bucket(index) = base ^ (index + 1)`
+      var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1 // exclusive
+      var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1 // inclusive
       // Even if the two schemes are of same scale, they can have non-overlapping bucket ranges.
       // The new bucket scheme should have at most maxBuckets, so keep reducing scale until within limits.
-      while (newBucketIndexEnd - newBucketIndexStart > maxBuckets) {
+      while (newBucketIndexEnd - newBucketIndexStart + 1 > maxBuckets) {
         newScale -= 1
         newBase = Math.pow(2, Math.pow(2, -newScale))
         newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
@@ -714,7 +721,7 @@ final case class Base2ExpHistogramBuckets(scale: Int,
   }
 
   /**
-   * Converts an OTel exponential index to array index.
+   * Converts an OTel exponential index to array index (aka bucket no).
    * For example if startIndexPositiveBuckets = -5 and numPositiveBuckets = 10, then
    * -5 will return 1, -4 will return 2, 0 will return 6, 4 will return 10.
    * Know that 0 array index is reserved for zero bucket.
