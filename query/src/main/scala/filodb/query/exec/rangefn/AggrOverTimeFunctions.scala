@@ -376,11 +376,13 @@ class RateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int) extends ChunkedR
     maxFunc.reset()
     minFunc.reset()
   }
-  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, hFunc.h)
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
+    hFunc.apply(windowStart, windowEnd, sampleToEmit)
     sampleToEmit.setDouble(2, maxFunc.max)
     sampleToEmit.setDouble(3, minFunc.min)
   }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = ??? // should not be invoked
 
   import BinaryVector.BinaryVectorPtr
 
