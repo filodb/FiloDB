@@ -13,10 +13,10 @@ object HistogramTest {
   )
 
   val rawHistBuckets2 = Seq(
-    Array[Double](0, 25, 17, 20, 25, 34, 76, 82),
-    Array[Double](0, 22, 26, 26, 36, 38, 56, 59),
-    Array[Double](0, 27, 26, 27, 33, 42, 46, 55),
-    Array[Double](0, 8, 5, 33, 35, 67, 91, 121)
+    Array[Double](0, 15, 17, 20, 25, 34, 76, 82),
+    Array[Double](0, 16, 26, 26, 36, 38, 56, 59),
+    Array[Double](0, 16, 26, 27, 33, 42, 46, 55),
+    Array[Double](0, 4, 5, 33, 35, 67, 91, 121)
   )
 
   val rawLongBuckets = rawHistBuckets.map(_.map(_.toLong))
@@ -256,27 +256,29 @@ class HistogramTest extends NativeVectorTest {
     it("should calculate more accurate quantile for otel exponential histogram using max and min column") {
       // bucket boundaries for scale 3, range -3 to 3, 7 buckets
       // zeroBucket: 0.0 -3: 0.840896, -2: 0.917004, -1: 1.000000, 0; 1.090508, 1: 1.189207, 2: 1.296840, 3: 1.414214
-      val exp95thWithoutMinMax = Seq(1.3329136609345256, 1.2987136172035367, 1.3772644080792311, 1.3897175222720994)
+      val expected95thWithoutMinMax = Seq(1.3329136609345256, 1.2987136172035367, 1.3772644080792311, 1.3897175222720994)
       otelExpHistograms.map { h =>
         h.quantile(0.95)
-      }.zip(exp95thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+      }.zip(expected95thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
 
       // notice how the quantiles are calculated within the max now, unlike before
-      val exp95thWithMinMax = Seq(1.2978395301558558, 1.296892165727062, 1.2990334920692943, 1.2993620241156902)
+      val expected95thWithMinMax = Seq(1.2978395301558558, 1.296892165727062, 1.2990334920692943, 1.2993620241156902)
       otelExpHistograms.map { h =>
         h.quantile(0.95, 0.78, 1.3) // notice 1.3 max is less than last bucket
-      }.zip(exp95thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+      }.zip(expected95thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
 
-      val exp5thWithoutMinMax = Seq(0.13790701210160922, 0.11275656477265718, 0.08564685710917462, 0.6359279140356217)
+      val expected5thWithoutMinMax = Seq(0.22984502016934866, 0.15504027656240363, 0.14452907137173218, 0.9199883517494387)
       otelExpHistograms.map { h =>
         h.quantile(0.05)
-      }.zip(exp5thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+      }.zip(expected5thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
 
       // notice how the quantiles are calculated within the min now, unlike before
-      val exp5thWithMinMax = Seq(0.7896758526873408, 0.7879023377662122, 0.7859951235344664, 0.825628309567315)
+      val expected5thWithMinMax = Seq(0.7961930120386448, 0.7908863115573832, 0.7901434789531481, 0.9199883517494387)
       otelExpHistograms.map { h =>
-        h.quantile(0.05, 0.78, 1.3) // notice 0.78 min is less than first non-zero bucket, but bigger than previous otel bucket if it existed
-      }.zip(exp5thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+        // notice 0.78 min is less than first non-zero bucketTop,
+        // but bigger than previous otel bucketTop if it existed
+        h.quantile(0.05, 0.78, 1.3)
+      }.zip(expected5thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
     }
 
     it("should serialize to and from BinaryHistograms and compare correctly") {
