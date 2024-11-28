@@ -594,7 +594,8 @@ final case class GeometricBuckets(firstBucket: Double,
 
 object Base2ExpHistogramBuckets {
   // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
-  val maxBuckets = 200
+  // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
+  val maxBuckets = 180
   val maxAbsScale = 100
   val maxAbsBucketIndex = 500
 }
