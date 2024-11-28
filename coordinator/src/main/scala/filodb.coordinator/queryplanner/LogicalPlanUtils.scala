@@ -641,4 +641,17 @@ object LogicalPlanUtils extends StrictLogging {
       .distinct
       .map(_.toSeq)
   }
+
+  def getLogicalPlanTreeStringRepresentation(logicalPlan: LogicalPlan) : String = {
+    // iterate over all the children of the logical plan and get the string representation
+    val children = logicalPlan match {
+      case nl: NonLeafLogicalPlan => nl.children.map(getLogicalPlanTreeStringRepresentation)
+      case _ => Seq()
+    }
+    if (children.isEmpty) {
+      logicalPlan.getClass.getSimpleName
+    } else {
+      s"${logicalPlan.getClass.getSimpleName}(${children.mkString(",")})"
+    }
+  }
 }

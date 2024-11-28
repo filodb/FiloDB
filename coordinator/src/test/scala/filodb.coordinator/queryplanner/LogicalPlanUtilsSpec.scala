@@ -181,4 +181,14 @@ class LogicalPlanUtilsSpec   extends AnyFunSpec with Matchers {
     getMaxLookbackInMillis(query1) shouldEqual 900000 // max of 15 and 10m
     getMaxLookbackInMillis(query2) shouldEqual 300000 // default lookback is 5m
   }
+
+  it ("getLogicalPlanTreeStringRepresentation should return result as expected") {
+    val timeParamsSec = TimeStepParams(1000, 10, 10000)
+    val query1 = """rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[15m]) + rate(test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"}[10m])"""
+    val query2 = """test_metric{_ns_="test-ns", _ws_="test-ns", cluster="test1"} offset 1d * 1000"""
+    val lp = Parser.queryRangeToLogicalPlan(query1, timeParamsSec)
+    LogicalPlanUtils.getLogicalPlanTreeStringRepresentation(lp) shouldEqual "BinaryJoin(PeriodicSeriesWithWindowing(RawSeries),PeriodicSeriesWithWindowing(RawSeries))"
+    val lp2 = Parser.queryToLogicalPlan(query2, 100, 10)
+    LogicalPlanUtils.getLogicalPlanTreeStringRepresentation(lp2) shouldEqual "ScalarVectorBinaryOperation(PeriodicSeries(RawSeries),ScalarFixedDoublePlan)"
+  }
 }
