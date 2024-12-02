@@ -22,7 +22,7 @@ impl<'a> From<CacheKey<'a>> for (SegmentId, String) {
     }
 }
 
-impl<'a> Equivalent<(SegmentId, String)> for CacheKey<'a> {
+impl Equivalent<(SegmentId, String)> for CacheKey<'_> {
     fn equivalent(&self, key: &(SegmentId, String)) -> bool {
         self.0 == key.0 && self.1 == key.1
     }

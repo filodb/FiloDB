@@ -38,13 +38,13 @@ impl<'a> StringFieldCollector<'a> {
     }
 }
 
-impl<'a> LimitedCollector for StringFieldCollector<'a> {
+impl LimitedCollector for StringFieldCollector<'_> {
     fn limit(&self) -> usize {
         self.limit
     }
 }
 
-impl<'a> Collector for StringFieldCollector<'a> {
+impl Collector for StringFieldCollector<'_> {
     type Fruit = Vec<(String, u64)>;
 
     type Child = StringFieldSegmentCollector;
@@ -153,7 +153,7 @@ impl SegmentCollector for StringFieldSegmentCollector {
     }
 }
 
-impl<'a> IndexCollector for StringFieldCollector<'a> {
+impl IndexCollector for StringFieldCollector<'_> {
     fn collect_over_index(
         &self,
         reader: &tantivy::SegmentReader,
