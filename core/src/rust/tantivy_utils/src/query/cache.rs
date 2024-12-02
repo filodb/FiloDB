@@ -61,7 +61,7 @@ where
     }
 }
 
-impl<'a, QueryType> Equivalent<(SegmentId, QueryType)> for CachableQueryKey<'a, QueryType>
+impl<QueryType> Equivalent<(SegmentId, QueryType)> for CachableQueryKey<'_, QueryType>
 where
     QueryType: Clone + PartialEq + Eq,
 {

@@ -25,6 +25,7 @@ jobs:
         components: rustfmt, clippy
         target: x86_64-apple-darwin, aarch64-apple-darwin, aarch64-unknown-linux-gnu
         cache-workspaces: "core/src/rust -> target"
+        toolchain: 1.83.0
     - name: Install cargo-zigbuild
       run: pip install cargo-zigbuild
     - name: Run tests
