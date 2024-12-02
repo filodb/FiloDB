@@ -42,7 +42,7 @@ where
     }
 }
 
-impl<'a, T> LimitedCollector for TimeRangeFilter<'a, T>
+impl<T> LimitedCollector for TimeRangeFilter<'_, T>
 where
     T: LimitedCollector,
     T::Child: LimitedSegmentCollector,
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<'a, T> Collector for TimeRangeFilter<'a, T>
+impl<T> Collector for TimeRangeFilter<'_, T>
 where
     T: LimitedCollector,
     T::Child: LimitedSegmentCollector,

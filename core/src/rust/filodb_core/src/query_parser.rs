@@ -51,7 +51,7 @@ pub mod filodb_query;
 ///         03 00 - string of length 3
 ///         44 45 46 - UTF8 encoding of 'DEF'
 ///     00 - end of boolean query
-
+///
 /// Query type encoding
 #[derive(FromPrimitive)]
 #[repr(u8)]
