@@ -31,13 +31,13 @@ impl<'a> TimeCollector<'a> {
     }
 }
 
-impl<'a> LimitedCollector for TimeCollector<'a> {
+impl LimitedCollector for TimeCollector<'_> {
     fn limit(&self) -> usize {
         self.limit
     }
 }
 
-impl<'a> Collector for TimeCollector<'a> {
+impl Collector for TimeCollector<'_> {
     // Tuple of part_id, time
     type Fruit = Vec<(i32, i64)>;
 

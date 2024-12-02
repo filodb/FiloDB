@@ -80,7 +80,7 @@ fn parse_map_field<'a>(
     // Capture value
     doc.map_values
         .get_mut(map_name.as_ref())
-        .ok_or_else(|| Err::Failure(ParserError::InternalMapError))?
+        .ok_or(Err::Failure(ParserError::InternalMapError))?
         .insert(field_name.to_string(), value.to_string().into());
     doc.field_names.push(field_name.to_string());
 
