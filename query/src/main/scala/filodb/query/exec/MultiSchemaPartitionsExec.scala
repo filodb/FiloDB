@@ -128,10 +128,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             // This code is responsible for putting exact IDs needed by any range functions.
             val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
 
-            val colIDs = isMaxMinColumnsEnabled(maxMinTenantFilter) match {
-              case true => addIDsForHistMaxMin(sch, colIDs1)
-              case _ => colIDs1
-            }
+            val colIDs = if (sch.data.columns.exists(_.name == "min") &&
+                             sch.data.columns.exists(_.name == "max") &&
+                             isMaxMinColumnsEnabled(maxMinTenantFilter))  addIDsForHistMaxMin(sch, colIDs1)
+                         else colIDs1
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
