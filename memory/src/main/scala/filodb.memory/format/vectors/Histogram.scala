@@ -83,7 +83,7 @@ trait Histogram extends Ordered[Histogram] {
 
       // now calculate quantile.  If bucket is last one and last bucket is +Inf then return second-to-last bucket top
       // as we cannot interpolate to +Inf.
-      if (bucket == numBuckets-1 && bucketTop(numBuckets - 1).isPosInfinity) {
+      if (bucket == numBuckets-1 && bucketEnd.isPosInfinity) {
         return bucketTop(numBuckets-2)
       } else if (bucket == 0 && bucketTop(0) <= 0) {
         return bucketTop(0) // zero or negative bucket

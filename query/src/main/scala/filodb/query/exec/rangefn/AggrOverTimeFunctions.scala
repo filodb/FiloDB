@@ -390,7 +390,7 @@ class RateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int) extends ChunkedR
   def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
-    // Do BinarySearch for start/end pos only once for both columns == WIN!
+    // Do BinarySearch for start/end pos only once for all columns == WIN!
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
@@ -403,7 +403,7 @@ class RateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int) extends ChunkedR
       val maxVectPtr = info.vectorAddress(maxColId)
       maxFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
 
-      // Get valueVector/reader for max column
+      // Get valueVector/reader for min column
       val minVectAcc = info.vectorAccessor(minColId)
       val minVectPtr = info.vectorAddress(minColId)
       minFunc.addTimeChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr), startRowNum, endRowNum)
