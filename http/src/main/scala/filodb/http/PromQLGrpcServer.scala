@@ -46,8 +46,10 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
   extends StrictLogging {
 
   private val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
+  private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
   private val server = ServerBuilder.forPort(this.port)
     .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+    .maxInboundMessageSize(maxInboundMessageSizeBytes)
     //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 
