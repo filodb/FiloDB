@@ -133,7 +133,7 @@ fn build_schema(
     builder.add_bytes_field(field_constants::PART_KEY, byte_options);
     builder.add_i64_field(field_constants::START_TIME, numeric_options.clone());
     builder.add_i64_field(field_constants::END_TIME, numeric_options.clone());
-    builder.add_text_field(field_constants::TYPE, text_options.clone());
+    builder.add_text_field(field_constants::TYPE, random_access_text_options.clone());
 
     // Fields from input schema
     env.foreach_string_in_array(schema_fields, |name| {

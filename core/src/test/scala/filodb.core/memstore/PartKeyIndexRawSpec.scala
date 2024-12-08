@@ -537,6 +537,9 @@ trait PartKeyIndexRawSpec {
 
       val labelValues4 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "instance", 1000)
       labelValues4.toSet shouldEqual (0 until 1000).map(c => s"instance$c").toSet
+
+      val labelValues5 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "_type_")
+      labelValues5 shouldEqual Seq("prom-counter")
     }
 
     // Testcases to test additionalFacet config
