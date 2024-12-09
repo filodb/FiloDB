@@ -7,6 +7,7 @@ import spire.syntax.cfor._
 
 import filodb.memory.format._
 
+
 /**
  * A trait to represent bucket-based histograms as well as derived statistics such as sums or rates of
  * increasing histograms.
@@ -14,6 +15,7 @@ import filodb.memory.format._
  * or equal to the bucketTop ("upper bound"), thus it is cumulative with increasing bucket number.
  * Furthermore the LAST bucket should contain the total number of observations overall.
  */
+//scalastyle:off file.size.limit
 trait Histogram extends Ordered[Histogram] {
   def numBuckets: Int
 
@@ -32,6 +34,8 @@ trait Histogram extends Ordered[Histogram] {
    * Gets the counter or number of observations for a particular bucket, or derived value of a bucket.
    */
   def bucketValue(no: Int): Double
+
+  def hasExponentialBuckets: Boolean
 
   /**
    * Returns an MutableDirectBuffer pointing to a serialized BinaryHistogram representation of this histogram.
@@ -68,9 +72,9 @@ trait Histogram extends Ordered[Histogram] {
       // using rank, find the le bucket which would have the identified rank
       val b = firstBucketGTE(rank)
 
-      // now calculate quantile.  If bucket is last one then return second-to-last bucket top
+      // now calculate quantile.  If bucket is last one and last bucket is +Inf then return second-to-last bucket top
       // as we cannot interpolate to +Inf.
-      if (b == numBuckets-1) return bucketTop(numBuckets-2)
+      if (b == numBuckets-1 && bucketTop(numBuckets - 1).isPosInfinity) return bucketTop(numBuckets-2)
       else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
         // interpolate quantile within le bucket
@@ -80,10 +84,107 @@ trait Histogram extends Ordered[Histogram] {
           count -= bucketValue(b-1)
           rank -= bucketValue(b-1)
         }
-        bucketStart + (bucketEnd-bucketStart)*(rank/count)
+        val fraction = rank/count
+        if (!hasExponentialBuckets || bucketStart == 0) {
+          bucketStart + (bucketEnd-bucketStart) * fraction
+        } else {
+          val logBucketEnd = log2(bucketEnd)
+          val logBucketStart = log2(bucketStart)
+          val logRank = logBucketStart + (logBucketEnd - logBucketStart) * fraction
+          Math.pow(2, logRank)
+        }
       }
     }
     result
+  }
+
+  private def log2(v: Double) = Math.log(v) / Math.log(2)
+
+  /**
+   * Adapted from histogram_fraction in Prometheus codebase, but modified to handle
+   * the fact that bucket values are cumulative. Also, if min and max are provided,
+   * then interpolation accuracy is improved.
+   */
+  //scalastyle:off cyclomatic.complexity
+  //scalastyle:off method.length
+  def histogramFraction(lower: Double, upper: Double,
+                        min: Double = Double.NegativeInfinity,
+                        max: Double = Double.PositiveInfinity): Double = {
+    require(lower >= 0 && upper >= 0, s"lower & upper params should be >= 0: lower=$lower, upper=$upper")
+    if (numBuckets == 0 || lower.isNaN || upper.isNaN || topBucketValue == 0) {
+      return Double.NaN
+    }
+    val count = topBucketValue
+
+    if (lower == 0 && upper == 0) {
+      return bucketValue(0) / count
+    }
+    if (lower >= upper) {
+      return 0.0
+    }
+
+    var lowerRank = 0.0
+    var upperRank = 0.0
+    var lowerSet = false
+    var upperSet = false
+    val it = (0 until numBuckets).iterator
+
+    while (it.hasNext && (!lowerSet || !upperSet)) {
+      val b = it.next()
+      val zeroBucket = (b == 0)
+      val bucketUpper = bucketTop(b)
+      val bucketLower = if (b == 0) 0.0 else bucketTop(b - 1)
+      val bucketVal = bucketValue(b)
+      val prevBucketVal = if (b == 0) 0.0 else bucketValue(b - 1)
+
+      // Define interpolation functions
+      def interpolateLinearly(v: Double): Double = {
+        val low = Math.max(bucketLower, min)
+        val high = Math.min(bucketUpper, max)
+        val fraction = (v - low) / (high - low)
+        prevBucketVal + (bucketVal - prevBucketVal) * fraction
+      }
+
+      def interpolateExponentially(v: Double) = {
+        val low = Math.max(bucketLower, min)
+        val high = Math.min(bucketUpper, max)
+        val logLower = log2(Math.abs(low))
+        val logUpper = log2(Math.abs(high))
+        val logV = log2(Math.abs(v))
+        val fraction = if (v > 0) (logV - logLower) / (logUpper - logLower)
+                       else 1 - ((logV - logUpper) / (logLower - logUpper))
+        prevBucketVal + (bucketVal - prevBucketVal) * fraction
+      }
+
+      if (!lowerSet && bucketLower == lower) {
+        // We have hit the lower value at the lower bucket boundary.
+        lowerRank = prevBucketVal
+        lowerSet = true
+      }
+      if (!upperSet && bucketUpper == upper) {
+        // We have hit the upper value at the lower bucket boundary.
+        upperRank = bucketVal
+        upperSet = true
+      }
+
+      if (!lowerSet && bucketLower < lower && bucketUpper > lower) {
+        // The lower value is in this bucket
+        lowerRank = if (!hasExponentialBuckets || zeroBucket) interpolateLinearly(lower)
+                    else interpolateExponentially(lower)
+        lowerSet = true
+      }
+      if (!upperSet && bucketLower < upper && bucketUpper > upper) {
+        // The upper value is in this bucket
+        upperRank = if (!hasExponentialBuckets || zeroBucket) interpolateLinearly(upper)
+                    else interpolateExponentially(upper)
+        upperSet = true
+      }
+    }
+
+    if (!lowerSet || lowerRank > count) lowerRank = count
+    if (!upperSet || upperRank > count) upperRank = count
+
+    (upperRank - lowerRank) / count
   }
 
   /**
@@ -135,6 +236,7 @@ trait HistogramWithBuckets extends Histogram {
     }
     values
   }
+  def hasExponentialBuckets: Boolean = buckets.isInstanceOf[Base2ExpHistogramBuckets]
 }
 
 object HistogramWithBuckets {
@@ -142,7 +244,7 @@ object HistogramWithBuckets {
   val empty = LongHistogram(HistogramBuckets.emptyBuckets, Array[Long]())
 }
 
-final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) extends HistogramWithBuckets {
+final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[Long]) extends HistogramWithBuckets {
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
@@ -154,6 +256,14 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
    * Adds the buckets from other into this LongHistogram
    */
   final def add(other: LongHistogram): Unit = {
+    if (other.buckets != buckets) {
+      throw new IllegalArgumentException(
+           s"Cannot add histograms with different bucket configurations. " +
+             s"Expected: ${buckets}, Found: ${other.buckets}"
+      )
+    }
+    // TODO if otel histogram, the need to add values in a different way
+    // see if we can refactor since MutableHistogram also has this logic
     assert(other.buckets == buckets)
     cforRange { 0 until numBuckets } { b =>
       values(b) += other.values(b)
@@ -186,12 +296,16 @@ object LongHistogram {
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values
  */
-final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Double]) extends HistogramWithBuckets {
+final case class MutableHistogram(var buckets: HistogramBuckets,
+                                  var values: Array[Double]) extends HistogramWithBuckets {
+  require(buckets.numBuckets == values.size, s"Invalid number of values: ${values.size} != ${buckets.numBuckets}")
+
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
     buckets match {
       case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
+      case g: Base2ExpHistogramBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
       case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
     }
     buf
@@ -224,6 +338,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * @param other Histogram to be added
    * @return true when input histogram has same schema and false when schema is different
    */
+  // scalastyle:off method.length
   final def addNoCorrection(other: HistogramWithBuckets): Boolean = {
     // Allow addition when type of bucket is different
     if (buckets.similarForMath(other.buckets)) {
@@ -233,7 +348,31 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
         values(b) += other.bucketValue(b)
       }
       true
-    } else {
+    } else if (buckets.isInstanceOf[Base2ExpHistogramBuckets] &&
+               other.buckets.isInstanceOf[Base2ExpHistogramBuckets]) {
+      // If it was NaN before, reset to 0 to sum another hist
+      if (java.lang.Double.isNaN(values(0))) java.util.Arrays.fill(values, 0.0)
+      val ourBuckets = buckets.asInstanceOf[Base2ExpHistogramBuckets]
+      val otherBuckets = other.buckets.asInstanceOf[Base2ExpHistogramBuckets]
+      // if our buckets is subset of other buckets, then we can add the values
+      if (ourBuckets.canAccommodate(otherBuckets)) {
+        ourBuckets.addValues(values, otherBuckets, other)
+        // since we are making the exp histogram buckets cumulative during
+        // ingestion, we can assume cumulative bucket values
+        false
+      } else {
+        val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
+        val newValues = new Array[Double](newBuckets.numBuckets) // new values array
+        newBuckets.addValues(newValues, ourBuckets, this)
+        newBuckets.addValues(newValues, otherBuckets, other)
+        buckets = newBuckets
+        values = newValues
+        // since we are making the exp histogram buckets cumulative during
+        // ingestion, we can assume cumulative bucket values
+        false
+      }
+    }
+    else {
       cforRange { 0 until numBuckets } { b =>
         values(b) = Double.NaN
       }
@@ -305,7 +444,7 @@ object MutableHistogram {
  * UPDATE: Adding support for min value as well to make sure the quantile is never below the minimum specified value.
  * By default, the minimum value is set to 0.0
  */
-final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: Double = 0.0)
+final case class MaxMinHistogram(innerHist: HistogramWithBuckets, max: Double, min: Double = 0.0)
   extends HistogramWithBuckets {
   final def buckets: HistogramBuckets = innerHist.buckets
   final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
@@ -338,6 +477,8 @@ final case class MaxMinHistogram(innerHist: MutableHistogram, max: Double, min: 
     }
     result
   }
+
+
 }
 
 /**
@@ -405,6 +546,7 @@ object HistogramBuckets {
   def apply(buffer: DirectBuffer, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(buffer.byteArray, buffer.addressOffset + 2, false)
     case HistFormat_Geometric1_Delta => geometric(buffer.byteArray, buffer.addressOffset + 2, true)
+    case HistFormat_OtelExp_Delta    => otelExp(buffer.byteArray, buffer.addressOffset + 2)
     case HistFormat_Custom_Delta     => custom(buffer.byteArray, buffer.addressOffset)
     case _                           => emptyBuckets
   }
@@ -413,6 +555,7 @@ object HistogramBuckets {
   def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
+    case HistFormat_OtelExp_Delta    => otelExp(acc.base, acc.baseOffset + bucketsDef.add(2).addr)
     case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }
@@ -424,6 +567,16 @@ object HistogramBuckets {
                      UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
                      UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt,
                      minusOne)
+
+  def otelExp(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets = {
+    val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
+    val startPosBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+    val numPosBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 4)
+    // uncomment when negative buckets are supported
+    // val startNegBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
+    // val numNegBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8)
+    Base2ExpHistogramBuckets(scale, startPosBucket, numPosBuckets)
+  }
 
   /**
    * Creates a CustomBuckets definition.
@@ -476,6 +629,205 @@ final case class GeometricBuckets(firstBucket: Double,
     other match {
       case c: CustomBuckets => c.allBucketTops.sameElements(other.allBucketTops)
       case _                => this == other
+    }
+  }
+}
+
+object Base2ExpHistogramBuckets {
+  // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
+  val maxBuckets = 200
+  val maxAbsScale = 100
+  val maxAbsBucketIndex = 500
+}
+
+/**
+ * Open Telemetry Base2 Exponential Histogram Bucket Scheme.
+ * See https://github.com/open-telemetry/opentelemetry-proto/blob/7312bdf63218acf27fe96430b7231de37fd091f2/
+ *             opentelemetry/proto/metrics/v1/metrics.proto#L500
+ * for the definition.
+ *
+ * Easier explanation here: https://dyladan.me/histograms/2023/05/04/exponential-histograms/
+ *
+ * The bucket scheme is based on the formula:
+ * `bucket(index) = base ^ (index + 1)`
+ * where index is the bucket index, and `base = 2 ^ 2 ^ -scale`
+ *
+ * Negative observations are not supported yet. But serialization format is forward compatible.
+ *
+ * @param scale OTel metrics ExponentialHistogramDataPoint proto scale value
+ * @param startIndexPositiveBuckets offset for positive buckets from the same proto
+ * @param numPositiveBuckets length of the positive buckets array from the same proto
+ */
+final case class Base2ExpHistogramBuckets(scale: Int,
+                                          startIndexPositiveBuckets: Int,
+                                          numPositiveBuckets: Int
+                                        ) extends HistogramBuckets {
+  import Base2ExpHistogramBuckets._
+  require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
+    s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${maxBuckets}")
+  // limit bucket index and scale values since the corresponding bucketTop values can get very large or very small and
+  // may tend to very very large or small values above double precision. Note we are also serializing
+  // these as shorts in the binary format, so they need to be within limits of short
+  require(startIndexPositiveBuckets > -maxAbsBucketIndex && startIndexPositiveBuckets < maxAbsBucketIndex,
+          s"Invalid startIndexPositiveBuckets $startIndexPositiveBuckets should be between " +
+            s"${-maxAbsBucketIndex} and ${maxAbsBucketIndex}")
+  require(scale > -maxAbsScale && scale < maxAbsScale,
+    s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
+
+  val base: Double = Math.pow(2, Math.pow(2, -scale))
+  val startBucketTop: Double = bucketTop(1)
+  val endBucketTop: Double = bucketTop(numBuckets - 1)
+
+  override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count
+
+  final def bucketTop(no: Int): Double = {
+    if (no ==0) 0.0 else {
+      // From OTel metrics proto docs:
+      // The histogram bucket identified by `index`, a signed integer,
+      // contains values that are greater than (base^index) and
+      // less than or equal to (base^(index+1)).
+      val index = startIndexPositiveBuckets + no - 1
+      Math.pow(base, index + 1)
+    }
+  }
+
+  final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
+
+    // Negative observations are not supported yet, so startIndexNegativeBuckets and numNegativeBuckets are always 0.
+    // They are here since the proto has it (but the client SDKs do not), and we want to be able to support it
+    // when the spec changes
+    val startIndexNegativeBuckets = 0
+    val numNegativeBuckets = 0
+    require(numBuckets < Short.MaxValue, s"numBucket overflow: $numBuckets")
+    require(startIndexPositiveBuckets < Short.MaxValue,
+      s"startIndexPositiveBuckets overflow: $startIndexPositiveBuckets")
+    require(scale < Short.MaxValue, s"scale overflow: $scale")
+    require(numPositiveBuckets < Short.MaxValue, s"numPositiveBuckets overflow $numPositiveBuckets")
+    // per BinHistogram format, bucket def len comes first always
+    buf.putShort(pos, (2 + 2 + 4 + 4).toShort)
+    // numBuckets comes next always
+    val numBucketsPos = pos + 2
+    buf.putShort(numBucketsPos, numBuckets.toShort, LITTLE_ENDIAN)
+    // now bucket format specific data
+    val bucketSchemeFieldsPos = pos + 4
+    buf.putShort(bucketSchemeFieldsPos, scale.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 2, startIndexPositiveBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 4, numPositiveBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 6, startIndexNegativeBuckets.toShort, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 8, numNegativeBuckets.toShort, LITTLE_ENDIAN)
+    pos + 14
+  }
+
+  override def toString: String = {
+    s"OTelExpHistogramBuckets(scale=$scale, startIndexPositiveBuckets=$startIndexPositiveBuckets, " +
+      s"numPositiveBuckets=$numPositiveBuckets) ${super.toString}"
+  }
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case c: Base2ExpHistogramBuckets => this.scale == c.scale &&
+                                          this.startIndexPositiveBuckets == c.startIndexPositiveBuckets &&
+                                          this.numPositiveBuckets == c.numPositiveBuckets
+      case _                           => false
+    }
+  }
+
+  def canAccommodate(other: Base2ExpHistogramBuckets): Boolean = {
+    // Can we do better? There can be double's == problems here
+    endBucketTop >= other.endBucketTop && startBucketTop <= other.startBucketTop
+  }
+
+  def add(o: Base2ExpHistogramBuckets,
+          maxBuckets: Int = Base2ExpHistogramBuckets.maxBuckets): Base2ExpHistogramBuckets = {
+    if (canAccommodate(o)) {
+      this
+    } else {
+      // calculate new bucket scheme that can accommodate both bucket ranges
+      val minBucketTopNeeded = Math.min(startBucketTop, o.startBucketTop)
+      val maxBucketTopNeeded = Math.max(endBucketTop, o.endBucketTop)
+      var newScale = Math.min(scale, o.scale)
+      var newBase = Math.max(base, o.base)
+      var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      // Even if the two schemes are of same scale, they can have non-overlapping bucket ranges.
+      // The new bucket scheme should have at most maxBuckets, so keep reducing scale until within limits.
+      while (newBucketIndexEnd - newBucketIndexStart > maxBuckets) {
+        newScale -= 1
+        newBase = Math.pow(2, Math.pow(2, -newScale))
+        newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
+        newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
+      }
+      Base2ExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd - newBucketIndexStart + 1)
+    }
+  }
+
+  /**
+   * Converts an OTel exponential index to array index.
+   * For example if startIndexPositiveBuckets = -5 and numPositiveBuckets = 10, then
+   * -5 will return 1, -4 will return 2, 0 will return 6, 4 will return 10.
+   * Know that 0 array index is reserved for zero bucket.
+   */
+  def bucketIndexToArrayIndex(index: Int): Int = index - startIndexPositiveBuckets + 1
+
+  /**
+   * Add the otherValues using otherBuckets scheme to ourValues. This method assumes (a) ourValues uses "this"
+   * bucket scheme and (a) this bucket scheme can accommodate otherBuckets.
+   */
+  def addValues(ourValues: Array[Double],
+                otherBuckets: Base2ExpHistogramBuckets,
+                otherHistogram: HistogramWithBuckets): Unit = {
+    // TODO consider removing the require once code is stable
+    require(ourValues.length == numBuckets)
+    require(otherHistogram.numBuckets == otherBuckets.numBuckets)
+    require(canAccommodate(otherBuckets))
+    val scaleIncrease = otherBuckets.scale - scale
+    // for each ourValues, find the bucket index in otherValues and add the value
+    val fac = Math.pow(2 , scaleIncrease).toInt
+    ourValues(0) += otherHistogram.bucketValue(0) // add the zero bucket
+    // For this algorithm we take advantage of the pattern that there is a relationship between scale
+    // and the bucketIndexPlus1. When scale increases by scaleIncrease,
+    // then the otherBucketIndexPlus1 for the same bucket in the other scheme
+    // is 2^scaleIncrease (which is fac) times otherBucketIndexPlus1.
+    cforRange { startIndexPositiveBuckets until startIndexPositiveBuckets + numPositiveBuckets } { ourBucketIndex =>
+      val ourBucketIndexPlus1 = ourBucketIndex + 1
+      val otherBucketIndexPlus1 = ourBucketIndexPlus1 * fac
+      val ourArrayIndex = bucketIndexToArrayIndex(ourBucketIndexPlus1 - 1)
+      // ourArrayIndex is guaranteed to be within bounds since we are iterating our bucket range
+
+      val otherArrayIndex = otherBuckets.bucketIndexToArrayIndex(otherBucketIndexPlus1 - 1)
+      // there is a possibility that otherArrayIndex is out of bounds, so we need to check
+
+      if (otherArrayIndex > 0 && otherArrayIndex < otherBuckets.numBuckets) { // add if within bounds
+
+        // Example 1: add every 2nd bucket from other to our bucket
+        // other scale = 2 . . . . . . . . . . .
+        //                 ↓   ↓   ↓   ↓   ↓   ↓
+        // our  scale =  1 .   .   .   .   .   .
+        //
+        // Example 2: add every 4th bucket from other to our bucket
+        // other scale = 3 . . . . . . . . . . . . .
+        //                 ↓       ↓       ↓       ↓
+        // our  scale =  1 .       .       .       .
+
+        // TODO consider removing the require once code is stable
+        require(ourArrayIndex != 0, "double counting zero bucket")
+        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
+          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
+            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
+        ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherArrayIndex)
+      } else if (otherArrayIndex >= otherBuckets.numBuckets) {
+        // if otherArrayIndex higher than upper bound, add to our last bucket since bucket counts are cumulative
+
+        // Example 3: add every 4th bucket from other to our
+        // other scale = 4 . . . . . . . . . . . . X    add last bucket X here
+        //                 ↓       ↓       ↓       ↓       ↓       ↓
+        // our  scale =  2 .       .       .       .       .       .
+
+        // TODO consider removing the require once code is stable
+        require(ourArrayIndex != 0, "double counting zero bucket")
+        ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherBuckets.numBuckets - 1)
+      }
+      // if otherArrayIndex is less than lower bound, the counts are already included and we don't need
+      // to add since the counts are cumulative
     }
   }
 }

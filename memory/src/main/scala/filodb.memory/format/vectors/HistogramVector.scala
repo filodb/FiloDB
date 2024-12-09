@@ -23,6 +23,7 @@ import filodb.memory.format.MemoryReader._
  *                  0x03   geometric   + NibblePacked delta Long values
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *                  0x05   custom LE/bucket values + NibblePacked delta Long values
+ *                  0x09   otelExp_Delta + NibblePacked delta Long values  (see [[Base2ExpHistogramBuckets]])
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -63,6 +64,9 @@ object BinaryHistogram extends StrictLogging {
       case HistFormat_Geometric1_Delta =>
         val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_OtelExp_Delta =>
+        val bucketDef = HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case HistFormat_Custom_Delta =>
         val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
@@ -102,13 +106,16 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Null = 0x00.toByte
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
+  val HistFormat_OtelExp_Delta = 0x09.toByte
   val HistFormat_Custom_Delta = 0x05.toByte
   val HistFormat_Geometric_XOR = 0x08.toByte    // Double values XOR compressed
   val HistFormat_Custom_XOR = 0x0a.toByte
 
-  def isValidFormatCode(code: Byte): Boolean =
+  def isValidFormatCode(code: Byte): Boolean = {
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
-    (code == HistFormat_Custom_Delta)
+    (code == HistFormat_Custom_Delta) || (code == HistFormat_OtelExp_Delta)
+    // Question: why are other formats like HistFormat_Geometric_XOR not here as valid ?
+  }
 
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
@@ -143,11 +150,12 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
-    require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
+    require(buckets.numBuckets == values.length, s"Values array size of ${values.length} != ${buckets.numBuckets}")
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else  buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
       case c: CustomBuckets                  => HistFormat_Custom_Delta
+      case o: Base2ExpHistogramBuckets        => HistFormat_OtelExp_Delta
     }
 
     buf.putByte(2, formatCode)
@@ -172,6 +180,7 @@ object BinaryHistogram extends StrictLogging {
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
       case g: GeometricBuckets               => HistFormat_Geometric_XOR
       case c: CustomBuckets                  => HistFormat_Custom_XOR
+      case o: Base2ExpHistogramBuckets        => HistFormat_OtelExp_Delta
     }
 
     buf.putByte(2, formatCode)
@@ -605,6 +614,7 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
 
   def detectDropAndCorrection(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr,
                               meta: CorrectionMeta): CorrectionMeta = meta match {
+    // TODO deal with exponential histogram counter correction
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
     case h @ HistogramCorrection(lastValue, correction) =>
       val firstValue = apply(0)
