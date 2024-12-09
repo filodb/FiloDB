@@ -64,7 +64,8 @@ object TestTimeseriesProducer extends StrictLogging {
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
                    genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
-                   genPromCounter: Boolean, genOtelCumulativeHistData: Boolean, genOtelDeltaHistData: Boolean,
+                   genPromCounter: Boolean, genOtelCumulativeHistData: Boolean,
+                   genOtelDeltaHistData: Boolean, genOtelExpDeltaHistData: Boolean,
                    publishIntervalSec: Int): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
@@ -72,7 +73,8 @@ object TestTimeseriesProducer extends StrictLogging {
 
     val metricName = if (genGauge) "heap_usage0"
                       else if (genHist || genOtelCumulativeHistData) "http_request_latency"
-                      else if (genDeltaHist || genOtelDeltaHistData) "http_request_latency_delta"
+                      else if (genDeltaHist || genOtelDeltaHistData || genOtelExpDeltaHistData)
+                        "http_request_latency_delta"
                       else if (genPromCounter) "heap_usage_counter0"
                       else "heap_usage_delta0"
 
@@ -98,15 +100,19 @@ object TestTimeseriesProducer extends StrictLogging {
                                dataset: Dataset,
                                shardMapper: ShardMapper,
                                spread: Int,
-                               publishIntervalSec: Int): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
+                               publishIntervalSec: Int,
+                               expHist: Boolean = false,
+                               numBuckets: Int = 20): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
     val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
 
     val producingFut = Future {
-      timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
-        .take(numSamples)
+      val data = if (expHist) genHistogramData(startTimeMs, numTimeSeries,
+        Schemas.otelDeltaHistogram, numBuckets = numBuckets, otelExponential = true)
+      else timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
+      data.take(numSamples)
         .foreach { rec =>
           val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
-          while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
+          while (!shardQueues(shard).offer(rec)) {  Thread sleep 50 }
         }
     }
     (producingFut, containerStream)
@@ -203,10 +209,12 @@ object TestTimeseriesProducer extends StrictLogging {
    * Note: the set of "instance" tags is unique for each invocation of genHistogramData.  This helps increase
    * the cardinality of time series for testing purposes.
    */
-  def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema): Stream[InputRecord] = {
-    val numBuckets = 10
-    val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
-    var buckets = new Array[Long](numBuckets)
+  def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
+                       numBuckets : Int = 20,
+                       otelExponential: Boolean = false): Stream[InputRecord] = {
+    val histBucketScheme = if (otelExponential) bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
+                           else bv.GeometricBuckets(2.0, 3.0, numBuckets)
+    var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema) {
                   "http_request_latency_delta"
                  } else {
@@ -214,7 +222,7 @@ object TestTimeseriesProducer extends StrictLogging {
                  }
 
     def updateBuckets(bucketNo: Int): Unit = {
-      for { b <- bucketNo until numBuckets } {
+      for { b <- bucketNo until histBucketScheme.numBuckets } {
         buckets(b) += 1
       }
     }
@@ -232,9 +240,9 @@ object TestTimeseriesProducer extends StrictLogging {
       if ( (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema )
           && prevTimestamp != timestamp) {
         prevTimestamp = timestamp
-        buckets = new Array[Long](numBuckets)
+        buckets = new Array[Long](histBucketScheme.numBuckets)
       }
-      updateBuckets(n % numBuckets)
+      updateBuckets(n % histBucketScheme.numBuckets)
       val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
       val count = util.Random.nextInt(100).toDouble
       val sum = buckets.sum.toDouble

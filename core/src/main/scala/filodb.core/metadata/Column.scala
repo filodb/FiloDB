@@ -43,6 +43,8 @@ case class DataColumn(id: Int,
                       columnType: Column.ColumnType,
                       params: Config = ConfigFactory.empty) extends Column {
 
+  def isCumulativeTemporality: Boolean = params.hasPath("detectDrops") && params.getBoolean("detectDrops")
+
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.
   // NOTE: this is one reason why column names cannot have commas

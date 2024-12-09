@@ -74,9 +74,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 
-  def publishInterval: Option[Long] = {
-    publishIntervalFinder.findPublishIntervalMs(schema.partition.hash, UnsafeUtils.ZeroArray, partitionKey)
-  }
+  def publishInterval: Option[Long] = None
   /**
     * Incoming, unencoded data gets appended to these BinaryAppendableVectors.
     * There is one element for each column of the schema. All of them have the same chunkId.

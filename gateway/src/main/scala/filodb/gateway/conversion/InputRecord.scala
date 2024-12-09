@@ -5,7 +5,7 @@ import remote.RemoteStorage.TimeSeries
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{DatasetOptions, Schema}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String => ZCUTF8}
-import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, CustomBuckets, LongHistogram}
 
 /**
  * An InputRecord represents one "record" of timeseries data for input to FiloDB system.
@@ -182,7 +182,7 @@ object InputRecord {
   }
 
   /**
-   * Writes a delta non-increasing histogram record, along with the sum, count, min and max
+   * Writes a delta non-decreasing histogram record, along with the sum, count, min and max
    */
   def writeOtelDeltaHistRecord(builder: RecordBuilder,
                                metric: String,
@@ -217,6 +217,64 @@ object InputRecord {
 
       // Now, write out histogram
       builder.startNewRecord(otelDeltaHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
+  }
+
+  /**
+   * Writes a non-decreasing histogram record, along with the sum, count, min and max
+   */
+  //scalastyle:off method.length
+  def writeOtelExponentialHistRecord(builder: RecordBuilder,
+                                     metric: String,
+                                     tags: Map[String, String],
+                                     timestamp: Long,
+                                     kvs: Seq[(String, Double)],
+                                     isDelta: Boolean): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+    var posBucketOffset = Double.NaN
+    var scale = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+        false
+      case ("count", v) => count = v
+        false
+      case ("min", v) => min = v
+        false
+      case ("max", v) => max = v
+        false
+      case ("posBucketOffset", v) => posBucketOffset = v
+        false
+      case ("scale", v) => scale = v
+        false
+      case other => true
+    }.map {
+      case (k, v) => (k.toInt, v.toLong)
+    }.sorted
+
+    val bucketValues = sortedBuckets.map(_._2).toArray
+
+    if (sortedBuckets.nonEmpty) {
+      // length - 1 because the zero bucket is not included in the positive bucket count
+      val buckets = Base2ExpHistogramBuckets(scale.toInt, posBucketOffset.toInt, sortedBuckets.length - 1)
+      val hist = LongHistogram(buckets, bucketValues)
+
+      // Now, write out histogram
+      builder.startNewRecord(if (isDelta) otelDeltaHistogram else otelCumulativeHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)

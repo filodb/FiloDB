@@ -114,6 +114,7 @@ object InstantFunction {
       if (sourceSchema.isHistMaxMin) HistogramQuantileWithMaxMinImpl() else HistogramQuantileImpl()
     case HistogramMaxQuantile => HistogramMaxQuantileImpl()
     case HistogramBucket => HistogramBucketImpl()
+    case HistogramFraction => HistogramFractionImpl()
     case _ => throw new UnsupportedOperationException(s"$function not supported.")
   }
 }
@@ -361,6 +362,15 @@ final case class HistogramQuantileImpl() extends HistToDoubleIFunction {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     val q = scalarParams(0)
     value.quantile(q)
+  }
+}
+
+final case class HistogramFractionImpl() extends HistToDoubleIFunction {
+  final def apply(value: Histogram, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.length == 2, "Need two params for histogram fraction function")
+    val lower = scalarParams(0)
+    val upper = scalarParams(1)
+    value.histogramFraction(lower, upper)
   }
 }
 

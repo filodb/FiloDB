@@ -10,6 +10,8 @@ class ColumnSpec extends AnyFunSpec with Matchers {
   import Dataset._
 
   val firstColumn = DataColumn(0, "first", ColumnType.StringColumn)
+  val cumulHistColumn = DataColumn(3, "hist", ColumnType.HistogramColumn,
+                              ConfigFactory.parseString("detectDrops = true"))
   val ageColumn = DataColumn(2, "age", ColumnType.IntColumn)
   val histColumnOpts = DataColumn(3, "hist", ColumnType.HistogramColumn,
                                   ConfigFactory.parseString("counter = true"))
@@ -23,6 +25,12 @@ class ColumnSpec extends AnyFunSpec with Matchers {
       val res1 = Column.validateColumnName(":illegal")
       res1.isBad shouldEqual true
       res1.swap.get.head shouldBe a[BadColumnName]
+    }
+
+    it("should return correct value for hasCumulativeIncrement") {
+      cumulHistColumn.isCumulativeTemporality shouldEqual true
+      deltaCountColumn.isCumulativeTemporality shouldEqual false
+      firstColumn.isCumulativeTemporality shouldEqual false
     }
 
     it("should check that column names cannot contain illegal chars") {

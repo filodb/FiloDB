@@ -115,6 +115,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
     final def bucketTop(no: Int): Double = buckets(no).le
     final def bucketValue(no: Int): Double = buckets(no).rate
     final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
+    final def hasExponentialBuckets: Boolean = false
   }
 
   /**

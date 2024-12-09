@@ -597,6 +597,7 @@ enum InstantFunctionId {
   MONTH                   = 20;
   YEAR                    = 21;
   OR_VECTOR_DOUBLE        = 22;
+  HISTOGRAM_FRACTION      = 23;
 }
 
 enum ScalarFunctionId {

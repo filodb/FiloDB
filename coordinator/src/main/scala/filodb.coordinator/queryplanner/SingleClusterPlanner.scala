@@ -790,7 +790,13 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Add the le filter transformer to select the required bucket
     (nameFilter, leFilter) match {
       case (Some(filter), Some (le)) if filter.endsWith("_bucket") => {
-        val paramsExec = StaticFuncArgs(le.toDouble, RangeParams(realScanStartMs / 1000,
+        // if le filter matches for Inf or +Inf, set the double value to PositiveInfinity
+        val doubleVal = le match {
+          case "+Inf" => Double.PositiveInfinity
+          case "Inf" => Double.PositiveInfinity
+          case _ => le.toDouble
+        }
+        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs / 1000,
           realScanStepMs / 1000, realScanEndMs / 1000))
         series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
           Seq(paramsExec))))

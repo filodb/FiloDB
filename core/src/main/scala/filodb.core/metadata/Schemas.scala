@@ -187,6 +187,11 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   def name: String = data.name
 
+  def hasCumulativeTemporalityColumn: Boolean = data.columns.exists {
+    case d: DataColumn => d.isCumulativeTemporality
+    case _ => false
+  }
+
   /**
     * Fetches reader for a binary vector
     */
@@ -284,7 +289,7 @@ final case class Schemas(part: PartitionSchema,
   }
 
   private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case (k, v) =>
-    s"${schemaName(k._1)} ColId:${k._2} : $v"
+    s"${schemaName(k._1)} ${k._1} ColId:${k._2} : $v"
   }
 
   Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")

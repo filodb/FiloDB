@@ -4,9 +4,8 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import kamon.Kamon
 import kamon.testkit.InstrumentInspection.Syntax.counterInstrumentInspection
-
 import filodb.core.query.ColumnFilter
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 
 class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
@@ -81,6 +80,36 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
     HierarchicalQueryExperience.isHigherLevelAggregationApplicable(
       ExcludeAggRule("agg_2", Set("tag3", "tag4")), Seq("tag1", "tag2", "_ws_", "_ns_", "_metric_")) shouldEqual true
+  }
+
+  it("getColumnsAfterFilteringOutDotStarRegexFilters should return as expected") {
+    var filters = Seq(
+      ColumnFilter("__name__", Equals("metric1")),
+      ColumnFilter("tag1", Equals("value1")),
+      ColumnFilter("tag2", EqualsRegex("value2.*")),
+      ColumnFilter("tag3", Equals("value3")),
+      ColumnFilter("tag4", EqualsRegex(".*")))
+
+    // should ignore tag4
+    HierarchicalQueryExperience.getColumnsAfterFilteringOutDotStarRegexFilters(filters) shouldEqual
+      Seq("__name__", "tag1", "tag2", "tag3")
+
+    filters = Seq(
+      ColumnFilter("tag1", Equals("value1")),
+      ColumnFilter("tag2", Equals("value2")),
+      ColumnFilter("tag3", EqualsRegex(".*abc")))
+
+    // should not ignore any tags
+    HierarchicalQueryExperience.getColumnsAfterFilteringOutDotStarRegexFilters(filters) shouldEqual
+      Seq("tag1", "tag2", "tag3")
+
+    filters = Seq(
+      ColumnFilter("tag1", EqualsRegex(".*")),
+      ColumnFilter("tag2", EqualsRegex(".*")),
+      ColumnFilter("tag3", EqualsRegex(".*")))
+
+    // should ignore all tags
+    HierarchicalQueryExperience.getColumnsAfterFilteringOutDotStarRegexFilters(filters) shouldEqual Seq()
   }
 
   it("checkAggregateQueryEligibleForHigherLevelAggregatedMetric should increment counter if metric updated") {
