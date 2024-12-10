@@ -2369,6 +2369,43 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     validatePlan(execPlan, expected)
   }
 
+  it("should add le label correctly for +Inf in histogram query") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(rate(my_hist_bucket{job="prometheus",le="+Inf"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist") shouldEqual true
+    // le filter should be removed
+    multiSchemaPartitionsExec.filters.filter(_.column == "le").isEmpty shouldEqual true
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).isInstanceOf[InstantVectorFunctionMapper].
+      shouldEqual(true)
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      isInstanceOf[StaticFuncArgs] shouldEqual(true)
+
+    multiSchemaPartitionsExec.rangeVectorTransformers(1).asInstanceOf[InstantVectorFunctionMapper].funcParams.head.
+      asInstanceOf[StaticFuncArgs].scalar shouldEqual Double.PositiveInfinity
+
+    val expected =
+      """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(700,1000,10000))
+        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(Infinity,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+        |---T~InstantVectorFunctionMapper(function=HistogramBucket)
+        |----FA1~StaticFuncArgs(Infinity,RangeParams(700,1000,10000))
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=Some(120000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(580000,10000000), filters=List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(my_hist))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#433386961],raw)"""
+        .stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)

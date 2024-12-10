@@ -84,6 +84,8 @@ object GatewayServer extends StrictLogging {
               descrYes = "Generate otel-cumulative-histogram schema test data and exit")
     val genOtelDeltaHistData = toggle(noshort = true,
               descrYes = "Generate otel-delta-histogram schema test data and exit")
+    val genOtelExpDeltaHistData = toggle(noshort = true,
+      descrYes = "Generate otel-exponential-delta-histogram schema test data and exit")
     val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
     val genCounterData = toggle(noshort = true, descrYes = "Generate Prometheus counter-schema test data and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
@@ -140,9 +142,11 @@ object GatewayServer extends StrictLogging {
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
+    val genOtelExpDeltaHistData = userOpts.genOtelExpDeltaHistData.getOrElse(false)
 
     if (genHist || genGaugeData || genDeltaHist
-          || genCounterData || genDeltaCounterData || genOtelDeltaHistData || genOtelCumulativeHistData) {
+          || genCounterData || genDeltaCounterData || genOtelDeltaHistData ||
+          genOtelExpDeltaHistData || genOtelCumulativeHistData) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
@@ -151,7 +155,10 @@ object GatewayServer extends StrictLogging {
                                                   otelCumulativeHistogram)
                    else if (genOtelDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
                                                   otelDeltaHistogram)
-                   else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
+                   else if (genOtelExpDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
+                     otelDeltaHistogram, otelExponential = true)
+                   else if (genDeltaHist)
+                     TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
                    else if (genGaugeData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
                                         userOpts.numMetrics(), userOpts.publishIntervalSecs(), gauge)
                    else if (genDeltaCounterData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
@@ -170,8 +177,8 @@ object GatewayServer extends StrictLogging {
       }
       Thread sleep 10000
       TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
-        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genOtelCumulativeHistData, genOtelDeltaHistData,
-        userOpts.publishIntervalSecs())
+        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genOtelCumulativeHistData,
+        genOtelDeltaHistData, genOtelExpDeltaHistData, userOpts.publishIntervalSecs())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {
@@ -260,7 +267,7 @@ object GatewayServer extends StrictLogging {
                                         producing(shard) = false
                                         output
                                       }
-                                    }
+                                    }.filter { case (_, j) => j.nonEmpty }
     logger.info(s"Created $numShards container builder queues with $parallelism parallel workers...")
     (shardQueues, containerStream)
   }
