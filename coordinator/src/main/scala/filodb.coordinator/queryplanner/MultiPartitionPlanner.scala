@@ -579,6 +579,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                        qContext: QueryContext): PlanResult = {
     // TODO: Reassess this validate, we should also support binary joins in split leaf as long as they are within
     //  the limits of max range of data exported
+
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val lookbackMs = getLookBackMillis(logicalPlan).max
