@@ -83,7 +83,7 @@ object QueryConfig {
 }
 case class RoutingConfig(
                           supportRemoteRawExport: Boolean                = false,
-                          maxRemoteRawExportTimeRange: FiniteDuration    = 3 days,
+                          maxRemoteRawExportTimeRange: FiniteDuration    = 31 days,
                           enableApproximatelyEqualCheckInStitch: Boolean = true,
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis
                         )
