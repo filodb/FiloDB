@@ -2766,6 +2766,42 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
+  it ("should materialize split-partition queries with offset binary joins correctly"){
+    val startSec = 0
+    val stepSec = 3
+    val endSec = 9999
+    val splitSec = 5000
+    val query = """sum(test{_ws_ = "demo", _ns_ = "localNs"} offset 5m) + sum(test{_ws_ = "demo", _ns_ = "localNs"})"""
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = {
+        val splitMs = 1000 * splitSec
+        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs)),
+          PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs), Some("grpc-remote1-url")))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] =
+        throw new RuntimeException("should not use")
+    }
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, singlePartitionPlanner, "local",
+      MetricsTestData.timeseriesDataset, queryConfig
+    )
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+    val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+    val execPlan = engine.materialize(lp,
+      QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    val expectedPlan =
+      """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))
+        |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{_ws_ = "demo", _ns_ = "localNs"} offset 5m) + sum(test{_ws_ = "demo", _ns_ = "localNs"}),0,3,5300,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))
+        |-E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(test{_ws_ = "demo", _ns_ = "localNs"} offset 5m) + sum(test{_ws_ = "demo", _ns_ = "localNs"}),5601,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))""".stripMargin
+
+    validatePlan(execPlan, expectedPlan)
+  }
 
   it("should handle multi partition topk correctly") {
     // Cases to handle
