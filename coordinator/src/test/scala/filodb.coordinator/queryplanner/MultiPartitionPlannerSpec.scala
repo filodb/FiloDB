@@ -15,7 +15,7 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{BadQueryException, LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
+import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
@@ -1711,18 +1711,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
    validatePlan(execPlan2, expectedPlanWithRemoteExec1)
 
-
-    val query4 = "sum(rate(test{job = \"app\"}[10m])) + sum(rate(bar{job = \"app\"}[5m] offset 5m))"
-    val lp4 = Parser.queryRangeToLogicalPlan(query4, TimeStepParams(2000, stepSecs, 10000))
-
-    val promQlQueryParams4 = PromQlQueryParams(query4, 1000, 100, 10000)
-    intercept[BadQueryException] {
-      // Expecting to see Exception when we use BinaryJoin with offsets, technically this too should not be a big deal
-      // as we need to identify the right window, however this was not supported even before the change and it is ok to
-      // leave it unaddressed in the first phase as its just Binary joins with offsets
-      engine.materialize(lp4, QueryContext(origQueryParams = promQlQueryParams4, plannerParams =
-        PlannerParams(processMultiPartition = true)))
-    }
 
 
     // Planner with period of uncertainty should still generate steps that are aligned with start and step,

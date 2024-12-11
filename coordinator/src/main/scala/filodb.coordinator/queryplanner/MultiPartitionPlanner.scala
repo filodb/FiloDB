@@ -568,30 +568,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
 
   /**
-   * Throws a BadQueryException if any of the following conditions hold:
-   *     (1) the plan spans more than one non-metric shard key prefix.
-   *     (2) the plan contains at least one BinaryJoin, and any of its BinaryJoins contain an offset.
-   * @param splitLeafPlan must contain leaf plans that individually span multiple partitions.
-   */
-  private def validateSplitLeafPlan(splitLeafPlan: LogicalPlan): Unit = {
-    val baseErrorMessage = "This query contains selectors that individually read data from multiple partitions. " +
-                           "This is likely because a selector's data was migrated between partitions. "
-    if (hasBinaryJoin(splitLeafPlan) && getOffsetMillis(splitLeafPlan).exists(_ > 0)) {
-      throw new BadQueryException( baseErrorMessage +
-          "These \"split\" queries cannot contain binary joins with offsets."
-      )
-    }
-    lazy val hasMoreThanOneNonMetricShardKey =
-      LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(splitLeafPlan, dataset.options.nonMetricShardColumns)
-        .filter(_.nonEmpty).distinct.size > 1
-    if (hasMoreThanOneNonMetricShardKey) {
-      throw new BadQueryException( baseErrorMessage +
-          "These \"split\" queries are not supported if they contain multiple non-metric shard keys."
-      )
-    }
-  }
-
-  /**
    * Materializes a LogicalPlan with leaves that individually span multiple partitions.
    * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they
    *   span more than one non-metric shard key prefix.
@@ -603,7 +579,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                        qContext: QueryContext): PlanResult = {
     // TODO: Reassess this validate, we should also support binary joins in split leaf as long as they are within
     //  the limits of max range of data exported
-    validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val lookbackMs = getLookBackMillis(logicalPlan).max
