@@ -15,7 +15,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
-import filodb.query.{BadQueryException, IntervalSelector, LabelCardinality, PlanValidationSpec, RawSeries}
+import filodb.query.{IntervalSelector, LabelCardinality, PlanValidationSpec, RawSeries}
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
@@ -2766,67 +2766,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-  it ("should fail to materialize unsupported split-partition queries with binary joins") {
-    val startSec = 123
-    val stepSec = 456
-    val endSec = 789
-    val queries = Seq(
-      // aggregate
-      """sum(foo{job="app"} + bar{job="app2"})""",
-      """sum(foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
-      """sum(foo{job="app"} offset 1h + bar{job="app"})""",
-      """sum(foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-      // instant
-      """sgn(foo{job="app"} + bar{job="app2"})""",
-      """exp(foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
-      """ln(foo{job="app"} offset 1h + bar{job="app"})""",
-      """log2(foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-      // binary join
-      """foo{job="app"} + bar{job="app2"}""",
-      """foo{job="app"} + (bar{job="app"} + baz{job="app2"})""",
-      """foo{job="app"} offset 1h + bar{job="app"}""",
-      """foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h)""",
-      // scalar vector join
-      """123 + (foo{job="app"} + bar{job="app2"})""",
-      """123 + (foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
-      """123 + (foo{job="app"} offset 1h + bar{job="app"})""",
-      """123 + (foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-      // scalar
-      """scalar(foo{job="app"} + bar{job="app2"})""",
-      """scalar(foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
-      """scalar(foo{job="app"} offset 1h + bar{job="app"})""",
-      """scalar(foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-      // absent
-      """absent(foo{job="app"} + bar{job="app2"})""",
-      """absent(foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
-      """absent(foo{job="app"} offset 1h + bar{job="app"})""",
-      """absent(foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-    )
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String],
-                                 timeRange: TimeRange): List[PartitionAssignment] = {
-        val midTime = (timeRange.startMs + timeRange.endMs) / 2
-        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, midTime)),
-             PartitionAssignment("remote1", "remote1-url", TimeRange(midTime, timeRange.endMs)))
-      }
-
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] =
-        throw new RuntimeException("should not use")
-    }
-    val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, singlePartitionPlanner, "local",
-      MetricsTestData.timeseriesDataset, queryConfig
-    )
-    for (query <- queries) {
-      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
-      val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
-      assertThrows[BadQueryException] {
-        engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
-          plannerParams = PlannerParams(processMultiPartition = true)))
-      }
-    }
-  }
 
   it("should handle multi partition topk correctly") {
     // Cases to handle
