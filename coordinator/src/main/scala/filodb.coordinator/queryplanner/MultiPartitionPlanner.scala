@@ -567,6 +567,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }}
   }
 
+  /**
+   *
+   * Extracted to reduce complexity in materializePlanHandleSplitLeaf.
+   *
+   * @param plan the plan to compute the offset for.
+   */
   private def computeOffsetMs(plan: LogicalPlan): Seq[Long] = plan match {
     case op: ScalarVectorBinaryOperation => Seq(getOffsetMillis(op).max)
     case _ => getOffsetMillis(plan)
