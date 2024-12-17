@@ -1,6 +1,11 @@
 #!/bin/bash
-sbt -Drust.optimize=true "jmh/jmh:run -rf json -i 5 -wi 3 -f 1 -jvmArgsAppend -XX:MaxInlineLevel=20 \
- -jvmArgsAppend -Xmx4g -jvmArgsAppend -XX:MaxInlineSize=99 -jvmArgsAppend  -Dkamon.enabled=false \
+
+sbt -Drust.optimize=true "jmh/jmh:run -rf json -i 2 -wi 2 -f 1 \
+ -jvmArgsAppend -Dlogback.configurationFile=../conf/logback-perf.xml
+ -jvmArgsAppend -XX:MaxInlineLevel=20 \
+ -jvmArgsAppend -Xmx4g \
+ -jvmArgsAppend -XX:MaxInlineSize=99 \
+ -jvmArgsAppend -Dkamon.enabled=false \
  filodb.jmh.Base2ExponentialHistogramQueryBenchmark \
  filodb.jmh.QueryHiCardInMemoryBenchmark \
  filodb.jmh.QueryInMemoryBenchmark \
@@ -11,4 +16,5 @@ sbt -Drust.optimize=true "jmh/jmh:run -rf json -i 5 -wi 3 -f 1 -jvmArgsAppend -X
  filodb.jmh.PartKeyLuceneIndexBenchmark \
  filodb.jmh.PartKeyTantivyIndexBenchmark"
 
-# -prof 'async:libPath=/path/to/async-profiler-3.0-macos/lib/libasyncProfiler.dylib;event=cpu;output=flamegraphdir=./profile-results' \
+# Add below argument to enable profiling
+# -prof \"async:libPath=/path/to/async-profiler-3.0-macos/lib/libasyncProfiler.dylib;event=cpu;output=flamegraph;dir=./profile-results\" \

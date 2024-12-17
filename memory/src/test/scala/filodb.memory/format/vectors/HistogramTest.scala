@@ -11,6 +11,14 @@ object HistogramTest {
     Array[Double](11, 16, 26, 27, 33, 42, 46, 55),
     Array[Double](4, 4, 5, 33, 35, 67, 91, 121)
   )
+
+  val rawHistBuckets2 = Seq(
+    Array[Double](0, 15, 17, 20, 25, 34, 76, 82),
+    Array[Double](0, 16, 26, 26, 36, 38, 56, 59),
+    Array[Double](0, 16, 26, 27, 33, 42, 46, 55),
+    Array[Double](0, 4, 5, 33, 35, 67, 91, 121)
+  )
+
   val rawLongBuckets = rawHistBuckets.map(_.map(_.toLong))
   val mutableHistograms = rawHistBuckets.map { buckets =>
     // Create a new copy here, so that mutations don't affect original array
@@ -26,7 +34,7 @@ object HistogramTest {
   }
 
   val otelExpBuckets = Base2ExpHistogramBuckets(3, -3, 7)
-  val otelExpHistograms = rawHistBuckets.map { buckets =>
+  val otelExpHistograms = rawHistBuckets2.map { buckets =>
     LongHistogram(otelExpBuckets, buckets.take(otelExpBuckets.numBuckets).map(_.toLong))
   }
 
@@ -103,7 +111,6 @@ class HistogramTest extends NativeVectorTest {
       customHistograms(0).quantile(0.95) shouldEqual 10
     }
 
-
     it("should calculate quantile correctly for exponential bucket histograms") {
       val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
       val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
@@ -115,6 +122,51 @@ class HistogramTest extends NativeVectorTest {
       hist.quantile(0.99) shouldEqual 1.6643974694230492 +- 0.00001
       hist.quantile(0.01) shouldEqual 0.0 // zero bucket
       hist.quantile(0.085) shouldEqual 0.014142135623730961 +- 0.00001
+    }
+
+    it("quantile for exponential histogram with real data should match expected") {
+      val bucketScheme = Base2ExpHistogramBuckets(3, -78, 126)
+      val str = "0.0=0.0, 0.0012664448775888738=0.0, 0.0013810679320049727=0.0, 0.001506065259187439=0.0, " +
+        "0.0016423758110424079=0.0, 0.0017910235218841198=0.0, 0.001953124999999996=0.0, 0.002129897915361827=0.0, " +
+        "0.002322670146489685=0.0, 0.0025328897551777484=0.0, 0.002762135864009946=0.0, 0.0030121305183748786=0.0, " +
+        "0.0032847516220848166=0.0, 0.0035820470437682404=0.0, 0.003906249999999993=0.0, 0.004259795830723655=0.0, " +
+        "0.004645340292979371=0.0, 0.005065779510355498=0.0, 0.005524271728019893=0.0, 0.006024261036749759=0.0, " +
+        "0.006569503244169634=0.0, 0.007164094087536483=0.0, 0.007812499999999988=0.0, 0.008519591661447312=0.0, " +
+        "0.009290680585958744=0.0, 0.010131559020710997=0.0, 0.011048543456039788=0.0, 0.012048522073499521=0.0, " +
+        "0.013139006488339272=0.0, 0.014328188175072969=0.0, 0.01562499999999998=0.0, 0.017039183322894627=0.0, " +
+        "0.018581361171917492=0.0, 0.020263118041422=0.0, 0.022097086912079584=0.0, 0.024097044146999046=0.0, " +
+        "0.026278012976678547=0.0, 0.028656376350145944=0.0, 0.031249999999999965=0.0, 0.03407836664578927=0.0, " +
+        "0.037162722343835=0.0, 0.04052623608284401=0.0, 0.044194173824159175=0.0, 0.0481940882939981=0.0, " +
+        "0.05255602595335711=0.0, 0.0573127527002919=0.0, 0.062499999999999944=0.0, 0.06815673329157855=0.0, " +
+        "0.07432544468767001=0.0, 0.08105247216568803=0.0, 0.08838834764831838=0.0, 0.09638817658799623=0.0, " +
+        "0.10511205190671424=0.0, 0.11462550540058382=0.0, 0.12499999999999992=0.0, 0.13631346658315713=1.0, " +
+        "0.14865088937534005=1.0, 0.16210494433137612=1.0, 0.17677669529663678=1.0, 0.1927763531759925=1.0, " +
+        "0.21022410381342854=1.0, 0.2292510108011677=1.0, 0.2499999999999999=2.0, 0.2726269331663143=2.0, " +
+        "0.29730177875068015=3.0, 0.3242098886627523=3.0, 0.3535533905932736=3.0, 0.3855527063519851=3.0, " +
+        "0.42044820762685714=4.0, 0.4585020216023355=5.0, 0.4999999999999999=5.0, 0.5452538663326287=5.0, " +
+        "0.5946035575013604=6.0, 0.6484197773255047=6.0, 0.7071067811865475=8.0, 0.7711054127039704=8.0, " +
+        "0.8408964152537145=9.0, 0.9170040432046712=9.0, 1.0=11.0, 1.0905077326652577=12.0, 1.189207115002721=14.0, " +
+        "1.2968395546510099=15.0, 1.4142135623730951=17.0, 1.542210825407941=19.0, 1.6817928305074294=20.0, " +
+        "1.8340080864093429=22.0, 2.0000000000000004=23.0, 2.181015465330516=26.0, 2.378414230005443=28.0, " +
+        "2.59367910930202=31.0, 2.8284271247461907=34.0, 3.084421650815883=37.0, 3.3635856610148593=41.0, " +
+        "3.6680161728186866=45.0, 4.000000000000002=48.0, 4.3620309306610325=53.0, 4.756828460010887=58.0, " +
+        "5.187358218604041=64.0, 5.656854249492383=70.0, 6.168843301631767=76.0, 6.7271713220297205=84.0, " +
+        "7.336032345637374=90.0, 8.000000000000005=99.0, 8.724061861322067=108.0, 9.513656920021775=118.0, " +
+        "10.374716437208086=129.0, 11.31370849898477=140.0, 12.337686603263537=152.0, 13.454342644059444=167.0, " +
+        "14.672064691274752=182.0, 16.000000000000014=199.0, 17.448123722644137=217.0, 19.027313840043554=237.0, " +
+        "20.749432874416176=258.0, 22.627416997969544=282.0, 24.675373206527077=308.0, 26.908685288118896=336.0, " +
+        "29.34412938254951=367.0, 32.000000000000036=400.0, 34.89624744528828=435.0, 38.05462768008712=474.0, " +
+        "41.49886574883236=517.0, 45.254833995939094=565.0, 49.35074641305417=617.0, 53.8173705762378=672.0, " +
+        "58.688258765099036=732.0, 64.00000000000009=749.0"
+      val counts = str.split(", ").map { s =>
+        val kv = s.split("=")
+        kv(1).toDouble
+      }
+      val hist = MutableHistogram(bucketScheme, counts)
+      hist.quantile(0.5) shouldEqual 29.927691427444305 +- 0.00001
+      hist.quantile(0.99) shouldEqual 61.602904581469566 +- 0.00001
+      hist.quantile(0.01) shouldEqual 0.6916552392692796 +- 0.00001
+      hist.quantile(0.99, min=0.03, max=59.87) shouldEqual 59.34643429268522 +- 0.00001
     }
 
     it("should calculate histogram_fraction correctly for exponential histograms using exponential interpolation") {
@@ -169,34 +221,64 @@ class HistogramTest extends NativeVectorTest {
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max column") {
-      val h = MaxMinHistogram(mutableHistograms(0), 90)
-      h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!
+      val h = mutableHistograms(0)
+      h.quantile(0.95, 0 ,90) shouldEqual 72.2 +- 0.1   // more accurate due to max!
 
       // Not just last bucket, but should always be clipped at max regardless of bucket scheme
       val values = Array[Double](10, 15, 17, 20, 25, 25, 25, 25)
-      val h2 = MaxMinHistogram(MutableHistogram(bucketScheme, values), 10)
-      h2.quantile(0.95) shouldEqual 9.5 +- 0.1   // more accurate due to max!
+      val h2 = MutableHistogram(bucketScheme, values)
+      h2.quantile(0.95, 0, 10) shouldEqual 9.5 +- 0.1   // more accurate due to max!
 
       val values3 = Array[Double](1, 1, 1, 1, 1, 4, 7, 7, 9, 9) ++ Array.fill(54)(12.0)
-      val h3 = MaxMinHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0)
-      h3.quantile(0.99) shouldEqual 1593.2 +- 0.1
-      h3.quantile(0.90) shouldEqual 1379.4 +- 0.1
+      val h3 = MutableHistogram(HistogramBuckets.binaryBuckets64, values3)
+      h3.quantile(0.99, 0, 1617.0) shouldEqual 1593.2 +- 0.1
+      h3.quantile(0.90, 0, 1617.0) shouldEqual 1379.4 +- 0.1
     }
 
     it("should calculate more accurate quantile with MaxMinHistogram using max and min column") {
-      val h = MaxMinHistogram(mutableHistograms(0), 100, 10)
-      h.quantile(0.95) shouldEqual 75.39 +- 0.1 // more accurate due to max, min!
+      val h = mutableHistograms(0)
+      h.quantile(0.95, 10, 100) shouldEqual 75.39 +- 0.1 // more accurate due to max, min!
 
       // Not just last bucket, but should always be clipped at max regardless of bucket scheme
       val values = Array[Double](10, 15, 17, 20, 25, 25, 25, 25)
-      val h2 = MaxMinHistogram(MutableHistogram(bucketScheme, values), 10, 2)
-      h2.quantile(0.95) shouldEqual 9.5 +- 0.1 // more accurate due to max, min!
+      val h2 = MutableHistogram(bucketScheme, values)
+      h2.quantile(0.95, 2, 10) shouldEqual 9.5 +- 0.1 // more accurate due to max, min!
 
       val values3 = Array[Double](1, 1, 1, 1, 1, 4, 7, 7, 9, 9) ++ Array.fill(54)(12.0)
-      val h3 = MaxMinHistogram(MutableHistogram(HistogramBuckets.binaryBuckets64, values3), 1617.0, 1.0)
-      h3.quantile(0.99) shouldEqual 1593.2 +- 0.1
-      h3.quantile(0.90) shouldEqual 1379.4 +- 0.1
-      h3.quantile(0.01) shouldEqual 1.0 +- 0.1 // must use the starting reference from min
+      val h3 = MutableHistogram(HistogramBuckets.binaryBuckets64, values3)
+      h3.quantile(0.99) shouldEqual 2006.0399999999995 +- 0.0001 // without min/max
+      h3.quantile(0.99, 0, 0) shouldEqual 2006.0399999999995 +- 0.0001 // with potentially wrong min max
+      h3.quantile(0.99, 1.0, 1617.0) shouldEqual 1593.2 +- 0.1
+      h3.quantile(0.90, 1.0, 1617.0) shouldEqual 1379.4 +- 0.1
+      h3.quantile(0.01, 1.0, 1617.0) shouldEqual 1.0 +- 0.1 // must use the starting reference from min
+    }
+
+    it("should calculate more accurate quantile for otel exponential histogram using max and min column") {
+      // bucket boundaries for scale 3, range -3 to 3, 7 buckets
+      // zeroBucket: 0.0 -3: 0.840896, -2: 0.917004, -1: 1.000000, 0; 1.090508, 1: 1.189207, 2: 1.296840, 3: 1.414214
+      val expected95thWithoutMinMax = Seq(1.3329136609345256, 1.2987136172035367, 1.3772644080792311, 1.3897175222720994)
+      otelExpHistograms.map { h =>
+        h.quantile(0.95)
+      }.zip(expected95thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+
+      // notice how the quantiles are calculated within the max now, unlike before
+      val expected95thWithMinMax = Seq(1.2978395301558558, 1.296892165727062, 1.2990334920692943, 1.2993620241156902)
+      otelExpHistograms.map { h =>
+        h.quantile(0.95, 0.78, 1.3) // notice 1.3 max is less than last bucket
+      }.zip(expected95thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+
+      val expected5thWithoutMinMax = Seq(0.22984502016934866, 0.15504027656240363, 0.14452907137173218, 0.9199883517494387)
+      otelExpHistograms.map { h =>
+        h.quantile(0.05)
+      }.zip(expected5thWithoutMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
+
+      // notice how the quantiles are calculated within the min now, unlike before
+      val expected5thWithMinMax = Seq(0.7961930120386448, 0.7908863115573832, 0.7901434789531481, 0.9199883517494387)
+      otelExpHistograms.map { h =>
+        // notice 0.78 min is less than first non-zero bucketTop,
+        // but bigger than previous otel bucketTop if it existed
+        h.quantile(0.05, 0.78, 1.3)
+      }.zip(expected5thWithMinMax).foreach { case (q, e) => q shouldEqual e +- 0.0001 }
     }
 
     it("should serialize to and from BinaryHistograms and compare correctly") {
