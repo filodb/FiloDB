@@ -4,6 +4,7 @@ import enumeratum.EnumEntry
 
 import filodb.query.RangeFunctionId
 
+// scalastyle:off number.of.types
 // Used for internal representations of RangeFunctions
 sealed abstract class InternalRangeFunction(val onCumulCounter: Boolean = false) extends EnumEntry
 
@@ -55,6 +56,7 @@ object InternalRangeFunction {
 
   // Used only for histogram schemas with max column
   case object SumAndMaxOverTime extends InternalRangeFunction
+  case object RateAndMinMaxOverTime extends InternalRangeFunction
   case object LastSampleHistMaxMin extends InternalRangeFunction
 
   case object Timestamp extends InternalRangeFunction

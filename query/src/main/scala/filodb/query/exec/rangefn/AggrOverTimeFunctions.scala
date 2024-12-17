@@ -366,6 +366,52 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
   }
 }
 
+class RateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int) extends ChunkedRangeFunction[TransientHistMaxMinRow] {
+  private val hFunc = new RateOverDeltaChunkedFunctionH
+  private val maxFunc = new MaxOverTimeChunkedFunctionD
+  private val minFunc = new MinOverTimeChunkedFunctionD
+
+  override final def reset(): Unit = {
+    hFunc.reset()
+    maxFunc.reset()
+    minFunc.reset()
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
+    hFunc.apply(windowStart, windowEnd, sampleToEmit)
+    sampleToEmit.setDouble(2, maxFunc.max)
+    sampleToEmit.setDouble(3, minFunc.min)
+  }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = ??? // should not be invoked
+
+  import BinaryVector.BinaryVectorPtr
+
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for all columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      hFunc.addTimeChunks(valueVectorAcc, valueVector, valueReader, startRowNum, endRowNum)
+
+      // Get valueVector/reader for max column
+      val maxVectAcc = info.vectorAccessor(maxColId)
+      val maxVectPtr = info.vectorAddress(maxColId)
+      maxFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
+
+      // Get valueVector/reader for min column
+      val minVectAcc = info.vectorAccessor(minColId)
+      val minVectPtr = info.vectorAddress(minColId)
+      minFunc.addTimeChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr), startRowNum, endRowNum)
+    }
+  }
+}
+
+
 /**
   * Computes Average Over Time using sum and count columns.
   * Used in when calculating avg_over_time using downsampled data

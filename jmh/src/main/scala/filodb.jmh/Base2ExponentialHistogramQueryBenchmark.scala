@@ -34,7 +34,7 @@ import filodb.timeseries.TestTimeseriesProducer
  */
 @State(Scope.Thread)
 class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
-  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.DEBUG)
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
 
   import filodb.coordinator._
   import client.Client.{actorAsk, asyncAsk}
@@ -46,7 +46,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf")
-    .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("30MB")))
+    .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("300MB")))
 
   private val cluster = FilodbCluster(system)
   cluster.join()
@@ -90,11 +90,12 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
     numMetricNames = 1, numSamplesPerTs * numSeries, dataset, shardMapper, spread,
     publishIntervalSec = 10, numBuckets = numBuckets, expHist = true)
+  val endTime = startTime + (numSamplesPerTs * 10000)
   val ingestTask = containerStream.groupBy(_._1)
     // Asynchronously subcribe and ingest each shard
     .mapParallelUnordered(numShards) { groupedStream =>
       val shard = groupedStream.key
-      println(s"Starting ingest exp histograms on shard $shard...")
+      println(s"Starting ingest exp histograms on shard $shard from timestamp $startTime to $endTime")
       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
         Observable.fromIterable(data)
@@ -117,13 +118,15 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   val histQuantileQuery =
     """histogram_quantile(0.7, sum(rate(http_request_latency_delta{_ws_="demo", _ns_="App-0"}[5m])))"""
   val queries = Seq(histQuantileQuery)
-  val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
+  val queryStartTime = startTime/1000 + (5 * 60)  // 5 minutes from start until 60 minutes from start
   val queryStep = 120        // # of seconds between each query sample "step"
-  val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
+  val queryEndTime = queryStartTime + queryIntervalMin*60
+  val qParams = TimeStepParams(queryStartTime, queryStep, queryEndTime)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
   }
+  println(s"Querying data from $queryStartTime to $queryEndTime")
 
   var queriesSucceeded = 0
   var queriesFailed = 0
