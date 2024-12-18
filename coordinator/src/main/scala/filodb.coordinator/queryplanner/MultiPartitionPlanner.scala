@@ -568,17 +568,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
 
   /**
-   *
-   * Extracted to reduce complexity in materializePlanHandleSplitLeaf.
-   *
-   * @param plan the plan to compute the offset for.
-   */
-  private def computeOffsetMs(plan: LogicalPlan): Seq[Long] = plan match {
-    case op: ScalarVectorBinaryOperation => Seq(getOffsetMillis(op).max)
-    case _ => getOffsetMillis(plan)
-  }
-
-  /**
    * Materializes a LogicalPlan with leaves that individually span multiple partitions.
    * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they
    *   span more than one non-metric shard key prefix.
@@ -589,7 +578,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val lookbackMs = getLookBackMillis(logicalPlan).max
-    val offsetMs = computeOffsetMs(logicalPlan)
+    val offsetMs = getOffsetMillis(logicalPlan)
     val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
     val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
     val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
