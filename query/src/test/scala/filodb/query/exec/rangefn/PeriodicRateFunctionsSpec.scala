@@ -200,17 +200,17 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
 
       // looback is extended to 2 * publishInterval when less than 2 * publishInterval
       val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-        Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+        Some(publishInterval), Some(Rate), stepMultipleNotationUsed = false, Nil, None)
       periodicSamplesVectorFnMapper.extendLookback(rv, 3) shouldEqual 2 * publishInterval
 
       // lookback is not extended when lookback >= 2 * publishInterval
       val periodicSamplesVectorFnMapper2 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-        Some(publishInterval), Some(Rate), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+        Some(publishInterval), Some(Rate), stepMultipleNotationUsed = false, Nil, None)
       periodicSamplesVectorFnMapper2.extendLookback(rv, publishInterval * 2 + 1) shouldEqual (2 * publishInterval + 1)
 
       // lookback is not extended for increase function
       val periodicSamplesVectorFnMapper3 = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-        Some(publishInterval), Some(Increase), QueryContext(), stepMultipleNotationUsed = false, Nil, None)
+        Some(publishInterval), Some(Increase), stepMultipleNotationUsed = false, Nil, None)
       periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
       // lookback is not extended for delta schemas
@@ -255,7 +255,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -302,7 +302,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -349,7 +349,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -396,7 +396,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -443,7 +443,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)

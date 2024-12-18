@@ -122,7 +122,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     val filters = Seq(ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)))
     val leafExecPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
       dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
-    val transformer = PeriodicSamplesMapper(startTime, reportingInterval, endTime, None, None, QueryContext())
+    val transformer = PeriodicSamplesMapper(startTime, reportingInterval, endTime, None, None)
     leafExecPlan.addRangeVectorTransformer(transformer)
 
     val topK = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
@@ -153,7 +153,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     val filters = Seq(ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)))
     val leafExecPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
       dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
-    val transformer = PeriodicSamplesMapper(startTime, reportingInterval, endTime, None, None, QueryContext())
+    val transformer = PeriodicSamplesMapper(startTime, reportingInterval, endTime, None, None)
     leafExecPlan.addRangeVectorTransformer(transformer)
 
     val count = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
