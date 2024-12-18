@@ -4,7 +4,7 @@ import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{PagedReadablePartition, WriteBufferPool}
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{CustomRangeVectorKey, QueryContext, RawDataRangeVector, ResultSchema, TransientRow}
+import filodb.core.query.{CustomRangeVectorKey, RawDataRangeVector, ResultSchema, TransientRow}
 import filodb.core.store.{InMemoryChunkScan, RawPartData}
 import filodb.memory.format.vectors.{LongHistogram, MutableHistogram}
 import filodb.memory.format.ZeroCopyUTF8String
