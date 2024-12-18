@@ -39,7 +39,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
       400000L -> 200d,
       500000L -> 200d
     )
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None)
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 
@@ -62,7 +62,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
       500100L -> 200d
     )
 
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None, QueryContext(),
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None,
       false, Nil, Some(100))
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -91,7 +91,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
       s"($key,{${value.map { case (k, v) => s"$k=$v" }.mkString(", ")}})"
     }.mkString("List(", ", ", ")")
 
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None, QueryContext(),
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None,
       false, Nil, Some(100))
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rvHistMaxMin)), querySession,
       1000, histMaxMinSchema, Nil)
@@ -140,7 +140,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     // step == lookback here
     // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
-      Some(400000L), Some(Increase), QueryContext(),
+      Some(400000L), Some(Increase),
       stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
@@ -163,8 +163,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     val rv = timeValueRVPk(samples)
 
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(600000L, 100000, 600000L, Some(600000), Some(Resets),
-      QueryContext())
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(600000L, 100000, 600000L, Some(600000), Some(Resets))
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 
@@ -186,8 +185,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     val rv = timeValueRVPk(samples)
 
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(600000L, 100000, 600000L, Some(600000), Some(Resets),
-      QueryContext())
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(600000L, 100000, 600000L, Some(600000), Some(Resets))
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 

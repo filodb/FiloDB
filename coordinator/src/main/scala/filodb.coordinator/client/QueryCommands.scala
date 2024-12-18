@@ -86,6 +86,7 @@ object QueryCommands {
 
   final case class ProtoExecPlan(dataset: DatasetRef,
                                  serializedExecPlan: Array[Byte],
+                                 serializedQueryContext: Array[Byte],
                                  submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse

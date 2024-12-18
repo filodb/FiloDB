@@ -222,12 +222,14 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
         }
 
         override def executePlan(
-          execPlanProto: GrpcMultiPartitionQueryService.ExecPlanContainer,
+          remoteExecPlanProto: GrpcMultiPartitionQueryService.RemoteExecPlan,
           responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse]
         ): Unit = {
           implicit val dispatcherScheduler: Scheduler = scheduler
           import filodb.coordinator.ProtoConverters._
-          val execPlan = execPlanProto.fromProto()
+          val queryContextProto = remoteExecPlanProto.getQueryContext
+          val queryContext = queryContextProto.fromProto
+          val execPlan = remoteExecPlanProto.getExecPlan().fromProto(queryContext)
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
           val dataset = execPlan.dataset.dataset
