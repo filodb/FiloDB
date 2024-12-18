@@ -2714,7 +2714,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-
   it ("should materialize split-partition queries with lookback and offset binary joins correctly"){
     val startSec = 0
     val stepSec = 3
