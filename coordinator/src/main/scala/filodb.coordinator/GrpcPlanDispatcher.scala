@@ -1,25 +1,24 @@
 package filodb.coordinator
 
-import java.net.InetAddress
-import java.util.concurrent.TimeUnit
-
-import scala.concurrent.duration.FiniteDuration
-
+import com.typesafe.scalalogging.StrictLogging
 import io.grpc.Metadata
 import io.grpc.stub.{MetadataUtils, StreamObserver}
+import java.net.InetAddress
+import java.util.concurrent.TimeUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{MulticastStrategy, Observable}
 import monix.reactive.subjects.ConcurrentSubject
+import scala.concurrent.duration.FiniteDuration
 
 import filodb.core.QueryTimeoutException
 import filodb.core.store.ChunkSource
 import filodb.grpc.GrpcCommonUtils
 import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.grpc.GrpcMultiPartitionQueryService.RemoteExecPlan
 import filodb.grpc.RemoteExecGrpc
 import filodb.query.{QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ExecPlanWithClientParams, GenericRemoteExec, PlanDispatcher}
-
 
 object GrpcPlanDispatcher {
 
@@ -28,10 +27,9 @@ object GrpcPlanDispatcher {
 
   val channelMap = new TrieMap[String, ManagedChannel]
   Runtime.getRuntime.addShutdownHook(new Thread(() => channelMap.values.foreach(_.shutdown())))
-
 }
 
-case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends PlanDispatcher {
+case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends PlanDispatcher with StrictLogging {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
 
@@ -69,7 +67,13 @@ case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends 
     val genericRemoteExec = plan.execPlan.asInstanceOf[GenericRemoteExec]
     import filodb.coordinator.ProtoConverters._
     val protoPlan = genericRemoteExec.execPlan.toExecPlanContainerProto
-
+    logger.debug(s"Query ${plan.execPlan.queryContext.queryId} proto plan size is  ${protoPlan.toByteArray.length}B")
+    logger.debug(s"Query ${plan.execPlan.queryContext.queryId} exec plan ${genericRemoteExec.execPlan.printTree()}")
+    val queryContextProto = genericRemoteExec.execPlan.queryContext.toProto
+    val remoteExecPlan : RemoteExecPlan = RemoteExecPlan.newBuilder()
+      .setExecPlan(protoPlan)
+      .setQueryContext(queryContextProto)
+      .build()
     val channel =
       GrpcPlanDispatcher.channelMap.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
     val observableResponse: monix.reactive.Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
@@ -85,7 +89,7 @@ case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends 
           nonBlockingStub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md))
             .withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
             .executePlan(
-              protoPlan,
+              remoteExecPlan,
               new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                 override def onNext(value: GrpcMultiPartitionQueryService.StreamingResponse): Unit =
                   subject.onNext(value)
