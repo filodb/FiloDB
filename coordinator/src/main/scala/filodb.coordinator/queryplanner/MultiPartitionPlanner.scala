@@ -49,6 +49,7 @@ case class PartitionAssignmentV2(proportionMap: Map[String, PartitionDetails],
     s" However the actual is $proportionMap")
 }
 
+
 trait PartitionLocationProvider {
 
   // keep this function for backward compatibility.
