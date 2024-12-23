@@ -725,12 +725,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               timeRange.endMs)
             case None           => (lastTimeRange.endMs, timeRange.endMs)
           }
-          val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
-          val newContext = qContext.copy(origQueryParams = newParams)
-          val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
-            IntervalSelector(gapStartTimeMs, gapEndTimeMs),
-            additionalLookbackMs = 0L.max(gapStartTimeMs - lastTimeRange.startMs))
-          execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
+          if (gapStartTimeMs > gapEndTimeMs){
+            execPlans
+          } else {
+            val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
+            val newContext = qContext.copy(origQueryParams = newParams)
+            val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
+              IntervalSelector(gapStartTimeMs, gapEndTimeMs),
+              additionalLookbackMs = 0L.max(gapStartTimeMs - lastTimeRange.startMs))
+            execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
+          }
         } else {
           execPlans
         }

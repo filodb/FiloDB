@@ -2714,6 +2714,42 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
+  it("(Step > End - Start) with split should have one exec Plan for first partition"){
+    val startSec = 0
+    val stepSec = 10000
+    val endSec = 9999
+    val splitSec1 = 5000
+    val query = """test{_ws_ = "demo", _ns_ = "localNs"}"""
+    val expected = """E~PromQlRemoteExec(PromQlQueryParams(test{_ws_ = "demo", _ns_ = "localNs"},0,10000,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,3000),CachingConfig(true,2048)))""".stripMargin
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = {
+        val splitMs1 = 1000 * splitSec1
+        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs1)),
+          PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs1 + 1, timeRange.endMs)))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] =
+        throw new RuntimeException("should not use")
+    }
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, singlePartitionPlanner, "local",
+      MetricsTestData.timeseriesDataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
+        supportRemoteRawExport = true,
+        maxRemoteRawExportTimeRange = Duration(3, TimeUnit.DAYS),
+        periodOfUncertaintyMs = 3000)))
+
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+    val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+    val execPlan = engine.materialize(lp,
+      QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    validatePlan(execPlan, expected)
+  }
+
   it ("should materialize split-partition queries with lookback and offset binary joins correctly"){
     val startSec = 0
     val stepSec = 3
