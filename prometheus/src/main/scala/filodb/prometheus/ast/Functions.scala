@@ -96,7 +96,6 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
     val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
     val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
-    val miscellaneousFunctionId = MiscellaneousFunctionId.withNameInsensitiveOption(name);
     if (vectorFn.isDefined) {
       allParams.head match {
         case num: ScalarExpression => val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
@@ -139,11 +138,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
           case FiloFunctionId.ChunkMetaAll =>   // Just get the raw chunk metadata
             RawChunkMeta(rangeSelector, filters, column.getOrElse(""))
         }
-      } else if(miscellaneousFunctionId.isDefined) { //
-        toSeriesPlanMisc(seriesParam, otherParams, timeParams) // need to update this logic
-      }
-      else toSeriesPlanMisc(seriesParam, otherParams, timeParams)
-      }
+      } else toSeriesPlanMisc(seriesParam, otherParams, timeParams)
     }
   }
 
