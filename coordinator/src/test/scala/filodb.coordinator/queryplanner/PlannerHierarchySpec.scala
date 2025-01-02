@@ -2729,7 +2729,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs1)),
           PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs1 + 1, timeRange.endMs)))
       }
-
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                          timeRange: TimeRange): List[PartitionAssignment] =
         throw new RuntimeException("should not use")
