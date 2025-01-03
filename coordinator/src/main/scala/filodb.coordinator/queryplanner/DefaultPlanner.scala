@@ -2,10 +2,8 @@ package filodb.coordinator.queryplanner
 
 
 import java.util.concurrent.ThreadLocalRandom
-
 import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
@@ -233,11 +231,21 @@ trait  DefaultPlanner {
                                               lp: ApplyMiscellaneousFunction,
                                               forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
-      if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
-        vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
-      else
-        vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
-      vectors
+      if (lp.function == MiscellaneousFunctionId.OptimizeWithAgg)
+      {
+        // The `Optimize` function is a no-operation (no-op), meaning it does not perform any transformation or
+        // computation. However, it is necessary to pass it through to the execution plan without any modifications when
+        // dealing with an "Optimize with Aggregation" query. This ensures that the optimization logic is preserved
+        // and applied correctly during the aggregation phase, without interfering with the underlying data
+        // or query execution flow.
+        vectors
+      }else{
+        if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
+          vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
+        else
+          vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
+        vectors
+      }
     }
 
     def materializeApplyInstantFunctionRaw(qContext: QueryContext,
