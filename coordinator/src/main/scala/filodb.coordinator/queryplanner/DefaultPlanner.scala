@@ -234,8 +234,8 @@ trait  DefaultPlanner {
                                               forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (lp.function == MiscellaneousFunctionId.OptimizeWithAgg) {
-        // Optimize` is a no-op that preserves optimization logic in
-        // aggregation queries, ensuring correct execution without modifying underlying data.
+        // Optimize with aggregation is a no-op, doing no transformation. It must pass through
+        // the execution plan to apply optimization logic correctly during aggregation.
         vectors
       } else {
         if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
