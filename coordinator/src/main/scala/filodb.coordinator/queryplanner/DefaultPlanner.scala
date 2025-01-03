@@ -239,7 +239,7 @@ trait  DefaultPlanner {
         // and applied correctly during the aggregation phase, without interfering with the underlying data
         // or query execution flow.
         vectors
-      }else{
+      } else {
         if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
           vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
         else
