@@ -18,7 +18,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
-
+//scalastyle:off file.size.limit
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
   * plan building call tree during query planning.
