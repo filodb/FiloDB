@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import akka.testkit._
-
+import filodb.coordinator.v2.NewNodeCoordinatorActor
 import filodb.core._
 
 object ShardMapperSpec extends ActorSpecConfig
@@ -302,5 +302,17 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.registerNode(Seq(0, 3), newCoord).isSuccess
     Seq(0, 3).forall(s => map.coordForShard(s) == newCoord) shouldEqual true
     assert(coord = newCoord, shards = Seq(0, 3), numAssignedShards = 4, unassignedShards = 28)
+  }
+
+  it ("test bitmap conversion of shard mapper") {
+    val numShards = 32
+    val map = new ShardMapper(numShards) // default init to ShardStatusUnassigned
+    val bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(map)
+    bitRep.length shouldEqual 4
+    bitRep.forall (x => x == 0) shouldEqual true // no bit should be set at this point
+  }
+
+  it ("test padding is set correctly in non 8 byte aligned number of shards") {
+    // most common setup is local testing with 4 shards
   }
 }

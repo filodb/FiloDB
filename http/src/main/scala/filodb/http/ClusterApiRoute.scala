@@ -6,7 +6,7 @@ import akka.http.scaladsl.server.Directives._
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
-import filodb.coordinator.{CurrentShardSnapshot, NodeClusterActor}
+import filodb.coordinator.{CurrentShardSnapshot, NodeClusterActor, ShardSnapshot}
 import filodb.core.{DatasetRef, ErrorResponse, Success => SuccessResponse}
 import filodb.core.store.{AssignShardConfig, UnassignShardConfig}
 import filodb.http.apiv1.{HttpSchema, HttpShardDetails, HttpShardState, HttpShardStateByAddress}
@@ -34,6 +34,17 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
         }
       }
     } ~
+      path(Segment / "statusV2") { dataset =>
+        get {
+          val resp = onSuccess(asyncAsk(clusterProxy, GetShardMapV2(DatasetRef.fromDotString(dataset))))
+          resp {
+            case ShardSnapshot(_, _, _, _) =>
+              complete(httpList(Seq(resp)))
+            case DatasetUnknown(_)            =>
+              complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
+          }
+        }
+      } ~
     // GET /api/v1/cluster/<dataset>/statusByAddress - shard health status grouped by node address
     // Sample output as follows:
     // {{{

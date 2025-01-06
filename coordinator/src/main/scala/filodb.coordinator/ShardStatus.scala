@@ -11,6 +11,16 @@ sealed trait ShardAction extends Serializable
 final case class CurrentShardSnapshot(ref: DatasetRef,
                                       map: ShardMapper) extends ShardAction with Response
 
+
+/**
+ * @param nodeCountInCluster number of nodes in the cluster
+ * @param numShards
+ * @param k8sHostFormat
+ * @param shardState
+ */
+final case class ShardSnapshot(nodeCountInCluster: Int, numShards: Int, k8sHostFormat: String,
+                               shardState: Array[Byte]) extends ShardAction with Response
+
 /**
   * Full state of all shards, sent to all ingestion actors. They react by starting/stopping
   * ingestion for the shards they own or no longer own. The version is expected to be global
