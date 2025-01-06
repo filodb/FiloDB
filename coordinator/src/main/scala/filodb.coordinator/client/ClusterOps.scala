@@ -47,4 +47,20 @@ trait ClusterOps extends ClientBase with StrictLogging {
       }
     }
   }
+
+  /**
+   * ShardMapperV2 is an optimization of the response size over the ShardMapper and GetShardMap ask call
+   * @return Some(ShardMapperV2) if the dataset is registered, None if dataset not found
+   */
+  def getShardMapperV2(dataset: DatasetRef, v2Enabled: Boolean,
+                     timeout: FiniteDuration = 30.seconds): Option[ShardMapperV2] = {
+    require(v2Enabled, s"ClusterV2 ShardAssignment is must for this operation")
+    val actor = Some(nodeCoordinator)
+    actor.flatMap { ref =>
+      Client.actorAsk(ref, GetShardMapV2(dataset), timeout) {
+        case ShardSnapshot(shardMapperV2) => Some(shardMapperV2)
+        case _ => None
+      }
+    }
+  }
 }

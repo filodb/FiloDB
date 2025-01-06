@@ -11,15 +11,29 @@ sealed trait ShardAction extends Serializable
 final case class CurrentShardSnapshot(ref: DatasetRef,
                                       map: ShardMapper) extends ShardAction with Response
 
+/**
+ * Optimized form of the ShardMapper state representation.
+ * NOTE: It doesn't track the shard status updates from coordinator or Ingestion actors. It is just
+ * a wrapper which compresses the response of ShardMapper state to reduce network transmission costs.
+ *
+ * @param nodeCountInCluster Number of replicas in the filodb cluster
+ * @param numShards Number of shards in the filodb cluster
+ * @param k8sHostFormat K8s host format. Valid ONLY for ClusterV2 shard assignment strategy
+ * @param shardState ByteArray. Each bit of the byte represents the shard status.
+ *                   For example: lets say we have 4 shards with following status:
+ *                   Seq[ShardStatusAssigned, ShardStatusRecovery, ShardStatusAssigned, ShardStatusAssigned]
+ *                   Then the shardState would be an array of single byte whose bit representation is - 1000 0000
+ *                   Explanation - corresponding bit is set to 1 if the shard is assigned, else 0
+ */
+final case class ShardMapperV2(nodeCountInCluster: Int, numShards: Int, k8sHostFormat: String,
+                               shardState: Array[Byte])
 
 /**
- * @param nodeCountInCluster number of nodes in the cluster
- * @param numShards
- * @param k8sHostFormat
- * @param shardState
+ * Response to GetShardMapV2 request. Uses the optimized ShardMapperV2 representation. Only applicable
+ * for ClusterV2 shard assignment strategy.
+ * @param map ShardMapperV2
  */
-final case class ShardSnapshot(nodeCountInCluster: Int, numShards: Int, k8sHostFormat: String,
-                               shardState: Array[Byte]) extends ShardAction with Response
+final case class ShardSnapshot(map: ShardMapperV2) extends ShardAction with Response
 
 /**
   * Full state of all shards, sent to all ingestion actors. They react by starting/stopping

@@ -20,7 +20,6 @@ import filodb.query.QueryCommand
 final case class GetShardMapScatter(ref: DatasetRef)
 case object LocalShardsHealthRequest
 case class DatasetShardHealth(dataset: DatasetRef, shard: Int, status: ShardStatus)
-case class LocalShardsHealthResponse(shardStatus: Seq[DatasetShardHealth])
 
 object NewNodeCoordinatorActor {
 
@@ -217,9 +216,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMap for dataset: ${g.ref.dataset}")
       }
-
     /*
+    * requested from HTTP API
     * What is the trade-off between GetShardMap vs GetShardMapV2 ?
     *
     * No | Ask Call        |   Size of Response (256 Shards)  |                Compute Used
@@ -231,13 +232,16 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     case g: GetShardMapV2 =>
       try {
         val shardBitMap = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(clusterDiscovery.shardMapper(g.ref))
-        sender() ! ShardSnapshot(
+        val shardMapperV2 = ShardMapperV2(
           settings.minNumNodes.get,
           ingestionConfigs(g.ref).numShards,
           settings.k8sHostFormat.get,
           shardBitMap)
+        sender() ! ShardSnapshot(shardMapperV2)
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMapV2 for dataset: ${g.ref.dataset}")
       }
 
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call

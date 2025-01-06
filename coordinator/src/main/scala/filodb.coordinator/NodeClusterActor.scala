@@ -95,6 +95,7 @@ object NodeClusterActor {
   final case class DatasetUnknown(ref: DatasetRef) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
   final case class BadData(message: String) extends ErrorResponse
+  final case class InternalServiceError(message: String) extends ErrorResponse
 
   // Cluster state info commands
   // Returns a Seq[DatasetRef]

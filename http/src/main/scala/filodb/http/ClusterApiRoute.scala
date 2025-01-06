@@ -31,17 +31,21 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
             complete(httpList(statusList))
           case DatasetUnknown(_)            =>
             complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
+          case InternalServiceError(errorMessage)  =>
+            complete(Codes.InternalServerError -> httpErr("InternalServerError", errorMessage))
         }
       }
     } ~
+    // NOTE: statusV2 will only work with ClusteringV2 ShardAssignment strategy
       path(Segment / "statusV2") { dataset =>
         get {
-          val resp = onSuccess(asyncAsk(clusterProxy, GetShardMapV2(DatasetRef.fromDotString(dataset))))
-          resp {
-            case ShardSnapshot(_, _, _, _) =>
-              complete(httpList(Seq(resp)))
+          onSuccess(asyncAsk(clusterProxy, GetShardMapV2(DatasetRef.fromDotString(dataset)))) {
+            case ShardSnapshot(shardMapperV2) =>
+              complete(httpList(Seq(shardMapperV2)))
             case DatasetUnknown(_)            =>
               complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
+            case InternalServiceError(errorMessage)  =>
+              complete(Codes.InternalServerError -> httpErr("InternalServerError", errorMessage))
           }
         }
       } ~
