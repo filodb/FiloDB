@@ -122,10 +122,8 @@ trait  DefaultPlanner {
     } else lp
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
-    val rawSource = logicalPlanWithoutBucket.series.isRaw && (logicalPlanWithoutBucket.series match {
-      case r: RawSeries   => !r.supportsRemoteDataCall
-      case _              => true
-    })   // the series is raw and supports raw export, its going to yield an iterator
+    // the series is raw and supports raw export, it's going to yield an iterator
+    val rawSource = logicalPlanWithoutBucket.series.isRaw
 
     /* Last function is used to get the latest value in the window for absent_over_time
     If no data is present AbsentFunctionMapper will return range vector with value 1 */
@@ -203,10 +201,7 @@ trait  DefaultPlanner {
     } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
-    val rawSource = lpWithoutBucket.rawSeries.isRaw && (lpWithoutBucket.rawSeries match {
-      case r: RawSeries => !r.supportsRemoteDataCall
-      case _ => true
-    })
+    val rawSource = lpWithoutBucket.rawSeries.isRaw
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       window = None, functionId = None,
       stepMultipleNotationUsed = false, funcParams = Nil,
@@ -832,7 +827,7 @@ object PlannerUtil extends StrictLogging {
             rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]),
           series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookbackMs)
           .asInstanceOf[RawSeriesLikePlan])
-      // wont bother rewriting and adjusting the start and end for metadata calls
+      // won't bother rewriting and adjusting the start and end for metadata calls
       case lp: MetadataQueryPlan => lp
       case lp: TsCardinalities => lp
     }
