@@ -11,22 +11,24 @@ import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardin
 
 /**
  * Aggregation rule definition. Contains the following information:
- * 1. aggregation metricDelimiter to be matched
- * 2. map of current aggregation metric suffix -> nextLevelAggregation's AggRule to be used
+ * 1. isRawToAgg describing if the query is raw that needs to be converted to aggregated or not.
+ * 2. aggregation metricDelimiter to be matched
+ * 3. map of current aggregation metric suffix -> nextLevelAggregation's AggRule to be used
  *    For example: agg -> AggRule { metricSuffix = agg_2, tags = Set("tag1", "tag2") }
  */
-case class HierarchicalQueryExperienceParams(metricDelimiter: String,
+case class HierarchicalQueryExperienceParams(isRawToAgg: Boolean, metricDelimiter: String,
                                              aggRules: Map[String, AggRule]) { }
 
 /**
  * Aggregation rule definition. Contains the following information:
  * 1. metric suffix for the given aggregation rule
- * 2. include/exclude tags for the given aggregation rule
+ * 2. level for the given aggregation rule
+ * 3. include/exclude tags for the given aggregation rule
  */
 sealed trait AggRule {
 
   val metricSuffix: String
-
+  val level: String
   val tags: Set[String]
   def isHigherLevelAggregationApplicable(shardKeyColumns: Set[String], filterTags: Seq[String]): Boolean
 }
@@ -34,8 +36,9 @@ sealed trait AggRule {
 /**
  * @param metricSuffix - String - Metric suffix for the given aggregation rule
  * @param tags - Set[String] - Include tags as specified in the aggregation rule
+ * @param level - String - level of the aggregation rule
  */
-case class IncludeAggRule(metricSuffix: String, tags: Set[String]) extends AggRule {
+case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String) extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with IncludeTags.
@@ -53,8 +56,9 @@ case class IncludeAggRule(metricSuffix: String, tags: Set[String]) extends AggRu
 /**
  * @param metricSuffix - String - Metric suffix for the given aggregation rule
  * @param tags - Set[String] - Exclude tags as specified in the aggregation rule
+ * @param level - String - level of the aggregation rule
  */
-case class ExcludeAggRule(metricSuffix: String, tags: Set[String]) extends AggRule {
+case class ExcludeAggRule(metricSuffix: String, tags: Set[String], level: String) extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with ExcludeTags. Here we need to check if the column filter
@@ -251,7 +255,7 @@ object HierarchicalQueryExperience extends StrictLogging {
 
   /**
    * Updates the metric column filter if higher level aggregation is applicable
-   * @param params - HierarchicalQueryExperienceParams - Contains metricDelimiter and aggRules
+   * @param params - HierarchicalQueryExperienceParams - Contains metricDelimiter, isRawToAgg and aggRules
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
    * @return - Seq[ColumnFilter] - Updated filters
    */
@@ -261,11 +265,12 @@ object HierarchicalQueryExperience extends StrictLogging {
     val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
     val currentMetricName = getMetricName(metricColumnFilter, filters)
     if (currentMetricName.isDefined) {
-      params.aggRules.find( x => currentMetricName.get.endsWith(x._1)) match {
-        case Some(aggRule) =>
-          if (isHigherLevelAggregationApplicable(aggRule._2, filterTags)) {
+      if (params.isRawToAgg) {
+          val matchingRules = params.aggRules.filter( x => isHigherLevelAggregationApplicable(x._2, filterTags))
+          if (matchingRules.nonEmpty) {
+            val highestLevelAggRule = matchingRules.maxBy( x => x._2.level)
             val updatedMetricName = getNextLevelAggregatedMetricName(
-              currentMetricName.get, params.metricDelimiter, aggRule._2.metricSuffix)
+              currentMetricName.get, params.metricDelimiter, highestLevelAggRule._2.metricSuffix)
             val updatedFilters = upsertFilters(
               filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
             logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
@@ -274,8 +279,23 @@ object HierarchicalQueryExperience extends StrictLogging {
           } else {
             filters
           }
-        case None => filters
-      }
+        } else {
+          params.aggRules.find( x => currentMetricName.get.endsWith(x._1)) match {
+            case Some(aggRule) =>
+              if (isHigherLevelAggregationApplicable(aggRule._2, filterTags)) {
+                val updatedMetricName = getNextLevelAggregatedMetricName(
+                  currentMetricName.get, params.metricDelimiter, aggRule._2.metricSuffix)
+                val updatedFilters = upsertFilters(
+                  filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
+                logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
+                incrementHierarchicalQueryOptimizedCounter(updatedFilters)
+                updatedFilters
+              } else {
+                filters
+              }
+            case None => filters
+          }
+        }
     } else {
       filters
     }
@@ -338,10 +358,10 @@ object HierarchicalQueryExperience extends StrictLogging {
                 //   the includeTags. This requires the knowledge of all the tags/labels which are being published
                 //   for a metric. This info is not available during planning and hence we can't optimize this scenario.
                 params match {
-                  case IncludeAggRule( _, _) =>
+                  case IncludeAggRule( _, _, _) =>
                     // can't optimize this scenario as we don't have the required info at the planning stage
                     false
-                  case ExcludeAggRule(_, excludeTags) =>
+                  case ExcludeAggRule(_, excludeTags, _) =>
                     if (excludeTags.subsetOf(clause.labels.toSet)) { true }
                     else { false }
                 }
