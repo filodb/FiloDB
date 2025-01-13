@@ -1,6 +1,7 @@
 package filodb.query.exec.aggregator
 
 import scala.collection.mutable
+import scala.util.Using
 
 import filodb.core.Utils
 import filodb.core.binaryrecord2.RecordBuilder
@@ -94,21 +95,22 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
         FiloSchedulers.assertThreadName(QuerySchedName)
         // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
         ChunkMap.validateNoSharedLocks(s"CountValues-$label")
-        aggRangeVector.rows.take(limit).foreach { row =>
-          val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
-            row.getBlobNumBytes(1), row.getBlobOffset(1))
-          rowMap.foreach { (k, v) =>
-            val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
-              (label.utf8 -> k.toString.utf8))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
-            builder.startNewRecord(recSchema)
-            builder.addLong(row.getLong(0))
-            builder.addDouble(v)
-            builder.endRecord()
+        Using.resource(aggRangeVector.rows()) {
+          rows => rows.take(limit).foreach { row =>
+            val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
+              row.getBlobNumBytes(1), row.getBlobOffset(1))
+            rowMap.foreach { (k, v) =>
+              val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
+                (label.utf8 -> k.toString.utf8))
+              val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
+              builder.startNewRecord(recSchema)
+              builder.addLong(row.getLong(0))
+              builder.addDouble(v)
+              builder.endRecord()
+            }
           }
-        }
+      }
       } finally {
-        aggRangeVector.rows.close()
         ChunkMap.releaseAllSharedLocks()
       }
       resRvs.map { case (key, builder) =>
