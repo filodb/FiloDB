@@ -726,6 +726,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             case None           => (lastTimeRange.endMs, timeRange.endMs)
           }
           if (gapStartTimeMs <= gapEndTimeMs){
+            // Check if there is a gap
             val newParams = qParams.copy(startSecs = gapStartTimeMs / 1000, endSecs = gapEndTimeMs / 1000)
             val newContext = qContext.copy(origQueryParams = newParams)
             val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
