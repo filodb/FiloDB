@@ -114,7 +114,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("checkAggregateQueryEligibleForHigherLevelAggregatedMetric should increment counter if metric updated") {
     val excludeRule = ExcludeAggRule("agg_2", Set("notAggTag1", "notAggTag2"), "2")
-    val params = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> excludeRule))
+    val params = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeRule)))
     Kamon.init()
     var counter = Kamon.counter("hierarchical-query-plans-optimized")
 

@@ -350,7 +350,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val binaryJoinAggregationBothOptimization = "sum(metric1:::agg{aggTag=\"app\"}) + sum(metric2:::agg{aggTag=\"app\"})"
     var lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
     lpUpdated.isInstanceOf[BinaryJoin] shouldEqual true
     lpUpdated.asInstanceOf[BinaryJoin].lhs.isInstanceOf[Aggregate] shouldEqual true
@@ -397,7 +397,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("aggTag", "aggTag2", "aggTag3", "aggTag4")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     // CASE 1 - Aggregate with by clause - should update the metric name as `by` clause labels are part of include tags
     var query = "sum(rate(my_counter:::agg{aggTag=\"spark\", aggTag2=\"app\"}[5m])) by (aggTag4, aggTag3)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -470,7 +470,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationExcludeTags = Set("excludeAggTag", "excludeAggTag2")
     val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags, "1")
-    val excludeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> excludeAggRule))
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeAggRule)))
     // CASE 1 - should update the metric name as `by` clause labels are not part of exclude tags
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) by (host)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -552,7 +552,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationExcludeTags = Set("excludeAggTag", "excludeAggTag2")
     val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationExcludeTags, "1")
-    val excludeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> excludeAggRule))
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeAggRule)))
     // CASE 1 - should update since the exclude tags are subset of the without clause labels
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (excludeAggTag2, excludeAggTag)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -643,7 +643,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     // All the cases should not be updated since without clause with include tags is not supported as of now
     var query = "sum(rate(my_counter:::agg{job=\"spark\", application=\"app\"}[5m])) without (version, instance)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -703,7 +703,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     // CASE 1: Raw queries lp should not be updated directly
     var query = "my_counter:::agg{job=\"spark\", application=\"app\"}[5m]"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
@@ -730,7 +730,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     val nextLevelAggregationTags = Set("job", "application", "instance", "version")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     // CASE 1: count aggregate should not be allowed
     var query = "count(my_gauge:::agg{job=\"spark\", application=\"app\"})"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
@@ -770,7 +770,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // with includeTags
     var nextLevelAggregationTags = Set("aggTag1", "aggTag2", "aggTag3")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
 
     // CASE 1: Should update the metric name since aggTag1/2 is part of include tags and aggTag4 is a .* regex
     var query = "sum(sum(my_counter:::agg{aggTag1=\"spark\", aggTag2=\"app\", aggTag4=~\".*\"}) by (aggTag1, aggTag2))"
@@ -794,7 +794,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // with excludeTags
     nextLevelAggregationTags = Set("excludeAggTag1", "excludeAggTag2")
     val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val excludeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> excludeAggRule))
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeAggRule)))
 
     // CASE 3: should update since excludeTags are only used with .* regex
     query = "sum by (aggTag1, aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\", excludeAggTag2=~\".*\"}))"
@@ -822,7 +822,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val nextLevelAggregatedMetricSuffix = "agg_2"
     var nextLevelAggregationTags = Set("aggTag1", "aggTag2", "aggTag3")
     val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> includeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(includeAggRule)))
     // CASE 1: should update the metric name as `by` clause labels are part of include tags
     var query = "sum(sum(my_counter:::agg{aggTag1=\"spark\", aggTag2=\"app\"}) by (aggTag1, aggTag2, aggTag3))"
     var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
@@ -853,7 +853,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // using excludeTags
     nextLevelAggregationTags = Set("excludeAggTag1", "excludeAggTag2")
     val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags, "1")
-    val excludeParams = HierarchicalQueryExperienceParams(false, ":::", Map("agg" -> excludeAggRule))
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeAggRule)))
     // CASE 4: should update since excludeTags are not used
     query = "sum by (aggTag1, aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\"}))"
     lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -880,8 +880,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"), "1")
     val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"), "1")
     // Query with multiple agg rules and suffixes
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::",
-      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> Set(includeAggRule), "suffix2" -> Set(excludeAggRule)))
     // CASE 1 - should update - simple binary join with two different aggregated metrics and suffixes, both of which are satisfying the next level aggregation metric constraints
     var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"})"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -926,8 +926,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"), "1")
     val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"), "1")
     // Query with multiple agg rules and suffixes
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::",
-      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> Set(includeAggRule), "suffix2" -> Set(excludeAggRule)))
     // CASE 1 - should update - both lhs and rhs are satisfying the next level aggregation metric constraints
     var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) by (notExcludeTag1)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -972,8 +972,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"), "1")
     val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"), "1")
     // Query with multiple agg rules and suffixes
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::",
-      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> Set(includeAggRule), "suffix2" -> Set(excludeAggRule)))
     // CASE 1 - should update - both lhs and rhs are satisfying the next level aggregation metric constraints
     var query = "sum(my_gauge:::suffix1{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1) + sum(your_gauge:::suffix2{notExcludeTag1=\"spark\", notExcludeTag2=\"filodb\"}) without (excludeTag1, excludeTag2)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)
@@ -1000,8 +1000,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val includeAggRule = IncludeAggRule("suffix1_2", Set("includeTag1", "includeTag2", "includeTag3"), "1")
     val excludeAggRule = ExcludeAggRule("suffix2_2", Set("excludeTag1", "excludeTag2"), "1")
     // Query with multiple agg rules and suffixes
-    val includeParams = HierarchicalQueryExperienceParams(false, ":::",
-      Map("suffix1" -> includeAggRule, "suffix2" -> excludeAggRule))
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("suffix1" -> Set(includeAggRule), "suffix2" -> Set(excludeAggRule)))
     // CASE 1 - should not update - both lhs and rhs metric are not using suffix passed for lp update
     var query = "sum(my_gauge:::no_rule{includeTag1=\"spark\", includeTag2=\"filodb\"}) by (includeTag3, includeTag1)"
     var lp = Parser.queryRangeToLogicalPlan(query, t)

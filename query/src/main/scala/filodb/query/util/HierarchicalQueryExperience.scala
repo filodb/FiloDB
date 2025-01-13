@@ -11,22 +11,37 @@ import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardin
 
 /**
  * Aggregation rule definition. Contains the following information:
- * 1. isRawToAgg describing if the query is raw that needs to be converted to aggregated or not.
- * 2. aggregation metricDelimiter to be matched
- * 3. map of current aggregation metric suffix -> nextLevelAggregation's AggRule to be used
- *    For example: agg -> AggRule { metricSuffix = agg_2, tags = Set("tag1", "tag2") }
+ *
+ * @param metricDelimiter metricDelimiter to be matched and used to create the raw to agg metric
+ * @param aggRulesByAggregationSuffix map of:
+ *                 Current aggregation metric suffix -> Set of "NEXT" level aggregation's rules that can be matched
+ *                 Example - {
+ *                                "agg1": Set(
+ *                                      AggRule{ metricSuffix = agg_2, tags = Set("tag1", "tag2")},
+ *                                      AggRule{ metricSuffix = agg_3, tags = Set("tag2")},
+ *                                  )
+ *                           }
+ * @param aggRulesByRawMetricName map of:
+ *                 metric name -> Set of aggregation rules to be tested against the raw metric label filters.
+ *                 Example - {
+ *                               "metric_name1": Set(
+ *                                     AggRule{ metricSuffix = agg,   tags = Set("tag1", "tag2", "tag3")},
+ *                                     AggRule{ metricSuffix = agg_2, tags = Set("tag1", "tag2")},
+ *                                     AggRule{ metricSuffix = agg_3, tags = Set("tag2")},
+ *                                 )
+ *                          }
  */
-case class HierarchicalQueryExperienceParams(isRawToAgg: Boolean, metricDelimiter: String,
-                                             aggRules: Map[String, AggRule]) { }
+case class HierarchicalQueryExperienceParams(metricDelimiter: String,
+                                             aggRulesByAggregationSuffix: Map[String, Set[AggRule]],
+                                             aggRulesByRawMetricName: Map[String, Set[AggRule]] = Map.empty) { }
 
 /**
  * Aggregation rule definition. Contains the following information:
- * 1. metric suffix for the given aggregation rule
- * 2. level for the given aggregation rule
- * 3. include/exclude tags for the given aggregation rule
+ * @param metricSuffix suffix for the given aggregation rule
+ * @param level  level of the given aggregation rule
+ * @param tags include/exclude tags for the given aggregation rule
  */
 sealed trait AggRule {
-
   val metricSuffix: String
   val level: String
   val tags: Set[String]
@@ -38,13 +53,13 @@ sealed trait AggRule {
  * @param tags - Set[String] - Include tags as specified in the aggregation rule
  * @param level - String - level of the aggregation rule
  */
-case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String) extends AggRule {
+case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with IncludeTags.
    *
    * @param shardKeyColumns - Seq[String] - List of shard key columns. These columns are not part of check. This
-   *                        include tags which are compulsory for the query like _metric_, _ws_, _ns_.
+   *                        includes tags which are compulsory for the query like _metric_, _ws_, _ns_.
    * @param filterTags      - Seq[String] - List of filter tags/labels in the query or in the aggregation clause
    * @return - Boolean
    */
@@ -58,7 +73,7 @@ case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String
  * @param tags - Set[String] - Exclude tags as specified in the aggregation rule
  * @param level - String - level of the aggregation rule
  */
-case class ExcludeAggRule(metricSuffix: String, tags: Set[String], level: String) extends AggRule {
+case class ExcludeAggRule(metricSuffix: String, tags: Set[String], level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with ExcludeTags. Here we need to check if the column filter
@@ -153,18 +168,18 @@ object HierarchicalQueryExperience extends StrictLogging {
   }
 
   /** Checks if the higher level aggregation is applicable for the given Include/Exclude tags.
-   * @param params - AggRule - Include or Exclude AggRule
+   * @param aggRule - AggRule - Include or Exclude AggRule
    * @param filterTags - Seq[String] - List of filter tags/labels in the query or in the aggregation clause
    * @return - Boolean
    */
-  def isHigherLevelAggregationApplicable(params: AggRule,
+  def isHigherLevelAggregationApplicable(aggRule: AggRule,
                                          filterTags: Seq[String]): Boolean = {
     shardKeyColumnsOption match {
       case None =>
         logger.info("[HierarchicalQueryExperience] Dataset options config not found. Skipping optimization !")
         false
       case Some(shardKeyColumns) =>
-        params.isHigherLevelAggregationApplicable(shardKeyColumns, filterTags)
+        aggRule.isHigherLevelAggregationApplicable(shardKeyColumns, filterTags)
     }
   }
 
@@ -180,6 +195,16 @@ object HierarchicalQueryExperience extends StrictLogging {
    */
   def getNextLevelAggregatedMetricName(metricName : String, metricDelimiter: String, metricSuffix: String): String = {
     metricName.replaceFirst(metricDelimiter + ".*", metricDelimiter + metricSuffix)
+  }
+
+  /**
+   * @param metricName raw metric name
+   * @param metricDelimiter metric delimiter pattern for aggregated metric
+   * @param metricSuffix suffix for the given aggregation rule
+   * @return
+   */
+  def getAggMetricNameForRawMetric(metricName : String, metricDelimiter: String, metricSuffix: String): String = {
+    metricName + metricDelimiter + metricSuffix
   }
 
   /** Gets the current metric name from the given metricColumnFilter and filters
@@ -265,37 +290,42 @@ object HierarchicalQueryExperience extends StrictLogging {
     val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
     val currentMetricName = getMetricName(metricColumnFilter, filters)
     if (currentMetricName.isDefined) {
-      if (params.isRawToAgg) {
-          val matchingRules = params.aggRules.filter( x => isHigherLevelAggregationApplicable(x._2, filterTags))
-          if (matchingRules.nonEmpty) {
-            val highestLevelAggRule = matchingRules.maxBy( x => x._2.level)
-            val updatedMetricName = getNextLevelAggregatedMetricName(
-              currentMetricName.get, params.metricDelimiter, highestLevelAggRule._2.metricSuffix)
-            val updatedFilters = upsertFilters(
-              filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
-            logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
-            incrementHierarchicalQueryOptimizedCounter(updatedFilters)
-            updatedFilters
-          } else {
-            filters
-          }
+      // Check if the metric name is part of the params.aggRulesByRawMetricName ( i.e. check if it is raw metric)
+      if (params.aggRulesByRawMetricName.contains(currentMetricName.get)) {
+        // CASE 1: Check if the given raw metric can be optimized using an aggregated rule
+        val matchingRules = params.aggRulesByRawMetricName(currentMetricName.get)
+          .filter(x => isHigherLevelAggregationApplicable(x, filterTags))
+        if (matchingRules.nonEmpty) {
+          val highestLevelAggRule = matchingRules.maxBy(x => x.level)
+          val updatedMetricName = getAggMetricNameForRawMetric(
+            currentMetricName.get, params.metricDelimiter, highestLevelAggRule.metricSuffix)
+          val updatedFilters = upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
+          logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
+          incrementHierarchicalQueryOptimizedCounter(updatedFilters)
+          updatedFilters
         } else {
-          params.aggRules.find( x => currentMetricName.get.endsWith(x._1)) match {
-            case Some(aggRule) =>
-              if (isHigherLevelAggregationApplicable(aggRule._2, filterTags)) {
-                val updatedMetricName = getNextLevelAggregatedMetricName(
-                  currentMetricName.get, params.metricDelimiter, aggRule._2.metricSuffix)
-                val updatedFilters = upsertFilters(
-                  filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
-                logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
-                incrementHierarchicalQueryOptimizedCounter(updatedFilters)
-                updatedFilters
-              } else {
-                filters
-              }
-            case None => filters
-          }
+          filters
         }
+      } else {
+        // CASE 2: Check if the given aggregated metric can be optimized using the NEXT level aggregation rules
+        params.aggRulesByAggregationSuffix.find(x => currentMetricName.get.endsWith(x._1)) match {
+          case Some(aggRulesSet) =>
+            val matchingRules = aggRulesSet._2.filter( x => isHigherLevelAggregationApplicable(x, filterTags))
+            if (matchingRules.nonEmpty) {
+              val highestLevelAggRule = matchingRules.maxBy(x => x.level)
+              val updatedMetricName = getNextLevelAggregatedMetricName(
+                currentMetricName.get, params.metricDelimiter, highestLevelAggRule.metricSuffix)
+              val updatedFilters = upsertFilters(
+                filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
+              logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
+              incrementHierarchicalQueryOptimizedCounter(updatedFilters)
+              updatedFilters
+            } else {
+              filters
+            }
+          case None => filters
+        }
+      }
     } else {
       filters
     }
