@@ -121,7 +121,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
 
   it("checkAggregateQueryEligibleForHigherLevelAggregatedMetric should increment counter if metric updated") {
     val excludeRule = ExcludeAggRule("agg_2", Set("notAggTag1", "notAggTag2"), "2")
-    val params = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeRule)))
+    val params = HierarchicalQueryExperienceParams(":::", Map("agg" -> Set(excludeRule)), Map("metric1" -> Set(excludeRule)))
     Kamon.init()
     var counter = Kamon.counter("hierarchical-query-plans-optimized")
 
@@ -135,8 +135,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
         ColumnFilter("aggTag", Equals("value"))), false)
     updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
       .shouldEqual("metric1:::agg_2")
-    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 1
-
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").withTag("metric_type", "agg").value shouldEqual 1
 
     // CASE 2: Should not update if metric doesn't have the aggregated metric identifier
     // reset the counter
@@ -151,8 +150,19 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
     updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
       .shouldEqual("metric1:::agg")
     // count should not increment
-    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 0
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").withTag("metric_type", "").value shouldEqual 0
 
+    // CASE 3: Should update for raw metric optimization
+    counter = Kamon.counter("hierarchical-query-plans-optimized")
+    updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
+      params, Seq(
+        ColumnFilter("__name__", Equals("metric1")),
+        ColumnFilter("_ws_", Equals("testws")),
+        ColumnFilter("_ns_", Equals("testns")),
+        ColumnFilter("aggTag", Equals("value"))), true)
+    updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+      .shouldEqual("metric1:::agg_2")
+    counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").withTag("metric_type", "raw").value shouldEqual 1
     Kamon.stop()
   }
 }
