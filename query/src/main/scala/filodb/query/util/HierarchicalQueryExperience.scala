@@ -286,9 +286,13 @@ object HierarchicalQueryExperience extends StrictLogging {
   }
 
   /**
-   * Updates the metric column filter if higher level aggregation is applicable
-   * @param params - HierarchicalQueryExperienceParams - Contains metricDelimiter, isRawToAgg and aggRules
+   * Updates the metric column filter if higher level aggregation is applicable. Two scenarios:
+   *  1. If the metric is aggregated metric - uses HierarchicalQueryExperienceParams.aggRulesByAggregationSuffix
+   *  2. If the metric is raw metric - uses HierarchicalQueryExperienceParams.aggRulesByRawMetricName map
+   * @param params - HierarchicalQueryExperienceParams
+   *               Contains metricDelimiter, aggRulesByAggregationSuffix, and aggRulesByRawMetricName
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
+   * @param isOptimizeWithAggLp - Boolean - Flag to check if the query is using `optimize_with_agg` function
    * @return - Seq[ColumnFilter] - Updated filters
    */
   def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params: HierarchicalQueryExperienceParams,
@@ -309,7 +313,7 @@ object HierarchicalQueryExperience extends StrictLogging {
             currentMetricName.get, params.metricDelimiter, highestLevelAggRule.metricSuffix)
           val updatedFilters = upsertFilters(filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
           logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
-          incrementHierarchicalQueryOptimizedCounter(updatedFilters)
+          incrementHierarchicalQueryOptimizedCounter(updatedFilters, true)
           updatedFilters
         } else {
           filters
@@ -326,7 +330,7 @@ object HierarchicalQueryExperience extends StrictLogging {
               val updatedFilters = upsertFilters(
                 filters, Seq(ColumnFilter(metricColumnFilter, Equals(updatedMetricName))))
               logger.info(s"[HierarchicalQueryExperience] Query optimized with filters: ${updatedFilters.toString()}")
-              incrementHierarchicalQueryOptimizedCounter(updatedFilters)
+              incrementHierarchicalQueryOptimizedCounter(updatedFilters, false)
               updatedFilters
             } else {
               filters
@@ -342,8 +346,10 @@ object HierarchicalQueryExperience extends StrictLogging {
   /**
    * Track the queries optimized by workspace and namespace
    * @param filters - Seq[ColumnFilter] - label filters of the query/lp
+   * @param optimizingRawMetric - Boolean - flag signifying if the metric getting optimized is a raw or agg metric
    */
-  private def incrementHierarchicalQueryOptimizedCounter(filters: Seq[ColumnFilter]): Unit = {
+  private def incrementHierarchicalQueryOptimizedCounter(filters: Seq[ColumnFilter],
+                                                         optimizingRawMetric: Boolean): Unit = {
     // track query optimized per workspace and namespace in the counter
     val metric_ws = LogicalPlan.getColumnValues(filters, TsCardinalities.LABEL_WORKSPACE) match {
       case Seq() => ""
@@ -353,9 +359,14 @@ object HierarchicalQueryExperience extends StrictLogging {
       case Seq() => ""
       case ns => ns.head
     }
+    val metric_type = optimizingRawMetric match {
+      case true => "raw"
+      case false => "agg"
+    }
     hierarchicalQueryOptimizedCounter
       .withTag("metric_ws", metric_ws)
       .withTag("metric_ns", metric_ns)
+      .withTag("metric_type", metric_type)
       .increment()
   }
 
