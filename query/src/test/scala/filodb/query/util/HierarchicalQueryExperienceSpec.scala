@@ -29,6 +29,13 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
       "metric1:::agg", ":::", params.metricSuffix) shouldEqual "metric1:::agg_2"
   }
 
+  it("getAggMetricNameForRawMetric should return expected metric name") {
+    val params = IncludeAggRule("agg_2", Set("job", "instance"), "2")
+    // Case 1: Should not update if metric doesn't have the aggregated metric identifier
+    HierarchicalQueryExperience.getAggMetricNameForRawMetric(
+      "metric1", ":::", params.metricSuffix) shouldEqual "metric1:::agg_2"
+  }
+
   it("isParentPeriodicSeriesPlanAllowedForRawSeriesUpdateForHigherLevelAggregatedMetric return expected values") {
     HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(
       Seq("BinaryJoin", "Aggregate", "ScalarOperation")) shouldEqual true
@@ -125,7 +132,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
         ColumnFilter("__name__", Equals("metric1:::agg")),
         ColumnFilter("_ws_", Equals("testws")),
         ColumnFilter("_ns_", Equals("testns")),
-        ColumnFilter("aggTag", Equals("value"))))
+        ColumnFilter("aggTag", Equals("value"))), false)
     updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
       .shouldEqual("metric1:::agg_2")
     counter.withTag("metric_ws", "testws").withTag("metric_ns", "testns").value shouldEqual 1
@@ -140,7 +147,7 @@ class HierarchicalQueryExperienceSpec extends AnyFunSpec with Matchers {
         ColumnFilter("__name__", Equals("metric1:::agg")),
         ColumnFilter("_ws_", Equals("testws")),
         ColumnFilter("_ns_", Equals("testns")),
-        ColumnFilter("notAggTag1", Equals("value")))) // using exclude tag, so should not optimize
+        ColumnFilter("notAggTag1", Equals("value"))), false) // using exclude tag, so should not optimize
     updatedFilters.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
       .shouldEqual("metric1:::agg")
     // count should not increment

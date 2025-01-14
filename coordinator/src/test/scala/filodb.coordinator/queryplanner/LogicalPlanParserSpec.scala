@@ -1039,7 +1039,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     updatedMetricNamesSet.contains("your_gauge:::no_rule2").shouldEqual(true) // not updated
   }
 
-  it("should correctly apply optimize_with_agg function to a Prometheus query") {
+  it("should correctly apply optimize_with_agg function to a promql query") {
     val timeParamsSec1 = TimeStepParams(1000, 10, 10000)
     val query1 = """optimize_with_agg(sum(rate(mns_gmail_authenticate_request_ms{_ws_="acs-icloud",_ns_="mail-notifications",app="mail-notifications",env="prod",_type_="prom-histogram"}[5m])))"""
     val lp1 = Parser.queryRangeToLogicalPlan(query1, timeParamsSec1)
@@ -1061,5 +1061,136 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     lp3.isInstanceOf[ApplyMiscellaneousFunction].shouldEqual(true)
     lp3.asInstanceOf[ApplyMiscellaneousFunction].function .shouldEqual(OptimizeWithAgg)
     LogicalPlanUtils.getLogicalPlanTreeStringRepresentation(lp3) shouldEqual "ApplyMiscellaneousFunction(BinaryJoin(Aggregate(PeriodicSeries(RawSeries)),Aggregate(PeriodicSeries(RawSeries))))"
+  }
+
+  it("Logical plan should update to use the aggregated metric from raw metric") {
+    val t = TimeStepParams(700, 1000, 10000)
+    // CASE 1 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - Both lhs and rhs should be updated
+    val binaryJoinAggregationBothOptimization = "optimize_with_agg(sum(rate(metric1{aggTag=\"app\"}[5m])) + sum(rate(metric2{aggTag=\"app\"}[5m])))"
+    var lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
+    val includeAggRule1 = IncludeAggRule("agg", Set("aggTag", "aggTag2", "aggTag3"), "1")
+    val includeAggRule2 = IncludeAggRule("agg_2", Set("aggTag", "aggTag2"), "2")
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map.empty,
+      Map("metric1" -> Set(includeAggRule1, includeAggRule2), "metric2" -> Set(includeAggRule1, includeAggRule2)))
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("agg_2").shouldEqual(true)
+    )
+    // CASE 2 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - rhs should be updated to level-2, while lhs should be updated to level-1
+    val binaryJoinAggregationRHSOptimization = "optimize_with_agg(sum(rate(metric1{aggTag3=\"abc\"}[5m])) + sum(rate(metric2{aggTag=\"app\"}[5m])))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationRHSOptimization, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[ApplyMiscellaneousFunction].vectors.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2:::agg_2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[ApplyMiscellaneousFunction].vectors.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1:::agg")
+    )
+    // CASE 3 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - lhs should be updated to level-2 and rhs should not since it is
+    // not an aggregated metric, even if both the metrics qualify for aggregation
+    val binaryJoinAggregationLHSOptimization = "optimize_with_agg(sum(rate(metric1{aggTag=\"abc\"}[5m])) + sum(rate(metric2{nonAggTag=\"app\"}[5m])))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationLHSOptimization, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[ApplyMiscellaneousFunction].vectors.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[ApplyMiscellaneousFunction].vectors.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1:::agg_2")
+    )
+    // CASE 4 - BinaryJoin (lhs = Aggregate, rhs = Aggregate)
+    // - lhs should not updated to agg as optimize_with_agg is not applied to it.
+    // - rhs should be updated to level-1 agg as optimize_with_agg is applied to it with the aggTag3 which is only present in level-1
+    val binaryJoinAggregationRHSOptimization2 = "sum(rate(metric1{aggTag=\"abc\"}[5m])) + optimize_with_agg(sum(rate(metric2{aggTag3=\"app\"}[5m])))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationRHSOptimization2, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2:::agg")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1")// raw metric not updated since optimize_with_agg is not applied to it
+    )
+    // CASE 5 - No optimization since optimize_with_agg is not used in lhs or rhs
+    val binaryJoinAggregationNoOptimization = "sum(rate(metric1{aggTag=\"abc\"}[5m])) + sum(rate(metric2{aggTag3=\"app\"}[5m]))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationNoOptimization, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1")// raw metric not updated since optimize_with_agg is not applied to it
+    )
+  }
+
+  it ("HQE Logical Plan update with mix mode") {
+    val t = TimeStepParams(700, 1000, 10000)
+    // CASE 1 - BinaryJoin (lhs = Aggregated Metric, rhs = raw) - Both lhs and rhs should be updated
+    val binaryJoinAggregationBothOptimization = "optimize_with_agg(sum(rate(metric1:::agg{aggTag=\"app\"}[5m])) + sum(rate(metric2{aggTag=\"app\"}[5m])))"
+    var lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization, t)
+    val includeAggRule1 = IncludeAggRule("agg", Set("aggTag", "aggTag2", "aggTag3"), "1")
+    val includeAggRule2 = IncludeAggRule("agg_2", Set("aggTag", "aggTag2"), "2")
+    val includeParams = HierarchicalQueryExperienceParams(":::",
+      Map("agg" -> Set(includeAggRule2)),
+      Map("metric1" -> Set(includeAggRule1, includeAggRule2), "metric2" -> Set(includeAggRule1, includeAggRule2)))
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("agg_2").shouldEqual(true)
+    )
+    // CASE 2 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - both lhs and rhs should be updated with optimize_with_agg flag
+    val binaryJoinAggregationBothOptimization2 = "optimize_with_agg(sum(rate(metric1:::agg{aggTag=\"abc\"}[5m])) + sum(rate(metric2:::agg{aggTag=\"app\"}[5m])))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization2, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter( x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .endsWith("agg_2").shouldEqual(true)
+    )
+    // CASE 3 - BinaryJoin (lhs = Aggregate, rhs = Aggregate) - both lhs and rhs should be updated
+    val binaryJoinAggregationBothOptimization3 = "optimize_with_agg(sum(rate(metric1{aggTag3=\"abc\"}[5m]))) + sum(rate(metric2:::agg{aggTag=\"app\"}[5m]))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationBothOptimization3, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2:::agg_2")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1:::agg")
+    )
+    // CASE 4 - Should not update lhs and rhs since they are using non included tags
+    val binaryJoinAggregationNoOptimization = "optimize_with_agg(sum(rate(metric1{nonAggTag3=\"abc\"}[5m]))) + sum(rate(metric2:::agg{nonAggTag=\"app\"}[5m]))"
+    lp = Parser.queryRangeToLogicalPlan(binaryJoinAggregationNoOptimization, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].rhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric2:::agg")
+    )
+    filterGroups = getColumnFilterGroup(lpUpdated.asInstanceOf[BinaryJoin].lhs)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("metric1")
+    )
   }
 }

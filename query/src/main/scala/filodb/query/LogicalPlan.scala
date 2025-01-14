@@ -192,8 +192,11 @@ case class RawSeries(rangeSelector: RangeSelector,
         // Check 1: Check if the leaf periodic series plan is allowed for raw series update
         HierarchicalQueryExperience.isLeafPeriodicSeriesPlanAllowedForRawSeriesUpdate(leafPeriodicPlan) match {
           case true =>
-            val updatedFilters = HierarchicalQueryExperience.upsertMetricColumnFilterIfHigherLevelAggregationApplicable(
-              params, filters)
+            // check if the metric used is raw metric and if the OptimizeWithAgg plan is used in the query
+            val isOptimizeWithAggLp = parentLogicalPlans
+              .contains(HierarchicalQueryExperience.logicalPlanForRawToAggMetric)
+            val updatedFilters = HierarchicalQueryExperience
+              .upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params, filters, isOptimizeWithAggLp)
             this.copy(filters = updatedFilters)
           case false => this
         }
@@ -738,7 +741,7 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
                                                parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ this.getClass.getSimpleName))
+        params, parentLogicalPlans :+ (this.getClass.getSimpleName + '-' + function.entryName)))
   }
 }
 

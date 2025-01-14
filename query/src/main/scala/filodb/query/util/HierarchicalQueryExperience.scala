@@ -8,6 +8,7 @@ import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardinalities}
+import filodb.query.MiscellaneousFunctionId.OptimizeWithAgg
 
 /**
  * Aggregation rule definition. Contains the following information:
@@ -23,6 +24,10 @@ import filodb.query.{AggregateClause, AggregationOperator, LogicalPlan, TsCardin
  *                           }
  * @param aggRulesByRawMetricName map of:
  *                 metric name -> Set of aggregation rules to be tested against the raw metric label filters.
+ *                 WHY is this separate map needed and why are we grouping by metric name ?
+ *                    A single promql query can have several metrics. Not all of them would qualify for raw to agg
+ *                    translation. Hence, we store the metrics which are eligible for the same in this map to avoid
+ *                    accidental updates.
  *                 Example - {
  *                               "metric_name1": Set(
  *                                     AggRule{ metricSuffix = agg,   tags = Set("tag1", "tag2", "tag3")},
@@ -129,6 +134,8 @@ object HierarchicalQueryExperience extends StrictLogging {
     case None => None
   }
 
+  lazy val logicalPlanForRawToAggMetric = "ApplyMiscellaneousFunction-" + OptimizeWithAgg.entryName
+
   /**
    * Helper function to get the ColumnFilter tag/label for the metric. This is needed to correctly update the filter.
    * @param filterTags - Seq[String] - List of ColumnFilter tags/labels
@@ -201,7 +208,7 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @param metricName raw metric name
    * @param metricDelimiter metric delimiter pattern for aggregated metric
    * @param metricSuffix suffix for the given aggregation rule
-   * @return
+   * @return the updated agregated metric name
    */
   def getAggMetricNameForRawMetric(metricName : String, metricDelimiter: String, metricSuffix: String): String = {
     metricName + metricDelimiter + metricSuffix
@@ -285,13 +292,14 @@ object HierarchicalQueryExperience extends StrictLogging {
    * @return - Seq[ColumnFilter] - Updated filters
    */
   def upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params: HierarchicalQueryExperienceParams,
-                                                                 filters: Seq[ColumnFilter]): Seq[ColumnFilter] = {
+                                                                 filters: Seq[ColumnFilter],
+                                                                 isOptimizeWithAggLp: Boolean): Seq[ColumnFilter] = {
     val filterTags = getColumnsAfterFilteringOutDotStarRegexFilters(filters)
     val metricColumnFilter = getMetricColumnFilterTag(filterTags, GlobalConfig.datasetOptions.get.metricColumn)
     val currentMetricName = getMetricName(metricColumnFilter, filters)
     if (currentMetricName.isDefined) {
       // Check if the metric name is part of the params.aggRulesByRawMetricName ( i.e. check if it is raw metric)
-      if (params.aggRulesByRawMetricName.contains(currentMetricName.get)) {
+      if (isOptimizeWithAggLp && params.aggRulesByRawMetricName.contains(currentMetricName.get)) {
         // CASE 1: Check if the given raw metric can be optimized using an aggregated rule
         val matchingRules = params.aggRulesByRawMetricName(currentMetricName.get)
           .filter(x => isHigherLevelAggregationApplicable(x, filterTags))
