@@ -5,7 +5,7 @@ import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
 import spire.syntax.cfor._
 
 import filodb.core.query.ResultSchema
-import filodb.memory.format.vectors.{Histogram, MaxMinHistogram, MutableHistogram}
+import filodb.memory.format.vectors.Histogram
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId._
 
@@ -114,6 +114,8 @@ object InstantFunction {
       if (sourceSchema.isHistMaxMin) HistogramQuantileWithMaxMinImpl() else HistogramQuantileImpl()
     case HistogramMaxQuantile => HistogramMaxQuantileImpl()
     case HistogramBucket => HistogramBucketImpl()
+    case HistogramFraction =>
+      if (sourceSchema.isHistMaxMin) HistogramFractionWithMaxMinImpl() else HistogramFractionImpl()
     case _ => throw new UnsupportedOperationException(s"$function not supported.")
   }
 }
@@ -364,6 +366,28 @@ final case class HistogramQuantileImpl() extends HistToDoubleIFunction {
   }
 }
 
+final case class HistogramFractionImpl() extends HistToDoubleIFunction {
+  final def apply(value: Histogram, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.length == 2, "Need two params for histogram fraction function")
+    val lower = scalarParams(0)
+    val upper = scalarParams(1)
+    value.histogramFraction(lower, upper)
+  }
+}
+
+/**
+ * Histogram quantile function for Histogram columns, where all buckets are together. This will take in consideration
+ * of min and max columns
+ */
+final case class HistogramFractionWithMaxMinImpl() extends HMaxMinToDoubleIFunction {
+  final def apply(value: Histogram, max: Double, min: Double, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.length == 2, "Need two params for histogram fraction function")
+    val lower = scalarParams(0)
+    val upper = scalarParams(1)
+    value.histogramFraction(lower, upper, min, max)
+  }
+}
+
 /**
  * Histogram quantile function for Histogram columns, where all buckets are together. This will take in consideration
  * of min and max columns
@@ -371,11 +395,7 @@ final case class HistogramQuantileImpl() extends HistToDoubleIFunction {
 final case class HistogramQuantileWithMaxMinImpl() extends HMaxMinToDoubleIFunction {
   final def apply(value: Histogram, max: Double, min: Double, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
-    val maxMinHist = value match {
-      case h: MutableHistogram => MaxMinHistogram(h, max, min)
-      case other: Histogram => MaxMinHistogram(MutableHistogram(other), max, min)
-    }
-    maxMinHist.quantile(scalarParams(0))
+    value.quantile(scalarParams(0), min, max)
   }
 }
 
@@ -388,11 +408,7 @@ final case class HistogramMaxQuantileImpl() extends HMaxMinToDoubleIFunction {
     */
   final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
-    val maxHist = hist match {
-      case h: MutableHistogram => MaxMinHistogram(h, max, 0d)
-      case other: Histogram    => MaxMinHistogram(MutableHistogram(other), max, 0d)
-    }
-    maxHist.quantile(scalarParams(0))
+    hist.quantile(scalarParams(0), 0, max)
   }
 }
 

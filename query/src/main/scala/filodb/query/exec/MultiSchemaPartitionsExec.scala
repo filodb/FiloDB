@@ -4,6 +4,7 @@ import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, GlobalConfig}
+import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession, QueryWarnings}
 import filodb.core.query.Filter.Equals
@@ -44,6 +45,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   // Remove _columnName suffix from metricName and generate PartLookupResult
   private def removeSuffixAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
                                                   source: ChunkSource,
+                                                  datasetRef: DatasetRef,
+                                                  originalLookupResult: PartLookupResult,
                                                   querySession: QuerySession) = {
     // Assume metric name has only equal filter
     val filterWithoutColumn = filters.filterNot(_.column == metricColumn) :+
@@ -53,7 +56,15 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     // clear stats since previous call to lookupPartitions set the stat with metric name that has suffix
     querySession.queryStats.clear()
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
-    (lookupRes, Some(columnName))
+    // Accept only if lookupResult schema has a data column with name as the requested columnName.
+    // This is true generally for histogram queries where we rewrite the query to remove _sum, _count suffix.
+    // Check is needed since summaries are not columnized, and we don't want the rewrite to happen for summaries.
+    // If column does not exist, return original lookup result and don't change the query
+    val schemas = source.schemas(datasetRef).get
+    if (lookupRes.firstSchemaId.exists(s => schemas.apply(s).data.columns.exists(_.name == columnName)))
+      (lookupRes, Some(columnName))
+    else
+      (originalLookupResult, None)
   }
 
   /**
@@ -90,9 +101,9 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram &&
         colName.isEmpty && metricName.isDefined) {
       val res = if (metricName.get.endsWith("_sum"))
-        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, dataset, lookupRes, querySession)
       else if (metricName.get.endsWith("_count"))
-        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, querySession)
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, dataset, lookupRes, querySession)
       else (lookupRes, newColName)
 
       lookupRes = res._1
@@ -117,10 +128,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             // This code is responsible for putting exact IDs needed by any range functions.
             val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
 
-            val colIDs = isMaxMinColumnsEnabled(maxMinTenantFilter) match {
-              case true => addIDsForHistMaxMin(sch, colIDs1)
-              case _ => colIDs1
-            }
+            val colIDs = if (sch.data.columns.exists(_.name == "min") &&
+                             sch.data.columns.exists(_.name == "max") &&
+                             isMaxMinColumnsEnabled(maxMinTenantFilter))  addIDsForHistMaxMin(sch, colIDs1)
+                         else colIDs1
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)

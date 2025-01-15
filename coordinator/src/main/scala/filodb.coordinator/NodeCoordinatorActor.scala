@@ -189,10 +189,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def ingestHandlers: Receive = LoggingReceive {
-    case SetupDataset(dataset, resources, source, storeConf, downsample) =>
+    case SetupDataset(dataset, resources, source, storeConf, downsample, overrideSchema) =>
       // used only in unit tests
       if (!(ingesters contains dataset.ref)) {
-        setupDataset(dataset, storeConf, resources.numShards, source, downsample, true)
+        setupDataset(dataset, storeConf, resources.numShards, source, downsample, overrideSchema)
       }
 
     case IngestRows(dataset, shard, rows) =>

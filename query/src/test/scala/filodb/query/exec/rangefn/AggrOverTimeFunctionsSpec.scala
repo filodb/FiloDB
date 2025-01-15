@@ -17,6 +17,7 @@ import filodb.memory._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.memory.BinaryRegion.NativePointer
+import filodb.memory.format.vectors.MutableHistogram
 import filodb.query.exec._
 
 /**
@@ -309,6 +310,39 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
         val maxMax = rawDataWindow.map(_(5).asInstanceOf[Double])
                                   .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
         aggRow.getDouble(2) shouldEqual maxMax
+      }
+    }
+  }
+
+  // Goal of this is to verify histogram rate functionality for diff time windows.
+  // See PeriodicSampleMapperSpec for verifying integration of histograms with min and max
+  it("should aggregate both max/min and hist for rate when min/max is in schema") {
+    val (data, rv) = MMD.histMaxMinRV(defaultStartTS, pubFreq, 150, 8)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(50) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      val row = new TransientHistMaxMinRow()
+      val chunkedIt = chunkedWindowItHist(data, rv, new RateAndMinMaxOverTimeFuncHD(5, 4), windowSize, step, row)
+      chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
+        val aggHist = aggRow.getHistogram(1)
+        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
+          .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        aggHist.asInstanceOf[MutableHistogram].values // what we got
+          .zip(sumRawHist.values.map(_/(windowSize-1)/10)) // expected
+          .foreach { case (a, b) =>
+            a shouldEqual b +- 0.0000001
+          }
+
+        val maxMax = rawDataWindow.map(_(5).asInstanceOf[Double])
+          .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
+        aggRow.getDouble(2) shouldEqual maxMax
+
+        val minMin = rawDataWindow.map(_(4).asInstanceOf[Double])
+          .foldLeft(Double.MaxValue) { case (agg, m) => Math.min(agg, m) }
+        aggRow.getDouble(3) shouldEqual minMin
+
       }
     }
   }

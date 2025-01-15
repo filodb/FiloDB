@@ -356,6 +356,10 @@ object MachineMetricsData {
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
                             options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
+  val expHistDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
+    Seq("timestamp:ts", "count:long", "sum:long", "min:long", "max:long", "h:hist:counter=false"),
+    options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
+
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
                        infBucket: Boolean = false, ws: String = "demo"):
@@ -380,6 +384,29 @@ object MachineMetricsData {
           bv.LongHistogram(scheme, buckets.map(x => x)),
           "request-latency",
           extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+    }
+  }
+
+  def otelDeltaExponentialHistSeries(startTs: Long = 100000L, numSeries: Int = 10,
+                                     timeStep: Int = 10000, numBuckets: Int = 160, ws: String = "demo"):
+  Stream[Seq[Any]] = {
+    histBucketScheme = bv.Base2ExpHistogramBuckets(3, -20, numBuckets - 1)
+    val buckets = new Array[Long](numBuckets)
+    def updateBuckets(bucketNo: Int): Unit = {
+      for { b <- bucketNo until numBuckets } {
+        buckets(b) += 1
+      }
+    }
+    Stream.from(0).map { n =>
+      updateBuckets(n % numBuckets)
+      Seq(startTs + n * timeStep,
+        (1 + n).toLong,
+        buckets.sum,
+        buckets.min,
+        buckets.max,
+        bv.LongHistogram(histBucketScheme, buckets.map(x => x)),
+        "request-latency",
+        extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 

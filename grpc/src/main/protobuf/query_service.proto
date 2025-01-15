@@ -597,6 +597,7 @@ enum InstantFunctionId {
   MONTH                   = 20;
   YEAR                    = 21;
   OR_VECTOR_DOUBLE        = 22;
+  HISTOGRAM_FRACTION      = 23;
 }
 
 enum ScalarFunctionId {
@@ -640,6 +641,7 @@ enum InternalRangeFunction {
   ABSENT_OVER_TIME      = 26;
   PRESENT_OVER_TIME     = 27;
   MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME = 28;
+  RATE_AND_MIN_MAX_OVER_TIME = 29;
 }
 
 enum SortFunctionId {
