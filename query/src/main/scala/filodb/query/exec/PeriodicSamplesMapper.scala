@@ -87,15 +87,15 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val chunkedHRangeFunc = rangeFuncGen().asChunkedH
           val minResolutionMs = rdrv.minResolutionMs
-          if (chunkedHRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && windowLength < minResolutionMs)
+          val extendedWindow = extendLookback(rdrv, windowLength)
+          if (chunkedHRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && extendedWindow < minResolutionMs * 2)
             throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
               s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
-              s"yield intended results for rate/increase functions since each lookback window contains " +
-              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs}ms")
-          val windowPlusPubInt = extendLookback(rv, windowLength)
+              s"yield intended results for rate/increase functions since each lookback window can contain " +
+              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, chunkedHRangeFunc, querySession, histRow), outputRvRange)
+                    extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
@@ -104,15 +104,16 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val minResolutionMs = rdrv.minResolutionMs
           val chunkedDRangeFunc = rangeFuncGen().asChunkedD
-          if (chunkedDRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] && windowLength < rdrv.minResolutionMs)
+          val extendedWindow = extendLookback(rdrv, windowLength)
+          if (chunkedDRangeFunc.isInstanceOf[CounterChunkedRangeFunction[_]] &&
+              extendedWindow < rdrv.minResolutionMs * 2)
             throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
               s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
-              s"yield intended results for rate/increase functions since each lookback window contains " +
-              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs}ms")
-          val windowPlusPubInt = extendLookback(rv, windowLength)
+              s"yield intended results for rate/increase functions since each lookback window can contain " +
+              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, chunkedDRangeFunc, querySession), outputRvRange)
+                    extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -165,23 +166,30 @@ final case class PeriodicSamplesMapper(startMs: Long,
   //scalastyle:on method.length
 
   /**
-   * If a counter function is used (increase or rate) along with a step multiple notation,
-   * the idea is to extend lookback by one publish interval so that the increase between
-   * adjacent lookback windows is also accounted for. This error would be especially
-   * pronounced if [1i] notation was used and step == lookback.
+   * If a rate function is used in the downsample dataset where publish interval is known,
+   * and the requested window length is less than 2*publishInterval then extend lookback automatically
+   * so we don't return empty result for rate.
+   * Typically, you don't modify the query parameters, but this is a special case only for the downsample
+   * dataset. We do this only for rate since it is already a per-second normalized value. Doing this for increase
+   * will lead to incorrect results.
    */
-  private def extendLookback(rv: RangeVector, window: Long): Long = {
+  private[exec] def extendLookback(rv: RangeVector, window: Long): Long = {
     window
-    // TODO There is a code path is used by Histogram bucket extraction path where
-    // underlying vector need not be a RawDataRangeVector. For those cases, we may
-    // not able to reliably extend lookback.
-    // Much more thought and work needed - so punting the bug
-//    val pubInt = rv match {
-//      case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
-//          => rvrd.publishInterval.getOrElse(0L)
-//      case _ => 0L
+// following code is commented, but uncomment when we want to extend window for rate function
+
+//    if (functionId.contains(InternalRangeFunction.Rate)) { // only extend for rate function
+//      val pubInt = rv match {
+//        case rvrd: RawDataRangeVector =>
+//          if (rvrd.partition.schema.hasCumulativeTemporalityColumn) // only extend for cumulative schemas
+//            rvrd.partition.publishInterval.getOrElse(0L)
+//          else 0L
+//        case _ => 0L
+//      }
+//      if (window < 2 * pubInt) 2 * pubInt // 2 * publish interval since we want 2 samples for rate
+//      else window
+//    } else {
+//      window
 //    }
-//    window + pubInt
   }
 
   // Transform source double or long to double schema

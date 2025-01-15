@@ -898,6 +898,7 @@ object ProtoConverters {
         case filodb.query.InstantFunctionId.HistogramQuantile => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_QUANTILE
         case filodb.query.InstantFunctionId.HistogramMaxQuantile => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE
         case filodb.query.InstantFunctionId.HistogramBucket => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_BUCKET
+        case filodb.query.InstantFunctionId.HistogramFraction => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_FRACTION
         case filodb.query.InstantFunctionId.Ln => GrpcMultiPartitionQueryService.InstantFunctionId.LN
         case filodb.query.InstantFunctionId.Log10 => GrpcMultiPartitionQueryService.InstantFunctionId.LOG10
         case filodb.query.InstantFunctionId.Log2 => GrpcMultiPartitionQueryService.InstantFunctionId.LOG2
@@ -929,6 +930,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_QUANTILE => filodb.query.InstantFunctionId.HistogramQuantile
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE => filodb.query.InstantFunctionId.HistogramMaxQuantile
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_BUCKET => filodb.query.InstantFunctionId.HistogramBucket
+        case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_FRACTION => filodb.query.InstantFunctionId.HistogramFraction
         case GrpcMultiPartitionQueryService.InstantFunctionId.LN => filodb.query.InstantFunctionId.Ln
         case GrpcMultiPartitionQueryService.InstantFunctionId.LOG10 => filodb.query.InstantFunctionId.Log10
         case GrpcMultiPartitionQueryService.InstantFunctionId.LOG2 => filodb.query.InstantFunctionId.Log2
@@ -978,6 +980,7 @@ object ProtoConverters {
         case InternalRangeFunction.AvgWithSumAndCountOverTime =>
           GrpcMultiPartitionQueryService.InternalRangeFunction.AVG_WITH_SUM_AND_COUNT_OVER_TIME
         case InternalRangeFunction.SumAndMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.SUM_AND_MAX_OVER_TIME
+        case InternalRangeFunction.RateAndMinMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.RATE_AND_MIN_MAX_OVER_TIME
         case InternalRangeFunction.LastSampleHistMaxMin => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN
         case InternalRangeFunction.Timestamp => GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP
         case InternalRangeFunction.AbsentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME
@@ -1015,6 +1018,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.AVG_WITH_SUM_AND_COUNT_OVER_TIME =>
           InternalRangeFunction.AvgWithSumAndCountOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.SUM_AND_MAX_OVER_TIME => InternalRangeFunction.SumAndMaxOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.RATE_AND_MIN_MAX_OVER_TIME => InternalRangeFunction.RateAndMinMaxOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN => InternalRangeFunction.LastSampleHistMaxMin
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP => InternalRangeFunction.Timestamp
         case GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME => InternalRangeFunction.AbsentOverTime

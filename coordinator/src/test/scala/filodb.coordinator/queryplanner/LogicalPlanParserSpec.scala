@@ -762,6 +762,59 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     )
   }
 
+  it ("LogicalPlan update for hierarchical queries should ignore .* regex label values in lp update checks") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val nextLevelAggregatedMetricSuffix = "agg_2"
+
+    // with includeTags
+    var nextLevelAggregationTags = Set("aggTag1", "aggTag2", "aggTag3")
+    val includeAggRule = IncludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val includeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> includeAggRule))
+
+    // CASE 1: Should update the metric name since aggTag1/2 is part of include tags and aggTag4 is a .* regex
+    var query = "sum(sum(my_counter:::agg{aggTag1=\"spark\", aggTag2=\"app\", aggTag4=~\".*\"}) by (aggTag1, aggTag2))"
+    var lp = Parser.queryToLogicalPlan(query, t.start, t.step)
+    var lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    var filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg_2")
+    )
+    // CASE 2: Should NOT update since aggTag4 is used in by clause which is not part of include rule
+    query = "sum(sum(my_counter:::agg{aggTag1=\"spark\", aggTag2=\"app\", aggTag4=~\".*\"}) by (aggTag1, aggTag4))"
+    lp = Parser.queryToLogicalPlan(query, t.start, t.step)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(includeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_counter:::agg")
+    )
+
+    // with excludeTags
+    nextLevelAggregationTags = Set("excludeAggTag1", "excludeAggTag2")
+    val excludeAggRule = ExcludeAggRule(nextLevelAggregatedMetricSuffix, nextLevelAggregationTags)
+    val excludeParams = HierarchicalQueryExperienceParams(":::", Map("agg" -> excludeAggRule))
+
+    // CASE 3: should update since excludeTags are only used with .* regex
+    query = "sum by (aggTag1, aggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\", excludeAggTag2=~\".*\"}))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge:::agg_2")
+    )
+    // CASE 4: should NOT update since excludeTags are only in by clause
+    query = "sum by (aggTag1, excludeAggTag2) (sum by (aggTag1, aggTag2) (my_gauge:::agg{aggTag1=\"a\", aggTag2=\"b\", excludeAggTag2=~\".*\"}))"
+    lp = Parser.queryRangeToLogicalPlan(query, t)
+    lpUpdated = lp.useHigherLevelAggregatedMetric(excludeParams)
+    filterGroups = getColumnFilterGroup(lpUpdated)
+    filterGroups.foreach(
+      filterSet => filterSet.filter(x => x.column == "__name__").head.filter.valuesStrings.head.asInstanceOf[String]
+        .shouldEqual("my_gauge:::agg")
+    )
+  }
+
   it("LogicalPlan update for hierarchical nested aggregation queries") {
     // common parameters using include tags
     val t = TimeStepParams(700, 1000, 10000)
