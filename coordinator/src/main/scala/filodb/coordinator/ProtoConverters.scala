@@ -1075,6 +1075,8 @@ object ProtoConverters {
         case filodb.query.MiscellaneousFunctionId.LabelJoin => GrpcMultiPartitionQueryService.MiscellaneousFunctionId.LABEL_JOIN
         case filodb.query.MiscellaneousFunctionId.HistToPromVectors =>
           GrpcMultiPartitionQueryService.MiscellaneousFunctionId.HIST_TO_PROM_VECTORS
+        case filodb.query.MiscellaneousFunctionId.OptimizeWithAgg =>
+          GrpcMultiPartitionQueryService.MiscellaneousFunctionId.OPTIMIZE_WITH_AGG
       }
       function
     }
@@ -1087,6 +1089,8 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.LABEL_JOIN => filodb.query.MiscellaneousFunctionId.LabelJoin
         case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.HIST_TO_PROM_VECTORS =>
           filodb.query.MiscellaneousFunctionId.HistToPromVectors
+        case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.OPTIMIZE_WITH_AGG =>
+          filodb.query.MiscellaneousFunctionId.OptimizeWithAgg
         case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.UNRECOGNIZED =>
           throw new IllegalArgumentException(s"Unrecognized MiscellaneousFunctionId ${f}")
       }

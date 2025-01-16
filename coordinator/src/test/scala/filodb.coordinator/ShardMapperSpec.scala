@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import akka.testkit._
-
+import filodb.coordinator.v2.NewNodeCoordinatorActor
 import filodb.core._
 
 object ShardMapperSpec extends ActorSpecConfig
@@ -302,5 +302,101 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.registerNode(Seq(0, 3), newCoord).isSuccess
     Seq(0, 3).forall(s => map.coordForShard(s) == newCoord) shouldEqual true
     assert(coord = newCoord, shards = Seq(0, 3), numAssignedShards = 4, unassignedShards = 28)
+  }
+
+  it ("test bitmap conversion of shard mapper") {
+    val numShards = 32
+    val shardMapper = new ShardMapper(numShards) // default init to ShardStatusUnassigned
+    var bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep.length shouldEqual 4
+    bitRep.forall (x => x == 0x00.toByte) shouldEqual true // no bit should be set at this point
+
+    // move everyone to assigned
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+    shardMapper.assignedShards.length shouldEqual 32
+
+    // status updated to assigned but bitmap representation should NOT yet be set to 1
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep.length shouldEqual 4
+    bitRep.forall (x => x == 0x00.toByte) shouldEqual true // no bit should be set at this point
+
+    // move first 8 and last 8 shards to active
+    for (i <- 0 to 7) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    for (i <- 24 to 31) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    shardMapper.activeShards().size shouldEqual 16
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    // 1111 1111    0000 0000    0000 0000    1111 1111
+    bitRep(0) shouldEqual 0xFF.toByte
+    bitRep(1) shouldEqual 0x00.toByte
+    bitRep(2) shouldEqual 0x00.toByte
+    bitRep(3) shouldEqual 0xFF.toByte
+  }
+
+  it ("test bitmap conversion of shard mapper with 256 shards") {
+    val shardMapper = new ShardMapper(256) // default init to ShardStatusUnassigned
+    var bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep.length shouldEqual 32
+    bitRep.forall (x => x == 0x00.toByte) shouldEqual true // no bit should be set at this point
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+    shardMapper.assignedShards.length shouldEqual 256
+
+    // make all shards active
+    for (i <- 0 to 255) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    // check if all the bits are set correctly
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep.forall (x => x == 0xFF.toByte) shouldEqual true
+
+    // make some shards in recovery mode
+    for (i <- 60 to 63) {
+      shardMapper.updateFromEvent(RecoveryInProgress(dataset, i, TestProbe().ref, 50))
+    }
+    // make some shards in down mode
+    for (i <- 64 to 67) {
+      shardMapper.updateFromEvent(ShardDown(dataset, i, TestProbe().ref))
+    }
+
+    shardMapper.activeShards().size shouldEqual 248
+    shardMapper.notActiveShards().size shouldEqual 8
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+
+    // first 60 shards are active
+    for (i <- 0 to 6) {
+      bitRep(i) shouldEqual 0xFF.toByte
+    }
+
+    // shards 56-63 should be 1111 0000
+    bitRep(7) shouldEqual 0xF0.toByte
+
+    // shards 64-71 should be 0000 1111
+    bitRep(8) shouldEqual 0x0F.toByte
+
+    // last 188 shards are active
+    for (i <- 9 to 31) {
+      bitRep(i) shouldEqual 0xFF.toByte
+    }
+  }
+
+  it ("test padding is set correctly in non 8 byte aligned number of shards") {
+    val shardMapper = new ShardMapper(2) // default init to ShardStatusUnassigned
+    var bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep.length shouldEqual 1
+    bitRep.forall (x => x == 0x00.toByte) shouldEqual true // no bit should be set at this point
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+    shardMapper.assignedShards.length shouldEqual 2
+    for (i <- 0 to 1) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep(0) shouldEqual 0xC0.toByte // 1100 0000 - padding for last 6 shards
+    shardMapper.updateFromEvent(ShardDown(dataset, 1, TestProbe().ref))
+
+    bitRep = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(shardMapper)
+    bitRep(0) shouldEqual 0x80.toByte // 1000 0000
   }
 }

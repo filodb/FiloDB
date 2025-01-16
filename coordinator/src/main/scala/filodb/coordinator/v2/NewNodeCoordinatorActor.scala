@@ -20,7 +20,6 @@ import filodb.query.QueryCommand
 final case class GetShardMapScatter(ref: DatasetRef)
 case object LocalShardsHealthRequest
 case class DatasetShardHealth(dataset: DatasetRef, shard: Int, status: ShardStatus)
-case class LocalShardsHealthResponse(shardStatus: Seq[DatasetShardHealth])
 
 object NewNodeCoordinatorActor {
 
@@ -30,6 +29,36 @@ object NewNodeCoordinatorActor {
             clusterDiscovery: FiloDbClusterDiscovery,
             settings: FilodbSettings): Props =
     Props(new NewNodeCoordinatorActor(memStore, clusterDiscovery, settings))
+
+
+  /**
+   * Converts a ShardMapper.statuses to a bitmap representation where the bit is set to:
+   *  - 1, if ShardStatus == ShardStatusActive
+   *  - 0, any other ShardStatus like ShardStatusAssigned, ShardStatusRecovery etc.
+   *  WHY this is the case ? This is because, the QueryActor is can only execute the query on the active shards.
+   *
+   * NOTE: bitmap is byte aligned. So extra bits are padded with 0.
+   *
+   * EXAMPLE - Following are some example of shards with statuses and their bit representation as below:
+   *                   Status                          |  BitMap Representation      |  Hex Representation
+   *  ---------------------------------------------------------------------------------------------------------------
+   *  Assigned, Active, Recovery, Error                |      0100 0000              |      0x40
+   *  Active, Active, Active, Active                   |      1111 0000              |      0xF0
+   *  Error, Active, Active, Error, Active, Active     |      0110 1100              |      0x6C
+   *
+   * @param shardMapper ShardMapper object which stores the bitmap representation
+   * @return A byte array where each byte represents 8 shards and the bit is set to 1 if the shard is active. Extra bits
+   *         are padded with 0.
+   */
+  def shardMapperBitMapRepresentation(shardMapper: ShardMapper) : Array[Byte] = {
+    val byteArray = new Array[Byte]((shardMapper.statuses.length + 7) / 8)
+    for (i <- shardMapper.statuses.indices) {
+      if (shardMapper.statuses(i) == ShardStatusActive) {
+        byteArray(i / 8) = (byteArray(i / 8) | (1 << (7 - (i % 8)))).toByte
+      }
+    }
+    byteArray
+  }
 }
 
 private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
@@ -172,6 +201,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       withQueryActor(originator, dataset) { _.tell(QueryActor.ThrowException(dataset), originator) }
   }
 
+  // scalastyle:off method.length
   def shardManagementHandlers: Receive = LoggingReceive {
     // sent by ingestion actors when shard status changes
     case ev: ShardEvent => try {
@@ -186,6 +216,32 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMap for dataset: ${g.ref.dataset}")
+      }
+    /*
+    * requested from HTTP API
+    * What is the trade-off between GetShardMap vs GetShardMapV2 ?
+    *
+    * No | Ask Call        |   Size of Response (256 Shards)  |                Compute Used
+    * -------------------------------------------------------------------------------------------------------------
+    * 1  | GetShardMap     |      ~37KB                       | Baseline - Uses ShardMapper for shard update tracking
+    * 2  | GetShardMapV2   |    172 Bytes with padding        | Additional CPU used to convert ShardMapper to BitMap
+    *                                                         | Will save CPU at the caller by avoiding string parsing
+    * */
+    case g: GetShardMapV2 =>
+      try {
+        val shardBitMap = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(clusterDiscovery.shardMapper(g.ref))
+        val shardMapperV2 = ShardMapperV2(
+          settings.minNumNodes.get,
+          ingestionConfigs(g.ref).numShards,
+          settings.k8sHostFormat.get,
+          shardBitMap)
+        sender() ! ShardSnapshot(shardMapperV2)
+      } catch { case e: Exception =>
+        logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMapV2 for dataset: ${g.ref.dataset}")
       }
 
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
@@ -214,8 +270,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message LocalShardsHealthRequest", e)
       }
-
   }
+  // scalastyle:on method.length
 
   def initHandler: Receive = {
     case InitNewNodeCoordinatorActor => initialize()
