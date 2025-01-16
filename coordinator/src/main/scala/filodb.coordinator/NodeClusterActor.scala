@@ -95,19 +95,12 @@ object NodeClusterActor {
   final case class DatasetUnknown(ref: DatasetRef) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
   final case class BadData(message: String) extends ErrorResponse
-  final case class InternalServiceError(message: String) extends ErrorResponse
 
-  // Cluster state info commands
+  // Cluste state info commands
   // Returns a Seq[DatasetRef]
   case object ListRegisteredDatasets
   // Returns CurrentShardSnapshot or DatasetUnknown
   final case class GetShardMap(ref: DatasetRef)
-
-  /**
-   * @param ref compressed ShardMap information for sending over the wire.
-   *            IMPORTANT: Only works with ClusteringV2 shard assignment strategy.
-   */
-  final case class GetShardMapV2(ref: DatasetRef)
 
   /** Registers sending actor to receive `ShardMapUpdate` whenever it changes. DeathWatch
     * will be used on the sending actors to watch for updates. On subscribe, will

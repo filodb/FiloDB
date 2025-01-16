@@ -18,7 +18,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
-//scalastyle:off file.size.limit
+
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
   * plan building call tree during query planning.
@@ -122,8 +122,10 @@ trait  DefaultPlanner {
     } else lp
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
-    // the series is raw and supports raw export, it's going to yield an iterator
-    val rawSource = logicalPlanWithoutBucket.series.isRaw
+    val rawSource = logicalPlanWithoutBucket.series.isRaw && (logicalPlanWithoutBucket.series match {
+      case r: RawSeries   => !r.supportsRemoteDataCall
+      case _              => true
+    })   // the series is raw and supports raw export, its going to yield an iterator
 
     /* Last function is used to get the latest value in the window for absent_over_time
     If no data is present AbsentFunctionMapper will return range vector with value 1 */
@@ -201,7 +203,10 @@ trait  DefaultPlanner {
     } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext, forceInProcess)
-    val rawSource = lpWithoutBucket.rawSeries.isRaw
+    val rawSource = lpWithoutBucket.rawSeries.isRaw && (lpWithoutBucket.rawSeries match {
+      case r: RawSeries => !r.supportsRemoteDataCall
+      case _ => true
+    })
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       window = None, functionId = None,
       stepMultipleNotationUsed = false, funcParams = Nil,
@@ -229,17 +234,11 @@ trait  DefaultPlanner {
                                               lp: ApplyMiscellaneousFunction,
                                               forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
-      if (lp.function == MiscellaneousFunctionId.OptimizeWithAgg) {
-        // Optimize with aggregation is a no-op, doing no transformation. It must pass through
-        // the execution plan to apply optimization logic correctly during aggregation.
-        vectors
-      } else {
-        if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
-          vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
-        else
-          vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
-        vectors
-      }
+      if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
+        vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
+      else
+        vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
+      vectors
     }
 
     def materializeApplyInstantFunctionRaw(qContext: QueryContext,
@@ -827,7 +826,7 @@ object PlannerUtil extends StrictLogging {
             rewritePlanWithRemoteRawExport(_, rangeSelector, additionalLookbackMs).asInstanceOf[FunctionArgsPlan]),
           series = rewritePlanWithRemoteRawExport(lp.series, rangeSelector, additionalLookbackMs)
           .asInstanceOf[RawSeriesLikePlan])
-      // won't bother rewriting and adjusting the start and end for metadata calls
+      // wont bother rewriting and adjusting the start and end for metadata calls
       case lp: MetadataQueryPlan => lp
       case lp: TsCardinalities => lp
     }

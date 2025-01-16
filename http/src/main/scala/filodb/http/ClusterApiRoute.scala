@@ -6,7 +6,7 @@ import akka.http.scaladsl.server.Directives._
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
-import filodb.coordinator.{CurrentShardSnapshot, NodeClusterActor, ShardSnapshot}
+import filodb.coordinator.{CurrentShardSnapshot, NodeClusterActor}
 import filodb.core.{DatasetRef, ErrorResponse, Success => SuccessResponse}
 import filodb.core.store.{AssignShardConfig, UnassignShardConfig}
 import filodb.http.apiv1.{HttpSchema, HttpShardDetails, HttpShardState, HttpShardStateByAddress}
@@ -31,24 +31,9 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
             complete(httpList(statusList))
           case DatasetUnknown(_)            =>
             complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
-          case InternalServiceError(errorMessage)  =>
-            complete(Codes.InternalServerError -> httpErr("InternalServerError", errorMessage))
         }
       }
     } ~
-    // NOTE: statusV2 will only work with ClusteringV2 ShardAssignment strategy
-      path(Segment / "statusV2") { dataset =>
-        get {
-          onSuccess(asyncAsk(clusterProxy, GetShardMapV2(DatasetRef.fromDotString(dataset)))) {
-            case ShardSnapshot(shardMapperV2) =>
-              complete(httpList(Seq(shardMapperV2)))
-            case DatasetUnknown(_)            =>
-              complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
-            case InternalServiceError(errorMessage)  =>
-              complete(Codes.InternalServerError -> httpErr("InternalServerError", errorMessage))
-          }
-        }
-      } ~
     // GET /api/v1/cluster/<dataset>/statusByAddress - shard health status grouped by node address
     // Sample output as follows:
     // {{{

@@ -296,11 +296,11 @@ object RepeatValueVector extends StrictLogging {
     val startNs = Utils.currentThreadCpuTimeNanos
     try {
       ChunkMap.validateNoSharedLocks(execPlan)
-      Using.resource(rv.rows()){
+      Using(rv.rows()){
         rows =>
           val nextRow = if (rows.hasNext) Some(rows.next()) else None
           new RepeatValueVector(rv.key, startMs, stepMs, endMs, nextRow, schema)
-      }
+      }.get
     } finally {
       ChunkMap.releaseAllSharedLocks()
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
@@ -573,19 +573,20 @@ object SerializedRangeVector extends StrictLogging {
       val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
       try {
         ChunkMap.validateNoSharedLocks(execPlan)
-        Using.resource(rv.rows()) {
-          rows => while (rows.hasNext) {
-              val nextRow = rows.next()
-              // Don't encode empty / NaN data over the wire
-              if (!canRemoveEmptyRows(rv.outputRange, schema) ||
-                schema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
-                schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
-                numRows += 1
-                builder.addFromReader(nextRow, schema, 0)
-              }
-            }
+        val rows = rv.rows
+        while (rows.hasNext) {
+          val nextRow = rows.next()
+          // Don't encode empty / NaN data over the wire
+          if (!canRemoveEmptyRows(rv.outputRange, schema) ||
+            schema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
+            schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
+            numRows += 1
+            builder.addFromReader(nextRow, schema, 0)
+          }
         }
       } finally {
+        rv.rows().close()
+        // clear exec plan
         // When the query is done, clean up lingering shared locks caused by iterator limit.
         ChunkMap.releaseAllSharedLocks()
       }

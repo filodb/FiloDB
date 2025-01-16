@@ -1,5 +1,6 @@
 package filodb.coordinator
 
+import com.typesafe.scalalogging.StrictLogging
 import io.grpc.Metadata
 import io.grpc.stub.{MetadataUtils, StreamObserver}
 import java.net.InetAddress
@@ -28,7 +29,7 @@ object GrpcPlanDispatcher {
   Runtime.getRuntime.addShutdownHook(new Thread(() => channelMap.values.foreach(_.shutdown())))
 }
 
-case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends PlanDispatcher {
+case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends PlanDispatcher with StrictLogging {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
 
@@ -66,6 +67,8 @@ case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends 
     val genericRemoteExec = plan.execPlan.asInstanceOf[GenericRemoteExec]
     import filodb.coordinator.ProtoConverters._
     val protoPlan = genericRemoteExec.execPlan.toExecPlanContainerProto
+    logger.debug(s"Query ${plan.execPlan.queryContext.queryId} proto plan size is  ${protoPlan.toByteArray.length}B")
+    logger.debug(s"Query ${plan.execPlan.queryContext.queryId} exec plan ${genericRemoteExec.execPlan.printTree()}")
     val queryContextProto = genericRemoteExec.execPlan.queryContext.toProto
     val remoteExecPlan : RemoteExecPlan = RemoteExecPlan.newBuilder()
       .setExecPlan(protoPlan)
