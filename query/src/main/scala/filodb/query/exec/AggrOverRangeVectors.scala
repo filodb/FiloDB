@@ -74,9 +74,14 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
   override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
     if (r1.isEmpty) r2
     else if (r2.isEmpty) r1
-    else if (r1 == r2 && (!r1.hasSameColumnsAs(r2)) || r1.fixedVectorLen != r2.fixedVectorLen) {
+    else if (!r1.hasSameColumnsAs(r2)) {
       throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
-    } else r1
+    } else if (r1.fixedVectorLen != r2.fixedVectorLen){
+      // r1 and r2 should have the same fixed length. They could be different due to non-existing points.
+      // Use the larger fixedVectorLen as the result fixedVectorLen.
+      r1.copy(fixedVectorLen = Some(Math.max(r1.fixedVectorLen.getOrElse(0), r2.fixedVectorLen.getOrElse(0))))
+    }
+    else r1
   }
 }
 
