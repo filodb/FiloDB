@@ -1923,6 +1923,25 @@ object ProtoConverters {
     }
   }
 
+  // RepeatTransformer
+  implicit class RepeatTransformerToProtoConverter(rpt: RepeatTransformer) {
+    def toProto: GrpcMultiPartitionQueryService.RepeatTransformer = {
+      val builder = GrpcMultiPartitionQueryService.RepeatTransformer.newBuilder()
+      builder.setStartMs(rpt.startMs)
+      builder.setStepMs(rpt.stepMs)
+      builder.setEndMs(rpt.endMs)
+      builder.setExecPlan(rpt.execPlan)
+      builder.build()
+    }
+  }
+
+  implicit class RepeatTransformerFromProtoConverter(rpt: GrpcMultiPartitionQueryService.RepeatTransformer) {
+    def fromProto(): RepeatTransformer = {
+      //      RepeatTransformer(0, 0, 0, "")
+      RepeatTransformer(rpt.getStartMs, rpt.getStepMs, rpt.getEndMs, rpt.getExecPlan)
+    }
+  }
+
 
   implicit class RangeVectorTransformerToProtoConverter(rangeVectorTransformer: RangeVectorTransformer) {
     def toProto(): GrpcMultiPartitionQueryService.RangeVectorTransformerContainer = {
@@ -1943,6 +1962,7 @@ object ProtoConverters {
         case vfm: VectorFunctionMapper => b.setVectorFunctionMapper(vfm.toProto).build()
         case ap: AggregatePresenter => b.setAggregatePresenter(ap.toProto).build()
         case afm: AbsentFunctionMapper => b.setAbsentFunctionMapper(afm.toProto).build()
+        case rpt: RepeatTransformer => b.setRepeatTransformer(rpt.toProto).build()
         case _ => throw new IllegalArgumentException("Unexpected Range Vector Transformer")
       }
     }
@@ -1967,6 +1987,7 @@ object ProtoConverters {
         case RangeVectorTransfomerCase.VECTORFUNCTIONMAPPER => rvtc.getVectorFunctionMapper().fromProto
         case RangeVectorTransfomerCase.AGGREGATEPRESENTER => rvtc.getAggregatePresenter().fromProto(queryContext)
         case RangeVectorTransfomerCase.ABSENTFUNCTIONMAPPER => rvtc.getAbsentFunctionMapper().fromProto
+        case RangeVectorTransfomerCase.REPEATTRANSFORMER => rvtc.getRepeatTransformer().fromProto
         case RangeVectorTransfomerCase.RANGEVECTORTRANSFOMER_NOT_SET =>
           throw new IllegalArgumentException("Unexpected Range Vector Transformer")
       }
