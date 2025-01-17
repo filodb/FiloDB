@@ -76,9 +76,25 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
     else if (r2.isEmpty) r1
     else if (!r1.hasSameColumnsAs(r2)) {
       throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
-    } else if (r1.fixedVectorLen != r2.fixedVectorLen){
+    } else if (r1.fixedVectorLen != r2.fixedVectorLen) {
+      // Because this change, this multi-partition case regarding stitch will cause schema mismatch.
+
+      // -LocalPartitionReduceAggregateExec (Mismatch because 7 != 1)
+      //  --StitchRvsExec     ===> Schema is reduced to (Schema(fixedVectorLen=1))
+      //    ---raw (Schema=None)
+      //    ---downsample (Schema(fixedVectorLen=1))
+      //  --StitchRvsExec(Remote partition) ==> Schema is reduced to(Schema(fixedVectorLen=7))
+      //    ---raw (Schema(fixedVectorLen=7))
+      //    ---downsample (Schema=None)
+
+      // The schema reduction is like
+      // Reduce(Reduce(Schema(fixedVectorLen=1)), None), Reduce(Reduce(Schema(fixedVectorLen=7)), None))
+      //    =>  Reduce(Schema(fixedVectorLen=1)), Schema(fixedVectorLen=7)))
+      //    => Mismatch.
+
       // r1 and r2 should have the same fixed length. They could be different due to non-existing points.
       // Use the larger fixedVectorLen as the result fixedVectorLen.
+      // This is to handle the special cases regarding the reduction of stitch plans.
       r1.copy(fixedVectorLen = Some(Math.max(r1.fixedVectorLen.getOrElse(0), r2.fixedVectorLen.getOrElse(0))))
     }
     else r1
