@@ -216,16 +216,20 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       // we need to populate planner params with the shard maps
       val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
       val remoteActiveShardMapper = getRemoteActiveShardMapper(qContext.plannerParams)
-      val plannerParams = qContext.plannerParams.copy(
-        localShardMapper = Some(localActiveShardMapper),
-        buddyShardMapper = Some(remoteActiveShardMapper)
-      )
-      val q = qContext.copy(plannerParams = plannerParams)
-      materializeShardLevelFailover(logicalPlan, q)
+      val shardLevelFailoverIsNeeded = (!localActiveShardMapper.allShardsActive) && (!remoteActiveShardMapper.allShardsActive)
+      if (shardLevelFailoverIsNeeded) {
+        val plannerParams = qContext.plannerParams.copy(
+          localShardMapper = Some(localActiveShardMapper),
+          buddyShardMapper = Some(remoteActiveShardMapper)
+        )
+        val q = qContext.copy(plannerParams = plannerParams)
+        materializeShardLevelFailover(logicalPlan, q)
+      } else {
+        materializeLegacy(logicalPlan, qContext)
+      }
     } else {
       materializeLegacy(logicalPlan, qContext)
     }
-
   }
 
   def materializeLegacy(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
