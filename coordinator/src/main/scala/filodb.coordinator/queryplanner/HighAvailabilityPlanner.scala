@@ -175,8 +175,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (execPlans.size == 1) execPlans.head
     else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
-  //scalastyle:on method.length
-
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val origQueryParams = qContext.origQueryParams
@@ -216,7 +214,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       // we need to populate planner params with the shard maps
       val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
       val remoteActiveShardMapper = getRemoteActiveShardMapper(qContext.plannerParams)
-      val shardLevelFailoverIsNeeded = (!localActiveShardMapper.allShardsActive) && (!remoteActiveShardMapper.allShardsActive)
+      val shardLevelFailoverIsNeeded =
+        (!localActiveShardMapper.allShardsActive) && (!remoteActiveShardMapper.allShardsActive)
       if (shardLevelFailoverIsNeeded) {
         val plannerParams = qContext.plannerParams.copy(
           localShardMapper = Some(localActiveShardMapper),
@@ -231,6 +230,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       materializeLegacy(logicalPlan, qContext)
     }
   }
+  //scalastyle:on method.length
 
   def materializeLegacy(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     // lazy because we want to fetch failures only if needed
