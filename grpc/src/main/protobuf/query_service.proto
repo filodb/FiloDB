@@ -777,6 +777,13 @@ message AbsentFunctionMapper {
   string metricColumn                = 3;
 }
 
+message RepeatTransformer {
+    int64 startMs     = 1;
+    int64 stepMs      = 2;
+    int64 endMs       = 3;
+    string execPlan   = 4;
+}
+
 message RangeVectorTransformerContainer {
   oneof rangeVectorTransfomer {
     StitchRvsMapper stitchRvsMapper                         =  1;
@@ -794,6 +801,7 @@ message RangeVectorTransformerContainer {
     VectorFunctionMapper vectorFunctionMapper               = 13;
     AggregatePresenter aggregatePresenter                   = 14;
     AbsentFunctionMapper AbsentFunctionMapper               = 15;
+    RepeatTransformer  repeatTransformer                    = 16;
   }
 }
 
