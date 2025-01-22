@@ -232,7 +232,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   }
   //scalastyle:on method.length
 
-  def materializeLegacy(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  def materializeLegacy(logicalPlan: LogicalPlan, oqContext: QueryContext): ExecPlan = {
+    // ensure that we do not use any features of shard level failover
+    val plannerParams = oqContext.plannerParams.copy(
+      failoverMode = LegacyFailoverMode
+    )
+    val qContext = oqContext.copy(plannerParams = plannerParams)
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
