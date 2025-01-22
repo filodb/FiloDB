@@ -9,7 +9,7 @@ import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.core.{DatasetRef, GlobalConfig, TestData}
 import filodb.memory.MemFactory
-import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.query._
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -175,5 +175,31 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.resultSchema.fixedVectorLen.nonEmpty shouldEqual true
     result.resultSchema.fixedVectorLen.get shouldEqual 11
+  }
+
+  it("should reduce result schemas with different fixedVecLengths caused by Stitching without error") {
+
+    // null needed below since there is a require in code that prevents empty children
+    val exec1 = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
+      Some(RvRange(0, 10, 100)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val exec2 = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
+      Some(RvRange(0, 10, 100)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+
+    val exec = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
+      Array[ExecPlan](exec1, exec2), AggregationOperator.Sum, Seq(0))
+
+    val rs1 = exec1.reduceSchemas(ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1)),
+      ResultSchema.empty
+    )
+    val rs2 = exec1.reduceSchemas(ResultSchema.empty, ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(147), List(0, 1)))
+
+    val reduced = exec.reduceSchemas(rs1, rs2)
+    reduced.columns shouldEqual rs1.columns
+    reduced.numRowKeyColumns shouldEqual rs1.numRowKeyColumns
+    reduced.brSchemas shouldEqual rs1.brSchemas
+    reduced.fixedVectorLen shouldEqual Some(430)
+    reduced.colIDs shouldEqual rs1.colIDs
   }
 }
