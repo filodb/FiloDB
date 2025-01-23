@@ -136,7 +136,7 @@ trait  DefaultPlanner {
     val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
-      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
+      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn),
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource = rawSource)))
     if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
@@ -208,7 +208,8 @@ trait  DefaultPlanner {
       case _ => true
     })
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      window = None, functionId = None, qContext, stepMultipleNotationUsed = false, funcParams = Nil,
+      window = None, functionId = None,
+      stepMultipleNotationUsed = false, funcParams = Nil,
       lp.offsetMs, rawSource = rawSource)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
@@ -450,7 +451,6 @@ trait  DefaultPlanner {
           sqww.atMs.getOrElse(sqww.startMs), sqww.stepMs, sqww.atMs.getOrElse(sqww.endMs),
           window,
           Some(rangeFn),
-          qContext,
           stepMultipleNotationUsed = false,
           paramsExec,
           sqww.offsetMs,
@@ -486,7 +486,6 @@ trait  DefaultPlanner {
          realScanStartMs, realScanStep, realScanEndMs,
          window,
          Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
-         qContext,
          stepMultipleNotationUsed = false,
          Seq(),
          offsetMs,

@@ -818,7 +818,6 @@ message QueryCommand {
 
 message ExecPlan {
   string planId                                                    = 1;
-  QueryContext queryContext                                        = 2;
   bool enforceSampleLimit                                          = 3;
   QueryCommand queryCommand                                        = 4;
   PlanDispatcherContainer dispatcher                               = 5;
@@ -1095,11 +1094,16 @@ message ExecPlanContainer {
   }
 }
 
+message RemoteExecPlan {
+  ExecPlanContainer execPlan = 1;
+  QueryContext queryContext  = 2;
+}
+
 service RemoteExec {
 
   rpc exec(Request) returns (Response);
 
   rpc execStreaming(Request) returns (stream StreamingResponse);
 
-  rpc executePlan(ExecPlanContainer) returns (stream StreamingResponse);
+  rpc executePlan(RemoteExecPlan) returns (stream StreamingResponse);
 }

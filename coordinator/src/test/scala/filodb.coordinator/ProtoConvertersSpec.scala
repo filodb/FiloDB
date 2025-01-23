@@ -62,15 +62,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     }
 
     val execPlan = filodb.query.exec.LabelCardinalityReduceExec(qContext, inProcessDispatcher, leaves)
-    execPlan.toProto.fromProto shouldEqual execPlan
+    execPlan.toProto.fromProto(qContext) shouldEqual execPlan
   }
 
   it("should convert MultiSchemaPartitionsExec to proto and back") {
     val dsRef = DatasetRef("raw-metrics")
-
-    val execPlan = MultiSchemaPartitionsExec(QueryContext(), inProcessDispatcher,
+    val qContext = QueryContext()
+    val execPlan = MultiSchemaPartitionsExec(qContext, inProcessDispatcher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
-    execPlan.toProto.fromProto shouldEqual execPlan
+    execPlan.toProto.fromProto(qContext) shouldEqual execPlan
   }
 
   it("should convert PartKeyLuceneIndexRecord to proto and back") {
