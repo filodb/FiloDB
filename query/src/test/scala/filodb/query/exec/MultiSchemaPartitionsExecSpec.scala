@@ -210,7 +210,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -246,7 +246,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val step = 0
     val end = now - (numRawSamples-100) * reportingInterval + 1
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(reportingInterval * 3),
-      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+      Some(InternalRangeFunction.SumOverTime)))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -272,7 +272,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -293,7 +293,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -320,7 +320,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
                                         InstantFunctionId.HistogramBucket,
                                         Seq(StaticFuncArgs(16.0, RangeParams(0,0,0)))))
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
-                                         Some(InternalRangeFunction.Rate), QueryContext(), rawSource = false))
+                                         Some(InternalRangeFunction.Rate), rawSource = false))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -366,7 +366,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val step = 20000L
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
-                                         Some(InternalRangeFunction.SumOverTime), QueryContext()))
+                                         Some(InternalRangeFunction.SumOverTime)))
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
@@ -413,7 +413,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -446,7 +446,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val step = 20000L
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000), // [5m]
-      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+      Some(InternalRangeFunction.SumOverTime)))
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil))
     execPlan.execute(memStore, querySession).runToFuture.futureValue
     info(execPlan.printTree())
