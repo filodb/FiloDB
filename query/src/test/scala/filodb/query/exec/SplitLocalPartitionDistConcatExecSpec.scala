@@ -115,12 +115,12 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dispacher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan1.addRangeVectorTransformer(new PeriodicSamplesMapper(start1, step, end1, Some(reportingInterval * 100),
-      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+      Some(InternalRangeFunction.SumOverTime)))
 
     val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dispacher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan2.addRangeVectorTransformer(new PeriodicSamplesMapper(start2, step, end2, Some(reportingInterval * 100),
-      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+      Some(InternalRangeFunction.SumOverTime)))
 
     val distConcatExec = SplitLocalPartitionDistConcatExec(QueryContext(), dispacher, Seq(execPlan1, execPlan2), None)
 

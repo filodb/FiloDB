@@ -295,7 +295,10 @@ final class QueryActor(memStore: TimeSeriesStore,
   def execProtoExecPlan(pep: ProtoExecPlan, replyTo: ActorRef): Unit = {
     import filodb.coordinator.ProtoConverters._
     val c = ExecPlanContainer.parseFrom(pep.serializedExecPlan)
-    val plan: ExecPlan = c.fromProto()
+    val queryContextProto =
+      filodb.grpc.GrpcMultiPartitionQueryService.QueryContext.parseFrom(pep.serializedQueryContext)
+    val queryContext = queryContextProto.fromProto
+    val plan: ExecPlan = c.fromProto(queryContext)
     execPhysicalPlan2(plan, replyTo)
   }
 
