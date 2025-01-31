@@ -126,8 +126,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   /**
    * Records the absolute value of otherwise-negative ingestion pipeline latencies.
-   * Negative latencies are exclusively recorded here; they are not recorded
-   *   by the above ingestionPipelineLatency metric.
    */
   val negativeIngestionPipelineLatency = Kamon.histogram("negative-ingestion-pipeline-latency",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
