@@ -124,6 +124,14 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val ingestionPipelineLatency = Kamon.histogram("ingestion-pipeline-latency",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 
+  /**
+   * Records the absolute value of otherwise-negative ingestion pipeline latencies.
+   * Negative latencies are exclusively recorded here; they are not recorded
+   *   by the above ingestionPipelineLatency metric.
+   */
+  val negativeIngestionPipelineLatency = Kamon.histogram("negative-ingestion-pipeline-latency",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
   val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 
@@ -1301,7 +1309,18 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
 
     val currentTime = System.currentTimeMillis()
-    shardStats.ingestionPipelineLatency.record(currentTime - container.timestamp)
+
+    // Account for clock skew, otherwise exceptions are thrown when negative latencies are recorded.
+    val ingestionPipelineLatency = currentTime - container.timestamp
+    shardStats.ingestionPipelineLatency.record(Math.max(0, ingestionPipelineLatency))
+    // It would be helpful to know if latencies are frequently negative;
+    //   record their absolute values into a separate histogram.
+    // We'll continue to count floored-to-zero values in the above metric; this will
+    //   keep e.g. its rate() as-expected when latencies are negligibly negative.
+    if (ingestionPipelineLatency < 0) {
+      shardStats.negativeIngestionPipelineLatency.record(-ingestionPipelineLatency)
+    }
+
     // Only update stuff if no exception was thrown.
 
     if (ingestionTime != lastIngestionTime) {
@@ -1312,7 +1331,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         logger.warn(s"createFlushTasks reporting ingestion delay for shardNum=$shardNum" +
           s" containerTimestamp=${container.timestamp} numRecords=${container.numRecords} offset = ${this._offset}")
       }
-      shardStats.ingestionClockDelay.update(currentTime - ingestionTime)
+
+      // Account for clock skew, otherwise exceptions are thrown when negative latencies are recorded.
+      // ingestionTime is _probably_ less likely to occur after currentTime than container.timestamp
+      //   (given that it's the result of the  Math.max() above). If really needed, it can get the same
+      //   two-metric treatment as ingestionPipelineLatency.
+      shardStats.ingestionClockDelay.update(Math.max(0, currentTime - ingestionTime))
     }
 
     tasks
