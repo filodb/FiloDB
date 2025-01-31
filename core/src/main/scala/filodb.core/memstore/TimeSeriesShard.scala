@@ -318,6 +318,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private var nextPartitionID = 0
 
+  // This should be handled by a logging-specific class if rate-limited logs become a common use-case.
+  // NOTE: This is not thread-safe, but it's good enough for this application--
+  //   see RateLimiter's javadoc for details.
+  private val negativeIngestionTimeLogRateLimiter = new RateLimiter(Duration(10, TimeUnit.SECONDS))
+
   /**
     * This index helps identify which partitions have any given column-value.
     * Used to answer queries not involving the full partition key.
@@ -1317,6 +1322,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     //   keep e.g. its rate() as-expected when latencies are negligibly negative.
     if (ingestionPipelineLatency < 0) {
       shardStats.negativeIngestionPipelineLatency.record(-ingestionPipelineLatency)
+      if (negativeIngestionTimeLogRateLimiter.attempt()) {
+        logger.error(s"Negative ingestion pipeline latency detected: " +
+                     s"currentTimeMillis=${currentTime}; " +
+                     s"container.timestamp=${container.timestamp}; " +
+                     s"ingestionPipelineLatency=${ingestionPipelineLatency}")
+      }
     }
 
     // Only update stuff if no exception was thrown.
