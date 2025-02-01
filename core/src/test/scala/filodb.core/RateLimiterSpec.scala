@@ -9,7 +9,7 @@ import scala.concurrent.duration.Duration
 
 class RateLimiterSpec extends AnyFunSpec with Matchers {
   it("should apply rate-limits accordingly") {
-    val rateLimiter = new RateLimiter(Duration(1, TimeUnit.SECONDS))
+    val rateLimiter = new RateLimiter(Duration(2, TimeUnit.SECONDS))
 
     // First attempt should succeed.
     rateLimiter.attempt() shouldEqual true
@@ -20,7 +20,7 @@ class RateLimiterSpec extends AnyFunSpec with Matchers {
     rateLimiter.attempt() shouldEqual false
 
     // Wait the period...
-    Thread.sleep(1000)
+    Thread.sleep(2000)
 
     // Next attempt should succeed.
     rateLimiter.attempt() shouldEqual true

@@ -8,7 +8,7 @@ import scala.concurrent.duration.Duration
  *               period has elapsed since the previous success.
  */
 class RateLimiter(period: Duration) {
-  var lastSuccessMillis = 0L;
+  private var lastSuccessMillis = 0L;
 
   /**
    * Returns true to indicate an attempt was "successful", else it was "failed".
