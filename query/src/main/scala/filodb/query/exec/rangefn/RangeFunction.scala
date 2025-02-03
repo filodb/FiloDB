@@ -431,7 +431,8 @@ object RangeFunction {
     case Some(Changes)                          => () => ChangesOverTimeFunction
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
-    case _                            => ??? //TODO enumerate all possible cases
+    case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+    case _                                      => ??? //TODO enumerate all possible cases
   }
 }
 

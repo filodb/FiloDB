@@ -67,6 +67,8 @@ object InternalRangeFunction {
 
   case object MedianAbsoluteDeviationOverTime extends InternalRangeFunction
 
+  case object LastOverTimeIsMadOutlier extends InternalRangeFunction
+
   //scalastyle:off cyclomatic.complexity
   def lpToInternalFunc(extFuncId: RangeFunctionId): InternalRangeFunction = extFuncId match {
     case RangeFunctionId.AvgOverTime      => AvgOverTime
@@ -94,6 +96,7 @@ object InternalRangeFunction {
     case RangeFunctionId.AbsentOverTime   => AbsentOverTime
     case RangeFunctionId.PresentOverTime  => PresentOverTime
     case RangeFunctionId.MedianAbsoluteDeviationOverTime => MedianAbsoluteDeviationOverTime
+    case RangeFunctionId.LastOverTimeIsMadOutlier => LastOverTimeIsMadOutlier
   }
   //scalastyle:on cyclomatic.complexity
 }
