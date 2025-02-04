@@ -21,7 +21,7 @@ class RateLimiter(period: Duration) {
    */
   def attempt(): Boolean = {
     val nowMillis = System.currentTimeMillis()
-    if (System.currentTimeMillis() - lastSuccessMillis > period.toMillis) {
+    if (nowMillis - lastSuccessMillis > period.toMillis) {
       lastSuccessMillis = nowMillis
       return true
     }
