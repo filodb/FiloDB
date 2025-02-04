@@ -321,7 +321,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   // This should be handled by a logging-specific class if rate-limited logs become a common use-case.
   // NOTE: This is not thread-safe, but it's good enough for this application--
   //   see RateLimiter's javadoc for details.
-  private val negativeIngestionTimeLogRateLimiter = new RateLimiter(Duration(10, TimeUnit.SECONDS))
+  private val negativeIngestionTimeLogRateLimiter = new RateLimiter(Duration(30, TimeUnit.SECONDS))
 
   /**
     * This index helps identify which partitions have any given column-value.
