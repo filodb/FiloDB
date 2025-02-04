@@ -961,7 +961,6 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionD
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    var rowNum = startRowNum
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
 
     for (_ <- startRowNum to endRowNum) {
