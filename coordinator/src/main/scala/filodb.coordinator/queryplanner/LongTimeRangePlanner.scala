@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext}
+import filodb.core.query.{QueryConfig, QueryContext, RvRange}
 import filodb.query._
 import filodb.query.exec._
 
@@ -241,6 +241,37 @@ import filodb.query.exec._
     PlanResult(Seq(stitchedPlan))
   }
 
+  private def materializeRawSeries(queryContext: QueryContext, logicalPlan: RawSeries): PlanResult = {
+    val timeRange = getTimeFromLogicalPlan(logicalPlan)
+    //from != to with no lookback should be handled by PeriodicSeries
+    require(timeRange.startMs == timeRange.endMs,
+      "Raw data queries with range expression [] should be instant query, start should equal to end.")
+
+    val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)
+    val offsetMs = logicalPlan.offsetMs.getOrElse(0L)
+    val (startTime, endTime) = (timeRange.endMs - lookbackMs - offsetMs, timeRange.endMs - offsetMs)
+    val execPlan = if (startTime > earliestRawTimestampFn) {
+      // This is the case where no data will be retrieved from DownsampleStore, simply push down to raw planner
+      rawClusterPlanner.materialize(logicalPlan, queryContext)
+    } else if (endTime < earliestRawTimestampFn) {
+      // This is the case where no data will be retrieved from RawStore, simply push down to DS planner
+      downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    } else {
+//      val rawEp = rawClusterPlanner.materialize(logicalPlan, queryContext)
+//      val downSampleEp = downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+      val rawLookbackMs = timeRange.endMs - earliestRawTimestampFn - offsetMs
+      val rawLp = logicalPlan.copy(lookbackMs = Some(rawLookbackMs))
+      val rawEp = rawClusterPlanner.materialize(rawLp, queryContext)
+      val downSampleLp = logicalPlan.copy(lookbackMs = Some(lookbackMs - rawLookbackMs),
+        rangeSelector = IntervalSelector(earliestRawTimestampFn + offsetMs, earliestRawTimestampFn + offsetMs))
+      val downSampleEp = downsampleClusterPlanner.materialize(downSampleLp, queryContext)
+
+      val rvRange = new RvRange(timeRange.endMs, 1000, timeRange.endMs)
+      StitchRvsExec(queryContext, stitchDispatcher, Some(rvRange), Seq(rawEp, downSampleEp))
+    }
+    PlanResult(Seq(execPlan))
+  }
+
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
@@ -251,11 +282,11 @@ import filodb.query.exec._
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case ts: TsCardinalities           => materializeTSCardinalityPlan(qContext, ts)
+        case rs: RawSeries                 => materializeRawSeries(qContext, rs)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
-             _: RawSeries |
              _: LabelNames                 => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
