@@ -243,10 +243,11 @@ import filodb.query.exec._
 
   private def materializeRawSeries(queryContext: QueryContext, logicalPlan: RawSeries): PlanResult = {
     val timeRange = getTimeFromLogicalPlan(logicalPlan)
-    //from != to with no lookback should be handled by PeriodicSeries
-    require(timeRange.startMs == timeRange.endMs,
-      "Raw data queries with range expression [] should be instant query, start should equal to end.")
 
+    // use rawClusterMaterialize to handle range Raw data queries with range expression []
+    if(timeRange.startMs != timeRange.endMs){
+      return rawClusterMaterialize(queryContext, logicalPlan)
+    }
     val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)
     val offsetMs = logicalPlan.offsetMs.getOrElse(0L)
     val (startTime, endTime) = (timeRange.endMs - lookbackMs - offsetMs, timeRange.endMs - offsetMs)
@@ -266,7 +267,7 @@ import filodb.query.exec._
         rangeSelector = IntervalSelector(earliestRawTimestampFn + offsetMs, earliestRawTimestampFn + offsetMs))
       val downSampleEp = downsampleClusterPlanner.materialize(downSampleLp, queryContext)
 
-      val rvRange = new RvRange(timeRange.endMs, 1000, timeRange.endMs)
+      val rvRange = RvRange(timeRange.endMs, 1000, timeRange.endMs)
       StitchRvsExec(queryContext, stitchDispatcher, Some(rvRange), Seq(rawEp, downSampleEp))
     }
     PlanResult(Seq(execPlan))
