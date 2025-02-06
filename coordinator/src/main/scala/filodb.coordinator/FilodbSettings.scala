@@ -52,6 +52,8 @@ final class FilodbSettings(val conf: Config) {
 
   // used for development mode only
   lazy val hostList = config.as[Option[Seq[String]]]("cluster-discovery.host-list")
+  // in production settings, filodb.grpc.bind-grpc-port is expected to be used
+  lazy val grpcPortList = config.as[Option[Seq[Int]]]("cluster-discovery.grpc-port-list")
   lazy val localhostOrdinal = config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
 
   lazy val minNumNodes = config.as[Option[Int]]("min-num-nodes-in-cluster")

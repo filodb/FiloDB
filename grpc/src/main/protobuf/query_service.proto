@@ -1107,4 +1107,6 @@ service RemoteExec {
   rpc execStreaming(Request) returns (stream StreamingResponse);
 
   rpc executePlan(RemoteExecPlan) returns (stream StreamingResponse);
+
+  rpc executePlan2(RemoteExecPlan) returns (stream StreamingResponse);
 }
