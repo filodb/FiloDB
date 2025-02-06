@@ -53,7 +53,7 @@ trait ClusterOps extends ClientBase with StrictLogging {
    * @return Some(ShardMapperV2) if the dataset is registered, None if dataset not found
    */
   def getShardMapperV2(dataset: DatasetRef, v2Enabled: Boolean,
-                     timeout: FiniteDuration = 30.seconds): Option[ShardMapperV2] = {
+                     timeout: FiniteDuration = 10.seconds): Option[ShardMapperV2] = {
     require(v2Enabled, s"ClusterV2 ShardAssignment is must for this operation")
     val actor = Some(nodeCoordinator)
     actor.flatMap { ref =>

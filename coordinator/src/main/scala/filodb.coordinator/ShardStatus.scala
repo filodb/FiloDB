@@ -28,6 +28,79 @@ final case class CurrentShardSnapshot(ref: DatasetRef,
 final case class ShardMapperV2(nodeCountInCluster: Int, numShards: Int, k8sHostFormat: String,
                                shardState: Array[Byte])
 
+object ShardMapperV2 {
+  /**
+   * Converts a ShardMapper.statuses to a bitmap representation where the bit is set to:
+   *  - 1, if ShardStatus == ShardStatusActive
+   *  - 0, any other ShardStatus like ShardStatusAssigned, ShardStatusRecovery etc.
+   *  WHY this is the case ? This is because, the QueryActor is can only execute the query on the active shards.
+   *
+   * NOTE: bitmap is byte aligned. So extra bits are padded with 0.
+   *
+   * EXAMPLE - Following are some example of shards with statuses and their bit representation as below:
+   *                   Status                          |  BitMap Representation      |  Hex Representation
+   *  ---------------------------------------------------------------------------------------------------------------
+   *  Assigned, Active, Recovery, Error                |      0100 0000              |      0x40
+   *  Active, Active, Active, Active                   |      1111 0000              |      0xF0
+   *  Error, Active, Active, Error, Active, Active     |      0110 1100              |      0x6C
+   *
+   * @param shardMapper ShardMapper object which stores the bitmap representation
+   * @return A byte array where each byte represents 8 shards and the bit is set to 1 if the shard is active. Extra bits
+   *         are padded with 0.
+   */
+  def shardMapperBitMapRepresentation(shardMapper: ShardMapper) : Array[Byte] = {
+    val byteArray = new Array[Byte]((shardMapper.statuses.length + 7) / 8)
+    for (i <- shardMapper.statuses.indices) {
+      if (shardMapper.statuses(i) == ShardStatusActive) {
+        byteArray(i / 8) = (byteArray(i / 8) | (1 << (7 - (i % 8)))).toByte
+      }
+    }
+    byteArray
+  }
+
+  /**
+   * @param nodeCountInCluster Number of nodes in the filodb cluster
+   * @param numShards Number of shards in the filodb cluster
+   * @param k8sHostFormat K8s host format. Valid ONLY for ClusterV2 shard assignment strategy
+   * @param shardMapper ShardMapper object which stores the bitmap representation
+   * @return ShardMapperV2 object
+   */
+  def apply(nodeCountInCluster: Int, numShards: Int, k8sHostFormat: String, shardMapper: ShardMapper): ShardMapperV2 = {
+    val shardStatusBitMap = shardMapperBitMapRepresentation(shardMapper)
+    ShardMapperV2(nodeCountInCluster, numShards, k8sHostFormat, shardStatusBitMap)
+  }
+
+  /**
+   * @param byte Byte to be converted to bits
+   * @return String representation of the byte in bits
+   */
+  def byteToBits(byte: Byte): String = {
+    (0 until 8).map(i => (byte >> (7 - i)) & 1).mkString
+  }
+
+  /**
+   * Helper function to print the bitmap, node and shard status. This is useful in debugging.
+   */
+  def prettyPrint(shardMapperV2: ShardMapperV2): Unit = {
+    println(s"NumNodes:  ${shardMapperV2.nodeCountInCluster} NumShards:  ${shardMapperV2.numShards} NodeFormat:  ${shardMapperV2.k8sHostFormat}") // scalastyle:ignore
+    println(s"ShardStatusBytes:  ${shardMapperV2.shardState.mkString("Array(", ", ", ")")}") // scalastyle:ignore
+    println(s"ShardStatusBitMap:  ${shardMapperV2.shardState.map(x => byteToBits(x)).mkString("Array(", ", ", ")")}") // scalastyle:ignore
+    println() // scalastyle:ignore
+    val printFormat = s"%5s\t%20s\t\t%s"
+    println(printFormat.format("Shard", "Status", "Address")) // scalastyle:ignore
+    for (shardIndex <- 0 until shardMapperV2.numShards) {
+      val byteIndex = shardIndex / 8
+      val bitIndex = shardIndex % 8
+      val bit = (shardMapperV2.shardState(byteIndex) >> (7 - bitIndex)) & 1
+      val status = if (bit == 1) "Shard Active" else "Shard Not Active"
+      val nodeNum = shardIndex / shardMapperV2.nodeCountInCluster
+      // NOTE: In local environment, the Address is dependent on the `filodb.cluster-discovery.hostList` config.
+      // The address printed here is an approximation and may not be accurate.
+      println(printFormat.format(shardIndex, status, ActorName.nodeCoordinatorPathClusterV2(String.format(shardMapperV2.k8sHostFormat, nodeNum.toString)))) // scalastyle:ignore
+    }
+  }
+}
+
 /**
  * Response to GetShardMapV2 request. Uses the optimized ShardMapperV2 representation. Only applicable
  * for ClusterV2 shard assignment strategy.
