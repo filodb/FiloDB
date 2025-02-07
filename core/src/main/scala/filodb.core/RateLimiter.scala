@@ -20,6 +20,7 @@ class RateLimiter(period: Duration) {
    *   may be acceptable in some use-cases).
    */
   def attempt(): Boolean = {
+    // Using nanoTime() because it is monotonic.
     val nowNanos = System.nanoTime()
     if (nowNanos - lastSuccessNanos > period.toNanos) {
       lastSuccessNanos = nowNanos
