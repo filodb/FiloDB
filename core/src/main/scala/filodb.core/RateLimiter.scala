@@ -8,7 +8,7 @@ import scala.concurrent.duration.Duration
  *               period has elapsed since the previous success.
  */
 class RateLimiter(period: Duration) {
-  private var lastSuccessMillis = 0L;
+  private var lastSuccessNanos = 0L;
 
   /**
    * Returns true to indicate an attempt was "successful", else it was "failed".
@@ -20,9 +20,10 @@ class RateLimiter(period: Duration) {
    *   may be acceptable in some use-cases).
    */
   def attempt(): Boolean = {
-    val nowMillis = System.currentTimeMillis()
-    if (nowMillis - lastSuccessMillis > period.toMillis) {
-      lastSuccessMillis = nowMillis
+    // Using nanoTime() because it is monotonic.
+    val nowNanos = System.nanoTime()
+    if (nowNanos - lastSuccessNanos > period.toNanos) {
+      lastSuccessNanos = nowNanos
       return true
     }
     false
