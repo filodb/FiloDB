@@ -68,6 +68,21 @@ object Client {
     val ref = Await.result(refFuture, askTimeout)
     new LocalClient(ref)
   }
+
+  /**
+   * @param hostPort host:port of the standalone node
+   * @param system the ActorSystem to connect to
+   * @param askTimeout timeout for expecting a response
+   * @return a LocalClient that remotely connects to a standalone FiloDB node NodeCoordinator
+   */
+  def standaloneClientV2(hostPort: String,
+                         system: ActorSystem,
+                         askTimeout: FiniteDuration = 10 seconds): LocalClient = {
+    val refFuture = system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(hostPort)).resolveOne(askTimeout)
+    val ref = Await.result(refFuture, askTimeout)
+    new LocalClient(ref)
+  }
+
 }
 
 case class ClientException(error: ErrorResponse) extends Exception(error.toString)

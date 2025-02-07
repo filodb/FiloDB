@@ -14,7 +14,7 @@ import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
+import filodb.coordinator.{ActorName, CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
 
 class FiloDbClusterDiscovery(settings: FilodbSettings,
@@ -94,8 +94,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val nodeCoordActorSelections = {
     hostNames.map { h =>
-      val actorPath = s"akka.tcp://filo-standalone@$h/user/coordinator"
-      system.actorSelection(actorPath)
+      system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(h))
     }
   }
 

@@ -29,36 +29,6 @@ object NewNodeCoordinatorActor {
             clusterDiscovery: FiloDbClusterDiscovery,
             settings: FilodbSettings): Props =
     Props(new NewNodeCoordinatorActor(memStore, clusterDiscovery, settings))
-
-
-  /**
-   * Converts a ShardMapper.statuses to a bitmap representation where the bit is set to:
-   *  - 1, if ShardStatus == ShardStatusActive
-   *  - 0, any other ShardStatus like ShardStatusAssigned, ShardStatusRecovery etc.
-   *  WHY this is the case ? This is because, the QueryActor is can only execute the query on the active shards.
-   *
-   * NOTE: bitmap is byte aligned. So extra bits are padded with 0.
-   *
-   * EXAMPLE - Following are some example of shards with statuses and their bit representation as below:
-   *                   Status                          |  BitMap Representation      |  Hex Representation
-   *  ---------------------------------------------------------------------------------------------------------------
-   *  Assigned, Active, Recovery, Error                |      0100 0000              |      0x40
-   *  Active, Active, Active, Active                   |      1111 0000              |      0xF0
-   *  Error, Active, Active, Error, Active, Active     |      0110 1100              |      0x6C
-   *
-   * @param shardMapper ShardMapper object which stores the bitmap representation
-   * @return A byte array where each byte represents 8 shards and the bit is set to 1 if the shard is active. Extra bits
-   *         are padded with 0.
-   */
-  def shardMapperBitMapRepresentation(shardMapper: ShardMapper) : Array[Byte] = {
-    val byteArray = new Array[Byte]((shardMapper.statuses.length + 7) / 8)
-    for (i <- shardMapper.statuses.indices) {
-      if (shardMapper.statuses(i) == ShardStatusActive) {
-        byteArray(i / 8) = (byteArray(i / 8) | (1 << (7 - (i % 8)))).toByte
-      }
-    }
-    byteArray
-  }
 }
 
 private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
@@ -231,12 +201,16 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     * */
     case g: GetShardMapV2 =>
       try {
-        val shardBitMap = NewNodeCoordinatorActor.shardMapperBitMapRepresentation(clusterDiscovery.shardMapper(g.ref))
-        val shardMapperV2 = ShardMapperV2(
+        val hostFormat = settings.k8sHostFormat.isDefined match {
+          case true => settings.k8sHostFormat.get
+          case false => "127.0.0.1" // default host in local dev environments
+        }
+        val shardMapperV2 = ShardMapperV2.apply(
           settings.minNumNodes.get,
           ingestionConfigs(g.ref).numShards,
-          settings.k8sHostFormat.get,
-          shardBitMap)
+          hostFormat,
+          clusterDiscovery.shardMapper(g.ref))
+        // send the shardMapV2 response to the caller.
         sender() ! ShardSnapshot(shardMapperV2)
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
