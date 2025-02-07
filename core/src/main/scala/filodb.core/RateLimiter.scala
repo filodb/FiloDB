@@ -20,7 +20,7 @@ class RateLimiter(period: Duration) {
    *   may be acceptable in some use-cases).
    */
   def attempt(): Boolean = {
-    val nowMillis = System.currentTimeMillis()
+    val nowMillis = Math.max(System.currentTimeMillis(), lastSuccessMillis)
     if (nowMillis - lastSuccessMillis > period.toMillis) {
       lastSuccessMillis = nowMillis
       return true
