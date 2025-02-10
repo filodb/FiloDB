@@ -258,8 +258,6 @@ import filodb.query.exec._
       // This is the case where no data will be retrieved from RawStore, simply push down to DS planner
       downsampleClusterPlanner.materialize(logicalPlan, queryContext)
     } else {
-//      val rawEp = rawClusterPlanner.materialize(logicalPlan, queryContext)
-//      val downSampleEp = downsampleClusterPlanner.materialize(logicalPlan, queryContext)
       val rawLookbackMs = timeRange.endMs - earliestRawTimestampFn - offsetMs
       val rawLp = logicalPlan.copy(lookbackMs = Some(rawLookbackMs))
       val rawEp = rawClusterPlanner.materialize(rawLp, queryContext)
