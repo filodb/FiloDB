@@ -241,6 +241,14 @@ import filodb.query.exec._
     PlanResult(Seq(stitchedPlan))
   }
 
+  /**
+   * Materialize raw series plan. Route to raw cluster or downSample cluster based on the lookback time
+   * and stitch them if needed.
+   *
+   * @param logicalPlan  The raw series logical plan to materialize
+   * @param queryContext The QueryContext object
+   * @return
+   */
   private def materializeRawSeries(queryContext: QueryContext, logicalPlan: RawSeries): PlanResult = {
     val timeRange = getTimeFromLogicalPlan(logicalPlan)
 
