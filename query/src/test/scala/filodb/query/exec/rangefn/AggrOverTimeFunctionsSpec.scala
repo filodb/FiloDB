@@ -347,6 +347,31 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly identify outliers with mad using sliding iterators") {
+    val data = (0 until 200).map { i =>
+      if ((i+1) % 20 == 0) 2.3d
+      else rand.nextDouble()
+    }
+    val rv = timeValueRV(data)
+    val rangeParams = RangeParams(100, 20, 500)
+    val windowSize = 20
+    val step = 5
+
+    val anomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last > 1.0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams))), windowSize, step)
+    val result = minSlidingIt.map(_.getDouble(1)).toBuffer
+    minSlidingIt.close()
+    info("Anomalies: " + anomalies)
+    info("Result: " + result)
+    result.zip(anomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+  }
+
   it("should correctly aggregate min_over_time / max_over_time using both chunked and sliding iterators") {
     val data = (1 to 240).map(_.toDouble)
     val chunkSize = 40
