@@ -99,9 +99,6 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
     logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
     cleanIndexDirectory()
   }
-  //else {
-  // TODO here we assume there is non-empty index which we need to validate
-  //}
 
   def cleanIndexDirectory(): Unit = {
     Utils.deleteRecursively(indexDiskLocation.toFile) match {
