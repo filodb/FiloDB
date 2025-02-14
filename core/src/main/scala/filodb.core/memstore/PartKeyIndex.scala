@@ -97,11 +97,17 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
     lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum))
   ) {
     logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
+    cleanIndexDirectory()
+  }
+  //else {
+  // TODO here we assume there is non-empty index which we need to validate
+  //}
+
+  def cleanIndexDirectory(): Unit = {
     Utils.deleteRecursively(indexDiskLocation.toFile) match {
       case Success(_) => // Notify the handler that the directory is now empty
         logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
         notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-
       case Failure(t) => // Update index state as TriggerRebuild again and rethrow the exception
         logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
           s"and index directory=$indexDiskLocation with stack trace", t)
@@ -109,9 +115,6 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
         throw new IllegalStateException("Unable to clean up index directory", t)
     }
   }
-  //else {
-  // TODO here we assume there is non-empty index which we need to validate
-  //}
 
   protected def loadIndexData[T](ctor: () => T): T = try {
     ctor()
