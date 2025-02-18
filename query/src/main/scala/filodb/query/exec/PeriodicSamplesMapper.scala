@@ -406,7 +406,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
     // cur is inside current window
-    val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart + 1
+    val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart - 1
     cur.timestamp >= windowStart
   }
 
