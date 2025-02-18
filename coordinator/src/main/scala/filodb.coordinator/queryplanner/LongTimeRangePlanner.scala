@@ -245,6 +245,34 @@ import filodb.query.exec._
    * Materialize raw series plan. Route to raw cluster or downSample cluster based on the lookback time
    * and stitch them if needed.
    *
+   * For stitching case:
+   * time ----->   |---| < offset
+   * |-------|-----|     < range with offset
+   *     |---|---------| < range no offset
+   *     s   R         e
+   *
+   * If we were building a plan without offsets to query the physical data we want, we'd use the ranges:
+   * Raw: [R, e - o]
+   * DS:  [s - o, R)
+   *
+   * Which means the plans would be built as:
+   *
+   * Raw:
+   * Lookback:  (e - o) - R
+   * Timestamp: e - o
+   * DS:
+   * Lookback:  R - (s - o)
+   * Timestamp: R
+   *
+   * But since we'll preserve the offset in the plan, we'll shift the above timestamps to the right:
+   *
+   * Raw:
+   * Lookback:  (e - o) - R
+   * Timestamp: e
+   * DS:
+   * Lookback:  R - (s - o)
+   * Timestamp: R + o
+   *
    * @param logicalPlan  The raw series logical plan to materialize
    * @param queryContext The QueryContext object
    * @return
@@ -254,6 +282,7 @@ import filodb.query.exec._
 
     // use rawClusterMaterialize to handle range Raw data queries with range expression []
     if(timeRange.startMs != timeRange.endMs){
+      logger.info("Materializing ranged raw series export against raw cluster:: {}", queryContext.origQueryParams)
       return rawClusterMaterialize(queryContext, logicalPlan)
     }
     val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)
