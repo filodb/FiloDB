@@ -26,7 +26,7 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
    */
   protected def getPartitions(logicalPlan: LogicalPlan,
                               queryParams: PromQlQueryParams,
-                              infiniteTimeRange: Boolean = false) : Seq[PartitionAssignment] = {
+                              infiniteTimeRange: Boolean = false) : Seq[PartitionAssignmentTrait] = {
 
     //1.  Get a Seq of all Leaf node filters
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
@@ -71,19 +71,19 @@ abstract class PartitionLocationPlanner(dataset: Dataset,
 
     //4. Based on the map in 2 and time range in 5, get the partitions to query
     routingKeyMap.flatMap(metricMap =>
-      partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
+      partitionLocationProvider.getPartitionsTrait(metricMap, queryTimeRange))
   }
   // scalastyle:on method.length
 
   /**
    * Checks if all the PartitionAssignments belong to same partition
    */
-  protected def isSinglePartition(partitions: Seq[PartitionAssignment]) : Boolean = {
+  protected def isSinglePartition(partitions: Seq[PartitionAssignmentTrait]) : Boolean = {
     if (partitions.isEmpty)
       true
     else {
-      val partName = partitions.head.partitionName
-      partitions.forall(_.partitionName.equals(partName))
+      val pSet = partitions.flatMap(p => p.proportionMap.keys)
+      pSet.forall(p => p.equals(pSet.head))
     }
   }
 
