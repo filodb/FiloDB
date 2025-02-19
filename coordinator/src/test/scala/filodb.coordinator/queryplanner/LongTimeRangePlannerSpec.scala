@@ -263,14 +263,66 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
   }
 
-  it("should direct raw-data queries to both raw planner only irrespective of time length") {
+  it("should not direct range raw-data queries with lookback"){
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000
+    val thrown = the[UnsupportedOperationException] thrownBy
+      Parser.queryRangeToLogicalPlan("foo[20m]", TimeStepParams(start, step, end))
+    thrown.toString.contains("Range expression is not allowed in query_range")
+  }
 
-    Seq(5, 10, 20).foreach { t =>
-      val logicalPlan = Parser.queryToLogicalPlan(s"foo[${t}m]", now, 1000)
-      val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
-      ep.name shouldEqual "raw"
-      ep.lp shouldEqual logicalPlan
-    }
+  it("should direct instant raw-data queries with lookback to raw cluster when only need raw data"){
+    val start = now/1000
+    val step = 1.second.toSeconds
+    val end = start
+
+    // raw retention is 10m
+    val logicalPlan = Parser.queryToLogicalPlan("foo[9m]", start, step)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
+  }
+
+  it("should direct instant raw-data queries with lookback to downSample cluster when only need downSample data"){
+    val start = now/1000 - 11.minutes.toSeconds
+    val step = 1.second.toSeconds
+    val end = start
+
+    // raw retention is 10m
+    val logicalPlan = Parser.queryToLogicalPlan("foo[10m]", start, step)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+
+    val logicalPlan2 = Parser.queryToLogicalPlan("foo[10m] offset 5m", start+5.minutes.toSeconds, step)
+    val ep2 = longTermPlanner.materialize(logicalPlan2, QueryContext()).asInstanceOf[MockExecPlan]
+    ep2.name shouldEqual "downsample"
+    ep2.lp shouldEqual logicalPlan2
+  }
+
+  it("should direct raw-data instant queries with lookback to both raw and downSample cluster when needed"){
+    val start = now/1000
+    val step = 1.second.toSeconds
+    val end = start
+
+    val logicalPlan = Parser.queryRangeToLogicalPlan("foo[20m]", TimeStepParams(start, step, end))
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downSampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downSampleEp.name shouldEqual "downsample"
+
+    val rawLp = rawEp.lp.asInstanceOf[RawSeries]
+    val downSampleLp = downSampleEp.lp.asInstanceOf[RawSeries]
+
+    downSampleLp.rangeSelector.asInstanceOf[IntervalSelector].to shouldEqual earliestRawTime
+    rawLp.rangeSelector.asInstanceOf[IntervalSelector].to shouldEqual start*1000
+    downSampleLp.lookbackMs.get + rawLp.lookbackMs.get shouldEqual 20.minutes.toMillis
   }
 
   it("should direct raw-cluster-only queries to raw planner for scalar vector queries") {

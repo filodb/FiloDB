@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext}
+import filodb.core.query.{QueryConfig, QueryContext, RvRange}
 import filodb.query._
 import filodb.query.exec._
 
@@ -241,6 +241,73 @@ import filodb.query.exec._
     PlanResult(Seq(stitchedPlan))
   }
 
+  /**
+   * Materialize raw series plan. Route to raw cluster or downSample cluster based on the lookback time
+   * and stitch them if needed.
+   *
+   * For stitching case:
+   * time ----->   |---| < offset
+   * |-------|-----|     < range with offset
+   *     |---|---------| < range no offset
+   *     s   R         e
+   *
+   * If we were building a plan without offsets to query the physical data we want, we'd use the ranges:
+   * Raw: [R, e - o]
+   * DS:  [s - o, R)
+   *
+   * Which means the plans would be built as:
+   *
+   * Raw:
+   * Lookback:  (e - o) - R
+   * Timestamp: e - o
+   * DS:
+   * Lookback:  R - (s - o)
+   * Timestamp: R
+   *
+   * But since we'll preserve the offset in the plan, we'll shift the above timestamps to the right:
+   *
+   * Raw:
+   * Lookback:  (e - o) - R
+   * Timestamp: e
+   * DS:
+   * Lookback:  R - (s - o)
+   * Timestamp: R + o
+   *
+   * @param logicalPlan  The raw series logical plan to materialize
+   * @param queryContext The QueryContext object
+   * @return
+   */
+  private def materializeRawSeries(queryContext: QueryContext, logicalPlan: RawSeries): PlanResult = {
+    val timeRange = getTimeFromLogicalPlan(logicalPlan)
+
+    // use rawClusterMaterialize to handle range Raw data queries with range expression []
+    if(timeRange.startMs != timeRange.endMs){
+      logger.info("Materializing ranged raw series export against raw cluster:: {}", queryContext.origQueryParams)
+      return rawClusterMaterialize(queryContext, logicalPlan)
+    }
+    val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)
+    val offsetMs = logicalPlan.offsetMs.getOrElse(0L)
+    val (startTime, endTime) = (timeRange.endMs - lookbackMs - offsetMs, timeRange.endMs - offsetMs)
+    val execPlan = if (startTime > earliestRawTimestampFn) {
+      // This is the case where no data will be retrieved from DownsampleStore, simply push down to raw planner
+      rawClusterPlanner.materialize(logicalPlan, queryContext)
+    } else if (endTime < earliestRawTimestampFn) {
+      // This is the case where no data will be retrieved from RawStore, simply push down to DS planner
+      downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    } else {
+      val rawLookbackMs = timeRange.endMs - earliestRawTimestampFn - offsetMs
+      val rawLp = logicalPlan.copy(lookbackMs = Some(rawLookbackMs))
+      val rawEp = rawClusterPlanner.materialize(rawLp, queryContext)
+      val downSampleLp = logicalPlan.copy(lookbackMs = Some(lookbackMs - rawLookbackMs),
+        rangeSelector = IntervalSelector(earliestRawTimestampFn + offsetMs, earliestRawTimestampFn + offsetMs))
+      val downSampleEp = downsampleClusterPlanner.materialize(downSampleLp, queryContext)
+
+      val rvRange = RvRange(timeRange.endMs, 1000, timeRange.endMs)
+      StitchRvsExec(queryContext, stitchDispatcher, Some(rvRange), Seq(rawEp, downSampleEp))
+    }
+    PlanResult(Seq(execPlan))
+  }
+
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
@@ -251,11 +318,11 @@ import filodb.query.exec._
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case ts: TsCardinalities           => materializeTSCardinalityPlan(qContext, ts)
+        case rs: RawSeries                 => materializeRawSeries(qContext, rs)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
-             _: RawSeries |
              _: LabelNames                 => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
