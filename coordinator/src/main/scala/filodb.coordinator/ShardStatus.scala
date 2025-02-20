@@ -79,21 +79,31 @@ object ShardMapperV2 {
   }
 
   /**
+   * @param shardMapperV2 ShardMapperV2 object
+   * @return String representation of the byte array in bits
+   */
+  def bitMapRepresentation(shardMapperV2: ShardMapperV2): String = {
+    val shardsPerNode = shardMapperV2.numShards / shardMapperV2.nodeCountInCluster
+    shardMapperV2.shardState.map(x => byteToBits(x).grouped(shardsPerNode).mkString(" ")).mkString(" ")
+  }
+
+  /**
    * Helper function to print the bitmap, node and shard status. This is useful in debugging.
    */
   def prettyPrint(shardMapperV2: ShardMapperV2): Unit = {
     println(s"NumNodes:  ${shardMapperV2.nodeCountInCluster} NumShards:  ${shardMapperV2.numShards} NodeFormat:  ${shardMapperV2.k8sHostFormat}") // scalastyle:ignore
     println(s"ShardStatusBytes:  ${shardMapperV2.shardState.mkString("Array(", ", ", ")")}") // scalastyle:ignore
-    println(s"ShardStatusBitMap:  ${shardMapperV2.shardState.map(x => byteToBits(x)).mkString("Array(", ", ", ")")}") // scalastyle:ignore
+    println(s"ShardStatusBitMap:  ${bitMapRepresentation(shardMapperV2)}") // scalastyle:ignore
     println() // scalastyle:ignore
     val printFormat = s"%5s\t%20s\t\t%s"
+    val shardsPerNode = shardMapperV2.numShards / shardMapperV2.nodeCountInCluster
     println(printFormat.format("Shard", "Status", "Address")) // scalastyle:ignore
     for (shardIndex <- 0 until shardMapperV2.numShards) {
       val byteIndex = shardIndex / 8
       val bitIndex = shardIndex % 8
       val bit = (shardMapperV2.shardState(byteIndex) >> (7 - bitIndex)) & 1
       val status = if (bit == 1) "Shard Active" else "Shard Not Active"
-      val nodeNum = shardIndex / shardMapperV2.nodeCountInCluster
+      val nodeNum = shardIndex / shardsPerNode
       // NOTE: In local environment, the Address is dependent on the `filodb.cluster-discovery.hostList` config.
       // The address printed here is an approximation and may not be accurate.
       println(printFormat.format(shardIndex, status, ActorName.nodeCoordinatorPathClusterV2(String.format(shardMapperV2.k8sHostFormat, nodeNum.toString)))) // scalastyle:ignore
