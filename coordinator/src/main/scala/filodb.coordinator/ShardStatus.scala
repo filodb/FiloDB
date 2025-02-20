@@ -82,7 +82,7 @@ object ShardMapperV2 {
    * @param shardMapperV2 ShardMapperV2 object
    * @return String representation of the byte array in bits
    */
-  def byteArrayString(shardMapperV2: ShardMapperV2): String = {
+  def bitMapRepresentation(shardMapperV2: ShardMapperV2): String = {
     val shardsPerNode = shardMapperV2.numShards / shardMapperV2.nodeCountInCluster
     shardMapperV2.shardState.map(x => byteToBits(x).grouped(shardsPerNode).mkString(" ")).mkString(" ")
   }
@@ -93,7 +93,7 @@ object ShardMapperV2 {
   def prettyPrint(shardMapperV2: ShardMapperV2): Unit = {
     println(s"NumNodes:  ${shardMapperV2.nodeCountInCluster} NumShards:  ${shardMapperV2.numShards} NodeFormat:  ${shardMapperV2.k8sHostFormat}") // scalastyle:ignore
     println(s"ShardStatusBytes:  ${shardMapperV2.shardState.mkString("Array(", ", ", ")")}") // scalastyle:ignore
-    println(s"ShardStatusBitMap:  ${byteArrayString(shardMapperV2)}") // scalastyle:ignore
+    println(s"ShardStatusBitMap:  ${bitMapRepresentation(shardMapperV2)}") // scalastyle:ignore
     println() // scalastyle:ignore
     val printFormat = s"%5s\t%20s\t\t%s"
     val shardsPerNode = shardMapperV2.numShards / shardMapperV2.nodeCountInCluster
