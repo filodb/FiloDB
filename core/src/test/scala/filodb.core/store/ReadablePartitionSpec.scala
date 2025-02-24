@@ -1,6 +1,6 @@
 package filodb.core.store
 
-import filodb.core.GlobalConfig
+import filodb.core.{GlobalConfig, Utils}
 import filodb.core.NamesTestData.dataset
 import filodb.core.downsample.OffHeapMemory
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardInfo, TimeSeriesShardStats}
@@ -14,33 +14,55 @@ class ReadablePartitionSpec extends AnyFunSpec with Matchers with BeforeAndAfter
     val rawData = RawPartData(Array.empty, Seq.empty)
     val p1 = new PagedReadablePartition(Schemas.deltaHistogram, 0, -1, rawData, 10)
     val p2 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, 10)
-    p1.doesSchemaMatchOrBackCompatibleHistograms(p2.schema.name, p2.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
+  }
+
+  it("doesSchemaMatchOrBackCompatibleHistograms should return true for otel-delta and delta") {
+    val rawData = RawPartData(Array.empty, Seq.empty)
+    val p1 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, 10)
+    val p2 = new PagedReadablePartition(Schemas.deltaHistogram, 0, -1, rawData, 10)
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
   }
 
   it("doesSchemaMatchOrBackCompatibleHistograms should return true for cumulative and otel-cumulative") {
     val rawData = RawPartData(Array.empty, Seq.empty)
     val p1 = new PagedReadablePartition(Schemas.promHistogram, 0, -1, rawData, 10)
     val p2 = new PagedReadablePartition(Schemas.otelCumulativeHistogram, 0, -1, rawData, 10)
-    p1.doesSchemaMatchOrBackCompatibleHistograms(p2.schema.name, p2.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
+  }
+
+  it("doesSchemaMatchOrBackCompatibleHistograms should return true for otel-cumulative and prom histogram") {
+    val rawData = RawPartData(Array.empty, Seq.empty)
+    val p1 = new PagedReadablePartition(Schemas.otelCumulativeHistogram, 0, -1, rawData, 10)
+    val p2 = new PagedReadablePartition(Schemas.promHistogram, 0, -1, rawData, 10)
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
   }
 
   it("doesSchemaMatchOrBackCompatibleHistograms should return true if schema matches paged readble partition") {
     val rawData = RawPartData(Array.empty, Seq.empty)
     val p1 = new PagedReadablePartition(Schemas.deltaCounter, 0, -1, rawData, 10)
     val p2 = new PagedReadablePartition(Schemas.deltaCounter, 0, -1, rawData, 10)
-    p1.doesSchemaMatchOrBackCompatibleHistograms(p2.schema.name, p2.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
 
     val p3 = new PagedReadablePartition(Schemas.gauge, 0, -1, rawData, 10)
     val p4 = new PagedReadablePartition(Schemas.gauge, 0, -1, rawData, 10)
-    p3.doesSchemaMatchOrBackCompatibleHistograms(p4.schema.name, p4.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p3.schema.name, p3.schema.schemaHash, p4.schema.name, p4.schema.schemaHash) shouldEqual true
 
     val p5 = new PagedReadablePartition(Schemas.promHistogram, 0, -1, rawData, 10)
     val p6 = new PagedReadablePartition(Schemas.promHistogram, 0, -1, rawData, 10)
-    p5.doesSchemaMatchOrBackCompatibleHistograms(p6.schema.name, p6.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p5.schema.name, p5.schema.schemaHash, p6.schema.name, p6.schema.schemaHash) shouldEqual true
 
     val p7 = new PagedReadablePartition(Schemas.promCounter, 0, -1, rawData, 10)
     val p8 = new PagedReadablePartition(Schemas.promCounter, 0, -1, rawData, 10)
-    p7.doesSchemaMatchOrBackCompatibleHistograms(p8.schema.name, p8.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p7.schema.name, p7.schema.schemaHash, p8.schema.name, p8.schema.schemaHash) shouldEqual true
   }
 
   it("doesSchemaMatchOrBackCompatibleHistograms should return true if schema matches timeseries partition") {
@@ -52,11 +74,13 @@ class ReadablePartitionSpec extends AnyFunSpec with Matchers with BeforeAndAfter
 
     val p1 = new TimeSeriesPartition(0, Schemas.deltaHistogram, 0, shardInfo, 1)
     val p2 = new TimeSeriesPartition(0, Schemas.otelDeltaHistogram, 0, shardInfo, 1)
-    p1.doesSchemaMatchOrBackCompatibleHistograms(p2.schema.name, p2.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual true
 
     val p3 = new TimeSeriesPartition(0, Schemas.gauge, 0, shardInfo, 1)
     val p4 = new TimeSeriesPartition(0, Schemas.gauge, 0, shardInfo, 1)
-    p3.doesSchemaMatchOrBackCompatibleHistograms(p4.schema.name, p4.schema.schemaHash) shouldEqual true
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p3.schema.name, p3.schema.schemaHash, p4.schema.name, p4.schema.schemaHash) shouldEqual true
   }
 
   it("doesSchemaMatchOrBackCompatibleHistograms should return false if schema does not matches timeseries partition") {
@@ -68,10 +92,22 @@ class ReadablePartitionSpec extends AnyFunSpec with Matchers with BeforeAndAfter
 
     val p1 = new TimeSeriesPartition(0, Schemas.deltaHistogram, 0, shardInfo, 1)
     val p2 = new TimeSeriesPartition(0, Schemas.promHistogram, 0, shardInfo, 1)
-    p1.doesSchemaMatchOrBackCompatibleHistograms(p2.schema.name, p2.schema.schemaHash) shouldEqual false
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p1.schema.name, p1.schema.schemaHash, p2.schema.name, p2.schema.schemaHash) shouldEqual false
 
     val p3 = new TimeSeriesPartition(0, Schemas.promCounter, 0, shardInfo, 1)
     val p4 = new TimeSeriesPartition(0, Schemas.deltaCounter, 0, shardInfo, 1)
-    p3.doesSchemaMatchOrBackCompatibleHistograms(p4.schema.name, p4.schema.schemaHash) shouldEqual false
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p3.schema.name, p3.schema.schemaHash, p4.schema.name, p4.schema.schemaHash) shouldEqual false
+
+    val p5 = new TimeSeriesPartition(0, Schemas.gauge, 0, shardInfo, 1)
+    val p6 = new TimeSeriesPartition(0, Schemas.dsGauge, 0, shardInfo, 1)
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p5.schema.name, p5.schema.schemaHash, p6.schema.name, p6.schema.schemaHash) shouldEqual false
+
+    val p7 = new TimeSeriesPartition(0, Schemas.otelCumulativeHistogram, 0, shardInfo, 1)
+    val p8 = new TimeSeriesPartition(0, Schemas.otelDeltaHistogram, 0, shardInfo, 1)
+    Utils.doesSchemaMatchOrBackCompatibleHistograms(
+      p7.schema.name, p7.schema.schemaHash, p8.schema.name, p8.schema.schemaHash) shouldEqual false
   }
 }
