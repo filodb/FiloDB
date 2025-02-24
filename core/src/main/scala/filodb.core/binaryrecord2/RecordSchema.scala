@@ -333,7 +333,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (DoubleColumn, i) if cols.contains(colNames(i)) =>
                               res(cols.indexOf(colNames(i))) = getDouble(base, offset, i).toString
       case (StringColumn, i) if cols.contains(colNames(i)) =>
-                              res(cols.indexOf(colNames(i))) = asJavaString(base, offset, i).toString
+                              res(cols.indexOf(colNames(i))) = asJavaString(base, offset, i)
       case (TimestampColumn, i) if cols.contains(colNames(i)) =>
                               res(cols.indexOf(colNames(i))) = getLong(base, offset, i).toString
       case (MapColumn, i)    => val consumer = new SelectColsMapItemConsumer(cols, res)
@@ -342,6 +342,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) => ???
       case _ => // column not selected
     }
+    if (cols.contains(Schemas.TypeLabel)) res(cols.indexOf(Schemas.TypeLabel)) =
+      Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
     res
   }
 
