@@ -109,9 +109,10 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
                 """.stripMargin))
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram,
-                                          Schemas.deltaCounter, Schemas.deltaHistogram, Schemas.otelDeltaHistogram,
-                                          Schemas.untyped),
+                                          Schemas.deltaCounter, Schemas.deltaHistogram, Schemas.untyped,
+                                          Schemas.otelDeltaHistogram, Schemas.otelCumulativeHistogram),
                                      Map.empty, 100, rawDataStoreConfig)
+
   val shardInfo = TimeSeriesShardInfo(0, batchDownsampler.shardStats,
     offheapMem.bufferPools, offheapMem.nativeMemoryManager)
 
@@ -142,10 +143,27 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val gaugeLowFreqName = "my_gauge_low_freq"
   var gaugeLowFreqPartKeyBytes: Array[Byte] = _
 
+  // otel-delta histogram
+  val otelDeltaHistName = "my_otel_delta_histogram"
+  var otelDeltaHistPartKeyBytes: Array[Byte] = _
+
+  // otel-cumulative histogram
+  val otelCummulativeHistName = "my_otel_cumulative_histogram"
+  var otelCummulativeHistPartKeyBytes: Array[Byte] = _
+
+  // prom-histogram and otel-cumulative histogram mixed data ingestion
+  val histMixedSchemaCumulativeName = "my_legacy_otel_cumulative_histogram"
+  var histMixedSchemaCumulativePartKeyBytes: Array[Byte] = _
+
+  // delta-histogram and otel-delta histogram mixed data ingestion
+  val histMixedSchemaDeltaName = "my_legacy_otel_delta_histogram"
+  var histMixedSchemaDeltaPartKeyBytes: Array[Byte] = _
+
+
   val lastSampleTime = 74373042000L
   val pkUpdateHour = hour(lastSampleTime)
 
-  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, deltaCounterName, histName, deltaHistName, histNameNaN, untypedName)
+  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, deltaCounterName, histName, deltaHistName, histNameNaN, untypedName, otelDeltaHistName)
   val shard = 0
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
@@ -1090,6 +1108,55 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     rawColStore.writePartKeys(rawDataset.ref, shard, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
+//  it ("should write otel cumulative histogram to cassandra") {
+//
+//  }
+
+  it ("should write otel delta histogram to cassandra") {
+    val rawDataset = Dataset("prometheus", Schemas.otelDeltaHistogram)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.otelDeltaHistogram, otelDeltaHistName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.otelDeltaHistogram, partKey, shardInfo, 1)
+
+    otelDeltaHistPartKeyBytes = part.partKeyBytes
+
+    val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
+    val rawSamples = Stream( // time, sum, count, hist, name, tags
+      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq(74372801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
+      Seq(74372802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), 2d, 15d, otelDeltaHistName, seriesTags),
+
+      Seq(74372861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), 1d, 16d, otelDeltaHistName, seriesTags),
+      Seq(74372861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq(74372862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), 0d, 30d, otelDeltaHistName, seriesTags),
+
+      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 11d, otelDeltaHistName, seriesTags),
+      Seq(74372921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), 3d, 20d, otelDeltaHistName, seriesTags),
+      Seq(74372922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), 6d, 25d, otelDeltaHistName, seriesTags),
+
+      Seq(74372981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
+      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq(74372982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), 3d, 25d, otelDeltaHistName, seriesTags),
+
+      Seq(74373041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), 1d, 30d, otelDeltaHistName, seriesTags),
+      Seq(74373042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), 1d, 22d, otelDeltaHistName, seriesTags)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.otelDeltaHistogram.ingestionSchema, base, offset)
+      part.ingest(lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
+    val pk = PartKeyRecord(otelDeltaHistPartKeyBytes, 74372801000L, currTime, shard)
+    rawColStore.writePartKeys(rawDataset.ref, shard, Observable.now(pk), 259200, pkUpdateHour).futureValue
+  }
+
   it("should write otel exponential delta histogram data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.otelDeltaHistogram)
@@ -1247,7 +1314,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       (gaugeLowFreqName, Schemas.dsGauge.name),
       (histName, Schemas.promHistogram.name),
       (histNameNaN, Schemas.promHistogram.name),
-      (deltaHistName, Schemas.deltaHistogram.name))
+      (deltaHistName, Schemas.deltaHistogram.name),
+      (otelDeltaHistName, Schemas.otelDeltaHistogram.name)
+    )
     val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
     val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runToFuture, 1 minutes)
     tsSchemaMetric.filter(k => metricNames.contains(k._1)).toSet shouldEqual metrics
@@ -1544,6 +1613,67 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       (74372922000L, 15d, 19d, Seq(1d, 9d, 19d)),
       (74372982000L, 17d, 17d, Seq(1d, 16d, 17d)),
       (74373042000L, 5d, 10d, Seq(4d, 5d, 10d))
+    )
+  }
+
+  it("should read and verify otel delta histogram data in cassandra using " +
+    "PagedReadablePartition for 1-min downsampled data") {
+
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
+        batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
+        0,
+        SinglePartitionScan(otelDeltaHistPartKeyBytes))
+      .toListL.runToFuture.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.otelDeltaHistogram.downsample.get, 0, 0,
+      downsampledPartData1, 5.minutes.toMillis.toInt)
+
+    downsampledPart1.partKeyBytes shouldEqual otelDeltaHistPartKeyBytes
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual false
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
+      new AtomicLong(), Long.MaxValue, "query-id")
+
+    val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
+    val downsampledData1 = rv1.rows.map { r =>
+      val h = r.getHistogram(3)
+      h.numBuckets shouldEqual 3
+      (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), (0 until h.numBuckets).map(i => h.bucketValue(i)),
+        r.getDouble(4), r.getDouble(5))
+    }.toList
+
+    /*
+    74372801000L, 0d, 1d, Array(0L, 0, 1), 0d, 10d)
+    74372801500L, 2d, 2d, Array(0L, 2, 2), 1d, 20d)
+    74372802000L, 3d, 3d, Array(2L, 3, 3), 2d, 15d) -> 74372802000,5.0,6.0,Vector(2.0, 5.0, 6.0), 0d (min), 20d (max)
+
+    74372861000L, 4d, 3d, Array(0L, 0, 3), 1d, 16d)
+    74372861500L, 1d, 1d, Array(0L, 0, 1), 0d, 10d)
+    74372862000L, 1d, 4d, Array(0L, 3, 4), 0d, 30d) -> 74372862000,6.0,8.0,Vector(0.0, 3.0, 8.0), 0d (min), 30d (max)
+
+    74372921000L, 2d, 2d, Array(0L, 0, 2), 0d, 11d)
+    74372921500L, 5d, 7d, Array(1L, 1, 7), 3d, 20d)
+    74372922000L, 8d, 10d, Array(0L, 8, 10), 6d, 25d) -> 74372922000,15.0,19.0,Vector(1.0, 9.0, 19.0), 0d (min), 25d (max)
+
+    74372981000L, 2d, 2d, Array(1L, 1, 2), 1d, 20d)
+    74372981500L, 1d, 1d, Array(0L, 1, 1), 0d, 10d)
+    74372982000L, 14d, 14d, Array(0L, 14, 14), 3d, 25d) -> 74372982000,17.0,17.0,Vector(1.0, 16.0, 17.0), 0d, 25d
+
+    74373041000L, 3d, 4d, Array(1L, 1, 4), 1d, 30d)
+    74373042000L, 2d, 6d, Array(3L, 4, 6), 1d, 22d) -> 74373042000,5.0,10.0,Vector(4.0, 5.0, 10.0), 1d, 30d
+     */
+
+
+    // time, sum, count, histogram
+    downsampledData1 shouldEqual Seq(
+      (74372802000L, 5d, 6d, Seq(2d, 5d, 6d), 0d, 20d),
+      (74372862000L, 6d, 8d, Seq(0d, 3d, 8d), 0d, 30d),
+      (74372922000L, 15d, 19d, Seq(1d, 9d, 19d), 0d, 25d),
+      (74372982000L, 17d, 17d, Seq(1d, 16d, 17d), 0d, 25d),
+      (74373042000L, 5d, 10d, Seq(4d, 5d, 10d), 1d, 30d)
     )
   }
 
@@ -2048,7 +2178,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
-    readKeys.size shouldEqual 10008
+    readKeys.size shouldEqual 10009
 
     val readKeys2 = (0 until numShards).flatMap { shard =>
       val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
@@ -2092,7 +2222,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }.toSet
 
     // downsample set should not have a few bulk metrics
-    readKeys.size shouldEqual 9907
+    readKeys.size shouldEqual 9908
 
     val readKeys2 = (0 until numShards).flatMap { shard =>
       val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
