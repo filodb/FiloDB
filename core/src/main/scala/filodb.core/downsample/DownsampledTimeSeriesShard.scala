@@ -526,8 +526,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     val isCompatibleSchemas = Utils.doesSchemaMatchOrBackCompatibleHistograms(
       schemas.schemaName(schemaId), schemaId, schemas.schemaName(firstSchemaId), firstSchemaId)
     if (!isCompatibleSchemas) {
-      logger.debug(
-        s"Schema mismatch! Expected schema ${schemas.schemaName(firstSchemaId)}, got ${schemas.schemaName(schemaId)}")
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId), getClass.getSimpleName)
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
