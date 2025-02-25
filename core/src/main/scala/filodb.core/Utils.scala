@@ -69,4 +69,23 @@ object Utils extends StrictLogging {
     }
 
   }
+
+  /**
+   * @param schemaName Source schema name.
+   * @param schemaHash Source schema hash.
+   * @param schemaNameToCheck the schema name to check against.
+   * @param schemaHashToCheck the schema hash to check against.
+   * @return true if the schema name and hash match or if the schemas are back compatible histograms
+   */
+  def doesSchemaMatchOrBackCompatibleHistograms(schemaName : String, schemaHash : Int,
+                                                      schemaNameToCheck : String, schemaHashToCheck : Int) : Boolean = {
+    if (schemaHash == schemaHashToCheck) { true }
+    else {
+      val sortedSchemas = Seq(schemaName, schemaNameToCheck).sortBy(_.length)
+      val ret = if ((sortedSchemas(0) == "prom-histogram") && (sortedSchemas(1) == "otel-cumulative-histogram")) true
+      else if ((sortedSchemas(0) == "delta-histogram") && (sortedSchemas(1) == "otel-delta-histogram")) true
+      else false
+      ret
+    }
+  }
 }
