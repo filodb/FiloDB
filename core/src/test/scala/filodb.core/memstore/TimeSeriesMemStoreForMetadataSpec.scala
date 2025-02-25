@@ -103,6 +103,19 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
     metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)
   }
 
+  it ("should read the metadata label values for multiple labels: instance, _type_") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    val metadata = memStore.labelValuesWithFilters(timeseriesDataset.ref, 0,
+      filters, labelNames = Seq("instance", "_type_"), now, now - 5000, QuerySession.makeForTestingOnly, 10)
+
+    metadata.hasNext shouldEqual true
+    metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8, "_type_".utf8 -> "schemaID:35859".utf8)
+  }
+
+
   it ("should return expected values for isCorrectPartitionForCardinalityQuery") {
     memStore.isCorrectPartitionForCardinalityQuery(QueryContext(),"") shouldEqual true
     memStore.isCorrectPartitionForCardinalityQuery(QueryContext(),"partition1") shouldEqual true
