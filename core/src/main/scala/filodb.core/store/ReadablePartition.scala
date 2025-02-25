@@ -129,21 +129,5 @@ trait ReadablePartition extends FiloPartition {
                           countInfoIterator: CountingChunkInfoIterator): RangeVectorCursor =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, countInfoIterator, columnIDs)
 
-  /**
-   * @param schemaNameToCheck the schema name to check against
-   * @param schemaHashToCheck the schema hash to check against
-   * @return true if the schema name and hash match or if the schemas are back compatible histograms
-   */
-  final def doesSchemaMatchOrBackCompatibleHistograms(schemaNameToCheck : String, schemaHashToCheck : Int) : Boolean = {
-    if (schema.schemaHash == schemaHashToCheck) { true }
-    else {
-      val sortedSchemas = Seq(schema.name, schemaNameToCheck).sortBy(_.length)
-      val ret = if ((sortedSchemas(0) == "prom-histogram") && (sortedSchemas(1) == "otel-cumulative-histogram")) true
-      else if ((sortedSchemas(0) == "delta-histogram") && (sortedSchemas(1) == "otel-delta-histogram")) true
-      else false
-      ret
-    }
-  }
-
   def publishInterval: Option[Long]
 }
