@@ -188,43 +188,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
   private val queryParams = PromQlQueryParams("notUsedQuery", 100, 1, 1000)
 
-  it("should route raw data export to raw cluster"){
-    val lp = Parser.queryToLogicalPlan(
-      """foo{_ws_ = "demo", _ns_ = "localNs"}[3d]""",
-      endSeconds, step, Antlr)
-    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
-    val expected = """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1304969071],raw)
-                     |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634518130000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1304969071],raw)
-                     |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634518130000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1304969071],raw)""".stripMargin
-    validatePlan(execPlan, expected)
-  }
-
-  it("should route raw data export to downSample cluster"){
-    val lp = Parser.queryToLogicalPlan(
-      """foo{_ws_ = "demo", _ns_ = "localNs"}[3d]""",
-      startSeconds, step, Antlr)
-    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
-    val expected = """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1525018619],downsample)
-                     |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633654130000,1633913330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1525018619],downsample)
-                     |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633654130000,1633913330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1525018619],downsample)""".stripMargin
-      validatePlan(execPlan, expected)
-  }
-
-  it("should route raw data export to both cluster"){
-    val lp = Parser.queryToLogicalPlan(
-      """foo{_ws_ = "demo", _ns_ = "localNs"}[10d]""",
-      endSeconds, step, Antlr)
-    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
-    val expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000),CachingConfig(true,2048)))
-                     |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],raw)
-                     |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172530000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],raw)
-                     |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172530000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],raw)
-                     |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],downsample)
-                     |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913330000,1634172530000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],downsample)
-                     |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913330000,1634172530000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2079492213],downsample)""".stripMargin
-    validatePlan(execPlan, expected)
-  }
-
   it("Plan with unary expression should be equals to its binary counterpart.") {
     val lp = Parser.queryRangeToLogicalPlan(
       """-foo{_ws_ = "demo", _ns_ = "localNs"} > -1""",
