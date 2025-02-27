@@ -192,7 +192,7 @@ object LogicalPlanParser {
     val at = sqww.atMs.fold("")(atMs => s" $At${atMs / 1000}")
     val suffix = s"$sqClause$offset$at$ClosingRoundBracket"
     if (sqww.functionArgs.isEmpty) s"$prefix$periodicSeriesQuery$suffix"
-    else if (sqww.functionArgs.size <= 1) {
+    else if (sqww.functionArgs.size == 1) {
       s"$prefix${functionArgsToQuery(sqww.functionArgs.head)}$Comma$periodicSeriesQuery$suffix"
     } else if (sqww.functionArgs.size == 2) {
       s"$prefix${functionArgsToQuery(sqww.functionArgs.head)}$Comma" +
