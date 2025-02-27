@@ -51,6 +51,29 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
     TimeRange(timeRange.startMs, timeRange.endMs)))
 
+  def partitionsV2SinglePartition(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, 1.0f)),
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+  def partitionsV2MultiPartition(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
+      "remote" -> PartitionDetails("remote", "remote-url", None, .5f)), TimeRange(timeRange.startMs, timeRange.endMs)))
+
+  def partitionsV2MultiPartitionAssignments(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
+      "remote1" -> PartitionDetails("remote1", "remote-url", None, .5f)),
+      TimeRange(timeRange.startMs, timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
+      "remote2" -> PartitionDetails("remote2", "remote-url", None, .5f)),
+      TimeRange(timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2 + 1, timeRange.endMs)))
+
+  def partitionsV2MultiPartitionAssignmentsOnlyWeightChange(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
+      "remote" -> PartitionDetails("remote1", "remote-url", None, .5f)),
+      TimeRange(timeRange.startMs, timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .2f),
+      "remote" -> PartitionDetails("remote2", "remote-url", None, .8f)),
+      TimeRange(timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2 + 1, timeRange.endMs)))
+
   it ("should not generate PromQlExec plan when partitions are local") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -609,6 +632,117 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+  }
+
+  it("single-partition namespace with V2 assignment should work well") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2SinglePartition(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2SinglePartition(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.children.forall(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual (false)
+  }
+
+  it("multi-partition namespace with V2 assignment should work well") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartition(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartition(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.children.forall(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual (true)
+  }
+
+  it("multi-partition namespace with V2 assignment with partition assignment changes should work well") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    println(execPlan.printTree())
+
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+    // Should have two MultiPartitionDistConcatExec for before and after assignment change.
+    execPlan.children.count(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual 2
+    // Should have one BinaryJoinExec stitch the period when assignment change happens.
+    execPlan.children.count(plan => plan.isInstanceOf[BinaryJoinExec]) shouldEqual 1
+  }
+
+  it("multi-partition namespace with V2 assignment with partition assignment weight changes should work well") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignmentsOnlyWeightChange(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignmentsOnlyWeightChange(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+    // Should have two MultiPartitionDistConcatExec for before and after assignment change.
+    execPlan.children.count(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual 2
+    // Should have one BinaryJoinExec stitch the period when assignment change happens.
+    execPlan.children.count(plan => plan.isInstanceOf[BinaryJoinExec]) shouldEqual 1
   }
 
   it ("should have equal hashcode for identical getColumnFilterGroup") {
