@@ -347,9 +347,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
-  it("should correctly identify outliers with mad using sliding iterators") {
+  it("should correctly identify outliers with mad using sliding iterators for all three boundsCheck settings") {
     val data = (0 until 200).map { i =>
-      if ((i+1) % 20 == 0) 2.3d
+      if ((i+1) % 40 == 0) -2.3d
+      else if ((i+1) % 20 == 0) 2.3d
       else rand.nextDouble()
     }
     val rv = timeValueRV(data)
@@ -357,16 +358,41 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val windowSize = 20
     val step = 5
 
-    val anomalies = data.sliding(windowSize, step).map { k =>
+    // only lower bounds
+    val lowerAnomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last < 0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt3 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(0.0, rangeParams))), windowSize, step)
+    val result3 = minSlidingIt3.map(_.getDouble(1)).toBuffer
+    minSlidingIt3.close()
+    result3.zip(lowerAnomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+
+    // both upper and lower bounds
+    val allAnomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last > 1.0 || k.last < 0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt1 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(1.0, rangeParams))), windowSize, step)
+    val result1 = minSlidingIt1.map(_.getDouble(1)).toBuffer
+    minSlidingIt1.close()
+    result1.zip(allAnomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+
+    // only upper bounds
+    val upperAnomalies = data.sliding(windowSize, step).map { k =>
       if (k.last > 1.0) k.last else Double.NaN
     }.toBuffer
 
-    val minSlidingIt = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams))), windowSize, step)
-    val result = minSlidingIt.map(_.getDouble(1)).toBuffer
-    minSlidingIt.close()
-    info("Anomalies: " + anomalies)
-    info("Result: " + result)
-    result.zip(anomalies).foreach { case (r, a) =>
+    val minSlidingIt2 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(2.0, rangeParams))), windowSize, step)
+    val result2 = minSlidingIt2.map(_.getDouble(1)).toBuffer
+    minSlidingIt2.close()
+    result2.zip(upperAnomalies).foreach { case (r, a) =>
       if (a.isNaN) r.isNaN shouldEqual true
       else r shouldEqual a
     }

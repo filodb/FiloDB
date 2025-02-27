@@ -71,7 +71,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")
     parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")
     parseAndAssertResult("""foo[5m:1m]""")("""foo[300s:60s]""")
-    parseAndAssertResult("""last_over_time_is_mad_outlier(3.0,sum(rate(http_requests_total{job="app"}[300s]))[432000s:300s])""")()
+    parseAndAssertResult("""last_over_time_is_mad_outlier(3.0,1.0,sum(rate(http_requests_total{job="app"}[300s]))[432000s:300s])""")()
   }
 
   it("should generate query from LogicalPlan having offset") {
