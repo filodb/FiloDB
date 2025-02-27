@@ -282,6 +282,9 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
   require(boundsCheck == 0 || boundsCheck == 1 || boundsCheck == 2,
     "boundsCheck parameter should be 0 (lower only), 1 (both lower and upper) or 2 (upper only)")
 
+  private val tolerance = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+  require(tolerance > 0, "tolerance must be a positive number")
+
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
   }
 
@@ -319,7 +322,6 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
       val mad = distFromMedian(lowerIndex)*(1-weight) + distFromMedian(upperIndex)*weight
 
       // classify last point as anomaly if it's more than `tolerance * mad` away from median
-      val tolerance = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
       val lowerBound = median - tolerance * mad
       val upperBound = median + tolerance * mad
       val lastValue = window.last.getDouble(1)
