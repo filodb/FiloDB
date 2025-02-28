@@ -241,6 +241,7 @@ import filodb.query.exec._
     PlanResult(Seq(stitchedPlan))
   }
 
+
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
