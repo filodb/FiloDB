@@ -1,9 +1,9 @@
 package filodb.query.exec.rangefn
 
 import java.lang.{Double => JLDouble}
+import java.util
 
 import debox.Buffer
-import java.util
 
 import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
@@ -268,7 +268,71 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex)*(1-weight) + diffFromMedians(upperIndex)*weight
     }
     sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)
+  }
+}
 
+class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFunction {
+  require(funcParams.size == 2, "last_over_time_is_mad_outlier function needs a two scalar arguments" +
+                  " (tolerance, bounds)")
+  require(funcParams(0).isInstanceOf[StaticFuncArgs], "first tolerance parameter must be a number; " +
+    "higher value means more tolerance to anomalies")
+  require(funcParams(1).isInstanceOf[StaticFuncArgs], "second bounds parameter must be a number(0, 1, 2)")
+
+  private val boundsCheck = funcParams(1).asInstanceOf[StaticFuncArgs].scalar.toInt
+  require(boundsCheck == 0 || boundsCheck == 1 || boundsCheck == 2,
+    "boundsCheck parameter should be 0 (lower only), 1 (both lower and upper) or 2 (upper only)")
+
+  private val tolerance = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+  require(tolerance > 0, "tolerance must be a positive number")
+
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+                      sampleToEmit: TransientRow,
+                      queryConfig: QueryConfig
+                    ): Unit = {
+    val size = window.size
+    if (size > 0) {
+      // find median
+      val q = 0.5
+      val values: Buffer[Double] = Buffer.ofSize(size)
+      for (i <- 0 until size) {
+        val curValue = window.apply(i).getDouble(1)
+        if (!curValue.isNaN) {
+          values.append(curValue)
+        }
+      }
+      values.sort(spire.algebra.Order.fromOrdering[Double])
+      val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
+      val median = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
+
+      // distance from median
+      val distFromMedian: Buffer[Double] = Buffer.ofSize(size)
+      for (i <- 0 until size) {
+        val curValue = window.apply(i).getDouble(1)
+        distFromMedian.append(Math.abs(median - curValue))
+      }
+
+      // mad = median of absolute distances from median
+      distFromMedian.sort(spire.algebra.Order.fromOrdering[Double])
+      val mad = distFromMedian(lowerIndex)*(1-weight) + distFromMedian(upperIndex)*weight
+
+      // classify last point as anomaly if it's more than `tolerance * mad` away from median
+      val lowerBound = median - tolerance * mad
+      val upperBound = median + tolerance * mad
+      val lastValue = window.last.getDouble(1)
+      if ((lastValue < lowerBound && boundsCheck <= 1) || (lastValue > upperBound && boundsCheck >= 1)) {
+        sampleToEmit.setValues(endTimestamp, lastValue)
+      } else {
+        sampleToEmit.setValues(endTimestamp, Double.NaN)
+      }
+    } else {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
   }
 }
 
@@ -906,7 +970,6 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionD
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    var rowNum = startRowNum
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
 
     for (_ <- startRowNum to endRowNum) {
