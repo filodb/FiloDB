@@ -941,11 +941,18 @@ object ProtoConverters {
       val schema = rvProto.getRecordSchema.fromProto
       val containers = rvProto.getRecordContainersList
         .asScala.map(byteString => RecordContainer(byteString.toByteArray))
-      val rowReader = containers.toIterator.flatMap(_.iterate(schema)).find(_ => true)
-      new RepeatValueVector(rvProto.getKey.fromProto,
-        rvProto.getRvRange.getStartMs, rvProto.getRvRange.getStep, rvProto.getRvRange.getEndMs,
-        rowReader,
-        schema)
+      val key = rvProto.getKey.fromProto
+      val stepMs = rvProto.getRvRange.getStep
+      val startMs = rvProto.getRvRange.getStartMs
+      val endMs = rvProto.getRvRange.getEndMs
+      val numRowsSerialized = (endMs - startMs) / math.max(1, stepMs) + 1
+      val rv = new SerializedRangeVector(key,
+                         numRowsSerialized.toInt,
+                         containers,
+                         schema,
+                         0,
+                         Some(RvRange(startMs, stepMs, endMs)))
+      new RepeatValueVector(rv, startMs, stepMs, endMs, schema)
     }
   }
 

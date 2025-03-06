@@ -342,9 +342,7 @@ final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long, exe
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RepeatValueVector] = {
     source.map { rv =>
         RepeatValueVector(rv, startMs, stepMs, endMs,
-          new RecordSchema(sourceSchema.columns, brSchema = sourceSchema.brSchemas),
-          execPlan,
-          querySession.queryStats)
+          new RecordSchema(sourceSchema.columns, brSchema = sourceSchema.brSchemas))
     }
   }
   override def schema(source: ResultSchema): ResultSchema = {
