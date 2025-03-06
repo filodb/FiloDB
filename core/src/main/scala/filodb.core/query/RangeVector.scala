@@ -184,7 +184,7 @@ sealed trait ScalarRangeVector extends SerializableRangeVector {
 final case class ScalarVaryingDouble(val timeValueMap: Map[Long, Double],
                                      override val outputRange: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
-  override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
+  override def rows(): RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
@@ -202,11 +202,10 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
  * Populate the vector from a single row.
  * Let say startMs=10, stepMs=10, endMs=50, RowReader has a double value 5 with a timestamp 100.
  * The result vector would be [10 -> 5, 20 -> 5, 30 -> 5, 40 -> 5, 50->5].
- * @param rangeVectorKey the range vector key.
+ * @param rv the range vector.
  * @param startMs the start timestamp in ms.
  * @param stepMs the step in ms.
  * @param endMs the end timestamp in ms
- * @param rowReader the row read that provide the value.
  * @param schema the schema.
  */
 final case class RepeatValueVector(rv: RangeVector,
@@ -215,7 +214,7 @@ final case class RepeatValueVector(rv: RangeVector,
   override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
-  lazy val key: RangeVectorKey = rv.key
+  def key: RangeVectorKey = rv.key
 
   // This will now be used only during serialization of this vector in protos
   // This is room for optimization here as we cant instantiate anything under 2048 bytes which is the MinContainerSize
@@ -230,9 +229,7 @@ final case class RepeatValueVector(rv: RangeVector,
 
   val recordSchema: RecordSchema = schema
 
-  // There is potential for optimization.
-  // The parent transformer does not need to iterate all rows.
-  // It can transform one data because data at all steps are identical. It just need to return a RepeatValueVector.
+
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
     val it = Using.resource(rv.rows()) {
@@ -262,8 +259,7 @@ final case class RepeatValueVector(rv: RangeVector,
       } else
         Iterator.empty
     }
-    if (startMs == endMs) it.take(1)
-    else it
+    if (startMs == endMs) it.take(1) else it
   }
 
   /**
@@ -275,7 +271,8 @@ final case class RepeatValueVector(rv: RangeVector,
    * Estimates the total size (in bytes) of all rows after serialization.
    */
   override def estimateSerializedRowBytes: Long =
-    this.schema.columns.zipWithIndex.map { case (col, idx) =>
+   // Given we dont have the row reader reference, this estimate will be incorrect in case of
+    this.schema.columns.zipWithIndex.map { case (col, _) =>
       col.colType match {
         case DoubleColumn       => SerializableRangeVector.SizeOfDouble
         case LongColumn         => SerializableRangeVector.SizeOfLong
@@ -285,9 +282,10 @@ final case class RepeatValueVector(rv: RangeVector,
         case BinaryRecordColumn => 0
         // We will take the worst case where histogram has buckets, each bucket has 2 doubles, one for the bucket
         //  itself and one for the bin count. We will have 4 more columns for sum, total, min and max,
-        case HistogramColumn    =>   val numBuckets = 20 // Hardcoding the approximate number of buckets
-                                     numBuckets * SerializableRangeVector.SizeOfDouble * 2
-                                            + SerializableRangeVector.SizeOfDouble * 4
+        case HistogramColumn    => {
+          val numBuckets = 20 // Hardcoding the number of buckets
+          numBuckets * SerializableRangeVector.SizeOfDouble * 2 + SerializableRangeVector.SizeOfDouble * 4
+        }
         case MapColumn          =>
                                     logger.warn("MapColumn estimate RepeatValueVector not yet supported")
                                     0 // Not supported yet
