@@ -13,7 +13,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, HistogramWithBuckets, LongHistogram}
+import filodb.memory.format.vectors.HistogramWithBuckets
 
 
 class ProtoConvertersSpec extends AnyFunSpec with Matchers {
