@@ -206,28 +206,13 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
  * @param startMs the start timestamp in ms.
  * @param stepMs the step in ms.
  * @param endMs the end timestamp in ms
- * @param schema the schema.
  */
 final case class RepeatValueVector(rv: RangeVector,
-                              startMs: Long, stepMs: Long, endMs: Long,
-                              schema: RecordSchema) extends SerializableRangeVector with StrictLogging {
-  override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
-  override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
+                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector with StrictLogging {
+  override lazy val outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
+  override lazy val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
   def key: RangeVectorKey = rv.key
-
-  // This will now be used only during serialization of this vector in protos
-  // This is room for optimization here as we cant instantiate anything under 2048 bytes which is the MinContainerSize
-  def containers: Seq[RecordContainer] = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
-    val rvCursor = rows()
-    if (rvCursor.hasNext) {
-      builder.addFromReader(rvCursor.next(), schema, 0)
-    }
-    builder.allContainers.toList
-  }
-
-  val recordSchema: RecordSchema = schema
 
 
   override def rows(): RangeVectorCursor = {
@@ -261,36 +246,6 @@ final case class RepeatValueVector(rv: RangeVector,
     }
     if (startMs == endMs) it.take(1) else it
   }
-
-  /**
-   * Used to calculate number of samples sent over the wire for limiting resources used by query
-   */
-  override def numRowsSerialized: Int = 1
-
-  /**
-   * Estimates the total size (in bytes) of all rows after serialization.
-   */
-  override def estimateSerializedRowBytes: Long =
-   // Given we dont have the row reader reference, this estimate will be incorrect in case of
-    this.schema.columns.zipWithIndex.map { case (col, _) =>
-      col.colType match {
-        case DoubleColumn       => SerializableRangeVector.SizeOfDouble
-        case LongColumn         => SerializableRangeVector.SizeOfLong
-        case IntColumn          => SerializableRangeVector.SizeOfInt
-        case StringColumn       => 0 // TODO: This will give incorrect estimates
-        case TimestampColumn    => SerializableRangeVector.SizeOfLong
-        case BinaryRecordColumn => 0
-        // We will take the worst case where histogram has buckets, each bucket has 2 doubles, one for the bucket
-        //  itself and one for the bin count. We will have 4 more columns for sum, total, min and max,
-        case HistogramColumn    => {
-          val numBuckets = 20 // Hardcoding the number of buckets
-          numBuckets * SerializableRangeVector.SizeOfDouble * 2 + SerializableRangeVector.SizeOfDouble * 4
-        }
-        case MapColumn          =>
-                                    logger.warn("MapColumn estimate RepeatValueVector not yet supported")
-                                    0 // Not supported yet
-      }
-    }.sum
 }
 
 

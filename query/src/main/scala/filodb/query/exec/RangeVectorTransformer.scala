@@ -5,7 +5,6 @@ import scala.collection.mutable.ListBuffer
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
-import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
@@ -340,9 +339,8 @@ final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long, exe
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RepeatValueVector] = {
-    val rs = new RecordSchema(sourceSchema.columns, brSchema = sourceSchema.brSchemas)
     source.map { rv =>
-        RepeatValueVector(rv, startMs, stepMs, endMs, rs)
+        RepeatValueVector(rv, startMs, stepMs, endMs)
     }
   }
   override def schema(source: ResultSchema): ResultSchema = {
