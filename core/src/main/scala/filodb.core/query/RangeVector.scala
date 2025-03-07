@@ -225,20 +225,30 @@ final case class RepeatValueVector(rv: RangeVector,
             .takeWhile(_ <= endMs - startMs).map {
               i => {
                 val t = i + startMs
-                new RowReader {
-                  override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
-                  override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
-                  override def getInt(columnNo: Int): Int = rr.getInt(columnNo)
-                  override def getLong(columnNo: Int): Long = if (columnNo == 0) t else rr.getLong(columnNo)
-                  override def getDouble(columnNo: Int): Double = rr.getDouble(columnNo)
-                  override def getFloat(columnNo: Int): Float = rr.getFloat(columnNo)
-                  override def getString(columnNo: Int): String = rr.getString(columnNo)
-                  override def getAny(columnNo: Int): Any = rr.getAny(columnNo)
-                  override def getBlobBase(columnNo: Int): Any = rr.getBlobBase(columnNo)
-                  override def getBlobOffset(columnNo: Int): Long = rr.getBlobOffset(columnNo)
-                  override def getBlobNumBytes(columnNo: Int): Int = rr.getBlobNumBytes(columnNo)
-                  override def getHistogram(columnNo: Int): Histogram = rr.getHistogram(columnNo)
+                rr match {
+                  case mr: MutableRowReader =>
+                                                mr.setLong(0, t)
+                                                mr
+
+                  case _                    =>
+                    Kamon.counter("non-mutable-row-reader-in-repeat-value-vector")
+                      .withoutTags().increment()
+                    new RowReader {
+                      override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
+                      override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
+                      override def getInt(columnNo: Int): Int = rr.getInt(columnNo)
+                      override def getLong(columnNo: Int): Long = if (columnNo == 0) t else rr.getLong(columnNo)
+                      override def getDouble(columnNo: Int): Double = rr.getDouble(columnNo)
+                      override def getFloat(columnNo: Int): Float = rr.getFloat(columnNo)
+                      override def getString(columnNo: Int): String = rr.getString(columnNo)
+                      override def getAny(columnNo: Int): Any = rr.getAny(columnNo)
+                      override def getBlobBase(columnNo: Int): Any = rr.getBlobBase(columnNo)
+                      override def getBlobOffset(columnNo: Int): Long = rr.getBlobOffset(columnNo)
+                      override def getBlobNumBytes(columnNo: Int): Int = rr.getBlobNumBytes(columnNo)
+                      override def getHistogram(columnNo: Int): Histogram = rr.getHistogram(columnNo)
+                    }
                 }
+
               }
             }
       } else
