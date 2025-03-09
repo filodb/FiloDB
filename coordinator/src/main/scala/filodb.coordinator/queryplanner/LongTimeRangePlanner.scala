@@ -244,7 +244,7 @@ import filodb.query.exec._
   /**
    * Materializes a raw series plan and routes the query to either the Raw or DownSample cluster based on lookback time.
    * - If the target time range falls within the raw data retention period, the query is routed to the Raw cluster.
-   * - Otherwise, it is routed to the DownSample cluster, In this case, it will have no data after
+   * - Otherwise, it is routed to the DownSample cluster only, In this case, it will have no data after
    *   latestDownsampleTimestampFn because they are unavailable.
    *
    * Limitations:
@@ -259,7 +259,7 @@ import filodb.query.exec._
 
     // use rawClusterMaterialize to handle range Raw data queries with range expression []
     if(timeRange.startMs != timeRange.endMs){
-      logger.info("Materializing ranged raw series export against raw cluster:: {}", queryContext.origQueryParams)
+      logger.error("Materializing ranged raw series export against raw cluster:: {}", queryContext.origQueryParams)
       return rawClusterMaterialize(queryContext, logicalPlan)
     }
     val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)

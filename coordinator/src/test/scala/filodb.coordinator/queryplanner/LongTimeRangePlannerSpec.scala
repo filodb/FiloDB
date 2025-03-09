@@ -293,6 +293,11 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     val ep2 = longTermPlanner.materialize(logicalPlan2, QueryContext()).asInstanceOf[MockExecPlan]
     ep2.name shouldEqual "downsample"
     ep2.lp shouldEqual logicalPlan2
+
+    val logicalPlan3 = Parser.queryToLogicalPlan("foo[10m] offset 20m", start, step)
+    val ep3= longTermPlanner.materialize(logicalPlan3, QueryContext()).asInstanceOf[MockExecPlan]
+    ep3.name shouldEqual "downsample"
+    ep3.lp shouldEqual logicalPlan3
   }
 
   it("should direct raw-cluster-only queries to raw planner for scalar vector queries") {
