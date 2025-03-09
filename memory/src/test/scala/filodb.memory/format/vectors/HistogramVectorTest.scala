@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 import org.agrona.concurrent.UnsafeBuffer
 import filodb.memory.format._
-import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta, HistFormat_OtelExp_Delta}
+import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta}
 
 class HistogramVectorTest extends NativeVectorTest {
   import HistogramTest._
