@@ -58,6 +58,8 @@ object BinaryHistogram extends StrictLogging {
      * Ingestion ingests BinHistograms directly without conversion to Histogram first.
      */
     def toHistogram: Histogram = formatCode match {
+
+      // All the delta encoding formats decode into LongHistograms and are generally used during ingestion
       case HistFormat_Geometric_Delta =>
         val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
@@ -70,11 +72,16 @@ object BinaryHistogram extends StrictLogging {
       case HistFormat_Custom_Delta =>
         val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+
+      // All the XOR encoding formats decode into MutableHistograms and are generally used during querying
       case HistFormat_Geometric_XOR =>
         val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
         MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case HistFormat_Custom_XOR =>
         val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+        MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_OtelExp_XOR =>
+        val bucketDef = HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
         MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case x =>
         logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
@@ -110,10 +117,11 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Custom_Delta = 0x05.toByte
   val HistFormat_Geometric_XOR = 0x08.toByte    // Double values XOR compressed
   val HistFormat_Custom_XOR = 0x0a.toByte
+  val HistFormat_OtelExp_XOR = 0x10.toByte
 
   def isValidFormatCode(code: Byte): Boolean = {
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
-    (code == HistFormat_Custom_Delta) || (code == HistFormat_OtelExp_Delta)
+    (code == HistFormat_Custom_Delta) || (code == HistFormat_OtelExp_Delta) || (code == HistFormat_OtelExp_XOR)
     // Question: why are other formats like HistFormat_Geometric_XOR not here as valid ?
   }
 
@@ -180,7 +188,7 @@ object BinaryHistogram extends StrictLogging {
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
       case g: GeometricBuckets               => HistFormat_Geometric_XOR
       case c: CustomBuckets                  => HistFormat_Custom_XOR
-      case o: Base2ExpHistogramBuckets        => HistFormat_OtelExp_Delta
+      case o: Base2ExpHistogramBuckets        => HistFormat_OtelExp_XOR
     }
 
     buf.putByte(2, formatCode)

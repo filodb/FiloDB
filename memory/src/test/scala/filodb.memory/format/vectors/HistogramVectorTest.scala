@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 import org.agrona.concurrent.UnsafeBuffer
 import filodb.memory.format._
-import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta, HistFormat_OtelExp_Delta}
+import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta}
 
 class HistogramVectorTest extends NativeVectorTest {
   import HistogramTest._
@@ -144,35 +144,14 @@ class HistogramVectorTest extends NativeVectorTest {
 
   }
 
-  it("should accept MutableHistograms with otel exp scheme and query them back") {
-    val appender = HistogramVector.appending(memFactory, 1024)
-    val mutHistograms = otelExpHistograms.map(h => MutableHistogram(h.buckets, h.valueArray))
+  it("should accept MutableHistograms with rate doubles that have fractional value with" +
+    " otel exp scheme and query them back") {
+    val mutHistograms = otelExpHistograms.map(h => MutableHistogram(h.buckets, h.valueArray.map(_ + 4.6992d)))
     mutHistograms.foreach { custHist =>
       custHist.serialize(Some(buffer))
-      appender.addData(buffer) shouldEqual Ack
+      val hist2 = BinaryHistogram.BinHistogram(buffer).toHistogram
+      hist2 shouldEqual custHist
     }
-    appender.length shouldEqual mutHistograms.length
-    val reader = appender.reader.asInstanceOf[RowHistogramReader]
-    reader.length shouldEqual mutHistograms.length
-
-    (0 until otelExpHistograms.length).foreach { i =>
-      val h = reader(i)
-      h.buckets shouldEqual otelExpHistograms.head.buckets
-      h shouldEqual mutHistograms(i)
-    }
-  }
-
-  it("Bin Histogram from otel exponential histogram should go through serialize and query cycle correctly") {
-    val appender = HistogramVector.appending(memFactory, 1024)
-    val otelExpBuckets = Base2ExpHistogramBuckets(3, -20, 41)
-    val h = MutableHistogram(otelExpBuckets, Array.fill(42)(1L))
-    h.serialize(Some(buffer))
-    appender.addData(buffer) shouldEqual Ack
-    val mutableHisto = appender.reader.asHistReader.sum(0,0)
-    val binHist = BinHistogram(mutableHisto.serialize())
-    binHist.formatCode shouldEqual HistFormat_OtelExp_Delta
-    val deserHist = binHist.toHistogram
-    deserHist shouldEqual h
   }
 
   it("should optimize histograms and be able to query optimized vectors") {
