@@ -65,6 +65,9 @@ object NibblePack {
   /**
    * Packs Double values using XOR encoding to find minimal # of bits difference between successive values.
    * Initial Double value is written first.
+   *
+   * Unpack bytes compressed with this method using unpackDoubleXOR.method.
+   *
    * @return the final position within the buffer after packing
    */
   final def packDoubles(inputs: Array[Double], buf: MutableDirectBuffer, bufindex: Int): Int = {
@@ -335,6 +338,8 @@ object NibblePack {
 
   /**
    * Generic unpack function which outputs values to a Sink which can process raw 64-bit values from unpack8.
+   * Use when you have compressed bytes using the `packDelta` method.
+   *
    * @param compressed a DirectBuffer wrapping the compressed bytes. Position 0 must be the beginning of the buffer
    *                   to unpack.  NOTE: the passed in DirectBuffer will be mutated to wrap the NEXT bytes that
    *                   can be unpacked.
@@ -349,6 +354,10 @@ object NibblePack {
     res
   }
 
+  /**
+   * Use to unpack bytes that were compressed using the `packDoubles` method.
+   * Do not use for `packDelta` or others.
+   */
   final def unpackDoubleXOR(compressed: DirectBuffer, outArray: Array[Double]): UnpackResult = {
     if (compressed.capacity < 8) {
       InputTooShort

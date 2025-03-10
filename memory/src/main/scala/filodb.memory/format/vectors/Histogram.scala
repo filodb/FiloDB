@@ -301,7 +301,8 @@ object LongHistogram {
 }
 
 /**
- * A histogram class that can be used for aggregation and to represent intermediate values
+ * A histogram class that can be used for aggregation and to represent intermediate values.
+ * MutableHistogram is primarily used in histogram queries, where query results like rate can be double values.
  */
 final case class MutableHistogram(var buckets: HistogramBuckets,
                                   var values: Array[Double]) extends HistogramWithBuckets {
@@ -310,9 +311,11 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
+    // Since MutableHistograms can have rate values, we should use writeDoubles method to serialize and encode data.
+    // FIXME why is Geo minus one using delta encoding ? Possible bug since unpack assumes double encoding.
+    // Not changing right now since outside scope of current PR
     buckets match {
       case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
-      case g: Base2ExpHistogramBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
       case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
     }
     buf
