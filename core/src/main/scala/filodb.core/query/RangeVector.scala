@@ -184,7 +184,7 @@ sealed trait ScalarRangeVector extends SerializableRangeVector {
 final case class ScalarVaryingDouble(val timeValueMap: Map[Long, Double],
                                      override val outputRange: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
-  override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
+  override def rows(): RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
@@ -202,111 +202,62 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
  * Populate the vector from a single row.
  * Let say startMs=10, stepMs=10, endMs=50, RowReader has a double value 5 with a timestamp 100.
  * The result vector would be [10 -> 5, 20 -> 5, 30 -> 5, 40 -> 5, 50->5].
- * @param rangeVectorKey the range vector key.
+ * @param rv the range vector.
  * @param startMs the start timestamp in ms.
  * @param stepMs the step in ms.
  * @param endMs the end timestamp in ms
- * @param rowReader the row read that provide the value.
- * @param schema the schema.
  */
-final class RepeatValueVector(rangeVectorKey: RangeVectorKey,
-                              startMs: Long, stepMs: Long, endMs: Long,
-                              rowReader: Option[RowReader],
-                              schema: RecordSchema) extends SerializableRangeVector with StrictLogging {
-  override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
-  override val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
+final case class RepeatValueVector(rv: RangeVector,
+                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector with StrictLogging {
+  override lazy val outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
+  override lazy val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
-  // This will now be used only during serialization of this vector in protos
-  // This is room for optimization here as we cant instantiate anything under 2048 bytes which is the MinContainerSize
-  def containers: Seq[RecordContainer] = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
-    rowReader.map(builder.addFromReader(_, schema, 0))
-    builder.allContainers.toList
-  }
+  def key: RangeVectorKey = rv.key
 
-  val recordSchema: RecordSchema = schema
 
-  // There is potential for optimization.
-  // The parent transformer does not need to iterate all rows.
-  // It can transform one data because data at all steps are identical. It just need to return a RepeatValueVector.
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
-    // If rowReader is empty, iterate nothing.
-    val it = Iterator.from(0, rowReader.map(_ => stepMs.toInt).getOrElse(1))
-      .takeWhile(_ <= endMs - startMs).map { i =>
-      val rr = rowReader.get
-      val t = i + startMs
-      new RowReader {
-        override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
-        override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
-        override def getInt(columnNo: Int): Int = rr.getInt(columnNo)
-        override def getLong(columnNo: Int): Long = if (columnNo == 0) t else rr.getLong(columnNo)
-        override def getDouble(columnNo: Int): Double = rr.getDouble(columnNo)
-        override def getFloat(columnNo: Int): Float = rr.getFloat(columnNo)
-        override def getString(columnNo: Int): String = rr.getString(columnNo)
-        override def getAny(columnNo: Int): Any = rr.getAny(columnNo)
-        override def getBlobBase(columnNo: Int): Any = rr.getBlobBase(columnNo)
-        override def getBlobOffset(columnNo: Int): Long = rr.getBlobOffset(columnNo)
-        override def getBlobNumBytes(columnNo: Int): Int = rr.getBlobNumBytes(columnNo)
-        override def getHistogram(columnNo: Int): Histogram = rr.getHistogram(columnNo)
-      }
+    val it = Using.resource(rv.rows()) {
+      rows =>
+        if (rows.hasNext) {
+          val rr = rows.next()
+          Iterator.from(0, stepMs.toInt)
+            .takeWhile(_ <= endMs - startMs).map {
+              i => {
+                val t = i + startMs
+                rr match {
+                  case mr: MutableRowReader =>
+                                                mr.setLong(0, t)
+                                                mr
+
+                  case _                    =>
+                    Kamon.counter("non-mutable-row-reader-in-repeat-value-vector")
+                      .withoutTags().increment()
+                    new RowReader {
+                      override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
+                      override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
+                      override def getInt(columnNo: Int): Int = rr.getInt(columnNo)
+                      override def getLong(columnNo: Int): Long = if (columnNo == 0) t else rr.getLong(columnNo)
+                      override def getDouble(columnNo: Int): Double = rr.getDouble(columnNo)
+                      override def getFloat(columnNo: Int): Float = rr.getFloat(columnNo)
+                      override def getString(columnNo: Int): String = rr.getString(columnNo)
+                      override def getAny(columnNo: Int): Any = rr.getAny(columnNo)
+                      override def getBlobBase(columnNo: Int): Any = rr.getBlobBase(columnNo)
+                      override def getBlobOffset(columnNo: Int): Long = rr.getBlobOffset(columnNo)
+                      override def getBlobNumBytes(columnNo: Int): Int = rr.getBlobNumBytes(columnNo)
+                      override def getHistogram(columnNo: Int): Histogram = rr.getHistogram(columnNo)
+                    }
+                }
+
+              }
+            }
+      } else
+        Iterator.empty
     }
-    // address step == 0 case
-    if (startMs == endMs) it.take(1)
-    else it
-  }
-  override def key: RangeVectorKey = rangeVectorKey
-
-  /**
-   * Used to calculate number of samples sent over the wire for limiting resources used by query
-   */
-  override def numRowsSerialized: Int = 1
-
-  /**
-   * Estimates the total size (in bytes) of all rows after serialization.
-   */
-  override def estimateSerializedRowBytes: Long =
-    this.schema.columns.zipWithIndex.map { case (col, idx) =>
-      col.colType match {
-        case DoubleColumn       => SerializableRangeVector.SizeOfDouble
-        case LongColumn         => SerializableRangeVector.SizeOfLong
-        case IntColumn          => SerializableRangeVector.SizeOfInt
-        case StringColumn       => this.rowReader.map(rr => rr.getString(idx).length).getOrElse(0)
-        case TimestampColumn    => SerializableRangeVector.SizeOfLong
-        case BinaryRecordColumn => this.rowReader.map(rr => rr.getBlobNumBytes(idx)).getOrElse(0)
-        // We will take the worst case where histogram has buckets, each bucket has 2 doubles, one for the bucket
-        //  itself and one for the bin count. We will have 4 more columns for sum, total, min and max,
-        case HistogramColumn    => this.rowReader.map(
-                                      rr => rr.getHistogram(idx).numBuckets * SerializableRangeVector.SizeOfDouble * 2
-                                            + SerializableRangeVector.SizeOfDouble * 4).getOrElse(0)
-        case MapColumn          =>
-                                    logger.warn("MapColumn estimate RepeatValueVector not yet supported")
-                                    0 // Not supported yet
-      }
-    }.sum
-}
-
-object RepeatValueVector extends StrictLogging {
-  import filodb.core._
-  def apply(rv: RangeVector,
-            startMs: Long, stepMs: Long, endMs: Long,
-            schema: RecordSchema,
-            execPlan: String,
-            queryStats: QueryStats): RepeatValueVector = {
-    val startNs = Utils.currentThreadCpuTimeNanos
-    try {
-      ChunkMap.validateNoSharedLocks(execPlan)
-      Using.resource(rv.rows()){
-        rows =>
-          val nextRow = if (rows.hasNext) Some(rows.next()) else None
-          new RepeatValueVector(rv.key, startMs, stepMs, endMs, nextRow, schema)
-      }
-    } finally {
-      ChunkMap.releaseAllSharedLocks()
-      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
-    }
+    if (startMs == endMs) it.take(1) else it
   }
 }
+
 
 sealed trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
