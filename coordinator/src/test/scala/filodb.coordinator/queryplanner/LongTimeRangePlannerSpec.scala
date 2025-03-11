@@ -263,14 +263,41 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
   }
 
-  it("should direct raw-data queries to both raw planner only irrespective of time length") {
+  it("should direct instant raw-data queries with lookback to raw cluster when only need raw data"){
+    val start = now/1000
+    val step = 1.second.toSeconds
 
-    Seq(5, 10, 20).foreach { t =>
-      val logicalPlan = Parser.queryToLogicalPlan(s"foo[${t}m]", now, 1000)
-      val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
-      ep.name shouldEqual "raw"
-      ep.lp shouldEqual logicalPlan
-    }
+    // raw retention is 10m
+    val logicalPlan = Parser.queryToLogicalPlan("foo[9m]", start, step)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
+
+    val logicalPlan2 = Parser.queryToLogicalPlan("foo[4m] offset 5m", start, step)
+    val ep2 = longTermPlanner.materialize(logicalPlan2, QueryContext()).asInstanceOf[MockExecPlan]
+    ep2.name shouldEqual "raw"
+    ep2.lp shouldEqual logicalPlan2
+  }
+
+  it("should direct instant raw-data queries with lookback to downSample cluster when range is over raw retention"){
+    val start = now/1000
+    val step = 1.second.toSeconds
+
+    // raw retention is 10m
+    val logicalPlan = Parser.queryToLogicalPlan("foo[10m]", start, step)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+
+    val logicalPlan2 = Parser.queryToLogicalPlan("foo[10m] offset 5m", start, step)
+    val ep2 = longTermPlanner.materialize(logicalPlan2, QueryContext()).asInstanceOf[MockExecPlan]
+    ep2.name shouldEqual "downsample"
+    ep2.lp shouldEqual logicalPlan2
+
+    val logicalPlan3 = Parser.queryToLogicalPlan("foo[10m] offset 20m", start, step)
+    val ep3= longTermPlanner.materialize(logicalPlan3, QueryContext()).asInstanceOf[MockExecPlan]
+    ep3.name shouldEqual "downsample"
+    ep3.lp shouldEqual logicalPlan3
   }
 
   it("should direct raw-cluster-only queries to raw planner for scalar vector queries") {
