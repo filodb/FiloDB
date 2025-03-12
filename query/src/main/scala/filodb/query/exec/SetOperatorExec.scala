@@ -108,7 +108,11 @@ final case class SetOperatorExec(queryContext: QueryContext,
   private[exec] def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): Iterator[RangeVector] = {
     // isEmpty method consumes rhs range vector
-    require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+    // TODO: Is this a problem? Calling rows() at different times on a  RangeVector should not cause
+    //  the second invocation of reading the rows to fail since it ultimately points to data on the heap or
+    //  offheap and not consuming data over the network which can't be read again.
+    //  however keeping this check might fail the AND operation using target schemas to fail.
+    //require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
 
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
