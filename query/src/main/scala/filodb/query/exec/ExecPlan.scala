@@ -45,7 +45,7 @@ final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSch
   */
 trait ExecPlan extends QueryCommand {
 
-  val planId = UUID.randomUUID().toString
+  val planId: String = UUID.randomUUID().toString
   /**
     * Query Processing parameters
     */
@@ -448,8 +448,9 @@ trait ExecPlan extends QueryCommand {
         val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
-            case srvable: SerializableRangeVector => srvable
-            case rv: RangeVector =>
+            case srv: SerializableRangeVector                => srv
+            case rv: RangeVector  if this.dispatcher.isLocalCall => rv
+            case rv: RangeVector                                 =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
@@ -458,17 +459,22 @@ trait ExecPlan extends QueryCommand {
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
               srv
           }
-          .map { srv =>
+          .map {
+            case srv: SerializedRangeVector =>
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              numResultSamples += srv.numRowsSerialized
-              checkSamplesLimit(numResultSamples, querySession.warnings)
-              val srvBytes = srv.estimatedSerializedBytes
-              resultSize += srvBytes
-              querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
-              checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
-              srv
+                  numResultSamples += srv.numRowsSerialized
+                  checkSamplesLimit(numResultSamples, querySession.warnings)
+                  val srvBytes = srv.estimatedSerializedBytes
+                  resultSize += srvBytes
+                  querySession.queryStats.getResultBytesCounter(Nil).addAndGet(srvBytes)
+                  checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
+                  srv
+            case rv: RangeVector           => rv
           }
-          .filter(_.numRowsSerialized > 0)
+          .filter {
+            case srv: SerializedRangeVector   => srv.numRowsSerialized > 0
+            case _                                  => true
+          }
           .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
