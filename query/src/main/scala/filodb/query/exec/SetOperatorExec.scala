@@ -112,6 +112,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     //  the second invocation of reading the rows to fail since it ultimately points to data on the heap or
     //  offheap and not consuming data over the network which can't be read again.
     //  however keeping this check might fail the AND operation using target schemas to fail.
+    //  This will however fail for IteratorBackedRangeVector where we will consume the rows, do we
+    //  selectively check for this case and created a SRV in that case?
     //require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
 
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()

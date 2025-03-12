@@ -121,7 +121,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       case e: QueryError => throw e.t
       case r: QueryResult =>
         r.result.size shouldEqual 1
-        r.result.head.numRows shouldEqual Some(numRawSamples)
+        r.result.head.rows().length shouldEqual numRawSamples
     }
   }
 
@@ -151,8 +151,9 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       case r: QueryResult =>
         r.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
         r.result.size shouldEqual 1
-        r.result.head.numRows shouldEqual Some(numRawSamples)
+        r.result.head.rows().length shouldEqual numRawSamples
     }
+
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan1))
@@ -164,7 +165,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       case r: QueryResult =>
         r.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
         r.result.size shouldEqual 1
-        r.result.head.numRows shouldEqual Some(numRawSamples)
+        r.result.head.rows().length shouldEqual numRawSamples
     }
 
     // Two children none of which returns data
@@ -219,7 +220,7 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
 
   override def clusterName: String = ???
 
-  override def isLocalCall: Boolean = ???
+  override def isLocalCall: Boolean = true
   override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                  source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     plan.execPlan.executeStreaming(memStore, querySession)

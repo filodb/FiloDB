@@ -445,11 +445,13 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         @volatile var resultSize = 0L
-        val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
+        lazy val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srv: SerializableRangeVector                => srv
-            case rv: RangeVector  if this.dispatcher.isLocalCall => rv
+            case rv: RangeVector  if !this.isInstanceOf[MetadataExecPlan] && this.dispatcher.isLocalCall => {
+              rv
+            }
             case rv: RangeVector                                 =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
@@ -877,3 +879,5 @@ abstract class NonLeafExecPlan extends ExecPlan {
 // deadline is set to QueryContext.plannerParams.queryTimeoutMillis for the top level call
 case class ClientParams(deadlineMs: Long)
 case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams)
+
+trait MetadataLeafExecPlan extends  LeafExecPlan with MetadataExecPlan

@@ -42,7 +42,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     override def clusterName: String = ???
 
-    override def isLocalCall: Boolean = ???
+    override def isLocalCall: Boolean = true
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                    source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???

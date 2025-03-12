@@ -118,14 +118,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     override def clusterName: String = ???
 
-    override def isLocalCall: Boolean = ???
+    override def isLocalCall: Boolean = true
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                    source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val executeDispatcher = new PlanDispatcher {
-    override def isLocalCall: Boolean = ???
+    override def isLocalCall: Boolean = true
     override def clusterName: String = ???
     override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {

@@ -1,15 +1,18 @@
 package filodb.query.exec
 
 import com.typesafe.config.ConfigFactory
+
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.DatasetRef
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PerQueryLimits, PlannerParams, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PerQueryLimits, PlannerParams, QueryConfig, QueryContext,
+  QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.vectors.{GeometricBuckets, HistogramBuckets, LongHistogram}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
-import filodb.query.{BinaryOperator, QueryError, QueryResult}
+import filodb.query.{BinaryOperator, QueryError, QueryResponse, QueryResult, StreamQueryResponse}
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -34,7 +37,18 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override protected def args: String = ???
       override def queryContext: QueryContext = qContext
       override def dataset: DatasetRef = ???
-      override def dispatcher: PlanDispatcher = ???
+      override def dispatcher: PlanDispatcher = new PlanDispatcher {
+        override def clusterName: String = ???
+
+        override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+                             (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+        override def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
+                                      (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
+
+        // Force serialization by making this false, in case of true, no such filtering is performed
+        override def isLocalCall: Boolean = false
+      }
       override def doExecute(source: ChunkSource,
                              querySession: QuerySession)(implicit sched: Scheduler): ExecResult = {
         ExecResult(Observable.fromIterable(rvs), Task.now(schema))
@@ -89,8 +103,15 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     )
 
     rvSchemaPairs.foreach { case (rv, schema) =>
-      makeFixedLeafExecPlan(Seq(rv), schema).execute(memStore, querySession)
-        .runToFuture.futureValue.asInstanceOf[QueryResult].result.isEmpty shouldEqual true
+      val res = makeFixedLeafExecPlan(Seq(rv), schema).execute(memStore, querySession).runToFuture.futureValue
+      res match {
+        case QueryError(id, queryStats, t) => {
+          t.printStackTrace()
+          fail()
+        }
+        case QueryResult(_, _, result, _, _, _, _) => result.isEmpty shouldEqual true
+
+      }
     }
   }
 
