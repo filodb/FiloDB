@@ -71,7 +71,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
         val results: Iterator[RangeVector] = binaryOp match {
           case LAND => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
-            setOpAnd(lhsRvs, rhsRvs, rhsSchema)
+            setOpAnd(lhsRvs, rhsRvs, rhsSchema, querySession)
           case LOR => setOpOr(lhsRvs, rhsRvs)
           case LUnless => setOpUnless(lhsRvs, rhsRvs)
           case _ => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
@@ -106,22 +106,23 @@ final case class SetOperatorExec(queryContext: QueryContext,
    */
   // scalastyle:off method.length
   private[exec] def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
-                       rhsSchema: ResultSchema): Iterator[RangeVector] = {
-    // isEmpty method consumes rhs range vector
-    // TODO: Is this a problem? Calling rows() at different times on a  RangeVector should not cause
-    //  the second invocation of reading the rows to fail since it ultimately points to data on the heap or
-    //  offheap and not consuming data over the network which can't be read again.
-    //  however keeping this check might fail the AND operation using target schemas to fail.
-    //  This will however fail for IteratorBackedRangeVector where we will consume the rows, do we
-    //  selectively check for this case and created a SRV in that case?
-    //require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+                       rhsSchema: ResultSchema, querySession: QuerySession): Iterator[RangeVector] = {
+
+    lazy val builder = SerializedRangeVector.newBuilder()
+    lazy val recSchema = SerializedRangeVector.toSchema(rhsSchema.columns, rhsSchema.brSchemas)
+    lazy val execPlanName = queryWithPlanName(queryContext)
+    val mappedRhsRvs = rhsRvs.map {
+      case srv: SerializedRangeVector  => srv
+      case rv: RangeVector               => SerializedRangeVector.apply(rv, builder,
+                                            recSchema, execPlanName, querySession.queryStats)
+    }
 
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
 
     val period = lhsRvs.headOption.flatMap(_.outputRange)
 
-    rhsRvs.foreach { rv =>
+    mappedRhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it contains no rows
       // TODO: isEmpty is expensive and iterates all the rows, we need a performant implementation, we may very well not

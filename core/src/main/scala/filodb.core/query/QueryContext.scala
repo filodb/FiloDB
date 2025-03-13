@@ -197,7 +197,8 @@ case class PlannerParams(applicationId: String = "filodb",
                          buddyGrpcEndpoint: Option[String] = None,
                          buddyGrpcTimeoutMs: Option[Long] = None,
                          localShardMapper: Option[ActiveShardMapper] = None,
-                         buddyShardMapper: Option[ActiveShardMapper] = None
+                         buddyShardMapper: Option[ActiveShardMapper] = None,
+                         enableLocalDispatch: Boolean = false
                         )
 
 object PlannerParams {
@@ -338,8 +339,11 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        streamingDispatch: Boolean = false, // TODO needs to be removed after streaming becomes stable
-                        catchMultipleLockSetErrors: Boolean = false) {
+                        streamingDispatch: Boolean = false,
+                        catchMultipleLockSetErrors: Boolean = false,
+                        // in case of target schemas, when the child Exec plan is run, if the
+                        //  the execution happens locally and thus no serialization is necessary
+                        preventRangeVectorSerialization: Boolean = false) {
 
   val queryStats: QueryStats = QueryStats()
   val warnings: QueryWarnings = QueryWarnings()
