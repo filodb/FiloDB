@@ -1558,7 +1558,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((100, Double.NaN), (110, 1.0), (120, Double.NaN)))
     ))
 
-    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema, querySession)
+      .map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
     map.size shouldBe 1
     map.get(Map("label1".utf8 -> "value1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0, Double.NaN), (10, 1.0), (20,Double.NaN)))
@@ -1581,7 +1582,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, Double.NaN), (20, 2.0), (30, 3.0))),
     ))
 
-    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema, querySession)
+      .map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
     map.size shouldBe 3
     // Since on is give, all RVs with empty join keys will be present in the results
     map.get(Map("label1".utf8 -> "value1".utf8)) match {
@@ -1616,7 +1618,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, Double.NaN), (20, 2.0), (30, 3.0))),
     ))
 
-    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema, querySession)
+      .map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
     map.size shouldBe 3
     // Since on is give, all RVs with empty join keys will be present in the results
     map.get(Map("label1".utf8 -> "value1".utf8)) match {
