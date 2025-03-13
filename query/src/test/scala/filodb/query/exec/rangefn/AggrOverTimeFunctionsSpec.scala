@@ -347,6 +347,57 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly identify outliers with mad using sliding iterators for all three boundsCheck settings") {
+    val data = (0 until 200).map { i =>
+      if ((i+1) % 40 == 0) -2.3d
+      else if ((i+1) % 20 == 0) 2.3d
+      else rand.nextDouble()
+    }
+    val rv = timeValueRV(data)
+    val rangeParams = RangeParams(100, 20, 500)
+    val windowSize = 20
+    val step = 5
+
+    // only lower bounds
+    val lowerAnomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last < 0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt3 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(0.0, rangeParams))), windowSize, step)
+    val result3 = minSlidingIt3.map(_.getDouble(1)).toBuffer
+    minSlidingIt3.close()
+    result3.zip(lowerAnomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+
+    // both upper and lower bounds
+    val allAnomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last > 1.0 || k.last < 0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt1 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(1.0, rangeParams))), windowSize, step)
+    val result1 = minSlidingIt1.map(_.getDouble(1)).toBuffer
+    minSlidingIt1.close()
+    result1.zip(allAnomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+
+    // only upper bounds
+    val upperAnomalies = data.sliding(windowSize, step).map { k =>
+      if (k.last > 1.0) k.last else Double.NaN
+    }.toBuffer
+
+    val minSlidingIt2 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(2.0, rangeParams))), windowSize, step)
+    val result2 = minSlidingIt2.map(_.getDouble(1)).toBuffer
+    minSlidingIt2.close()
+    result2.zip(upperAnomalies).foreach { case (r, a) =>
+      if (a.isNaN) r.isNaN shouldEqual true
+      else r shouldEqual a
+    }
+  }
+
   it("should correctly aggregate min_over_time / max_over_time using both chunked and sliding iterators") {
     val data = (1 to 240).map(_.toDouble)
     val chunkSize = 40

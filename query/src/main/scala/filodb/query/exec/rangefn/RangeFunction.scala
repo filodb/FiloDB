@@ -310,7 +310,7 @@ object RangeFunction {
       case Some(CountOverTime)                    => () => new CountOverTimeChunkedFunction()
       case Some(SumOverTime)                      => () => new SumOverTimeChunkedFunctionL
       case Some(AvgWithSumAndCountOverTime)       => require(schema.columns(2).name == "count")
-                                   () => new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
+                                                     () => new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
       case Some(AvgOverTime)                      => () => new AvgOverTimeChunkedFunctionL
       case Some(MinOverTime)                      => () => new MinOverTimeChunkedFunctionL
       case Some(MaxOverTime)                      => () => new MaxOverTimeChunkedFunctionL
@@ -431,7 +431,8 @@ object RangeFunction {
     case Some(Changes)                          => () => ChangesOverTimeFunction
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
-    case _                            => ??? //TODO enumerate all possible cases
+    case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+    case _                                      => ??? //TODO enumerate all possible cases
   }
 }
 

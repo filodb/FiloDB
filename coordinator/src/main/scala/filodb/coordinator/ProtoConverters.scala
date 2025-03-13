@@ -996,6 +996,7 @@ object ProtoConverters {
         case InternalRangeFunction.AbsentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME
         case InternalRangeFunction.PresentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME
         case InternalRangeFunction.MedianAbsoluteDeviationOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME
+        case InternalRangeFunction.LastOverTimeIsMadOutlier => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_OVER_TIME_IS_MAD_OUTLIER
       }
       function
     }
@@ -1034,6 +1035,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME => InternalRangeFunction.AbsentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME => InternalRangeFunction.PresentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME => InternalRangeFunction.MedianAbsoluteDeviationOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_OVER_TIME_IS_MAD_OUTLIER => InternalRangeFunction.LastOverTimeIsMadOutlier
         case GrpcMultiPartitionQueryService.InternalRangeFunction.UNRECOGNIZED =>
           throw new IllegalArgumentException(s"Unrecognized InternalRangeFunction ${f}")
       }
