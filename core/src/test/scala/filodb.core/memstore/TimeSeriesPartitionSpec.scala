@@ -2,12 +2,14 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
