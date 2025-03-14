@@ -20,6 +20,9 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
                              val queryConfig: QueryConfig)
   extends QueryPlanner with DefaultPlanner {
 
+  var topLevelPlanner: Option[QueryPlanner] = None
+  def childPlanners(): Seq[QueryPlanner] = planners.values.toSeq
+
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 

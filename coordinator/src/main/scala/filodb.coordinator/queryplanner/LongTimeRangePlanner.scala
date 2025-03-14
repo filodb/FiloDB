@@ -38,6 +38,8 @@ import filodb.query.exec._
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(rawClusterPlanner, downsampleClusterPlanner)
+  var topLevelPlanner: Option[QueryPlanner] = None
 
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
     val execPlan = if (!periodicSeriesPlan.isRoutable)

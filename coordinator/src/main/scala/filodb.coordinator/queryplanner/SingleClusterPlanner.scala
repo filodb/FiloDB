@@ -65,7 +65,8 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
-
+  var topLevelPlanner: Option[QueryPlanner] = None
+  def childPlanners(): Seq[QueryPlanner] = Nil
   private val shardPushdownCache: Option[Cache[(LogicalPlan, Option[Seq[Int]]), Option[Set[Int]]]] =
       if (queryConfig.cachingConfig.singleClusterPlannerCachingEnabled) {
         Some(

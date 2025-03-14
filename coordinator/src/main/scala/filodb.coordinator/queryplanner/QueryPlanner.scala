@@ -56,4 +56,6 @@ trait QueryPlanner {
     }
   }
 
+  def childPlanners(): Seq[QueryPlanner]
+
 }
