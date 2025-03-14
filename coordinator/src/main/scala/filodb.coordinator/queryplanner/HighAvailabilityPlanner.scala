@@ -52,6 +52,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import QueryFailureRoutingStrategy._
   import LogicalPlan._
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(localPlanner)
+
   // legacy failover counter captures failovers when we send a PromQL to the buddy
   // cluster
   val legacyFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)

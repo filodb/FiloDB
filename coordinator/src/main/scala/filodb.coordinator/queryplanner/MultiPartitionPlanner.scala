@@ -64,6 +64,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
+  var topLevelPlanner: Option[QueryPlanner] = None
+
+  def childPlanners(): Seq[QueryPlanner] = Seq(localPartitionPlanner)
+
   val plannerSelector: String = queryConfig.plannerSelector
     .getOrElse(throw new IllegalArgumentException("plannerSelector is mandatory"))
 

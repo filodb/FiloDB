@@ -36,10 +36,34 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) {
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(queryPlanner)
+  var topLevelPlanner: Option[QueryPlanner] = None
+  setTopLevelPlanner()
+
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
   private val datasetMetricColumn = dataset.options.metricColumn
+
+
+  private def setTopLevelPlanner(): Unit = {
+    val tp = Some(this)
+    val q = mutable.Queue[QueryPlanner]()
+    q.enqueue(this)
+    while (q.nonEmpty) {
+      val p = q.dequeue()
+      p match {
+        case p: SingleClusterPlanner => p.topLevelPlanner = tp
+        case p: MultiPartitionPlanner => p.topLevelPlanner = tp
+        case p: ShardKeyRegexPlanner => p.topLevelPlanner = tp
+        case p: SinglePartitionPlanner => p.topLevelPlanner = tp
+        case p: LongTimeRangePlanner => p.topLevelPlanner = tp
+        case p: HighAvailabilityPlanner => // no op
+        case _ => throw new IllegalStateException(s"Unknown planner type ${p.getClass}")
+      }
+      p.childPlanners().foreach(c => q.enqueue(c))
+    }
+  }
 
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
     qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
