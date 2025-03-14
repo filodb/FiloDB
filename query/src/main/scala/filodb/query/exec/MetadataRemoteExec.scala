@@ -18,7 +18,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
                               remoteExecHttpClient: RemoteExecHttpClient,
-                              config: QueryConfig) extends RemoteExec {
+                              config: QueryConfig) extends RemoteExec with MetadataLeafExecPlan {
 
   private val lvColumns = Seq(ColumnInfo("metadataMap", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(lvColumns, 1)
