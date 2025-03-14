@@ -2,19 +2,18 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{RowReader, TupleRowReader, UnsafeUtils}
+
 import java.util.concurrent.atomic.AtomicLong
 
 object TimeSeriesPartitionSpec {
@@ -656,4 +655,23 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     val data1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0)).toBuffer
     data1 shouldEqual (minData take 10)
   }
+
+  it("should return the current Chunk if the TimeRangeScan falls in current chunk") {
+    part = tracingPart(0, dataset1)
+    val data = singleSeriesReaders().take(11)
+    val minData = data.map(_.getDouble(1))
+    val initTS = data(0).getLong(0)
+    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(0, r, ingestBlockHolder,
+      flushIntervalMillis = flushIntervalMillis,
+      acceptDuplicateSamples = acceptDuplicateSamples,
+      createChunkAtFlushBoundary = timeAlignedChunksEnabled)
+    }
+    val infos = part.infos(TimeRangeChunkScan(initTS, initTS + 100000000))
+    assert(!infos.isInstanceOf[FilteredChunkInfoIterator])
+    val data1 = part.timeRangeRows(TimeRangeChunkScan(initTS, initTS + 100000000), Array(1))
+      .map(_.getDouble(0)).toBuffer
+    data1 shouldEqual minData.take(10)
+  }
+
+
 }
