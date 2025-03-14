@@ -336,10 +336,12 @@ extends ChunkMap(initMapSize) with ReadablePartition {
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
     case AllChunkScan        => allInfos
     case InMemoryChunkScan   => allInfos
-    case r: TimeRangeChunkScan => if (currentInfo != nullInfo
+    case r: TimeRangeChunkScan =>
+                                     if (currentInfo != nullInfo
                                       && r.startTime <= r.endTime
                                       && currentInfo.startTime <= r.startTime) {
                                      try {
+                                        chunkmapAcquireShared()
                                         new OneChunkInfo(currentInfo)
                                      } catch {
                                         case e: Throwable => chunkmapReleaseShared(); throw e;
