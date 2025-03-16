@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 
 import kamon.Kamon
@@ -10,6 +11,7 @@ import monix.reactive.Observable
 import filodb.core.query.QueryContext
 import filodb.query.{LogicalPlan, QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
+
 
 /**
   * Abstraction for Query Planning. QueryPlanners can be composed using decorator pattern to add capabilities.
@@ -56,6 +58,30 @@ trait QueryPlanner {
     }
   }
 
+  /**
+   * Returns the child planners of this planner.
+   */
   def childPlanners(): Seq[QueryPlanner]
+
+  /**
+   * Returns the root planner of the planner tree. Root planner is needed to plan subqueries from the leaf planners.
+   */
+  def getRootPlanner(): Option[QueryPlanner]
+
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit
+
+  /**
+   * Uses Depth first traversal to initialize the root planner in the planner tree.
+   * Must call on the root planner once the planner tree is constructed.
+   */
+  def initRootPlanner(): Unit = {
+    val q = mutable.Queue[QueryPlanner]()
+    q.enqueue(this)
+    while (q.nonEmpty) {
+      val p = q.dequeue()
+      p.setRootPlanner(this)
+      p.childPlanners().foreach(c => q.enqueue(c))
+    }
+  }
 
 }

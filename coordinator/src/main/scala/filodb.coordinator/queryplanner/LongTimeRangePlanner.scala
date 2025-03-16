@@ -39,7 +39,12 @@ import filodb.query.exec._
   override val dsOptions: DatasetOptions = schemas.part.options
 
   def childPlanners(): Seq[QueryPlanner] = Seq(rawClusterPlanner, downsampleClusterPlanner)
-  var topLevelPlanner: Option[QueryPlanner] = None
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
 
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
     val execPlan = if (!periodicSeriesPlan.isRoutable)
@@ -120,9 +125,11 @@ import filodb.query.exec._
       // a long lookback only if the last lookback window overlaps with earliestRawTime, however, we
       // should check for ANY interval overalapping earliestRawTime. We
       // can happen with ANY lookback interval, not just the last one.
+    } else if (LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)) {
+      throw new IllegalStateException("After this fix, we should not see subqueries" +
+        " in LongTimeRangePlanner. This is a bug. Please report.")
     } else if (
-      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
-        LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+      endWithOffsetMs - lookbackMs < earliestRawTime //TODO lookbacks can overlap in the middle intervals too
     ) {
       // For subqueries and long lookback queries, we keep things simple by routing to
       // downsample cluster since dealing with lookback windows across raw/downsample
@@ -316,8 +323,12 @@ import filodb.query.exec._
       case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: SubqueryWithWindowing       => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
+      case lp: SubqueryWithWindowing       => throw new IllegalStateException("After this fix, we should not see " +
+                                                "subqueries in LongTimeRangePlanner. This is a bug. Please report.")
+                                              // materializePeriodicSeriesPlan(qContext, lp)
+      case lp: TopLevelSubquery            => throw new IllegalStateException("After this fix, we should not see " +
+                                                "subqueries in LongTimeRangePlanner. This is a bug. Please report.")
+                                              // super.materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
       case lp: LabelCardinality            => materializeLabelCardinalityPlan(lp, qContext)
@@ -326,6 +337,7 @@ import filodb.query.exec._
   }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 }
