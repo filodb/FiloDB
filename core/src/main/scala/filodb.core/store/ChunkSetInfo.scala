@@ -276,8 +276,9 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
   /**
    * Returns a new ChunkInfoIterator which filters items from this iterator
    */
-  def filter(func: ChunkSetInfo => Boolean): ChunkInfoIterator =
+  def filter(func: ChunkSetInfoToBooleanFunction): ChunkInfoIterator = {
     new FilteredChunkInfoIterator(this, func)
+  }
 
   /**
    * Returns a regular Scala Iterator, transforming each ChunkSetInfo into an item of type B
@@ -377,8 +378,19 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
   override def unlock(): Unit = base.unlock()
 }
 
+/**
+ * This trait exists to avoid the allocation incurred by when FilteredChunkInfoIterator
+ * uses `ChunkSetInfo => Boolean` as an argument to `filter` in the constructor.
+ * The apply method on this argument causes an allocation on the ChunkSetInfo value class, and is
+ * incurred for every chunkSetInfo loaded by query. Doing it this way avoids that allocation entirely.
+ */
+trait ChunkSetInfoToBooleanFunction {
+  def apply(info: ChunkSetInfo): Boolean
+}
+
 class FilteredChunkInfoIterator(base: ChunkInfoIterator,
-                                filter: ChunkSetInfo => Boolean,
+                                // use this trait instead of `ChunkSetInfo => Boolean` to avoid allocation
+                                filter: ChunkSetInfoToBooleanFunction,
                                 // Move vars here for better performance -- no init field
                                 var nextnext: ChunkSetInfo = ChunkSetInfo(0),
                                 var gotNext: Boolean = false) extends ChunkInfoIterator {
@@ -390,7 +402,7 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
     try {
       while (base.hasNext && !gotNext) {
         nextnext = base.nextInfo
-        if (filter(nextnext)) gotNext = true
+        if (filter.apply(nextnext)) gotNext = true
       }
       gotNext
     } catch {
