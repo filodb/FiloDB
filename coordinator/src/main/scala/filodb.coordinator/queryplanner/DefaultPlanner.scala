@@ -1,6 +1,5 @@
 package filodb.coordinator.queryplanner
 
-
 import java.util.concurrent.ThreadLocalRandom
 
 import akka.serialization.SerializationExtension
@@ -27,8 +26,7 @@ import filodb.query.exec.InternalRangeFunction.Last
   */
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
-trait  DefaultPlanner {
-  def topLevelPlanner: Option[QueryPlanner]
+trait  DefaultPlanner extends QueryPlanner {
   def queryConfig: QueryConfig
   def dataset: Dataset
   def schemas: Schemas
@@ -51,9 +49,6 @@ trait  DefaultPlanner {
       case x@_ => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
     }
   }
-
-  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
-
 
   def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
                               qContext: QueryContext): Seq[FuncArgs] = functionParams map {
@@ -447,7 +442,7 @@ trait  DefaultPlanner {
     // different from start/end of the inner logical plan. This is rather confusing, the intent, however, was to keep
     // query context "original" without modification, so, as to capture the original intent of the user. This, however,
     // does not hold true across the entire code base, there are a number of place where we modify query context.
-    val innerExecPlan = topLevelPlanner.get.materialize(sqww.innerPeriodicSeries, qContext)
+    val innerExecPlan = getRootPlanner().get.materialize(sqww.innerPeriodicSeries, qContext)
     if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
       val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
@@ -532,7 +527,7 @@ trait  DefaultPlanner {
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    PlanResult(Seq(topLevelPlanner.get.materialize(tlsq.innerPeriodicSeries, qContext)))
+    PlanResult(Seq(getRootPlanner().get.materialize(tlsq.innerPeriodicSeries, qContext)))
   }
 
   def materializeScalarTimeBased(qContext: QueryContext,

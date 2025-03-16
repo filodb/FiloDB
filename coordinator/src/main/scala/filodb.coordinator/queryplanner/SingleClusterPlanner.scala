@@ -65,8 +65,14 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
-  var topLevelPlanner: Option[QueryPlanner] = None
   def childPlanners(): Seq[QueryPlanner] = Nil
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
+
   private val shardPushdownCache: Option[Cache[(LogicalPlan, Option[Seq[Int]]), Option[Set[Int]]]] =
       if (queryConfig.cachingConfig.singleClusterPlannerCachingEnabled) {
         Some(
@@ -306,6 +312,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     val plannerParams = qContext.plannerParams
     val updatedPlan = updateStartTime(logicalPlan)
     if (updatedPlan.isEmpty) EmptyResultExec(qContext, dsRef, inProcessPlanDispatcher)
