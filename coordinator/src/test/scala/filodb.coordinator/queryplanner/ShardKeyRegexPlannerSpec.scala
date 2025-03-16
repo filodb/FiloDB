@@ -209,14 +209,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1164028639],raw)""".stripMargin
 
     validatePlan(execPlan, expected)
-
-
-//    execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
-//    execPlan.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-//    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-//      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
-//    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-//      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
   it("should generate Exec plan for top level subquery") {

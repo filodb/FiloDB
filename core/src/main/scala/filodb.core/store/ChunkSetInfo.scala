@@ -55,12 +55,6 @@ object ChunkSet {
   }
 }
 
-object NotValueClass {
-  val inst = Array(NotValueClass(0), NotValueClass(1))
-}
-
-final case class NotValueClass(val value: Long) extends AnyVal
-
 /**
   * Records metadata about a chunk set, including its time range.  Is always offheap.
   */
