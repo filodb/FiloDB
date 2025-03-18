@@ -64,6 +64,14 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(localPartitionPlanner)
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
+
   val plannerSelector: String = queryConfig.plannerSelector
     .getOrElse(throw new IllegalArgumentException("plannerSelector is mandatory"))
 
@@ -96,6 +104,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       //       plannerHelper.materializeX(x)
       //    }
       // }
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     val tsdbQueryParams = qContext.origQueryParams
 
     if(

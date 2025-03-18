@@ -20,11 +20,21 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
                              val queryConfig: QueryConfig)
   extends QueryPlanner with DefaultPlanner {
 
+  def childPlanners(): Seq[QueryPlanner] = planners.values.toSeq
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
+
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
-  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan =
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
+  }
 
   /**
     * Returns planner for first metric in logical plan
