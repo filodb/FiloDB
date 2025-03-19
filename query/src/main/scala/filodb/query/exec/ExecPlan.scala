@@ -693,10 +693,16 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
+    // Prevent serialization if one of the two conditions happen
+    // 1. The querySession already has the preventRangeVectorSerialization set to true
+    // 2. If the dispatcher is an inProcessDispatcher and the config has enabled this feature
+    val preventRangeVectorSerialization = qSession.preventRangeVectorSerialization ||
+                                          (dispatcher.isLocalCall
+                                              && qSession.qContext.plannerParams.enableLocalDispatch)
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000
-        , qSession.preventRangeVectorSerialization)), source)
+        , preventRangeVectorSerialization)), source)
           .onErrorHandle { ex: Throwable =>
             QueryError(queryContext.queryId, qSession.queryStats, ex)
           }
