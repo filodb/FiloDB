@@ -215,6 +215,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 // do not notify listener as the map operation will be updating the state
                                 indexRefresh(endHour, startHour, periodicRefresh = false)
       case None             => // No checkpoint time found, start refresh from scratch
+                                // Clean the index directory  first to ensure we are starting from scratch
+                                partKeyIndex.cleanIndexDirectory()
                                 val parallelism = Math.round(downsampleConfig.indexRebuildParallelismMultiplier *
                                                     Runtime.getRuntime.availableProcessors()).toInt.max(1)
                                 logger.info("Rebuilding index with parallelism {}", parallelism)
