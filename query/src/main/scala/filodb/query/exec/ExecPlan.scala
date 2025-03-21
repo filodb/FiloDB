@@ -698,7 +698,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // 2. If the dispatcher is an inProcessDispatcher and the config has enabled this feature
     val preventRangeVectorSerialization = qSession.preventRangeVectorSerialization ||
                                           (dispatcher.isLocalCall
-                                              && qSession.qContext.plannerParams.enableLocalDispatch)
+                                              && qSession.queryConfig.enableLocalDispatch)
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000
@@ -757,7 +757,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                             querySession: QuerySession, span: Span, parallelism: Int)
                                            (implicit sched: Scheduler)= {
     val qs = if (
-        this.queryContext.plannerParams.enableLocalDispatch &&
+      querySession.queryConfig.enableLocalDispatch &&
       !this.isInstanceOf[MetadataExecPlan] && this.dispatcher.isLocalCall) {
       querySession.copy(preventRangeVectorSerialization = true)
     } else {
@@ -814,7 +814,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     var sch = ResultSchema.empty
-    val qs = if (this.queryContext.plannerParams.enableLocalDispatch &&
+    val qs = if (querySession.queryConfig.enableLocalDispatch &&
       !this.isInstanceOf[MetadataExecPlan] && this.dispatcher.isLocalCall) {
       querySession.copy(preventRangeVectorSerialization = true)
     } else {

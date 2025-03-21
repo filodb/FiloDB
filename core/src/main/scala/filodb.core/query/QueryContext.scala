@@ -197,8 +197,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          buddyGrpcEndpoint: Option[String] = None,
                          buddyGrpcTimeoutMs: Option[Long] = None,
                          localShardMapper: Option[ActiveShardMapper] = None,
-                         buddyShardMapper: Option[ActiveShardMapper] = None,
-                         enableLocalDispatch: Boolean = false
+                         buddyShardMapper: Option[ActiveShardMapper] = None
                         )
 
 object PlannerParams {

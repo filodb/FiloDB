@@ -368,10 +368,10 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     // serialize the range vectors
 
     // Start by enabling the feature in planner params
-    val plannerParams = querySession.qContext.plannerParams.copy(enableLocalDispatch=true)
+    val qConfig = querySession.queryConfig.copy(enableLocalDispatch=true)
     // The root is expected to be serialized but the leaves are not
     val qs = querySession.copy(
-          qContext = querySession.qContext.copy(plannerParams = plannerParams),
+          queryConfig = qConfig,
           preventRangeVectorSerialization = false)
     val lhs2 = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
       doExecuteParamAssertion = (_, qs) => qs.preventRangeVectorSerialization)::Nil

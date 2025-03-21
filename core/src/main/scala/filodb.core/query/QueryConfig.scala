@@ -112,4 +112,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        plannerSelector: Option[String] = None,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
                        routingConfig: RoutingConfig               = RoutingConfig(),
-                       cachingConfig: CachingConfig               = CachingConfig())
+                       cachingConfig: CachingConfig               = CachingConfig(),
+                       enableLocalDispatch: Boolean = false)
