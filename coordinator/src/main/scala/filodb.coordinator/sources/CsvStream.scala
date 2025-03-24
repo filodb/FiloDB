@@ -122,4 +122,6 @@ private[filodb] class CsvStream(csvReader: CSVReader,
   def teardown(): Unit = {
     csvReader.close()
   }
+
+  override def endOffset: Option[Long] = None
 }

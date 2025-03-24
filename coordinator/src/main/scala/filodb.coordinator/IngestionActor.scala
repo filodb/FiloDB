@@ -303,6 +303,13 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                                                   .withTag("shard", shard)
 
       val recoveryStart = System.currentTimeMillis()
+      val endStreamOffset = Math.max(
+        endOffset,
+        ingestionStream.endOffset match {
+          case Some(off) => off
+          case None => endOffset
+        }
+      )
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
 
@@ -315,7 +322,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
             s"$progressPct % - offset $off (target $endOffset)")
           statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct.toInt)
           off }
-        .until(_ >= endOffset)
+        .until(_ >= endStreamOffset)
         // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread
         .lastOptionL.runToFuture(shardInstance.ingestSched)
       fut.onComplete {
