@@ -220,6 +220,19 @@ abstract class ChunkMap(var capacity: Int) {
     arrayGet(realIndex(first + size - 1))
   }
 
+
+  final def chunkmapDoGetLastIterator(): ElementIterator = {
+    new LazyElementIterator(() => {
+      chunkmapAcquireShared()
+      try {
+        val lastIdx = realIndex(first + size - 1)
+        new MapIterator(lastIdx, lastIdx + 1)
+      } catch {
+        case e: Throwable => chunkmapReleaseShared(); throw e;
+      }
+    })
+  }
+
   /**
    * Produces an ElementIterator for going through every element of the map in increasing key order.
    */
@@ -708,7 +721,7 @@ abstract class ChunkMap(var capacity: Int) {
    * @param index initialized to first index to read from
    * @param lastIndex last index to read from (exclusive)
    */
-  private class MapIterator(var index: Int, val lastIndex: Int) extends ElementIterator {
+  protected class MapIterator(var index: Int, val lastIndex: Int) extends ElementIterator {
     private var closed: Boolean = false
     private var nextElem: NativePointer = 0
 
