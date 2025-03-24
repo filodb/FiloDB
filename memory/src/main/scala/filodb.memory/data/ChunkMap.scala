@@ -721,7 +721,7 @@ abstract class ChunkMap(var capacity: Int) {
    * @param index initialized to first index to read from
    * @param lastIndex last index to read from (exclusive)
    */
-  protected class MapIterator(var index: Int, val lastIndex: Int) extends ElementIterator {
+  private class MapIterator(var index: Int, val lastIndex: Int) extends ElementIterator {
     private var closed: Boolean = false
     private var nextElem: NativePointer = 0
 
