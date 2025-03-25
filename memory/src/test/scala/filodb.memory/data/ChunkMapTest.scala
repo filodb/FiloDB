@@ -57,6 +57,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoGetLast shouldEqual elems(5)
     map.chunkmapDoGetFirst shouldEqual elems(5)
     checkElems(Seq(5L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(5L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // last, not empty and not full
     map.chunkmapDoPut(elems(8))
@@ -65,6 +66,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoGetLast shouldEqual elems(8)
     map.chunkmapDoGetFirst shouldEqual elems(5)
     checkElems(Seq(5L, 8L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(8L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // middle, not empty and not full (no resize)
     map.chunkmapDoPut(elems(6))
@@ -73,6 +75,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoGetLast shouldEqual elems(8)
     map.chunkmapDoGetFirst shouldEqual elems(5)
     checkElems(Seq(5L, 6L, 8L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(8L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // Should be no resizing as long as length/# elements < 7
     Seq(2, 3, 9, 7).foreach { n =>
@@ -82,11 +85,13 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapSize shouldEqual 7
     map.chunkmapDoGetLast shouldEqual elems(9)
     checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(9L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // last, full (should resize)
     map.chunkmapDoPut(elems(10))
     map.chunkmapSize shouldEqual 8
     checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L, 10L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(10L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // middle, full (should resize)
     // should not resize until # elements = 15
@@ -101,6 +106,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoPut(elems(4))
     map.chunkmapSize shouldEqual 16
     checkElems(((2 to 10) ++ (21 to 27)).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(27L), map.chunkmapDoGetLastIterator().toBuffer)
 
     map.chunkmapFree()
   }
