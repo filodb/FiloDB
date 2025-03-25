@@ -327,7 +327,7 @@ import filodb.query.exec._
       case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => throw new IllegalStateException("Already handled subquery with windowing")
-      case lp: TopLevelSubquery            => throw new IllegalStateException("Already handled top level subquery")
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
       case lp: LabelCardinality            => materializeLabelCardinalityPlan(lp, qContext)
