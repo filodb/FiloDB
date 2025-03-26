@@ -1856,6 +1856,33 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan, expected)
   }
 
+  it("should generate plan for subquery with absent_over_time and offset") {
+    val query = """absent_over_time(my_gauge{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1"}[20m:1m] offset 1h)"""
+    val queryParams = PromQlQueryParams(query, startSeconds, step, endSeconds)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val expected = """T~AbsentFunctionMapper(columnFilter=List() rangeParams=RangeParams(1633913330,300,1634777330) metricColumn=_metric_)
+                     |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))
+                     |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+                     |---T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634777330000, window=Some(1200000), functionId=Some(Last), rawSource=false, offsetMs=Some(3600000))
+                     |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))
+                     |-----E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,100,false,false,true,Set(),None,Map(filodb-query-exec-aggregate-large-container -> 65536, filodb-query-exec-metadataexec -> 8192),RoutingConfig(false,3 days,true,300000),CachingConfig(true,2048)))
+                     |------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],raw)
+                     |-------T~PeriodicSamplesMapper(start=1634172840000, step=60000, end=1634773680000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172540000,1634773680000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(my_gauge)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],raw)
+                     |-------T~PeriodicSamplesMapper(start=1634172840000, step=60000, end=1634773680000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172540000,1634773680000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(my_gauge)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],raw)
+                     |------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],downsample)
+                     |-------T~PeriodicSamplesMapper(start=1633908540000, step=60000, end=1634172780000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633908240000,1634172780000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(my_gauge)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],downsample)
+                     |-------T~PeriodicSamplesMapper(start=1633908540000, step=60000, end=1634172780000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                     |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633908240000,1634172780000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(my_gauge)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1670234237],downsample)
+                     |-----E~PromQlRemoteExec(PromQlQueryParams(my_gauge{instance="Inst-1",_ws_="demo",_ns_="remoteNs"},1633908540,60,1634773680,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0),CachingConfig(true,2048)))""".stripMargin
+    validatePlan(execPlan, expected)
+  }
+
   // TODO timestamp function does not take binary expression although it works well with Prometheus
   // timestamp is used often with subqueries to find a particular event
   //  it("verification of common subquery cases: using timestamp funtion to find an occurence of a particular event") {
