@@ -17,7 +17,7 @@ import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.{DatasetRef, Iterators}
+import filodb.core.{DatasetRef, GlobalConfig, Iterators}
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
@@ -79,9 +79,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   val actorDispatcher = context.dispatcher
 
   // The flush task has very little work -- pretty much none. Looking at doFlushSteps, you can see that
-  // all of the heavy lifting -- including chunk encoding, forming the (potentially big) index timebucket blobs --
+  // all the heavy lifting -- including chunk encoding, forming the (potentially big) index time-bucket blobs --
   // is all done in the ingestion thread. Even the futures used to do I/O will not be done in this flush thread...
-  // they are allocated by the implicit ExecutionScheduler that Futures use and/or what C* etc uses.
+  // they are allocated by the implicit ExecutionScheduler that Futures use and/or what C* etc. uses.
   // The only thing that flushSched really does is tie up all these Futures together.
   val flushSched = Scheduler.computation(
     name = FiloSchedulers.FlushSchedName,
@@ -184,7 +184,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       for {
         _ <- tsStore.recoverIndex(ref, shard)
       } yield {
-        // bring shard to active state by sending this message - this code path wont invoke normalIngestion
+        // bring shard to active state by sending this message - this code path won't invoke normalIngestion
         statusActor ! IngestionStarted(ref, shard, nodeCoord)
         streamSubscriptions(shard) = CancelableFuture.never // simulate ingestion happens continuously
         streams(shard) = IngestionStream(Observable.never)
@@ -211,13 +211,25 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
             s"shard=$shard from $startRecoveryWatermark to $endRecoveryWatermark ; " +
             s"last flushed group $lastFlushedGroup")
           logger.info(s"Checkpoints for dataset=$ref shard=$shard were $checkpoints")
-          for {lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
-            checkpoints)}
+          if (GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.isDefined) {
+            for {lastOffset <- doRecoveryWithLatencyTracking(
+              GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.get, shard, startRecoveryWatermark,
+              reportingInterval, checkpoints)}
+              yield {
+                // Start reading past last offset for normal records; start flushes one group past last group
+                normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
+                  (lastFlushedGroup + 1) % numGroups)
+              }
+          }
+          else {
+            for {lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
+              checkpoints)}
             yield {
               // Start reading past last offset for normal records; start flushes one group past last group
               normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
                 (lastFlushedGroup + 1) % numGroups)
             }
+          }
         }
       }
     }
@@ -264,7 +276,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           handleError(ref, shard, x)
         case Success(_) =>
           logger.info(s"IngestStream onComplete.Success invoked for dataset=$ref shard=$shard")
-          // We dont release resources when finite ingestion ends normally.
+          // We don't release resources when finite ingestion ends normally.
           // Kafka ingestion is usually infinite and does not end unless canceled.
           // Cancel operation is already releasing after cancel is done.
           // We also have some tests that validate after finite ingestion is complete
@@ -285,6 +297,86 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   import Iterators._
 
+  private def doRecoveryWithLatencyTracking(maxRecursionDepth: Int, shard: Int, startOffset: Long,
+                                            interval: Long, checkpoints: Map[Int, Long]): Future[Option[Long]] = {
+    implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
+    val ingestionRecoveryLatency = Kamon.histogram("ingestion-recovery-latency", MeasurementUnit.time.milliseconds)
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shard)
+
+    val recoveryStart = System.currentTimeMillis()
+    statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
+    doRecoveryRecursive(1, maxRecursionDepth, shard, startOffset, interval, checkpoints).map { lastOffset =>
+      ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart)
+      lastOffset
+    }
+  }
+
+  private def doRecoveryRecursive(currentIteration: Int, maxRecursionDepth: Int, shard: Int, startOffset: Long,
+                                  interval: Long, checkpoints: Map[Int, Long]): Future[Option[Long]] = {
+    implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
+
+    logger.info(s"[RecoverIndex] doRecoveryRecursive called for dataset=$ref shard=$shard " +
+      s"startOffset=$startOffset interval=$interval currentIteration=$currentIteration")
+    val progressPct = (currentIteration * 100) / maxRecursionDepth
+    doRecoveryWithIngestionStreamEndOffset(shard, startOffset, checkpoints, progressPct).flatMap {
+      case Some(lastOffset) => if (currentIteration <= maxRecursionDepth) {
+          doRecoveryRecursive(currentIteration + 1, maxRecursionDepth, shard, lastOffset, interval, checkpoints)
+        } else {
+          Future.successful(Some(lastOffset))
+        }
+      case None =>
+        logger.error(s"[RecoverIndex] doRecovery returned None offset from IngestionStream." +
+          s"Recovery failed for dataset=$ref shard=$shard. currentIteration=$currentIteration")
+        val ex = new IllegalStateException(
+          "[RecoverIndex] Recovery failed with None offset from IngestionStream. " +
+          s"currentIteration=$currentIteration dataset=$ref shard=$shard")
+        handleError(ref, shard, ex)
+        Future.failed(ex)
+    }
+  }
+
+  private def doRecoveryWithIngestionStreamEndOffset(shard: Int, startOffset: Long,
+                         checkpoints: Map[Int, Long], progressPct: Int): Future[Option[Long]] = {
+    val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
+
+      val stream = ingestionStream.get
+      // getting the current last offset from the ingestion stream
+      val endStreamOffset = ingestionStream.endOffset.get
+      val reportingInterval = Math.max((endStreamOffset - startOffset) / 20, 1L)
+      logger.info(s"[RecoverIndex] Starting recovery for dataset=$ref shard=$shard " +
+        s"from $startOffset to $endStreamOffset with interval $reportingInterval")
+      val shardInstance = tsStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
+      val fut = tsStore.createDataRecoveryObservable(
+          ref, shard, stream, startOffset, endStreamOffset, checkpoints, reportingInterval)
+        .map { off =>
+          val progressPctInner = if (endStreamOffset - startOffset == 0) progressPct
+          else (off - startOffset) * progressPct / (endStreamOffset - startOffset)
+          logger.info(s"[RecoverIndex]Recovery of dataset=$ref shard=$shard at " +
+            s"$progressPctInner % - offset $off (target $endStreamOffset)")
+          statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct)
+          off
+        }
+        .until(_ >= endStreamOffset)
+        .lastOptionL.runToFuture(shardInstance.ingestSched)
+      fut.onComplete {
+        case Success(_) =>
+          logger.info(s"[RecoverIndex] Finished recovery for dataset=$ref shard=$shard")
+          ingestionStream.teardown()
+          streams.remove(shard)
+        case Failure(ex) =>
+          logger.error(s"[RecoverIndex] Recovery failed for dataset=$ref shard=$shard", ex)
+          handleError(ref, shard, ex)
+      }(actorDispatcher)
+      fut
+    }
+    futTry.recover { case NonFatal(t) =>
+      handleError(ref, shard, t)
+      Future.failed(t)
+    }
+    futTry.get
+  }
+
   /**
    * Starts the recovery stream; returns the last offset read during recovery process
    * Periodically (every interval offsets) reports recovery progress
@@ -303,18 +395,11 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                                                   .withTag("shard", shard)
 
       val recoveryStart = System.currentTimeMillis()
-      val endStreamOffset = Math.max(
-        endOffset,
-        ingestionStream.endOffset match {
-          case Some(off) => off
-          case None => endOffset
-        }
-      )
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
-
       val shardInstance = tsStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
-      val fut = tsStore.createDataRecoveryObservable(ref, shard, stream, startOffset, endOffset, checkpoints, interval)
+      val fut = tsStore.createDataRecoveryObservable(
+          ref, shard, stream, startOffset, endOffset, checkpoints, interval)
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
@@ -322,7 +407,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
             s"$progressPct % - offset $off (target $endOffset)")
           statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct.toInt)
           off }
-        .until(_ >= endStreamOffset)
+        .until(_ >= endOffset)
         // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread
         .lastOptionL.runToFuture(shardInstance.ingestSched)
       fut.onComplete {
