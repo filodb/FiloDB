@@ -31,6 +31,23 @@ object IngestionActor {
 
   final case class IngestionStatus(rowsIngested: Long)
 
+  /**
+   * Calculates the recovery progress percentage based on the current recursion depth, max recursion depth,
+   * recovered offset, start offset and end offset.
+   * For Example: if recursionDepth = 1 and maxRecursionDepth = 3, then the progress percentage will be calculated as:
+   * If recursionDepth == 1, then recovery would be between [0, 33]
+   * If recursionDepth == 2, then recovery would be between (33, 66]
+   * If recursionDepth == 3, then recovery would be between (66, 100]
+   * @return the recovery progress percentage
+   */
+  def getRecoveryProgressPercentage(currentRecursionDepth: Int, maxRecursionDepth: Int,
+                                    recoveredOffset: Long, startOffset: Long, endOffset: Long): Int = {
+    val maxProgressPerIteration = 100 / maxRecursionDepth
+    if (recoveredOffset >= endOffset && currentRecursionDepth == maxRecursionDepth) { 100 }
+    else (((recoveredOffset - startOffset) * maxProgressPerIteration) / (endOffset - startOffset)).toInt +
+      (currentRecursionDepth - 1) * maxProgressPerIteration
+  }
+
   def props(ref: DatasetRef,
             schemas: Schemas,
             memStore: TimeSeriesStore,
@@ -352,24 +369,6 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         handleError(ref, shard, ex)
         Future.failed(ex)
     }
-  }
-
-  /**
-   * Calculates the recovery progress percentage based on the current recursion depth, max recursion depth,
-   * recovered offset, start offset and end offset.
-   * For Example: if recursionDepth = 1 and maxRecursionDepth = 3, then the progress percentage will be calculated as:
-   * If recursionDepth == 1, then recovery would be between [0, 33]
-   * If recursionDepth == 2, then recovery would be between (33, 66]
-   * If recursionDepth == 3, then recovery would be between (66, 100]
-   * @return the recovery progress percentage
-   */
-  def getRecoveryProgressPercentage(currentRecursionDepth: Int, maxRecursionDepth: Int,
-                                    recoveredOffset: Long, startOffset: Long, endOffset: Long): Int = {
-    val maxProgressInCurrentIteration = ((currentRecursionDepth * 100) / maxRecursionDepth)
-    if (recoveredOffset >= endOffset) {
-      maxProgressInCurrentIteration
-    }
-    else (((recoveredOffset - startOffset) * maxProgressInCurrentIteration) / (endOffset - startOffset)).toInt
   }
 
   /**
