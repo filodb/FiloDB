@@ -36,13 +36,12 @@ class KafkaIngestionStream(config: Config,
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected lazy val consumer = createKCO(sc, tp, offset)
+  val kafkaConsumer : KafkaConsumer[Long, Any] = createConsumer(sc, tp, offset)
+  protected lazy val consumer = createKCO(sc)
+  private[filodb] def createKCO(sourceConfig: SourceConfig
+                               ): KafkaConsumerObservable[Long, Any, CommittableMessage[Long, Any]] = {
 
-  private[filodb] def createKCO(sourceConfig: SourceConfig,
-                topicPartition: TopicPartition,
-                offset: Option[Long]): KafkaConsumerObservable[Long, Any, CommittableMessage[Long, Any]] = {
-
-    val consumer = createConsumer(sourceConfig, topicPartition, offset)
+    val consumer = createConsumerTask(kafkaConsumer)
     val cfg = KafkaConsumerConfig(sourceConfig.asConfig)
     require(!cfg.enableAutoCommit, "'enable.auto.commit' must be false.")
 
@@ -51,20 +50,23 @@ class KafkaIngestionStream(config: Config,
 
   private[filodb] def createConsumer(sourceConfig: SourceConfig,
                                      topicPartition: TopicPartition,
-                                     offset: Option[Long]): Task[KafkaConsumer[Long, Any]] = {
+                                     offset: Option[Long]): KafkaConsumer[Long, Any] = {
     import collection.JavaConverters._
+    val props = sourceConfig.asProps
+    if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
 
+    blocking {
+      props.put("client.id", s"${props.get("group.id")}.${System.getenv("INSTANCE_ID")}.$shard")
+      val consumer = new KafkaConsumer(props)
+      consumer.assign(List(topicPartition).asJava)
+      offset.foreach { off => consumer.seek(topicPartition, off) }
+      consumer.asInstanceOf[KafkaConsumer[Long, Any]]
+    }
+  }
+
+  private[filodb] def createConsumerTask(consumer: KafkaConsumer[Long, Any]): Task[KafkaConsumer[Long, Any]] = {
     Task {
-      val props = sourceConfig.asProps
-      if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
-
-      blocking {
-        props.put("client.id", s"${props.get("group.id")}.${System.getenv("INSTANCE_ID")}.$shard")
-        val consumer = new KafkaConsumer(props)
-        consumer.assign(List(topicPartition).asJava)
-        offset.foreach { off => consumer.seek(topicPartition, off) }
-        consumer.asInstanceOf[KafkaConsumer[Long, Any]]
-      }
+      consumer
     }
   }
 
@@ -84,8 +86,25 @@ class KafkaIngestionStream(config: Config,
 
   override def teardown(): Unit = {
     logger.info(s"Shutting down stream $tp")
+    // Manually closing the kafka consumer on teardown. KCO on cancelTask calls close on the kafka consumer,
+    // but there is a delay in the callback to close the consumer at times. Hence, closing the consumer here. Multiple
+    // invocations of close is safe. This will avoid the `InstanceAlreadyExistsException` we see.
+    kafkaConsumer.close()
     // consumer does callback to close but confirm
    }
+
+  /**
+   * @return returns the offset of the last record in the stream, if applicable. This is used in
+   *         "IngestionActor.doRecovery" method to retrieve the ending watermark for shard recovery.
+   */
+  override def endOffset: Option[Long] = {
+    // Kafka offsets are Long, so we can return the last offset as the endOffset
+    import collection.JavaConverters._
+    kafkaConsumer.endOffsets(List(tp).asJava).asScala.get(tp) match {
+      case Some(offset) => Some(offset)
+      case None => None
+    }
+  }
 }
 
 /** The no-arg constructor `IngestionFactory` for the kafka ingestion stream.
