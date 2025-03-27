@@ -352,7 +352,9 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val rhs1 = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
       doExecuteParamAssertion = (_, qs) => qs.preventRangeVectorSerialization)::Nil
     val plan1 = makeSetOperatorExecPlan(lhs1, rhs1, BinaryOperator.LOR, range)
-    plan1.execute(memStore, querySession.copy(preventRangeVectorSerialization=true)).runToFuture.futureValue match {
+    val qs = querySession.copy(preventRangeVectorSerialization=true,
+                                queryConfig = queryConfig.copy(enableLocalDispatch = true))
+    plan1.execute(memStore, qs).runToFuture.futureValue match {
       case res: QueryResult  =>
         val rv = res.result.head
         // By default we expect a SerializableRangeVector
@@ -371,7 +373,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     // Start by enabling the feature in planner params
     val qConfig = querySession.queryConfig.copy(enableLocalDispatch=true)
     // The root is expected to be serialized but the leaves are not
-    val qs = querySession.copy(
+    val qs1 = querySession.copy(
           queryConfig = qConfig,
           preventRangeVectorSerialization = false)
     val lhs2 = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
@@ -379,7 +381,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val rhs2 = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
       doExecuteParamAssertion = (_, qs) => qs.preventRangeVectorSerialization)::Nil
     val plan2 = makeSetOperatorExecPlan(lhs2, rhs2, BinaryOperator.LOR, range)
-    plan2.execute(memStore, qs)
+    plan2.execute(memStore, qs1)
       .runToFuture.futureValue match {
       case res: QueryResult  =>
         val rv = res.result.head
