@@ -206,15 +206,14 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           val startRecoveryWatermark = checkpoints.values.min + 1
           val endRecoveryWatermark = checkpoints.values.max
           val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
-          val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
           logger.info(s"Starting recovery for dataset=$ref " +
             s"shard=$shard from $startRecoveryWatermark to $endRecoveryWatermark ; " +
             s"last flushed group $lastFlushedGroup")
           logger.info(s"Checkpoints for dataset=$ref shard=$shard were $checkpoints")
           if (GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.isDefined) {
-            for {lastOffset <- doRecoveryWithLatencyTracking(
-              GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.get, shard, startRecoveryWatermark,
-              reportingInterval, checkpoints)}
+            for {lastOffset <- doRecoveryWithShardRecoveryLatencyTracking(
+              GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.get, shard, startRecoveryWatermark, checkpoints)}
+              // NOTE: if the future failed, yield block will not be executed and the shard state will remain in error.
               yield {
                 // Start reading past last offset for normal records; start flushes one group past last group
                 normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
@@ -222,6 +221,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
               }
           }
           else {
+            val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
             for {lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
               checkpoints)}
             yield {
@@ -297,49 +297,90 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   import Iterators._
 
-  private def doRecoveryWithLatencyTracking(maxRecursionDepth: Int, shard: Int, startOffset: Long,
-                                            interval: Long, checkpoints: Map[Int, Long]): Future[Option[Long]] = {
+  /**
+   * Initiates the recovery process for the given shard and tracks the total latency of the recovery process.
+   * @param maxRecursionDepth the maximum number of times, we will fetch the last offset from the ingestion stream
+   *                          and recover to that offset before starting normalIngestion
+   * @param shard the shard number to start recovery on
+   * @param startOffset the starting offset to begin recovery
+   * @param checkpoints the existing checkpoints for the shard
+   * @return the last offset read during recovery process
+   */
+  private def doRecoveryWithShardRecoveryLatencyTracking(maxRecursionDepth: Int, shard: Int, startOffset: Long,
+                                            checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
     val ingestionRecoveryLatency = Kamon.histogram("ingestion-recovery-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shard)
-
     val recoveryStart = System.currentTimeMillis()
     statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
-    doRecoveryRecursive(1, maxRecursionDepth, shard, startOffset, interval, checkpoints).map { lastOffset =>
-      ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart)
-      lastOffset
-    }
+    val fut = doRecoveryRecursive(1, maxRecursionDepth, shard, startOffset, checkpoints)
+    // Make sure we track the ingestion recovery latency on both success and failure scenario
+    fut.onComplete(_ => ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart))
+    fut
   }
 
-  private def doRecoveryRecursive(currentIteration: Int, maxRecursionDepth: Int, shard: Int, startOffset: Long,
-                                  interval: Long, checkpoints: Map[Int, Long]): Future[Option[Long]] = {
+  /**
+   * Recursively fetch the last offset from the ingestion-stream and ingest data until the offset until the
+   *    maxRecursionDepth is reached. The max depth is configurable and is used to prevent infinite recursion.
+   * @param currentRecursionDepth the current depth of recursion
+   * @param maxRecursionDepth the maximum depth of recursion
+   * @param shard the shard number to start recovery on
+   * @param startOffset the starting offset to begin recovery
+   * @param checkpoints the existing checkpoints for the shard
+   * @return the last offset read during recovery process
+   */
+  private def doRecoveryRecursive(currentRecursionDepth: Int, maxRecursionDepth: Int, shard: Int, startOffset: Long,
+                                  checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
 
     logger.info(s"[RecoverIndex] doRecoveryRecursive called for dataset=$ref shard=$shard " +
-      s"startOffset=$startOffset interval=$interval currentIteration=$currentIteration")
-    val progressPct = (currentIteration * 100) / maxRecursionDepth
-    doRecoveryWithIngestionStreamEndOffset(shard, startOffset, checkpoints, progressPct).flatMap {
-      case Some(lastOffset) => if (currentIteration <= maxRecursionDepth) {
-          doRecoveryRecursive(currentIteration + 1, maxRecursionDepth, shard, lastOffset, interval, checkpoints)
+      s"startOffset=$startOffset currentRecursionDepth=$currentRecursionDepth")
+    doRecoveryWithIngestionStreamEndOffset(
+      currentRecursionDepth, maxRecursionDepth, shard, startOffset, checkpoints).flatMap {
+      case Some(lastOffset) => if (currentRecursionDepth <= maxRecursionDepth) {
+          doRecoveryRecursive(currentRecursionDepth + 1, maxRecursionDepth, shard, lastOffset, checkpoints)
         } else {
           Future.successful(Some(lastOffset))
         }
       case None =>
         logger.error(s"[RecoverIndex] doRecovery returned None offset from IngestionStream." +
-          s"Recovery failed for dataset=$ref shard=$shard. currentIteration=$currentIteration")
+          s"Recovery failed for dataset=$ref shard=$shard. currentRecursionDepth=$currentRecursionDepth")
         val ex = new IllegalStateException(
           "[RecoverIndex] Recovery failed with None offset from IngestionStream. " +
-          s"currentIteration=$currentIteration dataset=$ref shard=$shard")
+          s"currentRecursionDepth=$currentRecursionDepth dataset=$ref shard=$shard")
         handleError(ref, shard, ex)
         Future.failed(ex)
     }
   }
 
-  private def doRecoveryWithIngestionStreamEndOffset(shard: Int, startOffset: Long,
-                         checkpoints: Map[Int, Long], progressPct: Int): Future[Option[Long]] = {
-    val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
+  /**
+   * Calculates the recovery progress percentage based on the current recursion depth, max recursion depth,
+   * recovered offset, start offset and end offset.
+   * For Example: if recursionDepth = 1 and maxRecursionDepth = 3, then the progress percentage will be calculated as:
+   * If recursionDepth == 1, then recovery would be between [0, 33]
+   * If recursionDepth == 2, then recovery would be between (33, 66]
+   * If recursionDepth == 3, then recovery would be between (66, 100]
+   * @return the recovery progress percentage
+   */
+  def getRecoveryProgressPercentage(currentRecursionDepth: Int, maxRecursionDepth: Int,
+                                    recoveredOffset: Long, startOffset: Long, endOffset: Long): Int = {
+    val maxProgressInCurrentIteration = ((currentRecursionDepth * 100) / maxRecursionDepth)
+    if (recoveredOffset >= endOffset) {
+      maxProgressInCurrentIteration
+    }
+    else (((recoveredOffset - startOffset) * maxProgressInCurrentIteration) / (endOffset - startOffset)).toInt
+  }
 
+  /**
+   * Create the ingestion stream, seek to the startOffset, fetches the current endOffset from the ingestion stream and
+   * starts the ingestion of data until the endOffset is reached. On failure or completion, the ingestion stream is
+   * removed from the shard state, for next iteration.
+   * @return the last offset read during recovery process
+   */
+  private def doRecoveryWithIngestionStreamEndOffset(currentRecursionDepth: Int, maxRecursionDepth: Int,
+              shard: Int, startOffset: Long, checkpoints: Map[Int, Long]): Future[Option[Long]] = {
+    val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
       val stream = ingestionStream.get
       // getting the current last offset from the ingestion stream
       val endStreamOffset = ingestionStream.endOffset.get
@@ -350,10 +391,10 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       val fut = tsStore.createDataRecoveryObservable(
           ref, shard, stream, startOffset, endStreamOffset, checkpoints, reportingInterval)
         .map { off =>
-          val progressPctInner = if (endStreamOffset - startOffset == 0) progressPct
-          else (off - startOffset) * progressPct / (endStreamOffset - startOffset)
+          val progressPct = getRecoveryProgressPercentage(currentRecursionDepth, maxRecursionDepth,
+            off, startOffset, endStreamOffset)
           logger.info(s"[RecoverIndex]Recovery of dataset=$ref shard=$shard at " +
-            s"$progressPctInner % - offset $off (target $endStreamOffset)")
+            s"$progressPct % - offset $off (target $endStreamOffset)")
           statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct)
           off
         }
