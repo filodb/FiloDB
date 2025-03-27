@@ -296,6 +296,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case res: QueryResult  =>
         val rv = res.result.head
         // By default we expect a SerializableRangeVector
+        // Now we expect a non-SerializedRangeVector because preventRangeVectorSerialization=true
         assert(!rv.isInstanceOf[SerializedRangeVector])
         rv.rows().map(rr => (rr.getLong(0), rr.getDouble(1))).toList shouldEqual
           (0 until 10).zipWithIndex.map{ case (obs, i) => (i, obs.toDouble)}.toList

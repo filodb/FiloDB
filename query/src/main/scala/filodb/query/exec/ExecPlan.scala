@@ -696,9 +696,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Prevent serialization if one of the two conditions happen
     // 1. The querySession already has the preventRangeVectorSerialization set to true
     // 2. If the dispatcher is an inProcessDispatcher and the config has enabled this feature
-    val preventRangeVectorSerialization = qSession.preventRangeVectorSerialization ||
-                                          (dispatcher.isLocalCall
-                                              && qSession.queryConfig.enableLocalDispatch)
+    val preventRangeVectorSerialization = qSession.queryConfig.enableLocalDispatch &&
+                                          (dispatcher.isLocalCall || qSession.preventRangeVectorSerialization)
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000
