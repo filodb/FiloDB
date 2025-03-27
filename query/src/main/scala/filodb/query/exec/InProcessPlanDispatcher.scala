@@ -39,7 +39,8 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
       // translate implicit ExecutionContext to monix.Scheduler
       val querySession = QuerySession(plan.execPlan.queryContext, queryConfig,
                               streamingDispatch = PlanDispatcher.streamingResultsEnabled,
-                              catchMultipleLockSetErrors = true)
+                              catchMultipleLockSetErrors = true,
+                              preventRangeVectorSerialization = plan.clientParams.preventRangeVectorSerialization)
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadlineMs.milliseconds)
         .guarantee(Task.eval(querySession.close()))
