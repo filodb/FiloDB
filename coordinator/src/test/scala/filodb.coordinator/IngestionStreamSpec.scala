@@ -203,8 +203,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     IngestionActor.getRecoveryProgressPercentage(1, 3, 200, 100, 500) shouldEqual 8
     IngestionActor.getRecoveryProgressPercentage(1, 3, 400, 100, 500) shouldEqual 24
     IngestionActor.getRecoveryProgressPercentage(1, 3, 500, 100, 500) shouldEqual 33
+    IngestionActor.getRecoveryProgressPercentage(1, 3, 500, 500, 500) shouldEqual 33
     IngestionActor.getRecoveryProgressPercentage(2, 3, 600, 500, 700) shouldEqual 49
     IngestionActor.getRecoveryProgressPercentage(2, 3, 700, 500, 700) shouldEqual 66
+    IngestionActor.getRecoveryProgressPercentage(2, 3, 700, 700, 700) shouldEqual 66
     IngestionActor.getRecoveryProgressPercentage(3, 3, 800, 700, 1000) shouldEqual 77
     IngestionActor.getRecoveryProgressPercentage(3, 3, 900, 700, 1000) shouldEqual 88
     IngestionActor.getRecoveryProgressPercentage(3, 3, 1000, 700, 1000) shouldEqual 100

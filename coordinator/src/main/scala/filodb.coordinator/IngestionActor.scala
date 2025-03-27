@@ -44,7 +44,9 @@ object IngestionActor {
                                     recoveredOffset: Long, startOffset: Long, endOffset: Long): Int = {
     val maxProgressPerIteration = 100 / maxRecursionDepth
     if (recoveredOffset >= endOffset && currentRecursionDepth == maxRecursionDepth) { 100 }
-    else if (recoveredOffset >= endOffset) { currentRecursionDepth * maxProgressPerIteration }
+    else if ( (recoveredOffset >= endOffset) || (endOffset == startOffset) ) {
+      currentRecursionDepth * maxProgressPerIteration
+    }
     else (((recoveredOffset - startOffset) * maxProgressPerIteration) / (endOffset - startOffset)).toInt +
       (currentRecursionDepth - 1) * maxProgressPerIteration
   }
@@ -339,6 +341,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       .withTag("shard", shard)
     val recoveryStart = System.currentTimeMillis()
     statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
+    // start with first recursion depth
     val fut = doRecoveryRecursive(1, maxRecursionDepth, shard, startOffset, maxCheckpointOffset, checkpoints)
     // Make sure we track the ingestion recovery latency on both success and failure scenario
     fut.onComplete(_ => ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart))
@@ -364,13 +367,14 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       s"startOffset=$startOffset currentRecursionDepth=$currentRecursionDepth")
     doRecoveryWithIngestionStreamEndOffset(
       currentRecursionDepth, maxRecursionDepth, shard, startOffset, maxCheckpointOffset, checkpoints).flatMap {
-      // NOTE: Also avoid looping if the previous lastOffset was not greater than startOffset
+      // NOTE: Avoid recursing if the lastOffset was not greater than startOffset, i.e. end of stream is reached
       case Some(lastOffset) => if (currentRecursionDepth < maxRecursionDepth && lastOffset > startOffset) {
           doRecoveryRecursive(currentRecursionDepth + 1, maxRecursionDepth, shard, lastOffset,
             maxCheckpointOffset, checkpoints)
         } else {
+          statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 100)
           logger.info(s"[RecoverIndex] Recovery completed for dataset=$ref shard=$shard " +
-            s". LastOffsetRead=$lastOffset ")
+            s". last-offset-read=$lastOffset ")
           Future.successful(Some(lastOffset))
         }
       case None =>
@@ -404,27 +408,29 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           Math.max(maxCheckpointOffset, startOffset)
         case Some(off) => off
       }
-      if (endStreamOffset <= startOffset) {
-        logger.info(s"[RecoverIndex] Already reached the last offset for dataset=$ref shard=$shard " +
+      val fut = if (endStreamOffset <= startOffset) {
+        logger.info(s"[RecoverIndex] Already reached the endOffset! dataset=$ref shard=$shard " +
           s"from $startOffset to $endStreamOffset")
-        return Future.successful(Some(endStreamOffset))
+        Future.successful(Some(endStreamOffset))
       }
-      val reportingInterval = Math.max((endStreamOffset - startOffset) / 20, 1L)
-      logger.info(s"[RecoverIndex] Starting recovery for dataset=$ref shard=$shard " +
-        s"from $startOffset to $endStreamOffset with interval $reportingInterval")
-      val shardInstance = tsStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
-      val fut = tsStore.createDataRecoveryObservable(
-          ref, shard, stream, startOffset, endStreamOffset, checkpoints, reportingInterval)
-        .map { off =>
-          val progressPct = getRecoveryProgressPercentage(currentRecursionDepth, maxRecursionDepth,
-            off, startOffset, endStreamOffset)
-          logger.info(s"[RecoverIndex]Recovery of dataset=$ref shard=$shard at " +
-            s"$progressPct % - offset $off (target $endStreamOffset)")
-          statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct)
-          off
-        }
-        .until(_ >= endStreamOffset)
-        .lastOptionL.runToFuture(shardInstance.ingestSched)
+      else {
+        val reportingInterval = Math.max((endStreamOffset - startOffset) / 20, 1L)
+        logger.info(s"[RecoverIndex] Starting recovery for dataset=$ref shard=$shard " +
+          s"from $startOffset to $endStreamOffset with interval $reportingInterval")
+        val shardInstance = tsStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
+        tsStore.createDataRecoveryObservable(
+            ref, shard, stream, startOffset, endStreamOffset, checkpoints, reportingInterval)
+          .map { off =>
+            val progressPct = getRecoveryProgressPercentage(currentRecursionDepth, maxRecursionDepth,
+              off, startOffset, endStreamOffset)
+            logger.info(s"[RecoverIndex]Recovery of dataset=$ref shard=$shard at " +
+              s"$progressPct % - offset $off (target $endStreamOffset)")
+            statusActor ! RecoveryInProgress(ref, shard, nodeCoord, progressPct)
+            off
+          }
+          .until(_ >= endStreamOffset)
+          .lastOptionL.runToFuture(shardInstance.ingestSched)
+      }
       fut.onComplete {
         case Success(_) =>
           ingestionStream.teardown()

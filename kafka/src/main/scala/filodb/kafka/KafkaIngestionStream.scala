@@ -86,6 +86,7 @@ class KafkaIngestionStream(config: Config,
 
   override def teardown(): Unit = {
     logger.info(s"Shutting down stream $tp")
+    kafkaConsumer.close()
     // consumer does callback to close but confirm
    }
 
