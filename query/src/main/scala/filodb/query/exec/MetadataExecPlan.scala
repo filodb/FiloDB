@@ -24,7 +24,9 @@ import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.TsCardExec.MAX_RESULT_SIZE
 
-trait MetadataDistConcatExec extends NonLeafExecPlan {
+trait MetadataExecPlan
+
+trait MetadataDistConcatExec extends NonLeafExecPlan with MetadataExecPlan {
 
   require(children.nonEmpty)
 
@@ -228,7 +230,7 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
   }
 }
 
-trait LabelCardinalityExecPlan {
+trait LabelCardinalityExecPlan extends MetadataExecPlan {
   /**
    * Parameter deciding the sketch size to be used for approximating cardinality
    */
@@ -321,7 +323,7 @@ final case class PartKeysExec(queryContext: QueryContext,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
-                              end: Long) extends LeafExecPlan {
+                              end: Long) extends MetadataLeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
@@ -354,7 +356,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  filters: Seq[ColumnFilter],
                                  columns: Seq[String],
                                  startMs: Long,
-                                 endMs: Long) extends LeafExecPlan {
+                                 endMs: Long) extends MetadataLeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
@@ -413,7 +415,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
                                  shard: Int,
                                  filters: Seq[ColumnFilter],
                                  startMs: Long,
-                                 endMs: Long) extends LeafExecPlan with LabelCardinalityExecPlan {
+                                 endMs: Long) extends MetadataLeafExecPlan with LabelCardinalityExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
@@ -616,7 +618,7 @@ final case class LabelNamesExec(queryContext: QueryContext,
                                  shard: Int,
                                  filters: Seq[ColumnFilter],
                                  startMs: Long,
-                                 endMs: Long) extends LeafExecPlan {
+                                 endMs: Long) extends MetadataLeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
