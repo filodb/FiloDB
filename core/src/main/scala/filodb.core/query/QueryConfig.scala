@@ -46,6 +46,7 @@ object QueryConfig {
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
     val scCacheSize = queryConfig.as[Int]("single.cluster.cache.cache-size")
     val cachingConfig = CachingConfig(scCachingEnabled, scCacheSize)
+    val enableLocalDispatch = queryConfig.getBoolean("enable-local-dispatch")
 
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
@@ -56,7 +57,7 @@ object QueryConfig {
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides, rc, cachingConfig)
+      containerOverrides, rc, cachingConfig, enableLocalDispatch)
   }
 
   import scala.concurrent.duration._
@@ -112,4 +113,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        plannerSelector: Option[String] = None,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
                        routingConfig: RoutingConfig               = RoutingConfig(),
-                       cachingConfig: CachingConfig               = CachingConfig())
+                       cachingConfig: CachingConfig               = CachingConfig(),
+                       enableLocalDispatch: Boolean = false)

@@ -30,7 +30,7 @@ object MultiSchemaPartitionsExecSpec {
 
     override def clusterName: String = ???
 
-    override def isLocalCall: Boolean = ???
+    override def isLocalCall: Boolean = false
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                    source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
