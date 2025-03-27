@@ -86,6 +86,9 @@ class KafkaIngestionStream(config: Config,
 
   override def teardown(): Unit = {
     logger.info(s"Shutting down stream $tp")
+    // Manually closing the kafka consumer on teardown. KCO on cancelTask calls close on the kafka consumer,
+    // but there is a delay in the callback to close the consumer at times. Hence, closing the consumer here. Multiple
+    // invocations of close is safe. This will avoid the `InstanceAlreadyExistsException` we see.
     kafkaConsumer.close()
     // consumer does callback to close but confirm
    }
