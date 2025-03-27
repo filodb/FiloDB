@@ -71,7 +71,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
         val results: Iterator[RangeVector] = binaryOp match {
           case LAND => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
-            setOpAnd(lhsRvs, rhsRvs, rhsSchema)
+            setOpAnd(lhsRvs, rhsRvs, rhsSchema, querySession)
           case LOR => setOpOr(lhsRvs, rhsRvs)
           case LUnless => setOpUnless(lhsRvs, rhsRvs)
           case _ => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
@@ -106,16 +106,23 @@ final case class SetOperatorExec(queryContext: QueryContext,
    */
   // scalastyle:off method.length
   private[exec] def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
-                       rhsSchema: ResultSchema): Iterator[RangeVector] = {
-    // isEmpty method consumes rhs range vector
-    require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+                       rhsSchema: ResultSchema, querySession: QuerySession): Iterator[RangeVector] = {
+
+    lazy val builder = SerializedRangeVector.newBuilder()
+    lazy val recSchema = SerializedRangeVector.toSchema(rhsSchema.columns, rhsSchema.brSchemas)
+    lazy val execPlanName = queryWithPlanName(queryContext)
+    val mappedRhsRvs = rhsRvs.map {
+      case srv: SerializedRangeVector  => srv
+      case rv: RangeVector               => SerializedRangeVector.apply(rv, builder,
+                                            recSchema, execPlanName, querySession.queryStats)
+    }
 
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
 
     val period = lhsRvs.headOption.flatMap(_.outputRange)
 
-    rhsRvs.foreach { rv =>
+    mappedRhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it contains no rows
       // TODO: isEmpty is expensive and iterates all the rows, we need a performant implementation, we may very well not

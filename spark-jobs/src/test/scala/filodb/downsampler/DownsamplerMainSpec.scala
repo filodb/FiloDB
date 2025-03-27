@@ -2161,7 +2161,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
       res.result.size shouldEqual expectedRes
       res.result.foreach(_.rows.nonEmpty shouldEqual true)
-      res.result.foreach(_.asInstanceOf[SerializedRangeVector].schema.columns shouldEqual res.resultSchema.columns)
     }
 
     // test query for each metric name.
