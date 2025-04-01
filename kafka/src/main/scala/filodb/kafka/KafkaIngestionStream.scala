@@ -84,14 +84,25 @@ class KafkaIngestionStream(config: Config,
       SomeData(msg.record.value.asInstanceOf[RecordContainer], msg.record.offset)
     }
 
-  override def teardown(): Unit = {
+  override def teardown(isForced: Boolean = false): Unit = {
     logger.info(s"Shutting down stream $tp")
-    // Manually closing the kafka consumer on teardown. KCO on cancelTask calls close on the kafka consumer,
-    // but there is a delay in the callback to close the consumer at times. Hence, closing the consumer here. Multiple
-    // invocations of close is safe. This will avoid the `InstanceAlreadyExistsException` we see.
-    kafkaConsumer.close()
-    // consumer does callback to close but confirm
-   }
+    // the kco consumer on cancel, makes a callback to close the kafka-consumer but confirm
+
+    if (isForced) {
+      // Manually closing the kafka consumer on teardown to avoid the `InstanceAlreadyExistsException` when:
+      // 1. Moving from "IngestionActor.doRecovery" to "IngestionActor.normalIngestion" state.
+      // 2. During multiple iterations of "IngestionActor.doRecoveryWithIngestionStreamEndOffset".
+      //
+      // NOTE:
+      // -------------
+      // After completion of "IngestionActor.doRecovery" or "IngestionActor.doRecoveryWithIngestionStreamEndOffset",
+      // we DO NOT CLOSE the kafka consumer as IngestionActor.removeAndReleaseResources, which takes care of canceling
+      // the KafkaConsumerObservable and close the kafka consumer.
+      // Hence, to ensure cleanup of resources correctly, we are closing the kafka consumer here.
+      // isForced is set to true only in the "IngestionActor.doRecoveryWithIngestionStreamEndOffset" method.
+      kafkaConsumer.close()
+    }
+  }
 
   /**
    * @return returns the offset of the last record in the stream, if applicable. This is used in
