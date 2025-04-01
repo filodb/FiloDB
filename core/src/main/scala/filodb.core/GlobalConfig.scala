@@ -73,11 +73,11 @@ object GlobalConfig extends StrictLogging {
     }
   }
 
-  val indexRecoveryRecursiveOffsetMaxDepth: Option[Int] = {
-    systemConfig.hasPath("filodb.index-recovery.recursive-offset-max-depth") match {
+  val indexRecoveryMaxDepth: Option[Int] = {
+    systemConfig.hasPath("filodb.index-recovery.max-depth") match {
       case false => None
-      case true => if (systemConfig.getInt("filodb.index-recovery.recursive-offset-max-depth") > 0) {
-        Some(systemConfig.getInt("filodb.index-recovery.recursive-offset-max-depth"))
+      case true => if (systemConfig.getInt("filodb.index-recovery.max-depth") > 0) {
+        Some(systemConfig.getInt("filodb.index-recovery.max-depth"))
       } else {
         None
       }

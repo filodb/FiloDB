@@ -228,9 +228,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           val endRecoveryWatermark = checkpoints.values.max
           val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
           logger.info(s"Checkpoints=$checkpoints for dataset=$ref shard=$shard! lastFlushedGroup=$lastFlushedGroup")
-          GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.isDefined match {
+          GlobalConfig.indexRecoveryMaxDepth.isDefined match {
             case true => {
-              val maxRecursionDepth = GlobalConfig.indexRecoveryRecursiveOffsetMaxDepth.get
+              val maxRecursionDepth = GlobalConfig.indexRecoveryMaxDepth.get
               logger.info(s"[RecoverIndex] Using recursive strategy to fetch endOffset from IngestionStream!" +
                 s" dataset=$ref shard=$shard startOffset=$startRecoveryWatermark maxRecursionDepth=$maxRecursionDepth")
 
