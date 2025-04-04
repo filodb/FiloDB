@@ -159,12 +159,6 @@ extends ChunkMap(initMapSize) with ReadablePartition {
               return
             // Different histogram bucket schema: need a new vector here
             case BucketSchemaMismatch =>
-              // TODO For exponential histograms, there is a possibility to optimize if we end up with a bunch
-              // of one-observation histograms with frequently changing bucket schema. This can create lot of
-              // chunks. We can reduce chunk count by conditionally coalescing and adding this sample to the previous
-              // histogram. Work deferred to next iteration for now since it requires mutation of previous samples in
-              // write buffer, which is not something we have done before. It would also be contrary the principle of
-              // storing data in TSDB as it arrives without modification or taking loss in precision.
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
               return

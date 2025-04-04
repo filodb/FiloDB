@@ -341,6 +341,14 @@ class AppendableHistogramVector(factory: MemFactory,
     } else {
       // check the bucket schema is identical.  If not, return BucketSchemaMismatch
       if (!matchBucketDef(h, nativePtrReader, vectPtr)) return BucketSchemaMismatch
+      // TODO For exponential histograms, there is a possibility to optimize if we end up with a bunch
+      // of one-observation histograms with frequently changing bucket schema. This can create lot of
+      // chunks. We can reduce chunk count by conditionally coalescing and adding this sample to the previous
+      // histogram. Work deferred to next iteration for now since it requires mutation of previous samples in
+      // write buffer, which is not something we have done before. It would also be contrary the principle of
+      // storing data in TSDB as it arrives without modification or taking loss in precision. If we did it,
+      // it would have to be histograms of same scale. We would need to modify the previous histogram to
+      // change its bucket offset and counts, so it includes the current one's counts.
     }
 
     val res = appendHist(buf, h, numItems)
