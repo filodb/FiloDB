@@ -135,7 +135,7 @@ class HistogramVectorTest extends NativeVectorTest {
       hist.serialize(Some(buffer))
       if (buckets < 205) appender.addData(buffer) shouldEqual Ack
       // should fail for 206th histogram because it crosses the size of write buffer
-      if (buckets >= 205) appender.addData(buffer) shouldEqual VectorTooSmall(73,46)
+      if (buckets >= 205) appender.addData(buffer) shouldEqual VectorTooSmall(73,42)
       counts = counts.map(_ + 10)
     }
 
