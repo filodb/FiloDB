@@ -257,7 +257,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                 currentRecursionDepth = 1, maxRecursionDepth = maxRecursionDepth, shard = shard,
                 startOffset = startRecoveryWatermark, maxCheckpointOffset = endRecoveryWatermark,
                 checkpoints = checkpoints)
-              for { lastOffset <- doRecoveryWithShardRecoveryLatencyTracking(params, ingestionScheduler)
+              for {
+                lastOffset <- doRecoveryWithShardRecoveryLatencyTracking(params, ingestionScheduler)
               } yield {
                 // NOTE: if the future failed, yield block will not be executed and the shard state will remain in error
                 // Start reading past last offset for normal records; start flushes one group past last group
@@ -455,13 +456,18 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       val reportingInterval = Math.max((endStreamOffset - params.startOffset) / 20, 1L)
       logger.info(s"[RecoverIndex] Starting recovery for dataset=$ref shard=${params.shard} " +
         s"from ${params.startOffset} to $endStreamOffset with interval $reportingInterval")
+
       tsStore.createDataRecoveryObservable(
           ref, params.shard, stream, params.startOffset, endStreamOffset, params.checkpoints, reportingInterval)
         .map { off =>
           val progressPct = getRecoveryProgressPercentage(params.currentRecursionDepth, params.maxRecursionDepth,
             off, params.startOffset, endStreamOffset)
+
           logger.info(s"[RecoverIndex]Recovery of dataset=$ref shard=${params.shard} at " +
-            s"$progressPct % - offset $off (target $endStreamOffset)")
+            s"$progressPct % - offset $off (target $endStreamOffset); " +
+            s"${(off - params.startOffset)/(endStreamOffset - params.startOffset)}% of iteration=" +
+            s"${params.currentRecursionDepth + 1 / params.maxRecursionDepth}")
+
           statusActor ! RecoveryInProgress(ref, params.shard, nodeCoord, progressPct)
           off
         }
