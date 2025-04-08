@@ -216,8 +216,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
     case RecoveryInProgress(_, shard, node, progress) =>
       statusMap(shard) = ShardStatusRecovery(progress)
       registerNode(Seq(shard), node)
-    case IngestionError(_, shard, _) =>
-      statusMap(shard) = ShardStatusError
+    case IngestionError(_, shard, error) =>
+      statusMap(shard) = ShardStatusError(error)
       unassignShard(shard)
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
@@ -316,7 +316,7 @@ private[filodb] object ShardMapper extends StrictLogging {
     case ShardStatusUnassigned  => "."
     case ShardStatusAssigned    => "N"
     case ShardStatusActive      => "A"
-    case ShardStatusError       => "E"
+    case e: ShardStatusError    => "E"
     case s: ShardStatusRecovery => "R"
     case ShardStatusStopped     => "S"
     case ShardStatusDown        => "D"

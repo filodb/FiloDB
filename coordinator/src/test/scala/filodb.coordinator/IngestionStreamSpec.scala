@@ -73,8 +73,22 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
       expectMsgPF(within) {
         case CurrentShardSnapshot(ref, mapper) =>
           latestStatus = mapper.statuses.head
-          if (latestStatus != ShardStatusError)
+          mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+      }
+      info(s"Latest status = $latestStatus")
+    }
+  }
+
+  def waitForShardStatusError(ref: DatasetRef, waitFor: ShardStatus): Unit = {
+    var latestStatus: ShardStatus = ShardStatusAssigned
+    // sometimes we receive multiple status snapshots
+    while (!latestStatus.isInstanceOf[ShardStatusError]) {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(ref, mapper) =>
+          latestStatus = mapper.statuses.head
+          if (!latestStatus.isInstanceOf[ShardStatusError]) {
             mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+          }
       }
       info(s"Latest status = $latestStatus")
     }
@@ -113,7 +127,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
     setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-    waitForStatus(dataset33.ref, ShardStatusError)
+    waitForShardStatusError(dataset33.ref, ShardStatusError.apply(new IllegalArgumentException("bad data")))
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source

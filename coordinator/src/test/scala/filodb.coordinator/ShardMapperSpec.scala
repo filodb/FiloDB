@@ -236,7 +236,8 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref1))
     map.updateFromEvent(IngestionStarted(dataset, 1, ref1))
     map.updateFromEvent(IngestionError(dataset, 1, new java.io.IOException("e")))
-    map.statusForShard(1) shouldEqual ShardStatusError
+    map.statusForShard(1).isInstanceOf[ShardStatusError] shouldEqual true
+    map.statusForShard(1).asInstanceOf[ShardStatusError].error.isInstanceOf[java.io.IOException] shouldEqual true
   }
 
   it("should be idempotent for registerNode and assign/unassign/register/unregister as expected") {

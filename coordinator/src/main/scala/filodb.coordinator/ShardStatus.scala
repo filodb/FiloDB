@@ -180,9 +180,9 @@ case object ShardStatusActive extends ShardStatus {
     Seq(IngestionStarted(ref, shard, node))
 }
 
-case object ShardStatusError extends ShardStatus {
+final case class ShardStatusError(error: Throwable) extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
-    Seq(IngestionStarted(ref, shard, node))
+    Seq(IngestionError(ref, shard, error))
 }
 
 final case class ShardStatusRecovery(progressPct: Int) extends ShardStatus {
