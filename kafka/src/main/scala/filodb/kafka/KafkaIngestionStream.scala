@@ -36,6 +36,15 @@ class KafkaIngestionStream(config: Config,
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
+
+  /*
+  * NOTE: Why are we keeping reference to both KafkaConsumer and KafkaConsumerObservable ?
+  * This is because we need the KafkaConsumerObservable for the existing monix style streaming of data.
+  * And we need the direct reference to KafkaConsumer for:
+  *  1. To fetch the endOffsets for the topic partition. This is used in recovery path to stream to end of ingestion.
+  *  2. To close the KafkaConsumer on teardown, when isForced is set to true. This is done to ensure cleanup of
+  *     KafkaConsumer resources during recovery and before normalIngestion is started.
+  * */
   val kafkaConsumer : KafkaConsumer[Long, Any] = createConsumer(sc, tp, offset)
   protected lazy val consumer = createKCO(sc)
   private[filodb] def createKCO(sourceConfig: SourceConfig
