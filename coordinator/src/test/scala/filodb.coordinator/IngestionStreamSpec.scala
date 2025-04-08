@@ -89,6 +89,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
           if (!latestStatus.isInstanceOf[ShardStatusError]) {
             mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
           }
+          else {
+            // check if it is the same error
+            latestStatus.asInstanceOf[ShardStatusError].error.getMessage shouldEqual
+              waitFor.asInstanceOf[ShardStatusError].error.getMessage
+          }
       }
       info(s"Latest status = $latestStatus")
     }
@@ -127,7 +132,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
     setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-    waitForShardStatusError(dataset33.ref, ShardStatusError.apply(new IllegalArgumentException("bad data")))
+    waitForShardStatusError(dataset33.ref, ShardStatusError.apply(
+      new IllegalArgumentException("Invalid format: \"NananananaXX\"")))
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
