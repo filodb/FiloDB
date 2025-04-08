@@ -560,6 +560,7 @@ object HistogramBuckets {
   val binaryBuckets64 = GeometricBuckets(2.0d, 2.0d, 64, minusOne = true)
 
   val emptyBuckets = GeometricBuckets(2.0d, 2.0d, 0)
+  val emptyExpBuckets = Base2ExpHistogramBuckets(20, 0, 0)
 }
 
 /**

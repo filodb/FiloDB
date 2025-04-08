@@ -121,6 +121,7 @@ object NativePointerAccessor extends MemoryAccessor {
   val baseOffset: Long = 0
 
   override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
+    println(s"Wrapping native pointer into addr: $addr, length: $length")
     buf.wrap(addr, length)
   }
 }
@@ -134,6 +135,7 @@ class ByteArrayAccessor(val base: Array[Byte]) extends MemoryAccessor {
   val baseOffset: Long = UnsafeUtils.arayOffset
 
   override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
+    println(s"Wrapping array buffer into addr: $addr, length: $length")
     buf.wrap(base, addr.toInt, length)
   }
 }
@@ -164,6 +166,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   }
 
   override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
+    println(s"Wrapping on heap buffer into addr: $addr, length: $length")
     dBuf.wrap(buf, origBufPos + addr.toInt, length)
   }
 
@@ -185,6 +188,7 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   val length: Int = buf.limit() - buf.position()
 
   override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
+    println(s"Wrapping direct buffer into addr: $addr, length: $length")
     dBuf.wrap(buf, addr.toInt, length)
   }
 

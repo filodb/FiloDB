@@ -57,7 +57,7 @@ object BinaryHistogram extends StrictLogging {
      * by clients.  Materializes/deserializes everything.
      * Ingestion ingests BinHistograms directly without conversion to Histogram first.
      */
-    def toHistogram: Histogram = formatCode match {
+    def toHistogram: HistogramWithBuckets = formatCode match {
 
       // All the delta encoding formats decode into LongHistograms and are generally used during ingestion
       case HistFormat_Geometric_Delta =>
@@ -230,6 +230,8 @@ object HistogramVector extends StrictLogging {
   final def bucketDefNumBytes(acc: MemoryReader, addr: Ptr.U8): Int =
     addr.add(OffsetBucketDefSize).asU16.getU16(acc)
   final def bucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
+  final def afterFormatCode(acc: MemoryReader, addr: Ptr.U8): Ptr.U8 =
+    addr.add(OffsetFormatCode).add(1)
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryReader, addr: Ptr.U8): Boolean =
@@ -238,6 +240,11 @@ object HistogramVector extends StrictLogging {
       UnsafeUtils.equate(acc.base, acc.baseOffset + bucketDefAddr(addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
+
+  def appendingExp(factory: MemFactory, maxBytes: Int): AppendableExpHistogramVector = {
+    val addr = factory.allocateOffheap(maxBytes)
+    new AppendableExpHistogramVector(factory, Ptr.U8(addr), maxBytes)
+  }
 
   def appending(factory: MemFactory, maxBytes: Int): AppendableHistogramVector = {
     val addr = factory.allocateOffheap(maxBytes)
@@ -260,7 +267,8 @@ object HistogramVector extends StrictLogging {
 
   def apply(acc: MemoryReader, p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(acc, p) match {
     case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(acc, Ptr.U8(p))
-    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) =>new SectDeltaHistogramReader(acc, Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) => new SectDeltaHistogramReader(acc, Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_EXP_SIMPLE) => new RowExpHistogramReader(acc, Ptr.U8(p))
   }
 
   // Thread local buffer used as temp buffer for histogram vector encoding ONLY
