@@ -73,16 +73,8 @@ class AppendableExpHistogramVector(factory: MemFactory,
 
     val numItems = getNumHistograms(nativePtrReader, vectPtr)
     if (numItems == 0) {
-      // Copy the bucket definition and set the bucket def size
-//      UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-//        UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr,
-//        h.bucketDefNumBytes)
-//      UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
-//      UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
-
       // Initialize the first section
       val firstSectPtr = afterNumHistograms(nativePtrReader, vectPtr)
-      println(s"Initializing first section at $firstSectPtr")
       initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     }
 
@@ -133,7 +125,6 @@ class AppendableExpHistogramVector(factory: MemFactory,
 class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends HistogramReader with SectionReader {
   import HistogramVector._
 
-  println(s"RowExpHistogramReader: $histVect")
   final def length: Int = getNumHistograms(acc, histVect)
   val numBuckets = if (length > 0) getNumBuckets(acc, histVect) else 0
 

@@ -47,9 +47,7 @@ final case class Section private(addr: Long) extends AnyVal {
     val newNumElements = numElements(acc) + addedElements
     val newNumBytes = sectionNumBytes(acc) + addedBytes
     require(newNumElements <= 255 && newNumBytes <= 65535)
-    println(s"Updating section at $addr: numBytes=$newNumBytes, numElements=$newNumElements")
     Ptr.I32(addr).asMut.set(acc, newNumBytes | (newNumElements << 16) | (sectionType(acc).n << 24))
-    println(s"Now: ${debugString(acc)}")
   }
 
   final def setNumElements(acc: MemoryAccessor, num: Int): Unit = {
@@ -131,9 +129,7 @@ trait SectionWriter {
     if (bytesLeft >= (numBytes + 2)) {
       val writeAddr = curSection.endAddr(nativePtrReader)
       // write length prefix for the record
-      println(s"Writing length prefix of $numBytes bytes to section at $writeAddr")
       writeAddr.asU16.asMut.set(MemoryAccessor.nativePtrAccessor, numBytes)
-      println(s"Copying blob of $numBytes bytes to section at ${writeAddr + 2}")
       // copy record bytes
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
