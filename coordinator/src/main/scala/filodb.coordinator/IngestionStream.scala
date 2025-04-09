@@ -19,10 +19,20 @@ trait IngestionStream {
   def get: Observable[SomeData]
 
   /**
+   * @return returns the offset of the last record in the stream, if applicable. This is used in
+   *         "IngestionActor.doRecovery" method to retrieve the ending watermark for shard recovery.
+   */
+  def endOffset: Option[Long]
+
+  /**
    * NOTE: this does not cancel any subscriptions to the Observable.  That should be done prior to
    * calling this, which is more for release of resources.
+   * @param isForced if true, then the teardown should clean up all the resources without waiting for the scheduler
+   *                 to invoke the cancel-task, which cleans up the state. For example, in the case of Kafka, this
+   *                 would mean closing the Kafka consumer and releasing the resources, without waiting for the
+   *                 KafkaConsumerObservable task to cancel.
    */
-  def teardown(): Unit
+  def teardown(isForced: Boolean = false): Unit
 }
 
 object IngestionStream {
@@ -31,7 +41,8 @@ object IngestionStream {
    */
   def apply(stream: Observable[SomeData]): IngestionStream = new IngestionStream {
     val get = stream
-    def teardown(): Unit = {}
+    def teardown(isForced: Boolean): Unit = {}
+    def endOffset: Option[Long] = None
   }
 
   val empty = apply(Observable.empty[SomeData])
