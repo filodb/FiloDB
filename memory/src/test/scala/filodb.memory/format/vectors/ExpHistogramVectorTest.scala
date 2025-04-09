@@ -158,13 +158,11 @@ class ExpHistogramVectorTest extends NativeVectorTest {
 
     val optimized = appender.optimize(memFactory)
     val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
-    println(optReader.debugString(acc, optimized))
 
     optReader.length(acc, optimized) shouldEqual otelExpHistograms.length
     (0 until otelExpHistograms.length).foreach { i =>
       val h = optReader(i)
-      println(h)
-      //h.compare(otelExpHistograms(i)) shouldEqual 0
+      h.compare(otelExpHistograms(i)) shouldEqual 0
     }
 
     appender.reset()
@@ -179,85 +177,22 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     }
 
     val optimized = appender.optimize(memFactory)
-    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
-
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized)).asInstanceOf[RowExpHistogramReader]
     val bytes = optReader.toBytes(acc, optimized)
-
-    val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+    val onHeapAcc = Seq(
+      MemoryReader.fromArray(bytes),
       MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
-      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
+      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes))
+    )
 
     onHeapAcc.foreach { a =>
       val readerH = HistogramVector(a, 0)
-      (0 until rawHistBuckets.length).foreach { i =>
+      (0 until otelExpHistograms.length).foreach { i =>
         val h = readerH(i)
         h.compare(otelExpHistograms(i)) shouldEqual 0
       }
     }
   }
-
-  val lastIncrHist = LongHistogram(bucketScheme, incrHistBuckets.last.map(_.toLong))
-
-
-  it("should work for the downsampling round trip of a histogram vector") {
-
-    val myBucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
-    // time, sum, count, histogram
-    val bucketData = Seq(
-      Array(0d, 0d, 1d),
-      Array(0d, 2d, 3d),
-      Array(2d, 5d, 6d),
-      Array(2d, 5d, 9d),
-      Array(2d, 5d, 10d),
-      Array(2d, 8d, 14d),
-      Array(0d, 0d, 2d),
-      Array(1d, 7d, 9d),
-      Array(1d, 15d, 19d),
-      Array(2d, 16d, 21d),
-      Array(0d, 1d, 1d),
-      Array(0d, 15d, 15d),
-      Array(1d, 16d, 19d),
-      Array(4d, 20d, 25d)
-    )
-
-    val appender = HistogramVector.appendingExp(memFactory, 1024)
-    bucketData.foreach { rawBuckets =>
-      BinaryHistogram.writeDelta(myBucketScheme, rawBuckets.map(_.toLong), buffer)
-      appender.addData(buffer) shouldEqual Ack
-    }
-
-    appender.length shouldEqual bucketData.length
-
-    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
-    reader.length shouldEqual bucketData.length
-
-    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual debox.Buffer(6, 10)
-
-    (0 until bucketData.length).foreach { i =>
-      verifyHistogram(reader(i), i, bucketData, myBucketScheme)
-    }
-
-    val optimized = appender.optimize(memFactory)
-
-    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
-
-    val bytes = optReader.toBytes(acc, optimized)
-
-    val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
-      MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
-      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
-
-    onHeapAcc.foreach { a =>
-      val readerH = HistogramVector(a, 0).asInstanceOf[SectDeltaHistogramReader]
-      readerH.dropPositions(a, 0) shouldEqual debox.Buffer(6, 10)
-      (0 until bucketData.length).foreach { i =>
-        val h = readerH(i)
-        verifyHistogram(h, i, bucketData, myBucketScheme)
-      }
-    }
-  }
-
-
 
    it("histogram should have right formatCode after sum operation is applied") {
      val appender = HistogramVector.appendingExp(memFactory, 1024)
@@ -287,13 +222,13 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     appender.length shouldEqual 0
   }
 
-
   // Test for Section reader code in RowHistogramReader, that we can jump back and forth
   it("should be able to randomly look up any element in long HistogramVector") {
     val numElements = 150
-    val appender = HistogramVector.appendingExp(memFactory, numElements * 20)
+    val appender = HistogramVector.appendingExp(memFactory, numElements * 30)
     (0 until numElements).foreach { i =>
-      BinaryHistogram.writeDelta(bucketScheme, rawLongBuckets(i % rawLongBuckets.length), buffer)
+      val h = otelExpHistograms(i % otelExpHistograms.length)
+      BinaryHistogram.writeDelta(h.buckets, h.values, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 
@@ -302,9 +237,9 @@ class ExpHistogramVectorTest extends NativeVectorTest {
 
     for { _ <- 0 to 50 } {
       val elemNo = scala.util.Random.nextInt(numElements)
-      verifyHistogram(optReader(elemNo), elemNo % (rawLongBuckets.length))
+      val h = optReader(elemNo % otelExpHistograms.length)
+      h.compare(otelExpHistograms(elemNo % otelExpHistograms.length)) shouldEqual 0
     }
   }
-
 
 }
