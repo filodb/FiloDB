@@ -274,7 +274,8 @@ object InputRecord {
       val hist = LongHistogram(buckets, bucketValues)
 
       // Now, write out histogram
-      builder.startNewRecord(if (isDelta) otelDeltaHistogram else otelCumulativeHistogram)
+      builder.startNewRecord(if (isDelta) otelExpDeltaHistogram
+                             else throw new IllegalArgumentException("cumulative exp histogram not supported"))
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)

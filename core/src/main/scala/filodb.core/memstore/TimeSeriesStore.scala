@@ -276,9 +276,12 @@ object TimeSeriesStore {
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
         case HistogramColumn => val counter = col.params.as[Option[Boolean]]("counter").getOrElse(false)
                                 val exponential = col.params.as[Option[Boolean]]("exp").getOrElse(false)
-                            if (counter) bv.HistogramVector.appendingSect(memFactory, config.maxBlobBufferSize)
-                            else if (exponential) bv.HistogramVector.appendingExp(memFactory, config.maxBlobBufferSize)
-                            else                  bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
+                                if (counter)
+                                  bv.HistogramVector.appendingSect(memFactory, config.maxBlobBufferSize)
+                                else if (exponential)
+                                  bv.HistogramVector.appendingExp(memFactory, config.maxBlobBufferSize)
+                                else
+                                  bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
         case other: Column.ColumnType => ???
       }
     }.toArray

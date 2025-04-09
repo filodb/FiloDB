@@ -10,24 +10,29 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.MemoryReader._
 
 /**
- * A HistogramVector appender storing compressed histogram values for less storage space.
- * This is a Section-based vector - sections of up to 64 histograms are stored at a time.
+ * A HistogramVector appender specializing in Exponential Histograms storing compressed histogram values
+ * for less storage space. This is a Section-based vector - sections of up to 64 histograms are stored at a time.
  * It stores histograms up to a maximum allowed size (since histograms are variable length)
- * Note that the bucket schema is not set until getting the first item.
+ * Note that the bucket schema is stored along with each histogram.
  * This one stores the compressed histograms as-is, with no other transformation.
  *
- * Read/Write/Lock semantics: everything is gated by the number of elements.
- * When it is 0, nothing is initialized so the reader guards against that.
- * When it is > 0, then all structures are initialized.
+ * Example Vector in hex:
+ * 0x5C00000009130300540003001800160009100002000300FDFFFFFF01000000000000000200031E00
+ * 1C000910000A001400FDFFFFFF0900000000000000FE00141111010300111800160009100002001400BC71F2FF0100000000000000020005
  *
- *
- * Format:
- *   +0000  u16  4-byte total length of this vector (excluding this length)
- *
- *   +0003  u16  2-byte length of Histogram bucket definition
- *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
- *                  First two bytes of definition is always the number of buckets, a u16
- *   +(5+n) remaining values according to format above
+ * 5C000000 4bytes  vector length (35 bytes length)
+ * 09       1byte vector major type
+ * 13       1byte vector subtype
+ * 0300     2bytes num histograms in vector
+ * 5400     2bytes num bytes in the section following 4 byte section header (84 bytes)
+ * 02       1byte  num items in section
+ * 00       1byte type of section
+ * 1800     2bytes record length (24 bytes length)
+ * 160009100002000300FDFFFFFF0100000000000000020003 24bytes histogram
+ * 1E00     2bytes record length (30 bytes length)
+ * 1C000910000A001400FDFFFFFF0900000000000000FE0014111101030011 30 bytes histogram
+ * 1800     2bytes record length (24 bytes length)
+ * 160009100002001400BC71F2FF0100000000000000020005 24bytes histogram
  */
 class AppendableExpHistogramVector(factory: MemFactory,
                                 vectPtr: Ptr.U8,

@@ -84,7 +84,7 @@ object BinaryHistogram extends StrictLogging {
         val bucketDef = HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
         MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case x =>
-        logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
+        logger.warn(s"Unrecognizable histogram format code $x, returning empty histogram")
         Histogram.empty
     }
   }

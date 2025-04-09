@@ -28,8 +28,8 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, otelCumulativeHistogram, otelDeltaHistogram,
-  promHistogram}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, otelCumulativeHistogram,
+           otelDeltaHistogram, otelExpDeltaHistogram, promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -156,7 +156,7 @@ object GatewayServer extends StrictLogging {
                    else if (genOtelDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
                                                   otelDeltaHistogram)
                    else if (genOtelExpDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
-                     otelDeltaHistogram, otelExponential = true)
+                                                  otelExpDeltaHistogram)
                    else if (genDeltaHist)
                      TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
                    else if (genGaugeData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
