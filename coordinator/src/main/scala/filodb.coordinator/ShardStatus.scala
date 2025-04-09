@@ -180,9 +180,12 @@ case object ShardStatusActive extends ShardStatus {
     Seq(IngestionStarted(ref, shard, node))
 }
 
-case object ShardStatusError extends ShardStatus {
+// NOTE: why are we not using the full throwable instead of String? This is because
+// ShardStatus is used in many API responses in ClusterRoute and HealthRoute. Having a `Throwable` type member
+// variable will lead to Marshalling errors. Hence, we are using a String here to store the exception message.
+case class ShardStatusError(error: String) extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
-    Seq(IngestionStarted(ref, shard, node))
+    Seq(IngestionError(ref, shard, new Exception(error)))
 }
 
 final case class ShardStatusRecovery(progressPct: Int) extends ShardStatus {
