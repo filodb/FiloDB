@@ -19,6 +19,15 @@ import filodb.memory.format.MemoryReader._
  * Read/Write/Lock semantics: everything is gated by the number of elements.
  * When it is 0, nothing is initialized so the reader guards against that.
  * When it is > 0, then all structures are initialized.
+ *
+ *
+ * Format:
+ *   +0000  u16  4-byte total length of this vector (excluding this length)
+ *
+ *   +0003  u16  2-byte length of Histogram bucket definition
+ *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
+ *                  First two bytes of definition is always the number of buckets, a u16
+ *   +(5+n) remaining values according to format above
  */
 class AppendableExpHistogramVector(factory: MemFactory,
                                 vectPtr: Ptr.U8,
@@ -69,10 +78,11 @@ class AppendableExpHistogramVector(factory: MemFactory,
 //        UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr,
 //        h.bucketDefNumBytes)
 //      UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
-      UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
+//      UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
       // Initialize the first section
-      val firstSectPtr = afterFormatCode(nativePtrReader, vectPtr)
+      val firstSectPtr = afterNumHistograms(nativePtrReader, vectPtr)
+      println(s"Initializing first section at $firstSectPtr")
       initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     }
 
@@ -120,7 +130,7 @@ class AppendableExpHistogramVector(factory: MemFactory,
  * A reader for row-based Exp Histogram vectors.  Mostly contains logic to skip around the vector to find the right
  * record pointer.
  */
-class RowExpHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends HistogramReader with SectionReader {
+class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends HistogramReader with SectionReader {
   import HistogramVector._
 
   println(s"RowExpHistogramReader: $histVect")
@@ -131,7 +141,7 @@ class RowExpHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends His
   private val returnHist = new LongHistogram(buckets, new Array[Long](0))
   val endAddr = histVect + histVect.asI32.getI32(acc) + 4
 
-  def firstSectionAddr: Ptr.U8 = afterBucketDefAddr(acc, histVect)
+  def firstSectionAddr: Ptr.U8 = afterNumHistograms(acc, histVect)
 
   /**
    * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
@@ -156,7 +166,7 @@ class RowExpHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends His
 
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
-  protected val dSink = NibblePack.DeltaSink(returnHist.values)
+//  protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
   // WARNING: histogram returned is shared between calls, do not reuse!
   def apply(index: Int): HistogramWithBuckets = {

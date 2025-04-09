@@ -230,8 +230,8 @@ object HistogramVector extends StrictLogging {
   final def bucketDefNumBytes(acc: MemoryReader, addr: Ptr.U8): Int =
     addr.add(OffsetBucketDefSize).asU16.getU16(acc)
   final def bucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
-  final def afterFormatCode(acc: MemoryReader, addr: Ptr.U8): Ptr.U8 =
-    addr.add(OffsetFormatCode).add(1)
+  final def afterNumHistograms(acc: MemoryReader, addr: Ptr.U8): Ptr.U8 =
+    addr.add(OffsetNumHistograms).add(2)
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryReader, addr: Ptr.U8): Boolean =

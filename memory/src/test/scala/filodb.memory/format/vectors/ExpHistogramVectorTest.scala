@@ -39,18 +39,24 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     LongHistogram(Base2ExpHistogramBuckets(20, -888388, 1), Array(0L, 5L)),
   )
 
-  it("should accept BinaryHistograms of the same schema and be able to query them") {
+  it("should accept BinaryHistograms of the different exp schema and be able to query them") {
     val appender = HistogramVector.appendingExp(memFactory, 1024)
+    val reader1 = appender.reader.asInstanceOf[RowExpHistogramReader]
+    println(s"Before add: " + reader1.toHexString(reader1.acc, reader1.histVect.addr))
 
     otelExpHistograms.foreach { h =>
       BinaryHistogram.writeDelta(h.buckets, h.values, buffer)
+      println(s"Adding histogram: " + buffer.byteArray().map("%02X" format _).mkString)
       appender.addData(buffer) shouldEqual Ack
+      val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
+      println(s"After add: " + reader.toHexString(reader.acc, reader.histVect.addr))
     }
 
     appender.length shouldEqual otelExpHistograms.length
 
     val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
     reader.length shouldEqual otelExpHistograms.length
+
 
     (0 until otelExpHistograms.length).foreach { i =>
       val h = reader(i)
@@ -128,7 +134,7 @@ class ExpHistogramVectorTest extends NativeVectorTest {
       println(i)
       if (i < 575) appender.addData(buffer) shouldEqual Ack
       // should fail for 206th histogram because it crosses the size of write buffer
-      if (i >= 575) appender.addData(buffer) shouldEqual VectorTooSmall(26,14)
+      if (i >= 575) appender.addData(buffer) shouldEqual VectorTooSmall(26,6)
     }
     val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
     reader.length shouldEqual 575
