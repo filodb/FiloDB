@@ -217,7 +217,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
       statusMap(shard) = ShardStatusRecovery(progress)
       registerNode(Seq(shard), node)
     case IngestionError(_, shard, error) =>
-      statusMap(shard) = ShardStatusError(error)
+      statusMap(shard) = ShardStatusError(error.getMessage)
       unassignShard(shard)
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
