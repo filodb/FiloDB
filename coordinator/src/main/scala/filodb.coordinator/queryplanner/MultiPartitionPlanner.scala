@@ -34,8 +34,20 @@ case class PartitionAssignment(partitionName: String, httpEndPoint: String, time
   val proportionMap: Map[String, PartitionDetails] =
     Map(partitionName -> PartitionDetails(partitionName, httpEndPoint, grpcEndPoint, 1.0f))
 }
+
+/**
+ * The partition assignment case class.
+ * It is a different assignment partition if the proportionMap is different.
+ * @param proportionMap the map from a partition to its proportion.
+ *                      For example {p1: 0.1, p2:0.9} means this assingment has two partitions
+ *                      with around 10% data goes to p1 and 90% data goes to p2.
+ * @param timeRange the timeRange when the partition assignment is effective.
+ */
 case class PartitionAssignmentV2(proportionMap: Map[String, PartitionDetails],
-                                 timeRange: TimeRange) extends PartitionAssignmentTrait
+                                 timeRange: TimeRange) extends PartitionAssignmentTrait {
+  assert(proportionMap.map(_._2.proportion).sum == 1.0f, s"the total proportion of proportionMap should be 1.0f." +
+    s" However the actual is $proportionMap")
+}
 
 trait PartitionLocationProvider {
 
@@ -407,6 +419,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     PlanResult(execPlan:: Nil)
   }
 
+  /**
+   * materialize a plan that based on a multi-partition assignment.
+   *
+   * @param logicalPlan the logic plan.
+   * @param partition the partition assignment that may contains one or more partitions.
+   * @param queryContext the query context.
+   * @param timeRangeOverride if given, the plan will be materialized to this range. Otherwise, the
+   *                          range is computed from the PromQlQueryParams.
+   * @return an ExecPlan.
+   */
   private def materializeForPartition(logicalPlan: LogicalPlan,
                                       partition: PartitionAssignmentTrait,
                                       queryContext: QueryContext,
