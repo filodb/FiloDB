@@ -540,6 +540,18 @@ object HistogramBuckets {
     Base2ExpHistogramBuckets(scale, startPosBucket, numPosBuckets)
   }
 
+  def otelExpScale(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
+  }
+
+  def otelExpStartIndexPositiveBuckets(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+  }
+
+  def otelExpNumPositiveBuckets(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2 + 4)
+  }
+
   /**
    * Creates a CustomBuckets definition.
    * @param bucketsDefOffset must point to the 2-byte length prefix of the bucket definition
@@ -560,7 +572,8 @@ object HistogramBuckets {
   val binaryBuckets64 = GeometricBuckets(2.0d, 2.0d, 64, minusOne = true)
 
   val emptyBuckets = GeometricBuckets(2.0d, 2.0d, 0)
-  val emptyExpBuckets = Base2ExpHistogramBuckets(20, 0, 0)
+
+  def emptyExpBuckets: Base2ExpHistogramBuckets = Base2ExpHistogramBuckets(20, 0, 0)
 }
 
 /**
@@ -617,13 +630,17 @@ object Base2ExpHistogramBuckets {
  *
  * Negative observations are not supported yet. But serialization format is forward compatible.
  *
+ * The params are vars because we want to not allocate one of these for every histogram sample
+ * during queries. Do not mutate unless absolutely needed. The only place we mutate is during
+ * reading of exponential histogram vector.
+ *
  * @param scale OTel metrics ExponentialHistogramDataPoint proto scale value
  * @param startIndexPositiveBuckets offset for positive buckets from the same proto
  * @param numPositiveBuckets length of the positive buckets array from the same proto
  */
-final case class Base2ExpHistogramBuckets(scale: Int,
-                                          startIndexPositiveBuckets: Int,
-                                          numPositiveBuckets: Int
+final case class Base2ExpHistogramBuckets(var scale: Int,
+                                          var startIndexPositiveBuckets: Int,
+                                          var numPositiveBuckets: Int
                                         ) extends HistogramBuckets {
   import Base2ExpHistogramBuckets._
   require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
@@ -631,9 +648,9 @@ final case class Base2ExpHistogramBuckets(scale: Int,
   require(scale > -maxAbsScale && scale < maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 
-  val base: Double = Math.pow(2, Math.pow(2, -scale))
-  val startBucketTop: Double = bucketTop(1)
-  val endBucketTop: Double = bucketTop(numBuckets - 1)
+  def base: Double = Math.pow(2, Math.pow(2, -scale))
+  def startBucketTop: Double = bucketTop(1)
+  def endBucketTop: Double = bucketTop(numBuckets - 1)
 
   override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count
 

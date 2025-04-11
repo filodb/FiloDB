@@ -1,6 +1,5 @@
 package filodb.memory.format
 
-//import filodb.memory.format.vectors.Base2ExpHistogramBuckets
 import filodb.memory.format.vectors.Base2ExpHistogramBuckets
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer}
 import org.agrona.concurrent.UnsafeBuffer

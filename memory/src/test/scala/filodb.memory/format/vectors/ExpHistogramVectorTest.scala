@@ -186,7 +186,7 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     }
   }
 
-   it("histogram should have right formatCode after sum operation is applied") {
+   it("histogram should support sum and sum result should have right formatCode") {
      val appender = HistogramVector.appendingExp(memFactory, 1024)
      otelExpHistograms.foreach { h =>
        BinaryHistogram.writeDelta(h.buckets, h.values, buffer)
@@ -194,8 +194,10 @@ class ExpHistogramVectorTest extends NativeVectorTest {
      }
      appender.length shouldEqual otelExpHistograms.length
 
-    val mutableHisto = appender.reader.asHistReader.sum(0, 2)
-    BinHistogram(mutableHisto.serialize()).formatCode shouldEqual HistFormat_OtelExp_XOR
+    val sumHist = appender.reader.asHistReader.sum(0, 2)
+    sumHist.buckets shouldEqual Base2ExpHistogramBuckets(3, -8, 9)
+    sumHist.values shouldEqual Array(0.0, 0.0, 5.0, 5.0, 5.0, 5.0, 8.0, 8.0, 14.0, 20.0)
+    BinHistogram(sumHist.serialize()).formatCode shouldEqual HistFormat_OtelExp_XOR
   }
 
   it("should reject initially invalid BinaryHistogram") {

@@ -20,11 +20,11 @@ import filodb.memory.format.MemoryReader._
  * 0x5C00000009130300540003001800160009100002000300FDFFFFFF01000000000000000200031E00
  * 1C000910000A001400FDFFFFFF0900000000000000FE00141111010300111800160009100002001400BC71F2FF0100000000000000020005
  *
- * 5C000000 4bytes  vector length (35 bytes length)
+ * 5C000000 4bytes  vector length (92 bytes length)
  * 09       1byte vector major type
  * 13       1byte vector subtype
  * 0300     2bytes num histograms in vector
- * 5400     2bytes num bytes in the section following 4 byte section header (84 bytes)
+ * 5400     2bytes section length: num bytes in the section following 4 byte section header (84 bytes)
  * 03       1byte  num items in section
  * 00       1byte type of section
  * 1800     2bytes record length (24 bytes length)
@@ -112,7 +112,7 @@ class AppendableExpHistogramVector(factory: MemFactory,
 
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
-  // NOTE: do not access reader below unless this vect is nonempty.  TODO: fix this, or don't if we don't use this class
+  // NOTE: do not access reader below unless this vect is nonempty.
   lazy val reader: VectorDataReader = new RowExpHistogramReader(nativePtrReader, vectPtr)
 
   def reset(): Unit = {
@@ -132,15 +132,10 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   final def length: Int = getNumHistograms(acc, histVect)
 
   val buckets = HistogramBuckets.emptyExpBuckets
-  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
   val endAddr = histVect + histVect.asI32.getI32(acc) + 4
 
   def firstSectionAddr: Ptr.U8 = afterNumHistograms(acc, histVect)
 
-  /**
-   * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
-   * every time.  Using higher level functions such as sum is going to be a much better bet usually.
-   */
   def iterate(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr, startElement: Int): TypedIterator =
   new Iterator[Histogram] with TypedIterator {
     var elem = startElement
@@ -158,8 +153,9 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     (0 until size).map(_ => it.asHistIt.mkString(sep)).mkString(sep)
   }
 
-  def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
+  def length(acc: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
+  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
   // WARNING: histogram returned is shared between calls, do not reuse!
@@ -171,12 +167,15 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
 
     val binHist = BinaryHistogram.BinHistogram(buf)
-    returnHist.buckets = binHist.bucketDef // TODO can we further avoid this bucketDef object allocation?
-    val numBuckets = returnHist.buckets.numBuckets
+    val bucketDef = returnHist.buckets.asInstanceOf[Base2ExpHistogramBuckets]
+    bucketDef.scale = HistogramBuckets.otelExpScale(buf.byteArray(), binHist.bucketDefOffset)
+    bucketDef.startIndexPositiveBuckets = HistogramBuckets.otelExpStartIndexPositiveBuckets(buf.byteArray(),
+                                                                                            binHist.bucketDefOffset)
+    bucketDef.numPositiveBuckets = HistogramBuckets.otelExpNumPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset)
     dSink.reset()
-    dSink.setLength(numBuckets)
+    dSink.setLength(bucketDef.numBuckets)
     val buf2 = binHist.valuesByteSlice // no object allocation here, valuesBuf is reused
-    NibblePack.unpackToSink(buf2, dSink, numBuckets)
+    NibblePack.unpackToSink(buf2, dSink, bucketDef.numBuckets)
     returnHist
   }
 
@@ -184,7 +183,7 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
   final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(buckets)
+    val summedHist = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
     cforRange { start to end } { i =>
       summedHist.addNoCorrection(apply(i))
     }

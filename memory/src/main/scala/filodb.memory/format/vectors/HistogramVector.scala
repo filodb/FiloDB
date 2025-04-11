@@ -24,6 +24,7 @@ import filodb.memory.format.MemoryReader._
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *                  0x05   custom LE/bucket values + NibblePacked delta Long values
  *                  0x09   otelExp_Delta + NibblePacked delta Long values  (see [[Base2ExpHistogramBuckets]])
+ *                  0x10   otelExp_XOR   + NibblePacked delta Double values
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
