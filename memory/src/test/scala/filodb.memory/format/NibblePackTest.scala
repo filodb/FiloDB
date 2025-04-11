@@ -1,5 +1,7 @@
 package filodb.memory.format
 
+//import filodb.memory.format.vectors.Base2ExpHistogramBuckets
+import filodb.memory.format.vectors.Base2ExpHistogramBuckets
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer}
 import org.agrona.concurrent.UnsafeBuffer
 import org.scalatest._
@@ -234,6 +236,26 @@ class NibblePackTest extends AnyFunSpec with Matchers with ScalaCheckPropertyChe
       sink.outArray shouldEqual inputs
     }
   }
+
+  it("should pack and unpack random list of increasing Longs via delta using longer array than num items") {
+    val buf = new ExpandableArrayBuffer()
+    forAll(increasingLongList) { longs =>
+
+      val inputs = longs.toArray
+      val bytesWritten = NibblePack.packDelta(inputs, buf, 0)
+
+      // maxBucket length so that we can test the array sink with a larger buffer
+      // This is what happens with RowExpHistogramReader
+      val sink = NibblePack.DeltaSink(new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
+      sink.setLength(inputs.length)
+      val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+      val res = NibblePack.unpackToSink(bufSlice, sink, inputs.length)
+
+      res shouldEqual NibblePack.Ok
+      sink.outArray.slice(0, inputs.length) shouldEqual inputs
+    }
+  }
+
 
   def increasingDoubleList: Gen[Seq[Double]] = increasingLongList.map(_.map(_.toDouble)).filter(_.length > 0)
 

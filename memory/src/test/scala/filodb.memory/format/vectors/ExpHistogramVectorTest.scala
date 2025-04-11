@@ -17,7 +17,6 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
 
     reader.length(acc, appender.addr) shouldEqual 0
-    reader.numBuckets shouldEqual 0
     intercept[IllegalArgumentException] { reader(0) }
   }
 
@@ -41,22 +40,15 @@ class ExpHistogramVectorTest extends NativeVectorTest {
 
   it("should accept BinaryHistograms of the different exp schema and be able to query them") {
     val appender = HistogramVector.appendingExp(memFactory, 1024)
-    val reader1 = appender.reader.asInstanceOf[RowExpHistogramReader]
-    println(s"Before add: " + reader1.toHexString(reader1.acc, reader1.histVect.addr))
 
     otelExpHistograms.foreach { h =>
       BinaryHistogram.writeDelta(h.buckets, h.values, buffer)
-      println(s"Adding histogram: " + buffer.byteArray().map("%02X" format _).mkString)
       appender.addData(buffer) shouldEqual Ack
-      val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
-      println(s"After add: " + reader.toHexString(reader.acc, reader.histVect.addr))
     }
-
     appender.length shouldEqual otelExpHistograms.length
 
     val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
     reader.length shouldEqual otelExpHistograms.length
-
 
     (0 until otelExpHistograms.length).foreach { i =>
       val h = reader(i)

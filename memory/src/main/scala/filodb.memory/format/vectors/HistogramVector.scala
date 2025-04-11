@@ -51,6 +51,30 @@ object BinaryHistogram extends StrictLogging {
     def debugStr: String = s"totalLen=$totalLength numBuckets=$numBuckets formatCode=$formatCode " +
                            s"bucketDef=$bucketDefNumBytes bytes valuesIndex=$valuesIndex values=$valuesNumBytes bytes"
 
+    def bucketDef: HistogramBuckets = {
+      formatCode match {
+        // All the delta encoding formats decode into LongHistograms and are generally used during ingestion
+        case HistFormat_Geometric_Delta =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        case HistFormat_Geometric1_Delta =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
+        case HistFormat_OtelExp_Delta =>
+          HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        case HistFormat_Custom_Delta =>
+          HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+
+        // All the XOR encoding formats decode into MutableHistograms and are generally used during querying
+        case HistFormat_Geometric_XOR =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        case HistFormat_Custom_XOR =>
+          HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+        case HistFormat_OtelExp_XOR =>
+          HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        case x =>
+          logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
+          Histogram.empty.buckets
+      }
+    }
     /**
      * Converts this BinHistogram to a Histogram object.  May not be the most efficient.
      * Intended for slower paths such as high level (lower # samples) aggregation and HTTP/CLI materialization
@@ -84,7 +108,7 @@ object BinaryHistogram extends StrictLogging {
         val bucketDef = HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
         MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case x =>
-        logger.warn(s"Unrecognizable histogram format code $x, returning empty histogram")
+        logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
         Histogram.empty
     }
   }

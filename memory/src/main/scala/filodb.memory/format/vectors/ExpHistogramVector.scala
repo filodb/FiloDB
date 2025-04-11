@@ -25,7 +25,7 @@ import filodb.memory.format.MemoryReader._
  * 13       1byte vector subtype
  * 0300     2bytes num histograms in vector
  * 5400     2bytes num bytes in the section following 4 byte section header (84 bytes)
- * 02       1byte  num items in section
+ * 03       1byte  num items in section
  * 00       1byte type of section
  * 1800     2bytes record length (24 bytes length)
  * 160009100002000300FDFFFFFF0100000000000000020003 24bytes histogram
@@ -96,8 +96,7 @@ class AppendableExpHistogramVector(factory: MemFactory,
   def debugString: String = {
     val hReader = reader.asInstanceOf[RowExpHistogramReader]
     s"AppendableExpHistogramVector(vectPtr=$vectPtr maxBytes=$maxBytes) " +
-    s"numItems=${hReader.length} curSection=$curSection " +
-    { if (hReader.length > 0) s"bucketScheme: ${hReader.buckets} numBuckets=${hReader.numBuckets}" else "<noSchema>" }
+    s"numItems=${hReader.length} curSection=$curSection"
   }
 
   // Inner method to add the histogram to this vector
@@ -131,10 +130,9 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   import HistogramVector._
 
   final def length: Int = getNumHistograms(acc, histVect)
-  val numBuckets = if (length > 0) getNumBuckets(acc, histVect) else 0
 
   val buckets = HistogramBuckets.emptyExpBuckets
-  private val returnHist = new LongHistogram(buckets, new Array[Long](0))
+  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
   val endAddr = histVect + histVect.asI32.getI32(acc) + 4
 
   def firstSectionAddr: Ptr.U8 = afterNumHistograms(acc, histVect)
@@ -162,7 +160,7 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
-//  protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
   // WARNING: histogram returned is shared between calls, do not reuse!
   def apply(index: Int): HistogramWithBuckets = {
@@ -170,17 +168,16 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
     val buf = BinaryHistogram.valuesBuf
-
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
-    BinaryHistogram.BinHistogram(buf).toHistogram
-    // TODO optimize to use less memory
-    // buf now has the histogram
-    // bucketdef = extract bucketdef
-    // ensure returnHist.values has same length as bucketdef
-    // values =  NibblePack.unpackToSink(buf, dSink, numBuckets)
-    // returnHist.values = values
-    // returnHist.bucketdef = bucketdef
-//    returnHist
+
+    val binHist = BinaryHistogram.BinHistogram(buf)
+    returnHist.buckets = binHist.bucketDef // TODO can we further avoid this bucketDef object allocation?
+    val numBuckets = returnHist.buckets.numBuckets
+    dSink.reset()
+    dSink.setLength(numBuckets)
+    val buf2 = binHist.valuesByteSlice // no object allocation here, valuesBuf is reused
+    NibblePack.unpackToSink(buf2, dSink, numBuckets)
+    returnHist
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
