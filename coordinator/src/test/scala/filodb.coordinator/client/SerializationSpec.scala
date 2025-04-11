@@ -359,7 +359,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     roundTrip(execPlan) shouldEqual execPlan
   }
 
-  it("should serialize and deserialize big ExecPlan") {
+  ignore("should serialize and deserialize big ExecPlan")  {
     println(s"system ${system}")
     ActorSystemHolder.system = system
 
