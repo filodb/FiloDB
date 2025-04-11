@@ -182,7 +182,13 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
-    require(buckets.numBuckets == values.length, s"Values array size of ${values.length} != ${buckets.numBuckets}")
+    require(buckets.numBuckets <= values.length, s"Values array size of ${values.length} < ${buckets.numBuckets}")
+    // the length can be greater when exponential histogram bucket arrays are directly written to
+    // the wire durin queries without any aggregation like sum or rate, which is not a common case. Acceptable to
+    // pay the cost of copying the array in this case.
+    val values2 = if (buckets.numBuckets < values.size) values.slice(0, buckets.numBuckets)
+                  else values
+
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else  buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
@@ -194,7 +200,7 @@ object BinaryHistogram extends StrictLogging {
     val finalPos = if (formatCode == HistFormat_Null) { 3 }
                    else {
                      val valuesIndex = buckets.serialize(buf, 3)
-                     NibblePack.packDelta(values, buf, valuesIndex)
+                     NibblePack.packDelta(values2, buf, valuesIndex)
                    }
     require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
     buf.putShort(0, (finalPos - 2).toShort)
