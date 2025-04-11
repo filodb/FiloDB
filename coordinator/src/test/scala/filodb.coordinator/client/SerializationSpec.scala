@@ -5,8 +5,9 @@ import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
-import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
-import filodb.coordinator.queryplanner.SingleClusterPlanner
+import filodb.coordinator.{ActorSpecConfig, ActorSystemHolder, ActorTest, ShardMapper}
+
+import filodb.coordinator.queryplanner.{SingleClusterPlanner, SingleClusterPlannerSpec}
 import filodb.core.{MachineMetricsData, SpreadChange, query}
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordSchema}
 import filodb.core.metadata.{Dataset, Schemas}
@@ -14,6 +15,11 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.MapColumn
 import filodb.core.query.QueryConfig
 import filodb.core.store.IngestionConfig
+import filodb.grpc.GrpcMultiPartitionQueryService.RemoteExecPlan
+
+import java.io.ByteArrayOutputStream
+import java.util.zip.GZIPOutputStream
+
 import filodb.memory.format.{SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -350,6 +356,54 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val  param = PromQlQueryParams("test", 1000, 200, 5000)
     val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = param,
       plannerParams = PlannerParams(spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0))))))
+    roundTrip(execPlan) shouldEqual execPlan
+  }
+
+  ignore("should serialize and deserialize big ExecPlan")  {
+    println(s"system ${system}")
+    ActorSystemHolder.system = system
+
+    val execPlan = new SingleClusterPlannerSpec().getBigExecPlan
+    //val textPlan = execPlan.printTree()
+    val protoExecPlan = filodb.coordinator.ProtoConverters.execPlanToProto(execPlan)
+    val protoBytes = protoExecPlan.toByteArray
+    val protoSize = protoBytes.length
+    println(s"Proto plan size is ${protoSize}")
+
+//    In case if you want to see a textual representation of a plan
+//    import com.google.protobuf.TextFormat
+//    val appendable = new FileWriter("/Users/<user>/tmp/huge_plan.proto_text")
+//    val printer = TextFormat.printer
+//    printer.print(protoExecPlan, appendable)
+//    appendable.flush()
+//    appendable.close()
+
+    val rep: RemoteExecPlan = RemoteExecPlan.parseFrom(protoBytes)
+    val protoQC = rep.getQueryContext
+    import filodb.coordinator.ProtoConverters._
+    val qc = protoQC.fromProto
+    val execPlanFromProto = rep.getExecPlan.fromProto(qc)
+
+    val byteArrayOutputStream = new ByteArrayOutputStream()
+    val gzipOutputStream = new GZIPOutputStream(byteArrayOutputStream)
+    gzipOutputStream.write(protoExecPlan.toByteArray)
+    gzipOutputStream.close()
+    val gzippedSize = byteArrayOutputStream.toByteArray.length
+    println(s"Compressed with GZip proto size ${gzippedSize}")
+    val serializer = serialization.findSerializerFor(execPlan)
+
+
+    val kryoBytes = serializer.toBinary(execPlan)
+    println(s"Kryo plan size is ${kryoBytes.size}")
+
+    val kryoBytesDuplicateObjects = serializer.toBinary(execPlanFromProto)
+    println(s"Kryo plan size with duplicate objects ${kryoBytes.size}")
+
+    println(s"kryoBytes/protoBytes % = ${kryoBytes.size * 100.0 / protoSize}")
+    println(s"kryoBytes/gzippedProtoBytes % = ${kryoBytes.size * 100.0 / gzippedSize}")
+    println(s"kryoBytesDuplicateObjects/gzippedProtoBytes % = ${kryoBytesDuplicateObjects.size * 100.0 / gzippedSize}")
+
+    //execPlanFromProto shouldEqual execPlan
     roundTrip(execPlan) shouldEqual execPlan
   }
 

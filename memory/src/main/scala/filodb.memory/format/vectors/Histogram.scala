@@ -532,11 +532,11 @@ object HistogramBuckets {
 
   def otelExp(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets = {
     val scale = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
-    val startPosBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
-    val numPosBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 4)
+    val startPosBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+    val numPosBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2 + 4)
     // uncomment when negative buckets are supported
-    // val startNegBucket = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 6)
-    // val numNegBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8)
+    // val startNegBucket = UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2 + 4 + 2)
+    // val numNegBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2 + 4 + 2 + 4)
     Base2ExpHistogramBuckets(scale, startPosBucket, numPosBuckets)
   }
 
@@ -600,7 +600,6 @@ object Base2ExpHistogramBuckets {
   // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
   val maxBuckets = 180
   val maxAbsScale = 100
-  val maxAbsBucketIndex = 500
 }
 
 /**
@@ -628,12 +627,6 @@ final case class Base2ExpHistogramBuckets(scale: Int,
   import Base2ExpHistogramBuckets._
   require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
     s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${maxBuckets}")
-  // limit bucket index and scale values since the corresponding bucketTop values can get very large or very small and
-  // may tend to very very large or small values above double precision. Note we are also serializing
-  // these as shorts in the binary format, so they need to be within limits of short
-  require(startIndexPositiveBuckets > -maxAbsBucketIndex && startIndexPositiveBuckets < maxAbsBucketIndex,
-          s"Invalid startIndexPositiveBuckets $startIndexPositiveBuckets should be between " +
-            s"${-maxAbsBucketIndex} and ${maxAbsBucketIndex}")
   require(scale > -maxAbsScale && scale < maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 
@@ -662,23 +655,21 @@ final case class Base2ExpHistogramBuckets(scale: Int,
     val startIndexNegativeBuckets = 0
     val numNegativeBuckets = 0
     require(numBuckets < Short.MaxValue, s"numBucket overflow: $numBuckets")
-    require(startIndexPositiveBuckets < Short.MaxValue,
-      s"startIndexPositiveBuckets overflow: $startIndexPositiveBuckets")
     require(scale < Short.MaxValue, s"scale overflow: $scale")
     require(numPositiveBuckets < Short.MaxValue, s"numPositiveBuckets overflow $numPositiveBuckets")
     // per BinHistogram format, bucket def len comes first always
-    buf.putShort(pos, (2 + 2 + 4 + 4).toShort)
+    buf.putShort(pos, (2 + 2 + 4 + 2 + 4 + 2).toShort)
     // numBuckets comes next always
     val numBucketsPos = pos + 2
     buf.putShort(numBucketsPos, numBuckets.toShort, LITTLE_ENDIAN)
     // now bucket format specific data
     val bucketSchemeFieldsPos = pos + 4
     buf.putShort(bucketSchemeFieldsPos, scale.toShort, LITTLE_ENDIAN)
-    buf.putShort(bucketSchemeFieldsPos + 2, startIndexPositiveBuckets.toShort, LITTLE_ENDIAN)
-    buf.putShort(bucketSchemeFieldsPos + 4, numPositiveBuckets.toShort, LITTLE_ENDIAN)
-    buf.putShort(bucketSchemeFieldsPos + 6, startIndexNegativeBuckets.toShort, LITTLE_ENDIAN)
-    buf.putShort(bucketSchemeFieldsPos + 8, numNegativeBuckets.toShort, LITTLE_ENDIAN)
-    pos + 14
+    buf.putInt(bucketSchemeFieldsPos + 2, startIndexPositiveBuckets, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 2 + 4, numPositiveBuckets.toShort, LITTLE_ENDIAN)
+    buf.putInt(bucketSchemeFieldsPos + 2 + 4 + 2, startIndexNegativeBuckets, LITTLE_ENDIAN)
+    buf.putShort(bucketSchemeFieldsPos + 2 + 4 + 2 + 4, numNegativeBuckets.toShort, LITTLE_ENDIAN)
+    pos + 18
   }
 
   override def toString: String = {

@@ -654,6 +654,7 @@ enum MiscellaneousFunctionId {
   LABEL_REPLACE        = 0;
   LABEL_JOIN           = 1;
   HIST_TO_PROM_VECTORS = 2;
+  OPTIMIZE_WITH_AGG    = 3;
 }
 
 enum BinaryOperator {
@@ -1107,4 +1108,6 @@ service RemoteExec {
   rpc execStreaming(Request) returns (stream StreamingResponse);
 
   rpc executePlan(RemoteExecPlan) returns (stream StreamingResponse);
+
+  rpc executePlan2(RemoteExecPlan) returns (stream StreamingResponse);
 }

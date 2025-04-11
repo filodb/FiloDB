@@ -14,7 +14,7 @@ import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
+import filodb.coordinator.{ActorName, CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
 
 class FiloDbClusterDiscovery(settings: FilodbSettings,
@@ -94,8 +94,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val nodeCoordActorSelections = {
     hostNames.map { h =>
-      val actorPath = s"akka.tcp://filo-standalone@$h/user/coordinator"
-      system.actorSelection(actorPath)
+      system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(h))
     }
   }
 
@@ -112,10 +111,16 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     }
   }
 
+  def mergeSnapshotResponses(ref: DatasetRef,
+                             numShards: Int,
+                             snapshots: Observable[CurrentShardSnapshot]): Observable[ShardMapper] = {
+    val acc = new ShardMapper(numShards)
+    snapshots.map(_.map).foldLeft(acc)(_.mergeFrom(_, ref))
+  }
+
   private def reduceMappersFromAllNodes(ref: DatasetRef,
                                         numShards: Int,
                                         timeout: FiniteDuration): Observable[ShardMapper] = {
-    val acc = new ShardMapper(numShards)
     val snapshots = for {
       nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
       ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout)
@@ -135,7 +140,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     } yield {
       snapshot
     }
-    snapshots.map(_.map).foldLeft(acc)(_.mergeFrom(_, ref))
+    mergeSnapshotResponses(ref, numShards, snapshots)
   }
 
   private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()

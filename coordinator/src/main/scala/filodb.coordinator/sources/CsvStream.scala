@@ -119,7 +119,9 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                         }
   val get = Observable.fromIteratorUnsafe(batchIterator)
 
-  def teardown(): Unit = {
+  def teardown(isForced: Boolean = false): Unit = {
     csvReader.close()
   }
+
+  override def endOffset: Option[Long] = None
 }
