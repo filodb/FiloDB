@@ -36,13 +36,21 @@ class KafkaIngestionStream(config: Config,
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected lazy val consumer = createKCO(sc, tp, offset)
 
-  private[filodb] def createKCO(sourceConfig: SourceConfig,
-                topicPartition: TopicPartition,
-                offset: Option[Long]): KafkaConsumerObservable[Long, Any, CommittableMessage[Long, Any]] = {
+  /*
+  * NOTE: Why are we keeping reference to both KafkaConsumer and KafkaConsumerObservable ?
+  * This is because we need the KafkaConsumerObservable for the existing monix style streaming of data.
+  * And we need the direct reference to KafkaConsumer for:
+  *  1. To fetch the endOffsets for the topic partition. This is used in recovery path to stream to end of ingestion.
+  *  2. To close the KafkaConsumer on teardown, when isForced is set to true. This is done to ensure cleanup of
+  *     KafkaConsumer resources during recovery and before normalIngestion is started.
+  * */
+  val kafkaConsumer : KafkaConsumer[Long, Any] = createConsumer(sc, tp, offset)
+  protected lazy val consumer = createKCO(sc)
+  private[filodb] def createKCO(sourceConfig: SourceConfig
+                               ): KafkaConsumerObservable[Long, Any, CommittableMessage[Long, Any]] = {
 
-    val consumer = createConsumer(sourceConfig, topicPartition, offset)
+    val consumer = createConsumerTask(kafkaConsumer)
     val cfg = KafkaConsumerConfig(sourceConfig.asConfig)
     require(!cfg.enableAutoCommit, "'enable.auto.commit' must be false.")
 
@@ -51,20 +59,23 @@ class KafkaIngestionStream(config: Config,
 
   private[filodb] def createConsumer(sourceConfig: SourceConfig,
                                      topicPartition: TopicPartition,
-                                     offset: Option[Long]): Task[KafkaConsumer[Long, Any]] = {
+                                     offset: Option[Long]): KafkaConsumer[Long, Any] = {
     import collection.JavaConverters._
+    val props = sourceConfig.asProps
+    if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
 
+    blocking {
+      props.put("client.id", s"${props.get("group.id")}.${System.getenv("INSTANCE_ID")}.$shard")
+      val consumer = new KafkaConsumer(props)
+      consumer.assign(List(topicPartition).asJava)
+      offset.foreach { off => consumer.seek(topicPartition, off) }
+      consumer.asInstanceOf[KafkaConsumer[Long, Any]]
+    }
+  }
+
+  private[filodb] def createConsumerTask(consumer: KafkaConsumer[Long, Any]): Task[KafkaConsumer[Long, Any]] = {
     Task {
-      val props = sourceConfig.asProps
-      if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
-
-      blocking {
-        props.put("client.id", s"${props.get("group.id")}.${System.getenv("INSTANCE_ID")}.$shard")
-        val consumer = new KafkaConsumer(props)
-        consumer.assign(List(topicPartition).asJava)
-        offset.foreach { off => consumer.seek(topicPartition, off) }
-        consumer.asInstanceOf[KafkaConsumer[Long, Any]]
-      }
+      consumer
     }
   }
 
@@ -82,10 +93,38 @@ class KafkaIngestionStream(config: Config,
       SomeData(msg.record.value.asInstanceOf[RecordContainer], msg.record.offset)
     }
 
-  override def teardown(): Unit = {
+  override def teardown(isForced: Boolean = false): Unit = {
     logger.info(s"Shutting down stream $tp")
-    // consumer does callback to close but confirm
-   }
+    // the kco consumer on cancel, makes a callback to close the kafka-consumer but confirm
+
+    if (isForced) {
+      // Manually closing the kafka consumer on teardown to avoid the `InstanceAlreadyExistsException` when:
+      // 1. Moving from "IngestionActor.doRecovery" to "IngestionActor.normalIngestion" state.
+      // 2. During multiple iterations of "IngestionActor.doRecoveryWithIngestionStreamEndOffset".
+      //
+      // NOTE:
+      // -------------
+      // After completion of "IngestionActor.doRecovery" or "IngestionActor.doRecoveryWithIngestionStreamEndOffset",
+      // we DO NOT CLOSE the kafka consumer as IngestionActor.removeAndReleaseResources, which takes care of canceling
+      // the KafkaConsumerObservable and close the kafka consumer.
+      // Hence, to ensure cleanup of resources correctly, we are closing the kafka consumer here.
+      // isForced is set to true only in the "IngestionActor.doRecoveryWithIngestionStreamEndOffset" method.
+      kafkaConsumer.close()
+    }
+  }
+
+  /**
+   * @return returns the offset of the last record in the stream, if applicable. This is used in
+   *         "IngestionActor.doRecovery" method to retrieve the ending watermark for shard recovery.
+   */
+  override def endOffset: Option[Long] = {
+    // Kafka offsets are Long, so we can return the last offset as the endOffset
+    import collection.JavaConverters._
+    kafkaConsumer.endOffsets(List(tp).asJava).asScala.get(tp) match {
+      case Some(offset) => Some(offset)
+      case None => None
+    }
+  }
 }
 
 /** The no-arg constructor `IngestionFactory` for the kafka ingestion stream.

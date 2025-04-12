@@ -135,13 +135,29 @@ class HistogramVectorTest extends NativeVectorTest {
       hist.serialize(Some(buffer))
       if (buckets < 205) appender.addData(buffer) shouldEqual Ack
       // should fail for 206th histogram because it crosses the size of write buffer
-      if (buckets >= 205) appender.addData(buffer) shouldEqual VectorTooSmall(73,46)
+      if (buckets >= 205) appender.addData(buffer) shouldEqual VectorTooSmall(73,42)
       counts = counts.map(_ + 10)
     }
 
     val reader = appender.reader.asInstanceOf[RowHistogramReader]
     reader.length shouldEqual 205
 
+  }
+
+  it ("should be able to create a vector of one observation histograms of large bucket offset") {
+    val appender = HistogramVector.appending(memFactory, 15000) // 15k bytes is default blob size
+    val bucketScheme = Base2ExpHistogramBuckets(20, 9037032, 1)
+    val counts = Array(0L, 1L)
+
+    (0 until 2958).foreach { i =>
+      val hist = LongHistogram(bucketScheme, counts)
+      hist.serialize(Some(buffer))
+      if (i < 2957) appender.addData(buffer) shouldEqual Ack
+      // should fail for 206th histogram because it crosses the size of write buffer
+      if (i >= 2957) appender.addData(buffer) shouldEqual VectorTooSmall(5,0)
+    }
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual 2957
   }
 
   it("should accept MutableHistograms with rate doubles that have fractional value with" +

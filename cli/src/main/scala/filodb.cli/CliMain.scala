@@ -115,6 +115,7 @@ object CliMain extends StrictLogging {
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configpath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command statusV2 --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --numgroupbyfields {1,2,3}")
@@ -207,6 +208,10 @@ object CliMain extends StrictLogging {
         case Some("status") =>
           val (remote, ref) = getClientAndRef(args)
           dumpShardStatus(remote, ref)
+
+        case Some("statusV2") =>
+          val (remote, ref) = getClientAndRef(args)
+          dumpShardStatusV2(remote, ref)
 
         case Some("validateSchemas") => validateSchemas()
 
@@ -330,6 +335,20 @@ object CliMain extends StrictLogging {
           println(ShardFormatStr.format(idx, status,
                                         Try(ref.path.address).getOrElse("")))
         }
+      case _ =>
+        println(s"Unable to obtain status for dataset $ref, has it been setup yet?")
+    }
+  }
+
+  /**
+   * Prints shardStatus of filodb cluster using ShardStatusV2
+   * @param client LocalClient
+   * @param ref DatasetRef
+   */
+  def dumpShardStatusV2(client: LocalClient, ref: DatasetRef): Unit = {
+    client.getShardMapperV2(ref, v2ClusterEnabled) match {
+      case Some(map) =>
+        ShardMapperV2.prettyPrint(map)
       case _ =>
         println(s"Unable to obtain status for dataset $ref, has it been setup yet?")
     }

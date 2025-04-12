@@ -45,7 +45,17 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                        filoSettings: FilodbSettings, scheduler: Scheduler)
   extends StrictLogging {
 
-  private val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
+  private val port  = if (filoSettings.grpcPortList.isDefined && filoSettings.localhostOrdinal.isDefined) {
+    val ordinal = filoSettings.localhostOrdinal.get
+    filoSettings.grpcPortList.get(ordinal)
+  } else if (filoSettings.allConfig.hasPath("filodb.grpc.bind-grpc-port")) {
+      filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
+  } else {
+    throw new IllegalArgumentException(
+      "[ClusterV2] Grpc port is not defined, " +
+      "neither bind-grpc-port nor grpc-port-list with localhost-ordinal are defined"
+    )
+  }
   private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
   private val server = ServerBuilder.forPort(this.port)
     .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
@@ -248,6 +258,15 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
               rp.processQueryResponse(QueryError(execPlan.queryContext.queryId, QueryStats(), t))
             case _            =>  rp.span.mark("exec plan dispatched successful")
           }
+        }
+
+        override def executePlan2(
+          remoteExecPlanProto: GrpcMultiPartitionQueryService.RemoteExecPlan,
+          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse]
+        ): Unit = {
+          throw new NotImplementedError(
+            "FiloDB intercluster communication is not implemented yet"
+          )
         }
       }
 
