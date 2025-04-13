@@ -80,10 +80,10 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val hostNames = {
     require(settings.minNumNodes.isDefined, "[ClusterV2] Minimum Number of Nodes config not provided")
-    if (settings.k8sHostFormat.isDefined) {
+    if (settings.hostNameFormat.isDefined) {
       // This is used in kubernetes setup. We read the host format config and resolve the FQDN using env variables
       val hosts = (0 until settings.minNumNodes.get)
-        .map(i => String.format(settings.k8sHostFormat.get, i.toString))
+        .map(i => String.format(settings.hostNameFormat.get, i.toString))
       logger.info(s"[ClusterV2] hosts to communicate: " + hosts)
       hosts.sorted
     } else if (settings.hostList.isDefined) {
