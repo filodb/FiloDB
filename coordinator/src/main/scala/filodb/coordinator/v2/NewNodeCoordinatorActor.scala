@@ -201,8 +201,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     * */
     case g: GetShardMapV2 =>
       try {
-        val hostFormat = settings.k8sHostFormat.isDefined match {
-          case true => settings.k8sHostFormat.get
+        val hostFormat = settings.hostNameFormat.isDefined match {
+          case true => settings.hostNameFormat.get
           case false => "127.0.0.1" // default host in local dev environments
         }
         val shardMapperV2 = ShardMapperV2.apply(
