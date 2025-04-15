@@ -158,7 +158,14 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
-  // WARNING: histogram returned is shared between calls, do not reuse!
+  /**
+   * Returns a histogram for the given index.  The histogram is a shared instance and should not be modified.
+   * Warning1: Returned instance is reused across calls, should not be modified or referenced for longer.
+   * Warning2: The values array in the LongHistogram can be longer than the number of buckets. Take only the prefix
+   *           of the array that is needed.
+   * @param index the index of the histogram to return
+   * @return a histogram for the given index
+   */
   def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
