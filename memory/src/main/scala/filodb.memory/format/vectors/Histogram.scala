@@ -252,6 +252,10 @@ object HistogramWithBuckets {
   val empty = LongHistogram(HistogramBuckets.emptyBuckets, Array[Long]())
 }
 
+/**
+ * Mutable histogram class that can be used for writes and reads of raw histograms into and from vectors.
+ * WARNING: values array length can be longer than the number of buckets in the case of exponential histograms.
+ */
 final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[Long]) extends HistogramWithBuckets {
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
@@ -303,6 +307,8 @@ object LongHistogram {
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values.
  * MutableHistogram is primarily used in histogram queries, where query results like rate can be double values.
+ *
+ * WARNING: values array length can be longer than the number of buckets in the case of exponential histograms.
  */
 final case class MutableHistogram(var buckets: HistogramBuckets,
                                   var values: Array[Double]) extends HistogramWithBuckets {
@@ -613,7 +619,23 @@ object Base2ExpHistogramBuckets {
   // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
   // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
   val maxBuckets = 180
-  val maxAbsScale = 100
+  val maxAbsScale = 25
+
+  val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray
+  def base(scale: Int): Double = {
+    if (scale < -maxAbsScale || scale > maxAbsScale) {
+      throw new IllegalArgumentException(s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
+    }
+    precomputedBase(scale + maxAbsScale)
+  }
+
+  val precomputedLogBase = (-maxAbsScale to maxAbsScale).map(b => Math.log(base(b))).toArray
+  def logBase(scale: Int): Double = {
+    if (scale < -maxAbsScale || scale > maxAbsScale) {
+      throw new IllegalArgumentException(s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
+    }
+    precomputedLogBase(scale + maxAbsScale)
+  }
 }
 
 /**
@@ -648,9 +670,19 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
   require(scale > -maxAbsScale && scale < maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 
-  def base: Double = Math.pow(2, Math.pow(2, -scale))
-  def startBucketTop: Double = bucketTop(1)
-  def endBucketTop: Double = bucketTop(numBuckets - 1)
+  def base: Double = Base2ExpHistogramBuckets.base(scale)
+  var startBucketTop: Double = bucketTop(1)
+  var endBucketTop: Double = bucketTop(numBuckets - 1)
+
+  def setScheme(scale: Int,
+                startIndexPositiveBuckets: Int,
+                numPositiveBuckets: Int): Unit = {
+    this.scale = scale
+    this.startIndexPositiveBuckets = startIndexPositiveBuckets
+    this.numPositiveBuckets = numPositiveBuckets
+    startBucketTop = bucketTop(1)
+    endBucketTop = bucketTop(numBuckets - 1)
+  }
 
   override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count
 
@@ -661,7 +693,9 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
       // contains values that are greater than (base^index) and
       // less than or equal to (base^(index+1)).
       val index = startIndexPositiveBuckets + no - 1
-      Math.pow(base, index + 1)
+      // exp(b * log(a)) is faster than pow(a, b)
+      // Instead of Math.pow(base, index + 1) , use:
+      Math.exp((index + 1) * Base2ExpHistogramBuckets.logBase(scale))
     }
   }
 
@@ -781,11 +815,11 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
         //                 ↓       ↓       ↓       ↓
         // our  scale =  1 .       .       .       .
 
-        // TODO consider removing the require once code is stable
-        require(ourArrayIndex != 0, "double counting zero bucket")
-        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
-          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
-            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
+        // The requires below are removed to improve performance. Enable only if needed to debug
+//        require(ourArrayIndex != 0, "double counting zero bucket")
+//        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
+//          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
+//            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
         ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherArrayIndex)
       } else if (otherArrayIndex >= otherBuckets.numBuckets) {
         // if otherArrayIndex higher than upper bound, add to our last bucket since bucket counts are cumulative

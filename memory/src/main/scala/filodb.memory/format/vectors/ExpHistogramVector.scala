@@ -175,10 +175,10 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
     val binHist = BinaryHistogram.BinHistogram(buf)
     val bucketDef = returnHist.buckets.asInstanceOf[Base2ExpHistogramBuckets]
-    bucketDef.scale = HistogramBuckets.otelExpScale(buf.byteArray(), binHist.bucketDefOffset)
-    bucketDef.startIndexPositiveBuckets = HistogramBuckets.otelExpStartIndexPositiveBuckets(buf.byteArray(),
-                                                                                            binHist.bucketDefOffset)
-    bucketDef.numPositiveBuckets = HistogramBuckets.otelExpNumPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset)
+    bucketDef.setScheme(HistogramBuckets.otelExpScale(buf.byteArray(), binHist.bucketDefOffset),
+                        HistogramBuckets.otelExpStartIndexPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset),
+                        HistogramBuckets.otelExpNumPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset))
+
     dSink.reset()
     dSink.setLength(bucketDef.numBuckets)
     val buf2 = binHist.valuesByteSlice // no object allocation here, valuesBuf is reused
