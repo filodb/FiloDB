@@ -1137,7 +1137,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                                    forceDispatcher: Option[PlanDispatcher] = None): PlanResult = {
     val canPushdownInner = !LogicalPlanUtils.hasDescendantAggregateOrJoin(lp.vectors) ||
       getPushdownShards(qContext, lp.vectors).isDefined
-    var toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    var toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
+      qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     if (!canPushdownInner) {
       val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans)
       val plan = if (toReduceLevel1.needsStitch) {

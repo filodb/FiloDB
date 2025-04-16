@@ -403,7 +403,8 @@ trait  DefaultPlanner {
    def materializeAggregate(qContext: QueryContext,
                             lp: Aggregate,
                             forceInProcess: Boolean = false): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
+      qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     val reducer = addAggregator(lp, qContext, toReduceLevel1)
     PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }
