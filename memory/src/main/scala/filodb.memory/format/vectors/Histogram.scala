@@ -619,42 +619,20 @@ object Base2ExpHistogramBuckets {
   // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
   // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
   val maxBuckets = 180
-  val maxAbsScale = 25
+  val maxAbsScale = 20
 
-  private val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => pow(2, pow(2, -b))).toArray
+  val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray
   def base(scale: Int): Double = {
-    if (scale < -maxAbsScale || scale > maxAbsScale) {
-      throw new IllegalArgumentException(s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
-    }
+    require(scale >= -maxAbsScale && scale <= maxAbsScale,
+      s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
     precomputedBase(scale + maxAbsScale)
   }
 
-  private val precomputedLogBase = (-maxAbsScale to maxAbsScale).map(b => Math.log(base(b))).toArray
+  val precomputedLogBase = (-maxAbsScale to maxAbsScale).map(b => Math.log(base(b))).toArray
   def logBase(scale: Int): Double = {
-    if (scale < -maxAbsScale || scale > maxAbsScale) {
-      throw new IllegalArgumentException(s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
-    }
+    require(scale >= -maxAbsScale && scale <= maxAbsScale,
+      s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
     precomputedLogBase(scale + maxAbsScale)
-  }
-
-  /**
-   * Faster calculation of `a^b` using exp and log, rather than using Math.pow which is really slow.
-   */
-  def pow(a: Double, b: Double): Double = {
-    if (a == 0) 0.0
-    else if (a == 1) 1.0
-    else Math.exp(b * Math.log(a))
-  }
-
-  /**
-   * Calculates pow(base, i) where base = `2 ^ 2 ^ -scale`.
-   * Essentially `(2 ^ 2 ^ -scale) ^ i`
-   */
-  def basePow(scale: Int, i: Double): Double = {
-    if (scale < -maxAbsScale || scale > maxAbsScale) {
-      throw new IllegalArgumentException(s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
-    }
-    Math.exp(i * precomputedLogBase(scale + maxAbsScale))
   }
 }
 
@@ -687,7 +665,7 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
   import Base2ExpHistogramBuckets._
   require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
     s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${maxBuckets}")
-  require(scale > -maxAbsScale && scale < maxAbsScale,
+  require(scale >= -maxAbsScale && scale <= maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 
   def base: Double = Base2ExpHistogramBuckets.base(scale)
@@ -713,7 +691,9 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
       // contains values that are greater than (base^index) and
       // less than or equal to (base^(index+1)).
       val index = startIndexPositiveBuckets + no - 1
-      basePow(scale, index + 1)
+      // exp(b * log(a)) is faster than pow(a, b)
+      // Instead of Math.pow(base, index + 1) , use:
+      Math.exp((index + 1) * Base2ExpHistogramBuckets.logBase(scale))
     }
   }
 

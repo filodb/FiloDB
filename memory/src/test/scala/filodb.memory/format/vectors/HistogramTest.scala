@@ -359,6 +359,36 @@ class HistogramTest extends NativeVectorTest {
       }
     }
 
+    import org.scalacheck.Gen
+    import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks.forAll
+
+    it("should calculate bucket tops correctly for exp bucket scheme") {
+
+      def bucketParams: Gen[Base2ExpHistogramBuckets] =
+        for {
+          scale <- Gen.chooseNum(-Base2ExpHistogramBuckets.maxAbsScale, Base2ExpHistogramBuckets.maxAbsScale)
+          bucketStart <- Gen.choose(-100000, 100000)
+          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxBuckets)
+          b = Base2ExpHistogramBuckets(scale, bucketStart, numBuckets)
+          // restrict test for reasonable values for now. We are getting into double precision comparison & overflow issues
+          if b.startBucketTop < 1E+10 && b.endBucketTop < 1E+10
+        } yield { b }
+
+      val epislon = 1.0E-8
+      forAll(bucketParams) { b =>
+        // validate base
+        val expectedBase = Math.pow(2, Math.pow(2, -b.scale))
+        b.base shouldEqual expectedBase +- epislon
+
+        // validate bucket tops are base 2 exponential
+        for (i <- 1 until b.numBuckets) {
+          val bucketTop = b.bucketTop(i)
+          val index = b.startIndexPositiveBuckets + i - 1
+          bucketTop shouldEqual Math.pow(b.base, index + 1) +- epislon
+        }
+      }
+    }
+
     // Test this later when different schemas are supported
     ignore("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
       val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
