@@ -753,13 +753,6 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
       // minus one below since there is  "+1" in `bucket(index) = base ^ (index + 1)`
       var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1 // exclusive
       var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1 // inclusive
-      // scalastyle:off
-      // temporary line to debug unit test flakyness. Will remove in next commit
-      println(s"Starting with newScale=$newScale, newBase=$newBase " +
-        s"minBucketTopNeeded=$minBucketTopNeeded " +
-        s"maxBucketTopNeeded=$maxBucketTopNeeded " +
-        s"newBucketIndexStart=$newBucketIndexStart " +
-        s"newBucketIndexEnd=$newBucketIndexEnd")
       // Even if the two schemes are of same scale, they can have non-overlapping bucket ranges.
       // The new bucket scheme should have at most maxBuckets, so keep reducing scale until within limits.
       while (newBucketIndexEnd - newBucketIndexStart + 1 > maxBuckets) {
@@ -767,12 +760,6 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
         newBase = Base2ExpHistogramBuckets.base(newScale)
         newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
         newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
-        println(s"Reduced newScale=$newScale, newBase=$newBase " +
-          s"minBucketTopNeeded=$minBucketTopNeeded " +
-          s"maxBucketTopNeeded=$maxBucketTopNeeded " +
-          s"newBucketIndexStart=$newBucketIndexStart " +
-          s"newBucketIndexEnd=$newBucketIndexEnd")
-        // scalastyle:on
       }
       Base2ExpHistogramBuckets(newScale, newBucketIndexStart, newBucketIndexEnd - newBucketIndexStart + 1)
     }
