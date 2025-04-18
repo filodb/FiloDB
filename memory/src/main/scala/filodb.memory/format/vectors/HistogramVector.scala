@@ -24,6 +24,7 @@ import filodb.memory.format.MemoryReader._
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *                  0x05   custom LE/bucket values + NibblePacked delta Long values
  *                  0x09   otelExp_Delta + NibblePacked delta Long values  (see [[Base2ExpHistogramBuckets]])
+ *                  0x10   otelExp_XOR   + NibblePacked delta Double values
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -51,13 +52,37 @@ object BinaryHistogram extends StrictLogging {
     def debugStr: String = s"totalLen=$totalLength numBuckets=$numBuckets formatCode=$formatCode " +
                            s"bucketDef=$bucketDefNumBytes bytes valuesIndex=$valuesIndex values=$valuesNumBytes bytes"
 
+    def bucketDef: HistogramBuckets = {
+      formatCode match {
+        // All the delta encoding formats decode into LongHistograms and are generally used during ingestion
+        case HistFormat_Geometric_Delta =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        case HistFormat_Geometric1_Delta =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
+        case HistFormat_OtelExp_Delta =>
+          HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        case HistFormat_Custom_Delta =>
+          HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+
+        // All the XOR encoding formats decode into MutableHistograms and are generally used during querying
+        case HistFormat_Geometric_XOR =>
+          HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        case HistFormat_Custom_XOR =>
+          HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+        case HistFormat_OtelExp_XOR =>
+          HistogramBuckets.otelExp(buf.byteArray, bucketDefOffset)
+        case x =>
+          logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
+          Histogram.empty.buckets
+      }
+    }
     /**
      * Converts this BinHistogram to a Histogram object.  May not be the most efficient.
      * Intended for slower paths such as high level (lower # samples) aggregation and HTTP/CLI materialization
      * by clients.  Materializes/deserializes everything.
      * Ingestion ingests BinHistograms directly without conversion to Histogram first.
      */
-    def toHistogram: Histogram = formatCode match {
+    def toHistogram: HistogramWithBuckets = formatCode match {
 
       // All the delta encoding formats decode into LongHistograms and are generally used during ingestion
       case HistFormat_Geometric_Delta =>
@@ -158,7 +183,13 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
-    require(buckets.numBuckets == values.length, s"Values array size of ${values.length} != ${buckets.numBuckets}")
+    require(buckets.numBuckets <= values.length, s"Values array size of ${values.length} < ${buckets.numBuckets}")
+    // the length can be greater when exponential histogram bucket arrays are directly written to
+    // the wire durin queries without any aggregation like sum or rate, which is not a common case. Acceptable to
+    // pay the cost of copying the array in this case.
+    val values2 = if (buckets.numBuckets < values.size) values.slice(0, buckets.numBuckets)
+                  else values
+
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else  buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
@@ -170,7 +201,7 @@ object BinaryHistogram extends StrictLogging {
     val finalPos = if (formatCode == HistFormat_Null) { 3 }
                    else {
                      val valuesIndex = buckets.serialize(buf, 3)
-                     NibblePack.packDelta(values, buf, valuesIndex)
+                     NibblePack.packDelta(values2, buf, valuesIndex)
                    }
     require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
     buf.putShort(0, (finalPos - 2).toShort)
@@ -230,6 +261,8 @@ object HistogramVector extends StrictLogging {
   final def bucketDefNumBytes(acc: MemoryReader, addr: Ptr.U8): Int =
     addr.add(OffsetBucketDefSize).asU16.getU16(acc)
   final def bucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
+  final def afterNumHistograms(acc: MemoryReader, addr: Ptr.U8): Ptr.U8 =
+    addr.add(OffsetNumHistograms).add(2)
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryReader, addr: Ptr.U8): Boolean =
@@ -238,6 +271,11 @@ object HistogramVector extends StrictLogging {
       UnsafeUtils.equate(acc.base, acc.baseOffset + bucketDefAddr(addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
+
+  def appendingExp(factory: MemFactory, maxBytes: Int): AppendableExpHistogramVector = {
+    val addr = factory.allocateOffheap(maxBytes)
+    new AppendableExpHistogramVector(factory, Ptr.U8(addr), maxBytes)
+  }
 
   def appending(factory: MemFactory, maxBytes: Int): AppendableHistogramVector = {
     val addr = factory.allocateOffheap(maxBytes)
@@ -260,7 +298,8 @@ object HistogramVector extends StrictLogging {
 
   def apply(acc: MemoryReader, p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(acc, p) match {
     case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(acc, Ptr.U8(p))
-    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) =>new SectDeltaHistogramReader(acc, Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) => new SectDeltaHistogramReader(acc, Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_EXP_SIMPLE) => new RowExpHistogramReader(acc, Ptr.U8(p))
   }
 
   // Thread local buffer used as temp buffer for histogram vector encoding ONLY

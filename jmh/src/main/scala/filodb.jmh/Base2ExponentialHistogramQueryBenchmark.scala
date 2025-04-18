@@ -80,7 +80,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   final val numShards = 8
   final val numSamplesPerTs = 720   // 2 hours * 3600 / 10 sec interval
   final val numSeries = 100
-  final val numQueries = 100
+  final val numQueries = 50
   final val numBuckets = 160
   val spread = 3
 

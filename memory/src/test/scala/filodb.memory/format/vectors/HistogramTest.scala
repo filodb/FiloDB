@@ -359,6 +359,36 @@ class HistogramTest extends NativeVectorTest {
       }
     }
 
+    import org.scalacheck.Gen
+    import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks.forAll
+
+    it("should calculate bucket tops correctly for exp bucket scheme") {
+
+      def bucketParams: Gen[Base2ExpHistogramBuckets] =
+        for {
+          scale <- Gen.chooseNum(-Base2ExpHistogramBuckets.maxAbsScale, Base2ExpHistogramBuckets.maxAbsScale)
+          bucketStart <- Gen.choose(-100000, 100000)
+          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxBuckets)
+          b = Base2ExpHistogramBuckets(scale, bucketStart, numBuckets)
+          // restrict test for reasonable values for now. We are getting into double precision comparison & overflow issues
+          if b.startBucketTop < 1E+10 && b.endBucketTop < 1E+10
+        } yield { b }
+
+      val epislon = 1.0E-8
+      forAll(bucketParams) { b =>
+        // validate base
+        val expectedBase = Math.pow(2, Math.pow(2, -b.scale))
+        b.base shouldEqual expectedBase +- epislon
+
+        // validate bucket tops are base 2 exponential
+        for (i <- 1 until b.numBuckets) {
+          val bucketTop = b.bucketTop(i)
+          val index = b.startIndexPositiveBuckets + i - 1
+          bucketTop shouldEqual Math.pow(b.base, index + 1) +- epislon
+        }
+      }
+    }
+
     // Test this later when different schemas are supported
     ignore("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
       val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
@@ -398,26 +428,27 @@ class HistogramTest extends NativeVectorTest {
       b1.bucketIndexToArrayIndex(5) shouldEqual 11
       b1.bucketTop(b1.bucketIndexToArrayIndex(-1)) shouldEqual 1.0
 
-      val b2 = Base2ExpHistogramBuckets(2, -2, 7) // 0.8408 to 2.378
-      val b3 = Base2ExpHistogramBuckets(2, -4, 9) // 0.594 to 2.378
+      val b2 = Base2ExpHistogramBuckets(2, -2, 6) // 0.8408 to 2.000
+      b2.endBucketTop shouldEqual 1.9999999999999998 +- 0.0001
+      val b3 = Base2ExpHistogramBuckets(2, -4, 8) // 0.594 to 2.000
       b1.canAccommodate(b2) shouldEqual false
       b2.canAccommodate(b1) shouldEqual false
       b3.canAccommodate(b1) shouldEqual true
       b3.canAccommodate(b2) shouldEqual true
 
       val bAdd = b1.add(b2)
-      bAdd.numBuckets shouldEqual 10
+      bAdd.numBuckets shouldEqual 9
       bAdd.scale shouldEqual 2
       bAdd.startBucketTop shouldBe 0.5946035575013606 +- 0.0001
-      bAdd.endBucketTop shouldBe 2.378414245732675 +- 0.0001
+      bAdd.endBucketTop shouldBe 1.9999999999999998 +- 0.0001
       bAdd.canAccommodate(b1) shouldEqual true
       bAdd.canAccommodate(b2) shouldEqual true
 
       val bAddValues = new Array[Double](bAdd.numBuckets)
       bAdd.addValues(bAddValues, b1, MutableHistogram(b1, Array(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)))
-      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 11.0, 11.0)
-      bAdd.addValues(bAddValues, b2, MutableHistogram(b2, Array(0, 1, 2, 3, 4, 5, 6, 7)))
-      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0)
+      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 11.0)
+      bAdd.addValues(bAddValues, b2, MutableHistogram(b2, Array(0, 1, 2, 3, 4, 5, 6)))
+      bAddValues.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0)
 
       val b4 = Base2ExpHistogramBuckets(5, 15, 36) // 1.414 to 3.018
       b4.numBuckets shouldEqual 37
@@ -432,13 +463,13 @@ class HistogramTest extends NativeVectorTest {
       val bAdd2 = bAdd.add(b4).add(b5)
       val bAdd2Values = new Array[Double](bAdd2.numBuckets)
       bAdd2.addValues(bAdd2Values, bAdd, MutableHistogram(bAdd, bAddValues))
-      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 18.0, 18.0, 18.0, 18.0, 18.0)
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 13.0, 16.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0)
 
       bAdd2.addValues(bAdd2Values, b4, MutableHistogram(b4, (0 until 37 map (i => i.toDouble)).toArray))
-      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 43.0, 51.0, 54.0, 54.0, 54.0)
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 42.0, 50.0, 53.0, 53.0, 53.0)
 
       bAdd2.addValues(bAdd2Values, b5, MutableHistogram(b5, Array(0.0, 10.0, 11, 12, 13, 14, 15)))
-      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 43.0, 62.0, 67.0, 69.0, 69.0)
+      bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 42.0, 61.0, 66.0, 68.0, 68.0)
 
     }
 

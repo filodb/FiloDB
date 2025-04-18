@@ -124,16 +124,20 @@ trait SectionWriter {
     addBlobInner(base, offset, numBytes)
   }
 
-  private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse =
+  private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse = {
     // Copy bytes to end address, update variables
     if (bytesLeft >= (numBytes + 2)) {
       val writeAddr = curSection.endAddr(nativePtrReader)
+      // write length prefix for the record
       writeAddr.asU16.asMut.set(MemoryAccessor.nativePtrAccessor, numBytes)
+      // copy record bytes
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
+      // update section length
       curSection.update(MemoryAccessor.nativePtrAccessor, numBytes + 2, 1)
       Ack
     } else VectorTooSmall(numBytes + 2, bytesLeft)
+  }
 }
 
 /**
