@@ -240,6 +240,8 @@ object InputRecord {
                                      timestamp: Long,
                                      kvs: Seq[(String, Double)],
                                      isDelta: Boolean): Unit = {
+    require(isDelta, "Cumulative exponential histograms not supported")
+
     var sum = Double.NaN
     var count = Double.NaN
     var min = Double.NaN
@@ -274,8 +276,7 @@ object InputRecord {
       val hist = LongHistogram(buckets, bucketValues)
 
       // Now, write out histogram
-      builder.startNewRecord(if (isDelta) otelExpDeltaHistogram
-                             else throw new IllegalArgumentException("cumulative exp histogram not supported"))
+      builder.startNewRecord(otelExpDeltaHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
