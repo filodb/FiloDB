@@ -6,6 +6,7 @@ sbt -Drust.optimize=true "jmh/jmh:run -rf json -i 2 -wi 2 -f 1 \
  -jvmArgsAppend -Xmx4g \
  -jvmArgsAppend -XX:MaxInlineSize=99 \
  -jvmArgsAppend -Dkamon.enabled=false \
+ filodb.jmh.HistVectorBenchmark \
  filodb.jmh.Base2ExponentialHistogramQueryBenchmark \
  filodb.jmh.QueryHiCardInMemoryBenchmark \
  filodb.jmh.QueryInMemoryBenchmark \
