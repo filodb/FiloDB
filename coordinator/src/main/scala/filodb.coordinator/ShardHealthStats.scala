@@ -35,7 +35,7 @@ class ShardHealthStats(ref: DatasetRef,
     numRecovering.update(mapper.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
     numAssigned.update(mapper.statuses.count(_ == ShardStatusAssigned))
     if (!skipUnassigned) numUnassigned.update(mapper.statuses.count(_ == ShardStatusUnassigned))
-    numError.update(mapper.statuses.count(_ == ShardStatusError))
+    numError.update(mapper.statuses.count(_.isInstanceOf[ShardStatusError]))
     numStopped.update(mapper.statuses.count(_ == ShardStatusStopped))
     numDown.update(mapper.statuses.count(_ == ShardStatusDown))
   }

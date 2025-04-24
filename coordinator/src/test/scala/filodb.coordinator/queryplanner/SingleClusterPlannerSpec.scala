@@ -73,6 +73,12 @@ class SingleClusterPlannerSpec extends AnyFunSpec
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")
 
+  private val mapper256 = new ShardMapper(256)
+  for {i <- 0 until 256} mapper256.registerNode(Seq(i), node)
+  //private def mapperRef2 = mapper256
+  private val engine256 = new SingleClusterPlanner(dataset, schemas, mapper256, earliestRetainedTimestampFn = 0,
+    queryConfig, "raw")
+
   override def beforeEach(): Unit = {
     engine.invalidateCaches()
   }
@@ -299,6 +305,28 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     partExec.chunkMethod.startTime shouldEqual 20460000
     partExec.chunkMethod.endTime shouldEqual 21780000
   }
+
+  def getBigExecPlan : ExecPlan = {
+    val q =
+      """label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_info{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m])) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","total_node","","")
+        | or label_replace(count(clamp_max(count(  max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_info{_ws_="aci-kubernetes", _ns_="us-central-1n",job="a"}[10m]) unless on(exported_node) (max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n",job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key="maintenance-automation",job="a"}[10m]))) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","schedulable_node", "","")
+        | or label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~".*new-node.*|node.kubernetes.io/deployment-handoff|node.kubernetes.io/deployment|npd.aci.apple.com/deploy-unhealthy",job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"maintenance-automation",job="a"}[10m]) ) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","nodes_in_provisioning", "","")
+        | or label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"bolt.apple.com/.*|skywagon.swe.apple.com/.*|mlpt.apple.com/dedicated|dedicated|xrails-dedicated|phalanx.swe.apple.com/.*|abs",job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~".*new-node.*|node.kubernetes.io/deployment-handoff|node.kubernetes.io/deployment|npd.aci.apple.com/deploy-unhealthy|maintenance-automation",job="a"}[10m]) ) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","dedicated_node", "","")
+        | or label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"npd.aci.apple.com/os-unhealthy|npd.aci.apple.com/resourcepressure-unhealthy|npd.aci.apple.com/scriptexporter-unhealthy|npd.aci.apple.com/identity-unhealthy|npd.aci.apple.com/tpm-hostcertd-unhealthy|npd.aci.apple.com/sdr-unhealthy|npd.aci.apple.com/sdr-presence-unhealthy|npd.aci.apple.com/kube-unhealthy|node.kubernetes.io/.*|npd.aci.apple.com/nodeuok-unhealthy|aci.apple.com/adb-outofservice",job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"bolt.apple.com/.*|skywagon.swe.apple.com/.*|mlpt.apple.com/dedicated|dedicated|xrails-dedicated|phalanx.swe.apple.com/.*|abs|.*new-node.*|node.kubernetes.io/deployment-handoff|node.kubernetes.io/deployment|npd.aci.apple.com/deploy-unhealthy|maintenance-automation|aci.apple.com/cordon|aci.cani/cordon-prod|aci.cani/cordon-qa|aci.apple.com/network-issue|npd.aci.apple.com/cst-pressure|npd.aci.apple.com/hardware-unhealthy",job="a"}[10m]) ) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","nodes_broken", "","") or label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~".*",job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"bolt.apple.com/.*|skywagon.swe.apple.com/.*|mlpt.apple.com/dedicated|dedicated|xrails-dedicated|phalanx.swe.apple.com/.*|abs|.*new-node.*|node.kubernetes.io/deployment-handoff|node.kubernetes.io/deployment|npd.aci.apple.com/deploy-unhealthy|maintenance-automation|aci.apple.com/cordon|aci.cani/cordon-prod|aci.cani/cordon-qa|aci.apple.com/network-issue|npd.aci.apple.com/cst-pressure|npd.aci.apple.com/hardware-unhealthy|npd.aci.apple.com/os-unhealthy|npd.aci.apple.com/resourcepressure-unhealthy|npd.aci.apple.com/scriptexporter-unhealthy|npd.aci.apple.com/identity-unhealthy|npd.aci.apple.com/tpm-hostcertd-unhealthy|npd.aci.apple.com/sdr-unhealthy|npd.aci.apple.com/sdr-presence-unhealthy|npd.aci.apple.com/kube-unhealthy|node.kubernetes.io/.*|npd.aci.apple.com/nodeuok-unhealthy|aci.apple.com/adb-outofservice",job="a"}[10m]) ) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","unknown_taints", "","")
+        | or label_replace(count(clamp_max(count( max_over_time(kube_node_labels{_ns_="us-central-1n",_ws_="aci-kubernetes",job="a"}[10m]) and on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"aci.apple.com/cordon|aci.cani/cordon-prod|aci.cani/cordon-qa|aci.apple.com/network-issue|npd.aci.apple.com/cst-pressure|npd.aci.apple.com/hardware-unhealthy", job="a"}[10m]) unless on(exported_node) max_over_time(kube_node_spec_taint{_ws_="aci-kubernetes", _ns_="us-central-1n", key=~"bolt.apple.com/.*|skywagon.swe.apple.com/.*|mlpt.apple.com/dedicated|dedicated|xrails-dedicated|phalanx.swe.apple.com/.*|abs|.*new-node.*|node.kubernetes.io/deployment-handoff|node.kubernetes.io/deployment|npd.aci.apple.com/deploy-unhealthy|maintenance-automation",job="a"}[10m]) ) by (exported_node,label_machine_class),1)) by (label_machine_class),"node_state","nodes_in_maintenance", "","")
+        |""".stripMargin
+
+
+    val lp = Parser.queryRangeToLogicalPlan(q.stripMargin, TimeStepParams(20900, 90, 21800))
+    val execPlan = engine256.materialize(
+      lp, QueryContext(
+        origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, 8))))
+      )
+    )
+    execPlan
+  }
+
 
   it("should generate correct plan for subqueries with multiple child nodes for subqueries") {
     val lp = Parser.queryRangeToLogicalPlan("""min_over_time(rate(foo{job="bar"}[5m])[3m:1m])""",

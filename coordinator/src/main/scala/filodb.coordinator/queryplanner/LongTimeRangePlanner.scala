@@ -241,6 +241,40 @@ import filodb.query.exec._
     PlanResult(Seq(stitchedPlan))
   }
 
+  /**
+   * Materializes a raw series plan and routes the query to either the Raw or DownSample cluster based on lookback time.
+   * - If the target time range falls within the raw data retention period, the query is routed to the Raw cluster.
+   * - Otherwise, it is routed to the DownSample cluster only, In this case, it will have no data after
+   *   latestDownsampleTimestampFn because they are unavailable.
+   *
+   * Limitations:
+   * - Stitching data from the Raw and DownSample clusters is not supported due to schema differences.
+   *
+   * @param logicalPlan  The raw series logical plan to materialize.
+   * @param queryContext The QueryContext object.
+   * @return
+   */
+  private def materializeRawSeries(queryContext: QueryContext, logicalPlan: RawSeries): PlanResult = {
+    val timeRange = getTimeFromLogicalPlan(logicalPlan)
+
+    // use rawClusterMaterialize to handle range Raw data queries with range expression []
+    if(timeRange.startMs != timeRange.endMs){
+      logger.error("Materializing ranged raw series export against raw cluster:: {}", queryContext.origQueryParams)
+      return rawClusterMaterialize(queryContext, logicalPlan)
+    }
+    val lookbackMs = logicalPlan.lookbackMs.getOrElse(0L)
+    val offsetMs = logicalPlan.offsetMs.getOrElse(0L)
+    val (startTime, endTime) = (timeRange.endMs - lookbackMs - offsetMs, timeRange.endMs - offsetMs)
+    val execPlan = if (startTime > earliestRawTimestampFn) {
+      // This is the case where no data will be retrieved from DownsampleStore, simply push down to raw planner.
+      rawClusterPlanner.materialize(logicalPlan, queryContext)
+    } else {
+      // This is the case where data in RawStore isn't enough, simply push down to DS planner.
+      downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    }
+    PlanResult(Seq(execPlan))
+  }
+
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
@@ -251,11 +285,11 @@ import filodb.query.exec._
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case ts: TsCardinalities           => materializeTSCardinalityPlan(qContext, ts)
+        case rs: RawSeries                 => materializeRawSeries(qContext, rs)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
-             _: RawSeries |
              _: LabelNames                 => rawClusterMaterialize(qContext, logicalPlan)
       }
     }

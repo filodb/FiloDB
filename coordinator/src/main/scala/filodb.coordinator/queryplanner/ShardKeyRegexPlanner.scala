@@ -154,7 +154,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val shardKeys = getShardKeys(logicalPlan)
     val partitions = shardKeys
       .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams))
-      .map(_.partitionName)
+      .flatMap(_.proportionMap.keys)
       .distinct
     // NOTE: don't use partitions.size < 2. When partitions == 0, generateExec will not
     //   materialize any plans because there are no partitions against which it should materialize.
@@ -240,7 +240,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       val newLogicalPlan = logicalPlan.replaceFilters(key)
       val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val partitions = getPartitions(newLogicalPlan, newQueryParams)
-        .map(_.partitionName)
+        .flatMap(_.proportionMap.keys)
         .distinct
       if (partitions.size > 1) {
         partitionSplitKeys.append(key)

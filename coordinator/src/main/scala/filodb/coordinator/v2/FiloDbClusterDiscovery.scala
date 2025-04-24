@@ -14,7 +14,7 @@ import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
+import filodb.coordinator.{ActorName, CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
 
 class FiloDbClusterDiscovery(settings: FilodbSettings,
@@ -80,10 +80,10 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val hostNames = {
     require(settings.minNumNodes.isDefined, "[ClusterV2] Minimum Number of Nodes config not provided")
-    if (settings.k8sHostFormat.isDefined) {
+    if (settings.hostNameFormat.isDefined) {
       // This is used in kubernetes setup. We read the host format config and resolve the FQDN using env variables
       val hosts = (0 until settings.minNumNodes.get)
-        .map(i => String.format(settings.k8sHostFormat.get, i.toString))
+        .map(i => String.format(settings.hostNameFormat.get, i.toString))
       logger.info(s"[ClusterV2] hosts to communicate: " + hosts)
       hosts.sorted
     } else if (settings.hostList.isDefined) {
@@ -94,8 +94,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
   lazy private val nodeCoordActorSelections = {
     hostNames.map { h =>
-      val actorPath = s"akka.tcp://filo-standalone@$h/user/coordinator"
-      system.actorSelection(actorPath)
+      system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(h))
     }
   }
 
@@ -112,10 +111,16 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     }
   }
 
+  def mergeSnapshotResponses(ref: DatasetRef,
+                             numShards: Int,
+                             snapshots: Observable[CurrentShardSnapshot]): Observable[ShardMapper] = {
+    val acc = new ShardMapper(numShards)
+    snapshots.map(_.map).foldLeft(acc)(_.mergeFrom(_, ref))
+  }
+
   private def reduceMappersFromAllNodes(ref: DatasetRef,
                                         numShards: Int,
                                         timeout: FiniteDuration): Observable[ShardMapper] = {
-    val acc = new ShardMapper(numShards)
     val snapshots = for {
       nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
       ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout)
@@ -135,7 +140,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     } yield {
       snapshot
     }
-    snapshots.map(_.map).foldLeft(acc)(_.mergeFrom(_, ref))
+    mergeSnapshotResponses(ref, numShards, snapshots)
   }
 
   private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()
