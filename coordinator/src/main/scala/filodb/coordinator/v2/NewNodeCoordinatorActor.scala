@@ -20,7 +20,6 @@ import filodb.query.QueryCommand
 final case class GetShardMapScatter(ref: DatasetRef)
 case object LocalShardsHealthRequest
 case class DatasetShardHealth(dataset: DatasetRef, shard: Int, status: ShardStatus)
-case class LocalShardsHealthResponse(shardStatus: Seq[DatasetShardHealth])
 
 object NewNodeCoordinatorActor {
 
@@ -172,6 +171,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       withQueryActor(originator, dataset) { _.tell(QueryActor.ThrowException(dataset), originator) }
   }
 
+  // scalastyle:off method.length
   def shardManagementHandlers: Receive = LoggingReceive {
     // sent by ingestion actors when shard status changes
     case ev: ShardEvent => try {
@@ -186,6 +186,36 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMap for dataset: ${g.ref.dataset}")
+      }
+    /*
+    * requested from HTTP API
+    * What is the trade-off between GetShardMap vs GetShardMapV2 ?
+    *
+    * No | Ask Call        |   Size of Response (256 Shards)  |                Compute Used
+    * -------------------------------------------------------------------------------------------------------------
+    * 1  | GetShardMap     |      ~37KB                       | Baseline - Uses ShardMapper for shard update tracking
+    * 2  | GetShardMapV2   |    172 Bytes with padding        | Additional CPU used to convert ShardMapper to BitMap
+    *                                                         | Will save CPU at the caller by avoiding string parsing
+    * */
+    case g: GetShardMapV2 =>
+      try {
+        val hostFormat = settings.hostNameFormat.isDefined match {
+          case true => settings.hostNameFormat.get
+          case false => "127.0.0.1" // default host in local dev environments
+        }
+        val shardMapperV2 = ShardMapperV2.apply(
+          settings.minNumNodes.get,
+          ingestionConfigs(g.ref).numShards,
+          hostFormat,
+          clusterDiscovery.shardMapper(g.ref))
+        // send the shardMapV2 response to the caller.
+        sender() ! ShardSnapshot(shardMapperV2)
+      } catch { case e: Exception =>
+        logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetShardMapV2 for dataset: ${g.ref.dataset}")
       }
 
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
@@ -214,8 +244,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message LocalShardsHealthRequest", e)
       }
-
   }
+  // scalastyle:on method.length
 
   def initHandler: Receive = {
     case InitNewNodeCoordinatorActor => initialize()

@@ -73,8 +73,14 @@ class HistogramTest extends NativeVectorTest {
       HistogramBuckets(writeBuf, HistFormat_Custom_Delta) shouldEqual customScheme
 
       val buckets3 = Base2ExpHistogramBuckets(3, -5, 16)
-      buckets3.serialize(writeBuf, 0) shouldEqual 14
+      buckets3.serialize(writeBuf, 0) shouldEqual 18
       HistogramBuckets(writeBuf, HistFormat_OtelExp_Delta) shouldEqual buckets3
+
+      // bugfix: accommodate large offsets that exceed short-int
+      val buckets4 = Base2ExpHistogramBuckets(3, -9037032, 150)
+      buckets4.serialize(writeBuf, 0) shouldEqual 18
+      HistogramBuckets(writeBuf, HistFormat_OtelExp_Delta) shouldEqual buckets4
+
     }
   }
 

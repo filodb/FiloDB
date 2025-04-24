@@ -73,8 +73,27 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
       expectMsgPF(within) {
         case CurrentShardSnapshot(ref, mapper) =>
           latestStatus = mapper.statuses.head
-          if (latestStatus != ShardStatusError)
+          mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+      }
+      info(s"Latest status = $latestStatus")
+    }
+  }
+
+  def waitForShardStatusError(ref: DatasetRef, waitFor: ShardStatus): Unit = {
+    var latestStatus: ShardStatus = ShardStatusAssigned
+    // sometimes we receive multiple status snapshots
+    while (!latestStatus.isInstanceOf[ShardStatusError]) {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(ref, mapper) =>
+          latestStatus = mapper.statuses.head
+          if (!latestStatus.isInstanceOf[ShardStatusError]) {
             mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+          }
+          else {
+            // check if it is the same error
+            latestStatus.asInstanceOf[ShardStatusError].error shouldEqual
+              waitFor.asInstanceOf[ShardStatusError].error
+          }
       }
       info(s"Latest status = $latestStatus")
     }
@@ -113,7 +132,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
     setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-    waitForStatus(dataset33.ref, ShardStatusError)
+    waitForShardStatusError(dataset33.ref, ShardStatusError.apply("Invalid format: \"NananananaXX\""))
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -197,5 +216,18 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)
     expectMsg(IngestionActor.IngestionStatus(85))    // <-- must be rounded to 5, we ingest entire batches
+  }
+
+  it ("should calculate recoveryPct correctly") {
+    IngestionActor.getRecoveryProgressPercentage(1, 3, 200, 100, 500) shouldEqual 8
+    IngestionActor.getRecoveryProgressPercentage(1, 3, 400, 100, 500) shouldEqual 24
+    IngestionActor.getRecoveryProgressPercentage(1, 3, 500, 100, 500) shouldEqual 33
+    IngestionActor.getRecoveryProgressPercentage(1, 3, 500, 500, 500) shouldEqual 33
+    IngestionActor.getRecoveryProgressPercentage(2, 3, 600, 500, 700) shouldEqual 49
+    IngestionActor.getRecoveryProgressPercentage(2, 3, 700, 500, 700) shouldEqual 66
+    IngestionActor.getRecoveryProgressPercentage(2, 3, 700, 700, 700) shouldEqual 66
+    IngestionActor.getRecoveryProgressPercentage(3, 3, 800, 700, 1000) shouldEqual 77
+    IngestionActor.getRecoveryProgressPercentage(3, 3, 900, 700, 1000) shouldEqual 88
+    IngestionActor.getRecoveryProgressPercentage(3, 3, 1000, 700, 1000) shouldEqual 100
   }
 }
