@@ -107,7 +107,7 @@ object TestTimeseriesProducer extends StrictLogging {
 
     val producingFut = Future {
       val data = if (expHist) genHistogramData(startTimeMs, numTimeSeries,
-        Schemas.otelDeltaHistogram, numBuckets = numBuckets, otelExponential = true)
+                                   Schemas.otelExpDeltaHistogram, numBuckets = numBuckets)
       else timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
       data.take(numSamples)
         .foreach { rec =>
@@ -210,12 +210,14 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
-                       numBuckets : Int = 20,
-                       otelExponential: Boolean = false): Stream[InputRecord] = {
-    val histBucketScheme = if (otelExponential) bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
-                           else bv.GeometricBuckets(2.0, 3.0, numBuckets)
+                       numBuckets : Int = 20): Stream[InputRecord] = {
+    val histBucketScheme = if (Schemas.otelExpDeltaHistogram == histSchema)
+                                bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
+                           else
+                                bv.GeometricBuckets(2.0, 3.0, numBuckets)
     var buckets = new Array[Long](histBucketScheme.numBuckets)
-    val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema) {
+    val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema
+                     || Schemas.otelExpDeltaHistogram == histSchema) {
                   "http_request_latency_delta"
                  } else {
                   "http_request_latency"
@@ -237,7 +239,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       // reset buckets for delta histograms
-      if ( (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema )
+      if ( (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema
+        || Schemas.otelExpDeltaHistogram == histSchema)
           && prevTimestamp != timestamp) {
         prevTimestamp = timestamp
         buckets = new Array[Long](histBucketScheme.numBuckets)
@@ -254,7 +257,8 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      if (histSchema == Schemas.otelDeltaHistogram || histSchema == Schemas.otelCumulativeHistogram) {
+      if (histSchema == Schemas.otelDeltaHistogram || histSchema == Schemas.otelCumulativeHistogram
+                 || Schemas.otelExpDeltaHistogram == histSchema) {
         val minVal = buckets.min.toDouble
         val maxVal = buckets.max.toDouble
         new MetricTagInputRecord(Seq(timestamp, sum, count, hist, minVal, maxVal), metric, tags, histSchema)
