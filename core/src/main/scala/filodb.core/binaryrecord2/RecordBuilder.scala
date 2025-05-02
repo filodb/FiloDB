@@ -338,7 +338,7 @@ class RecordBuilder(memFactory: MemFactory,
     require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
     // check key size, must be < 60KB
     require(keyLen < 192, s"key is too large: ${keyLen} bytes")
-    require(valueLen < 64*1024, s"value is too large: $valueLen bytes")
+    require(valueLen < 32 * 1024, s"value is too large: $valueLen bytes")
 
     // Check if key is a predefined key
     val predefKeyNum =  // but if there are no predefined keys, skip the cost of hashing the key
