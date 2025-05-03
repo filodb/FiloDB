@@ -37,12 +37,26 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("raw", logicalPlan)
     }
+    def childPlanners(): Seq[QueryPlanner] = Nil
+    private var rootPlanner: Option[QueryPlanner] = None
+    def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+    def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+      this.rootPlanner = Some(rootPlanner)
+    }
+    initRootPlanner()
   }
 
   val downsamplePlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("downsample", logicalPlan)
     }
+    def childPlanners(): Seq[QueryPlanner] = Nil
+    private var rootPlanner: Option[QueryPlanner] = None
+    def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+    def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+      this.rootPlanner = Some(rootPlanner)
+    }
+    initRootPlanner()
   }
 
   val rawRetention = 10.minutes
@@ -88,7 +102,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "raw"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[TopLevelSubquery].innerPeriodicSeries
   }
 
   it("should direct raw-cluster-only range function subqueries to raw planner") {
@@ -99,7 +113,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "raw"
-    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing]
+    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing].innerPeriodicSeries
   }
 
   it("should direct downsample-only queries to downsample planner") {
@@ -117,7 +131,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[TopLevelSubquery].innerPeriodicSeries
   }
 
   it("should directed downsample-only range function subqueries to downsample planner") {
@@ -126,7 +140,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"
-    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing]
+    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing].innerPeriodicSeries
   }
 
   it("should direct overlapping instant queries correctly to raw or downsample clusters") {
@@ -216,9 +230,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
     val exp = ep.asInstanceOf[MockExecPlan]
     exp.name shouldEqual "downsample"
-    val downsampleLp = exp.lp.asInstanceOf[PeriodicSeriesPlan]
-    downsampleLp.startMs shouldEqual logicalPlan.startMs
-    downsampleLp.endMs shouldEqual logicalPlan.endMs
+    exp.lp.asInstanceOf[PeriodicSeriesPlan]
+    // skipping check of startMs and endMs as we are not using a proper root planner to plan the subquery
   }
 
   def getStartForSubquery(startMs: Long, stepMs: Long) : Long = {

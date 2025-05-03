@@ -12,7 +12,6 @@ import filodb.query.exec._
   * LongTimeRangePlanner knows about limited retention of raw data, and existence of downsampled data.
   * For any query that arrives beyond the retention period of raw data, it splits the query into
   * two time ranges - latest time range from raw data, and old time range from downsampled data.
-  * It then stitches the subquery results to present top level query results for entire time range.
   *
   * @param rawClusterPlanner this planner (typically a SingleClusterPlanner) abstracts planning for raw cluster data
   * @param downsampleClusterPlanner this planner (typically a SingleClusterPlanner)
@@ -38,6 +37,13 @@ import filodb.query.exec._
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(rawClusterPlanner, downsampleClusterPlanner)
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
 
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
     val execPlan = if (!periodicSeriesPlan.isRoutable)
@@ -64,7 +70,6 @@ import filodb.query.exec._
         _: ScalarVaryingDoublePlan | _: ScalarVectorBinaryOperation | _: VectorPlan => Seq()
     }
   }
-
 
   // scalastyle:off method.length
   private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
@@ -114,15 +119,17 @@ import filodb.query.exec._
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) { // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
+    } else if (LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)) {
+      // eventually the subquery will be delegated to the root planner
+      super.defaultWalkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
+    } else if (
       // "(endWithOffsetMs - lookbackMs) < earliestRawTime" check is erroneous, we claim that we have
       // a long lookback only if the last lookback window overlaps with earliestRawTime, however, we
       // should check for ANY interval overalapping earliestRawTime. We
       // can happen with ANY lookback interval, not just the last one.
-    } else if (
-      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
-        LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+      endWithOffsetMs - lookbackMs < earliestRawTime //TODO lookbacks can overlap in the middle intervals too
     ) {
-      // For subqueries and long lookback queries, we keep things simple by routing to
+      // For long lookback queries, we keep things simple by routing to
       // downsample cluster since dealing with lookback windows across raw/downsample
       // clusters is quite complex and is not in scope now. We omit recent instants for which downsample
       // cluster may not have complete data
@@ -276,12 +283,17 @@ import filodb.query.exec._
   }
 
   // scalastyle:off cyclomatic.complexity
+  // scalastyle:off method.length
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
 
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {
+        // for subqueries, we need to delegate to the root planner since the logic resides there already
+        case t: TopLevelSubquery           => super.materializeTopLevelSubquery(qContext, t)
+        case s: SubqueryWithWindowing      => super.materializeSubqueryWithWindowing(qContext, s)
+
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case ts: TsCardinalities           => materializeTSCardinalityPlan(qContext, ts)
@@ -314,7 +326,7 @@ import filodb.query.exec._
       case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: SubqueryWithWindowing       => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: SubqueryWithWindowing       => throw new IllegalStateException("Already handled subquery with windowing")
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
@@ -324,6 +336,7 @@ import filodb.query.exec._
   }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 }
