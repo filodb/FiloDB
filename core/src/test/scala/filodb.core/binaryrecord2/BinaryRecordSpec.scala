@@ -460,6 +460,35 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       bytes should not equal (recordBase)
       recSchema2.equals(recordBase, recordOff, bytes, UnsafeUtils.arayOffset) shouldEqual true
     }
+
+    it("should throw if label key length > 191") {
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
+      val longLabelValue = "value_of_long_label_key"
+      val longlabelKey = "long_label_key" * 20
+      val tags = Map(ZCUTF8.apply(longlabelKey) -> ZCUTF8.apply(longLabelValue))
+      partKeyBuilder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.schemaHash)
+      partKeyBuilder.addString("test")
+      assertThrows[IllegalArgumentException] {
+        partKeyBuilder.startMap()
+        partKeyBuilder.addMapKeyValue(tags.head._1.bytes, tags.head._2.bytes)
+        partKeyBuilder.endMap()
+      }
+      partKeyBuilder.endRecord()
+    }
+
+    it("should throw if label value length > 32,767 (i16 max) ") {
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
+      val longLabelValue = "A" * 32768
+      val tags = Map(ZCUTF8.apply("long_label_key") -> ZCUTF8.apply(longLabelValue))
+      partKeyBuilder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.schemaHash)
+      partKeyBuilder.addString("test")
+      assertThrows[IllegalArgumentException] {
+        partKeyBuilder.startMap()
+        partKeyBuilder.addMapKeyValue(tags.head._1.bytes, tags.head._2.bytes)
+        partKeyBuilder.endMap()
+      }
+      partKeyBuilder.endRecord()
+    }
   }
 
   // This method allows us to build a "partKey" schema BinaryRecord without using the RecordComparator method,
