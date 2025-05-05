@@ -68,6 +68,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partkeyLabelScans = Kamon.counter("memstore-labels-partkeys-scanned").withTags(TagSet.from(tags))
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").withTags(TagSet.from(tags))
 
+  // Tracking the index adds and updates during active kafka ingestion.
+  val partKeyIndexAdded = Kamon.counter("partkey-index-added").withTags(TagSet.from(tags))
+  val partKeyIndexUpdated = Kamon.counter("partkey-index-updated").withTags(TagSet.from(tags))
+
   /**
     * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
     * stats on message lag:
@@ -942,8 +946,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       .runToFuture(ingestSched)
   }
 
-  private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit =
+  private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit = {
     partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+    shardStats.partKeyIndexUpdated.increment()
+  }
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
@@ -1043,6 +1049,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        // Track new partkeys which are added to index.
+        shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
           modifyCardinalityCountNoThrow(shardKey, 1, 1)
         }
