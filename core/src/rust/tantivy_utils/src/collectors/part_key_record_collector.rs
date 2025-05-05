@@ -32,7 +32,6 @@ impl UnresolvedPartKeyRecord {
 
         let Some(OwnedValue::Bytes(part_key)) = doc_data
             .field_values()
-            .into_iter()
             .filter(|(field, _)| *field == part_key_field)
             .map(|(_, value)| value.into())
             .next()
