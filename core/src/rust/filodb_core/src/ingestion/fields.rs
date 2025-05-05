@@ -139,20 +139,8 @@ mod tests {
         {
             assert_eq!(actual, expected.to_string());
         } else {
-            panic!("Expected OwnedValue::Str");
+            assert!(false, "Expected OwnedValue::Str");
         };
-        // assert_eq!(
-        //     **doc
-        //         .doc
-        //         .get_sorted_field_values()
-        //         .first()
-        //         .unwrap()
-        //         .1
-        //         .first()
-        //         .map(|c| c)
-        //         .unwrap().into(),
-        //     OwnedValue::Str(expected.into())
-        // );
     }
 
     #[test]
@@ -209,7 +197,7 @@ mod tests {
         {
             assert_eq!(actual, expected.to_string());
         } else {
-            panic!("Expected OwnedValue::Str");
+            assert!(false, "Expected OwnedValue::Str");
         };
     }
 }
