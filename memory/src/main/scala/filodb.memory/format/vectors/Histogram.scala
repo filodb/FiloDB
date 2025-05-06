@@ -252,6 +252,10 @@ object HistogramWithBuckets {
   val empty = LongHistogram(HistogramBuckets.emptyBuckets, Array[Long]())
 }
 
+/**
+ * Mutable histogram class that can be used for writes and reads of raw histograms into and from vectors.
+ * WARNING: values array length can be longer than the number of buckets in the case of exponential histograms.
+ */
 final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[Long]) extends HistogramWithBuckets {
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
@@ -303,6 +307,8 @@ object LongHistogram {
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values.
  * MutableHistogram is primarily used in histogram queries, where query results like rate can be double values.
+ *
+ * WARNING: values array length can be longer than the number of buckets in the case of exponential histograms.
  */
 final case class MutableHistogram(var buckets: HistogramBuckets,
                                   var values: Array[Double]) extends HistogramWithBuckets {
@@ -540,6 +546,18 @@ object HistogramBuckets {
     Base2ExpHistogramBuckets(scale, startPosBucket, numPosBuckets)
   }
 
+  def otelExpScale(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails)
+  }
+
+  def otelExpStartIndexPositiveBuckets(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getInt(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2)
+  }
+
+  def otelExpNumPositiveBuckets(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): Int = {
+    UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 2 + 4)
+  }
+
   /**
    * Creates a CustomBuckets definition.
    * @param bucketsDefOffset must point to the 2-byte length prefix of the bucket definition
@@ -560,6 +578,8 @@ object HistogramBuckets {
   val binaryBuckets64 = GeometricBuckets(2.0d, 2.0d, 64, minusOne = true)
 
   val emptyBuckets = GeometricBuckets(2.0d, 2.0d, 0)
+
+  def emptyExpBuckets: Base2ExpHistogramBuckets = Base2ExpHistogramBuckets(20, 0, 0)
 }
 
 /**
@@ -599,7 +619,21 @@ object Base2ExpHistogramBuckets {
   // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
   // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
   val maxBuckets = 180
-  val maxAbsScale = 100
+  val maxAbsScale = 20
+
+  val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray
+  def base(scale: Int): Double = {
+    require(scale >= -maxAbsScale && scale <= maxAbsScale,
+      s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
+    precomputedBase(scale + maxAbsScale)
+  }
+
+  val precomputedLogBase = (-maxAbsScale to maxAbsScale).map(b => Math.log(base(b))).toArray
+  def logBase(scale: Int): Double = {
+    require(scale >= -maxAbsScale && scale <= maxAbsScale,
+      s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
+    precomputedLogBase(scale + maxAbsScale)
+  }
 }
 
 /**
@@ -616,23 +650,37 @@ object Base2ExpHistogramBuckets {
  *
  * Negative observations are not supported yet. But serialization format is forward compatible.
  *
+ * The params are vars because we want to not allocate one of these for every histogram sample
+ * during queries. Do not mutate unless absolutely needed. The only place we mutate is during
+ * reading of exponential histogram vector.
+ *
  * @param scale OTel metrics ExponentialHistogramDataPoint proto scale value
  * @param startIndexPositiveBuckets offset for positive buckets from the same proto
  * @param numPositiveBuckets length of the positive buckets array from the same proto
  */
-final case class Base2ExpHistogramBuckets(scale: Int,
-                                          startIndexPositiveBuckets: Int,
-                                          numPositiveBuckets: Int
+final case class Base2ExpHistogramBuckets(var scale: Int,
+                                          var startIndexPositiveBuckets: Int,
+                                          var numPositiveBuckets: Int
                                         ) extends HistogramBuckets {
   import Base2ExpHistogramBuckets._
   require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
     s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${maxBuckets}")
-  require(scale > -maxAbsScale && scale < maxAbsScale,
+  require(scale >= -maxAbsScale && scale <= maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 
-  val base: Double = Math.pow(2, Math.pow(2, -scale))
-  val startBucketTop: Double = bucketTop(1)
-  val endBucketTop: Double = bucketTop(numBuckets - 1)
+  def base: Double = Base2ExpHistogramBuckets.base(scale)
+  var startBucketTop: Double = bucketTop(1)
+  var endBucketTop: Double = bucketTop(numBuckets - 1)
+
+  def setScheme(scale: Int,
+                startIndexPositiveBuckets: Int,
+                numPositiveBuckets: Int): Unit = {
+    this.scale = scale
+    this.startIndexPositiveBuckets = startIndexPositiveBuckets
+    this.numPositiveBuckets = numPositiveBuckets
+    startBucketTop = bucketTop(1)
+    endBucketTop = bucketTop(numBuckets - 1)
+  }
 
   override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count
 
@@ -643,7 +691,9 @@ final case class Base2ExpHistogramBuckets(scale: Int,
       // contains values that are greater than (base^index) and
       // less than or equal to (base^(index+1)).
       val index = startIndexPositiveBuckets + no - 1
-      Math.pow(base, index + 1)
+      // exp(b * log(a)) is faster than pow(a, b)
+      // Instead of Math.pow(base, index + 1) , use:
+      Math.exp((index + 1) * Base2ExpHistogramBuckets.logBase(scale))
     }
   }
 
@@ -673,8 +723,8 @@ final case class Base2ExpHistogramBuckets(scale: Int,
   }
 
   override def toString: String = {
-    s"OTelExpHistogramBuckets(scale=$scale, startIndexPositiveBuckets=$startIndexPositiveBuckets, " +
-      s"numPositiveBuckets=$numPositiveBuckets) ${super.toString}"
+    s"Base2ExpHistogramBuckets(scale=$scale, startIndexPositiveBuckets=$startIndexPositiveBuckets, " +
+      s"numPositiveBuckets=$numPositiveBuckets)"
   }
   override def similarForMath(other: HistogramBuckets): Boolean = {
     other match {
@@ -707,7 +757,7 @@ final case class Base2ExpHistogramBuckets(scale: Int,
       // The new bucket scheme should have at most maxBuckets, so keep reducing scale until within limits.
       while (newBucketIndexEnd - newBucketIndexStart + 1 > maxBuckets) {
         newScale -= 1
-        newBase = Math.pow(2, Math.pow(2, -newScale))
+        newBase = Base2ExpHistogramBuckets.base(newScale)
         newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1
         newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1
       }
@@ -763,11 +813,11 @@ final case class Base2ExpHistogramBuckets(scale: Int,
         //                 ↓       ↓       ↓       ↓
         // our  scale =  1 .       .       .       .
 
-        // TODO consider removing the require once code is stable
-        require(ourArrayIndex != 0, "double counting zero bucket")
-        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
-          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
-            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
+        // The requires below are removed to improve performance. Enable only if needed to debug
+//        require(ourArrayIndex != 0, "double counting zero bucket")
+//        require( Math.abs(bucketTop(ourArrayIndex) - otherBuckets.bucketTop(otherArrayIndex)) <= 0.000001,
+//          s"Bucket tops of $ourArrayIndex and $otherArrayIndex don't match:" +
+//            s" ${bucketTop(ourArrayIndex)} != ${otherBuckets.bucketTop(otherArrayIndex)}")
         ourValues(ourArrayIndex) += otherHistogram.bucketValue(otherArrayIndex)
       } else if (otherArrayIndex >= otherBuckets.numBuckets) {
         // if otherArrayIndex higher than upper bound, add to our last bucket since bucket counts are cumulative

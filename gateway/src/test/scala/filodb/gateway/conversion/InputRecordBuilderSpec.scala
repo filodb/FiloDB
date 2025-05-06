@@ -113,7 +113,7 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
 
     InputRecord.writeOtelExponentialHistRecord(builder3, metric, baseTags, 100000L,
                                                bucketKVs ++ sumCountMinMaxKVs ++ more, isDelta = true)
-    builder3.allContainers.head.iterate(Schemas.otelDeltaHistogram.ingestionSchema).foreach { row =>
+    builder3.allContainers.head.iterate(Schemas.otelExpDeltaHistogram.ingestionSchema).foreach { row =>
       row.getDouble(1) shouldEqual sum
       row.getDouble(2) shouldEqual count
       row.getDouble(4) shouldEqual min

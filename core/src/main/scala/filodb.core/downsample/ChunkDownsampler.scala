@@ -147,7 +147,9 @@ case class HistSumDownsampler(val inputColIds: Seq[Int]) extends HistChunkDownsa
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
     val histReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asHistReader
     val summedHist = histReader.sum(startRow, endRow)
-    LongHistogram(summedHist.buckets, summedHist.values.map(_.toLong))
+    // taking first numBuckets values from the summed histogram since exp histograms can return more values
+    val values = summedHist.values.take(summedHist.buckets.numBuckets).map(_.toLong)
+    LongHistogram(summedHist.buckets, values)
   }
 }
 
