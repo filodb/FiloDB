@@ -130,17 +130,14 @@ mod tests {
         let _ = parse_indexed_field(&buf, &mut doc, &index.schema).expect("Should succeed");
 
         assert!(doc.field_names.contains(&COL1_NAME.to_string()));
-        if let Some(OwnedValue::Str(actual)) = doc
+        let actual: OwnedValue = doc
             .doc
             .get_sorted_field_values()
             .into_iter()
             .map(|(_, value)| (*value.first().unwrap()).into())
             .next()
-        {
-            assert_eq!(actual, expected.to_string());
-        } else {
-            assert!(false, "Expected OwnedValue::Str");
-        };
+            .unwrap();
+        assert_eq!(actual, OwnedValue::Str(expected.to_string()));
     }
 
     #[test]
@@ -188,16 +185,13 @@ mod tests {
         let _ = parse_multicolumn_field(&buf, &mut doc, &index.schema).expect("Should succeed");
 
         assert!(doc.field_names.contains(&COL1_NAME.to_string()));
-        if let Some(OwnedValue::Str(actual)) = doc
+        let actual: OwnedValue = doc
             .doc
             .get_sorted_field_values()
             .into_iter()
             .map(|(_, value)| (*value.first().unwrap()).into())
             .next()
-        {
-            assert_eq!(actual, expected.to_string());
-        } else {
-            assert!(false, "Expected OwnedValue::Str");
-        };
+            .unwrap();
+        assert_eq!(actual, OwnedValue::Str(expected.to_string()));
     }
 }
