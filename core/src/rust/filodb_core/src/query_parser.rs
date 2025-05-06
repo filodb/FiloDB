@@ -298,11 +298,11 @@ fn parse_long_range_query<'a>(
     // 8 byte end
     let (input, end) = le_i64(input)?;
 
-    let field = schema.get_field(field_name).to_nom_err()?;
+    let resolved_field = schema.get_field(field_name).to_nom_err()?;
 
     let query = RangeQuery::new(
-        Bound::Included(Term::from_field_i64(field, start)),
-        Bound::Included(Term::from_field_i64(field, end)),
+        Bound::Included(Term::from_field_i64(resolved_field, start)),
+        Bound::Included(Term::from_field_i64(resolved_field, end)),
     );
 
     Ok((input, Box::new(query)))
