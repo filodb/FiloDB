@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use quick_cache::{sync::Cache, Equivalent};
+use tantivy::index::SegmentId;
 use tantivy::{
     columnar::{BytesColumn, Column, DynamicColumn, HasAssociatedColumnType, StrColumn},
-    SegmentId, SegmentReader,
+    SegmentReader,
 };
 
 // Max column items to cache.  These are relatively cheap (< 1KB)

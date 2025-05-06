@@ -3,10 +3,11 @@
 use std::{ops::Bound, sync::Arc};
 
 use quick_cache::Weighter;
+use tantivy::index::SegmentId;
 use tantivy::{
     query::{AllQuery, Query, RangeQuery, TermQuery, TermSetQuery},
     schema::{Field, IndexRecordOption, Schema},
-    SegmentId, TantivyError, Term,
+    TantivyError, Term,
 };
 use tantivy_common::BitSet;
 use tantivy_utils::field_constants;
@@ -90,10 +91,10 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
                 Ok(Box::new(query))
             }
             FiloDBQuery::ByEndTime(ended_at) => {
-                let query = RangeQuery::new_i64_bounds(
-                    field_constants::END_TIME.to_string(),
-                    Bound::Included(0),
-                    Bound::Included(*ended_at),
+                let field = schema.get_field(field_constants::END_TIME)?;
+                let query = RangeQuery::new(
+                    Bound::Included(Term::from_field_i64(field, 0)),
+                    Bound::Included(Term::from_field_i64(field, *ended_at)),
                 );
 
                 Ok(Box::new(query))

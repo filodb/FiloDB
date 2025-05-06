@@ -114,9 +114,10 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_inge
             part_key_num_bytes as usize,
         )?;
 
-        ingesting_doc
-            .doc
-            .add_bytes(handle.schema.get_field(field_constants::PART_KEY)?, bytes);
+        ingesting_doc.doc.add_bytes(
+            handle.schema.get_field(field_constants::PART_KEY)?,
+            bytes.as_slice(),
+        );
 
         // Add dynamic fields
         let fields = env.get_byte_array(&fields)?;
@@ -238,12 +239,12 @@ pub extern "system" fn Java_filodb_core_memstore_TantivyNativeMethods_00024_remo
     jni_exec(&mut env, |_| {
         let handle = IndexHandle::get_ref_from_handle(handle);
 
-        let query = RangeQuery::new_i64_bounds(
-            field_constants::END_TIME.to_string(),
-            Bound::Included(0),
+        let field = handle.schema.get_field(field_constants::END_TIME)?;
+        let query = RangeQuery::new(
+            Bound::Included(Term::from_field_i64(field, 0)),
             // To match existing Lucene index behavior, make this inclusive even though it's named
             // "ended before" in the API
-            Bound::Included(ended_before),
+            Bound::Included(Term::from_field_i64(field, ended_before)),
         );
 
         let java_ret = if return_deleted_count == JNI_TRUE {
