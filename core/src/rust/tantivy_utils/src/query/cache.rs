@@ -3,11 +3,12 @@
 use std::{hash::Hash, sync::Arc};
 
 use quick_cache::{sync::Cache, Equivalent, Weighter};
+use tantivy::index::SegmentId;
 use tantivy::{
     collector::SegmentCollector,
     query::{EnableScoring, Query, Weight},
     schema::{Field, Schema},
-    Searcher, SegmentId, TantivyError,
+    Searcher, TantivyError,
 };
 use tantivy_common::BitSet;
 

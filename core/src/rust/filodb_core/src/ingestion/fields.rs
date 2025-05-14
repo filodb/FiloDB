@@ -107,7 +107,6 @@ fn parse_multicolumn_field<'a>(
 mod tests {
     use bytes::BufMut;
     use tantivy::{schema::OwnedValue, Document};
-
     use tantivy_utils::test_utils::{
         build_test_schema, COL1_NAME, JSON_ATTRIBUTE1_NAME, JSON_COL_NAME,
     };
@@ -131,17 +130,14 @@ mod tests {
         let _ = parse_indexed_field(&buf, &mut doc, &index.schema).expect("Should succeed");
 
         assert!(doc.field_names.contains(&COL1_NAME.to_string()));
-        assert_eq!(
-            **doc
-                .doc
-                .get_sorted_field_values()
-                .first()
-                .unwrap()
-                .1
-                .first()
-                .unwrap(),
-            OwnedValue::Str(expected.into())
-        );
+        let actual: OwnedValue = doc
+            .doc
+            .get_sorted_field_values()
+            .into_iter()
+            .map(|(_, value)| (*value.first().unwrap()).into())
+            .next()
+            .unwrap();
+        assert_eq!(actual, OwnedValue::Str(expected.to_string()));
     }
 
     #[test]
@@ -189,16 +185,13 @@ mod tests {
         let _ = parse_multicolumn_field(&buf, &mut doc, &index.schema).expect("Should succeed");
 
         assert!(doc.field_names.contains(&COL1_NAME.to_string()));
-        assert_eq!(
-            **doc
-                .doc
-                .get_sorted_field_values()
-                .first()
-                .unwrap()
-                .1
-                .first()
-                .unwrap(),
-            OwnedValue::Str(expected.into())
-        );
+        let actual: OwnedValue = doc
+            .doc
+            .get_sorted_field_values()
+            .into_iter()
+            .map(|(_, value)| (*value.first().unwrap()).into())
+            .next()
+            .unwrap();
+        assert_eq!(actual, OwnedValue::Str(expected.to_string()));
     }
 }
