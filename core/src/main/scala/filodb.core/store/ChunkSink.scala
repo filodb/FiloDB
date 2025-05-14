@@ -2,19 +2,18 @@ package filodb.core.store
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
-
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
-
 import filodb.core._
 import filodb.core.metadata.Schemas
 import filodb.memory.format.UnsafeUtils
+import kamon.metric.MeasurementUnit
 
 case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, shard: Int)
 
@@ -60,6 +59,7 @@ trait ChunkSink {
                           updateHour: Long,
                           updatedTimeMs: Long,
                           offset: Long,
+                          tagSet: TagSet,
                           partKeys: Observable[PartKeyRecord]): Future[Response]
 
   def writePartKeys(ref: DatasetRef, shard: Int,
@@ -100,6 +100,11 @@ class ChunkSinkStats {
   private val chunksetWrites     = Kamon.counter("chunkset-writes").withoutTags
   private val partKeysWrites     = Kamon.counter("partKey-writes").withoutTags
 
+  // PartKeyUpdatesPublisher metrics
+  private val partKeyUpdatesSuccess = Kamon.counter("partKey-updates-published")
+  private val partKeyUpdatesError   = Kamon.counter("partKey-updates-failed")
+  private val partKeyUpdatesLatency = Kamon.histogram("partKey-updates-latency", MeasurementUnit.time.milliseconds)
+
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
 
@@ -122,6 +127,18 @@ class ChunkSinkStats {
   def partKeysWrite(numKeys: Int): Unit = {
     partKeysWrites.increment(numKeys)
     partKeysWritten.addAndGet(numKeys)
+  }
+
+  def partKeyUpdatesSuccess(num: Int, tagSet: TagSet): Unit = {
+    partKeyUpdatesSuccess.withTags(tagSet).increment(num)
+  }
+
+  def partKeyUpdatesFailed(num: Int, tagSet: TagSet): Unit = {
+    partKeyUpdatesError.withTags(tagSet).increment(num)
+  }
+
+  def partKeyUpdatesLatency(latency: Long, tagSet: TagSet): Unit = {
+    partKeyUpdatesLatency.withTags(tagSet).record(latency)
   }
 }
 
@@ -172,7 +189,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
-  override def writePartKeyUpdates(ref: DatasetRef, updateHour: Long, updatedTimeMs: Long, offset: Long,
+  override def writePartKeyUpdates(ref: DatasetRef, updateHour: Long, updatedTimeMs: Long, offset: Long, tagSet: TagSet,
                                    partKeys: Observable[PartKeyRecord]): Future[Response] = Future.successful(Success)
 
   override def writePartKeys(ref: DatasetRef, shard: Int,

@@ -15,6 +15,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -545,18 +546,25 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                           updateHour: Long,
                           updatedTimeMs: Long,
                           offset: Long,
+                          tagSet: TagSet,
                           partKeys: Observable[PartKeyRecord]): Future[Response] = {
+    val start = System.currentTimeMillis()
     val updatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(ref)
     val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
       val split = PartKeyRecord.getBucket(pk.partKey, schemas, pkByUTNumSplits)
       val updateFut = updatesTable.writePartKey(split, writeTimeIndexTtlSeconds, updateHour, updatedTimeMs, offset, pk)
       Task.fromFuture(updateFut).map { resp =>
-        // TODO: Track writes
+        // Track metrics for observability
+        resp match {
+          case Success => sinkStats.partKeyUpdatesSuccess(1, tagSet)
+          // Failed for any other case
+          case _ => sinkStats.partKeyUpdatesFailed(1, tagSet)
+        }
         resp
       }
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runToFuture
     ret.onComplete { _ =>
-      // TODO: Track Latency
+      sinkStats.partKeyUpdatesLatency(System.currentTimeMillis() - start, tagSet)
     }
     ret
   }

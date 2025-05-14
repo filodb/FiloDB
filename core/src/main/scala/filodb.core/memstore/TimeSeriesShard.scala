@@ -485,7 +485,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    * and publishing since the ingestion scheduler is single-threaded )
    * */
   private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
-    if (partKeyUpdatesPublishingEnabled) Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore))
+    if (partKeyUpdatesPublishingEnabled) {
+      Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore, TagSet.from(shardStats.tags)))
+    }
     else None
 
   /**
@@ -1462,12 +1464,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       case None => Future.successful(Success) // No publishing in this case
     }
-
     // Ensure it runs asynchronously without blocking doFlushSteps
     publishPartKeyUpdatesFuture.onComplete {
-      // TODO: Add number of updates here
-      case scala.util.Success(resp) => logger.info(s"[PartKeyUpdatePublisher] Success response: ${resp}")
-      case scala.util.Failure(ex) => logger.error("[PartKeyUpdatePublisher] Failed with exception", ex)
+      case scala.util.Success(resp) => logger.info(s"[PartKeyUpdatePublisher] pk updates published with resp: $resp")
+      case scala.util.Failure(ex) => logger.error("[PartKeyUpdatePublisher] pk updates failed with exception", ex)
     }(ioPool)
 
     /* Step 5.3: We flush dirty part keys in the one designated group for each shard.
