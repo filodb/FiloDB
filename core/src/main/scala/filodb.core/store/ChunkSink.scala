@@ -56,6 +56,12 @@ trait ChunkSink {
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord]
 
+  def writePartKeyUpdates(ref: DatasetRef,
+                          updateHour: Long,
+                          updatedTimeMs: Long,
+                          offset: Long,
+                          partKeys: Observable[PartKeyRecord]): Future[Response]
+
   def writePartKeys(ref: DatasetRef, shard: Int,
                     partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                     updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
@@ -165,6 +171,9 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
+
+  override def writePartKeyUpdates(ref: DatasetRef, updateHour: Long, updatedTimeMs: Long, offset: Long,
+                                   partKeys: Observable[PartKeyRecord]): Future[Response] = Future.successful(Success)
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,

@@ -29,6 +29,7 @@ import spire.syntax.cfor._
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
+import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
@@ -302,6 +303,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val tantivyQueryCacheEstimatedItemSize =
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
   private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
+  // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
+  private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("metastore.index-updates-publishing-enabled")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -473,6 +476,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     * IMPORTANT. Only modify this var in IngestScheduler
     */
   private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
+
+  private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
+    if (partKeyUpdatesPublishingEnabled) Some(new CassandraPartKeyUpdatesPublisher(shardNum))
+    else None
 
   /**
     * This is the group during which this shard will flush dirty part keys. Randomized to
@@ -948,6 +955,11 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit = {
     partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+    // Tracking updated partIds for real time publishing
+    updatedPartIdsForPublishing match {
+      case Some(obj) => obj.store(p.partID)
+      case None => _ // No tracking needed
+    }
     shardStats.partKeyIndexUpdated.increment()
   }
 
@@ -1050,6 +1062,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         // Track new partkeys which are added to index.
+        // Tracking updated partIds for real time publishing
+        updatedPartIdsForPublishing match {
+          case Some(obj) => obj.store(partId)
+          case None => _ // No tracking needed
+        }
         shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
           modifyCardinalityCountNoThrow(shardKey, 1, 1)
@@ -1423,10 +1440,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
 
-    /* Step 1: Kick off partition iteration to persist chunks to column store */
+    /* Step 5.1: Kick off partition iteration to persist chunks to column store */
     val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
 
-    /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
+    /* Step 5.3: We flush dirty part keys in the one designated group for each shard.
      * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
      * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
      * be added during iteration due to endTime detection
@@ -1505,8 +1522,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
-    assertThreadName(IOSchedName)
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
+    assertThreadName(IOSchedName)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
       Observable.fromIteratorUnsafe(partKeyRecords),
