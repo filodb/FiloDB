@@ -36,6 +36,14 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) {
 
+  def childPlanners(): Seq[QueryPlanner] = Seq(queryPlanner)
+  private var rootPlanner: Option[QueryPlanner] = None
+  def getRootPlanner(): Option[QueryPlanner] = rootPlanner
+  def setRootPlanner(rootPlanner: QueryPlanner): Unit = {
+    this.rootPlanner = Some(rootPlanner)
+  }
+  initRootPlanner()
+
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
@@ -98,6 +106,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * @return materialized Execution Plan which can be dispatched
    */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    require(getRootPlanner().isDefined, "Root planner not set. Internal error.")
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (isMetadataQuery(logicalPlan)
