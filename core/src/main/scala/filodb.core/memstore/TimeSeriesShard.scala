@@ -26,7 +26,7 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import spire.syntax.cfor._
 
-import filodb.core.{ErrorResponse, _}
+import filodb.core.{ErrorResponse, Success, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
@@ -477,13 +477,20 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
 
+  /**
+   * This data structure is used for real time tracking and publishing updated partIds within a shard. This is published
+   * at every flush interval irrespective of the num-group.
+   *
+   * IMPORTANT. Only operate on this object in the IngestScheduler ( which gurantees ordering of reads, writes
+   * and publishing since the ingestion scheduler is single-threaded )
+   * */
   private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
-    if (partKeyUpdatesPublishingEnabled) Some(new CassandraPartKeyUpdatesPublisher(shardNum))
+    if (partKeyUpdatesPublishingEnabled) Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore))
     else None
 
   /**
     * This is the group during which this shard will flush dirty part keys. Randomized to
-    * ensure we dont flush time buckets across shards at same time
+    * ensure we don't flush time buckets across shards at same time
     */
   private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
   logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
@@ -956,9 +963,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit = {
     partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
     // Tracking updated partIds for real time publishing
-    updatedPartIdsForPublishing match {
-      case Some(obj) => obj.store(p.partID)
-      case None => _ // No tracking needed
+    if (updatedPartIdsForPublishing.isDefined) {
+      updatedPartIdsForPublishing.get.store(p.partID)
     }
     shardStats.partKeyIndexUpdated.increment()
   }
@@ -1063,9 +1069,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         // Track new partkeys which are added to index.
         // Tracking updated partIds for real time publishing
-        updatedPartIdsForPublishing match {
-          case Some(obj) => obj.store(partId)
-          case None => _ // No tracking needed
+        if (updatedPartIdsForPublishing.isDefined) {
+          updatedPartIdsForPublishing.get.store(partId)
         }
         shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
@@ -1442,6 +1447,28 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     /* Step 5.1: Kick off partition iteration to persist chunks to column store */
     val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
+
+    // Step 5.2 Publish the real-time partKey updates for downstream applications to consume.
+    // NOTE: This is different from the partKey persist task that happens in Step 5.3. The overall
+    // in both the task is, but this task tracks changes more real-time for the given shard irrespective of
+    // the given num-group.
+    // IMPORTANT: We need to make sure that the following publish task is not executed in the ingestion thread. We also
+    // need to make sure that the ingestion thread is not blocked or waiting on it.
+    val publishPartKeyUpdatesFuture = updatedPartIdsForPublishing match {
+      case Some(obj) => {
+       val updatedPartKeyIds = obj.fetchAll()
+       val partKeyRecords = InMemPartitionIterator2(updatedPartKeyIds).map(toPartKeyRecord)
+       obj.publish(ingestConsumer.ingestOffset, partKeyRecords)
+      }
+      case None => Future.successful(Success) // No publishing in this case
+    }
+
+    // Ensure it runs asynchronously without blocking doFlushSteps
+    publishPartKeyUpdatesFuture.onComplete {
+      // TODO: Add number of updates here
+      case scala.util.Success(resp) => logger.info(s"[PartKeyUpdatePublisher] Success response: ${resp}")
+      case scala.util.Failure(ex) => logger.error("[PartKeyUpdatePublisher] Failed with exception", ex)
+    }(ioPool)
 
     /* Step 5.3: We flush dirty part keys in the one designated group for each shard.
      * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
