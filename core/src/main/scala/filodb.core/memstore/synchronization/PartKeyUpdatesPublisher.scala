@@ -4,6 +4,7 @@ import debox.Buffer
 import scala.concurrent.Future
 
 import filodb.core.Response
+import filodb.core.memstore.FiloSchedulers.{assertThreadName, IngestSchedName}
 import filodb.core.store.PartKeyRecord
 
 /**
@@ -26,9 +27,11 @@ trait PartKeyUpdatesPublisher {
   /**
    * Retrieves all the updated partIds since the last flush.
    * Reset's the buffer to store the newly updated partIds for the next flush.
+   * Make sure that this is called only in IngestionThread
    * @return buffer[updated-partIds]
    */
   def fetchAll(): Buffer[Int] = {
+    assertThreadName(IngestSchedName)
     val old = buffer
     buffer = debox.Buffer.empty[Int]
     old
