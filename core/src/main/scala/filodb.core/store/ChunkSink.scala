@@ -2,18 +2,21 @@ package filodb.core.store
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
+
 import filodb.core._
 import filodb.core.metadata.Schemas
 import filodb.memory.format.UnsafeUtils
-import kamon.metric.MeasurementUnit
 
 case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, shard: Int)
 
