@@ -15,6 +15,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -541,6 +542,33 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     opt.getOrElse(pkr)
   }
 
+  def writePartKeyUpdates(ref: DatasetRef,
+                          updateHour: Long,
+                          updatedTimeMs: Long,
+                          offset: Long,
+                          tagSet: TagSet,
+                          partKeys: Observable[PartKeyRecord]): Future[Response] = {
+    val start = System.currentTimeMillis()
+    val updatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(ref)
+    val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
+      val split = PartKeyRecord.getBucket(pk.partKey, schemas, pkByUTNumSplits)
+      val updateFut = updatesTable.writePartKey(split, writeTimeIndexTtlSeconds, updateHour, updatedTimeMs, offset, pk)
+      Task.fromFuture(updateFut).map { resp =>
+        // Track metrics for observability
+        resp match {
+          case Success => sinkStats.partKeyUpdatesSuccess(1, tagSet)
+          // Failed for any other case
+          case _ => sinkStats.partKeyUpdatesFailed(1, tagSet)
+        }
+        resp
+      }
+    }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runToFuture
+    ret.onComplete { _ =>
+      sinkStats.partKeyUpdatesLatency(System.currentTimeMillis() - start, tagSet)
+    }
+    ret
+  }
+
   def writePartKeys(ref: DatasetRef,
                     shard: Int, // TODO not used if v2. Remove after migration to v2 tables
                     partKeys: Observable[PartKeyRecord],
@@ -649,6 +677,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val partKeysV2TableCache = concurrentCache[DatasetRef, PartitionKeysV2Table](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
   val partKeysByUTTableCache = concurrentCache[DatasetRef, PartitionKeysByUpdateTimeTable](tableCacheSize)
+  val partKeysPublishedUpdatesTableCache = concurrentCache[DatasetRef, PartKeyPublishedUpdatesTable](tableCacheSize)
   val partitionKeysTableCache = concurrentCache[DatasetRef,
                                   ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
 
@@ -744,6 +773,15 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       { dataset: DatasetRef =>
         new PartitionKeysByUpdateTimeTable(dataset, getClusterConnector(dataset), ingestionConsistencyLevel,
           readConsistencyLevel)(readEc) })
+  }
+
+  def getOrCreatePartKeyPublishedUpdatesTableCache(dataset: DatasetRef): PartKeyPublishedUpdatesTable = {
+    partKeysPublishedUpdatesTableCache.getOrElseUpdate(
+      dataset,
+      { dataset: DatasetRef =>
+        new PartKeyPublishedUpdatesTable(dataset, getClusterConnector(dataset), ingestionConsistencyLevel)(readEc)
+      }
+    )
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
