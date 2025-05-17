@@ -304,7 +304,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
   private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
   // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
-  private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
+  private val partKeyUpdatesPublishingEnabled = filodbConfig.hasPath("memstore.index-updates-publishing-enabled") &&
+    filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
