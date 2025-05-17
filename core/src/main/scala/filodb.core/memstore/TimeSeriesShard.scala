@@ -487,6 +487,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * */
   private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
     if (partKeyUpdatesPublishingEnabled) {
+      logger.info(s"[PKUpdatePublisher] Initializing partKey updates publisher for shard=${shardNum}")
       Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore, TagSet.from(shardStats.tags)))
     }
     else None
