@@ -71,6 +71,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
   private val pkv2NumBuckets = cassandraConfig.getInt("pk-v2-table-num-buckets")
   private val writeTimeIndexTtlSeconds = cassandraConfig.getDuration("write-time-index-ttl", TimeUnit.SECONDS).toInt
+  // NOTE: the following TTL is used in the `writePartKeyUpdates` call.
+  private val pkUpdatesTTLSeconds = cassandraConfig.getDuration("pk-published-updates-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
   private val numTokenRangeSplitsForScans = cassandraConfig.getInt("num-token-range-splits-for-scans")
 
@@ -543,7 +545,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   def writePartKeyUpdates(ref: DatasetRef,
-                          updateHour: Long,
+                          epoch5mBucket: Long,
                           updatedTimeMs: Long,
                           offset: Long,
                           tagSet: TagSet,
@@ -552,7 +554,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val updatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(ref)
     val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
       val split = PartKeyRecord.getBucket(pk.partKey, schemas, pkByUTNumSplits)
-      val updateFut = updatesTable.writePartKey(split, writeTimeIndexTtlSeconds, updateHour, updatedTimeMs, offset, pk)
+      val updateFut = updatesTable.writePartKey(split, pkUpdatesTTLSeconds, epoch5mBucket, updatedTimeMs, offset, pk)
       Task.fromFuture(updateFut).map { resp =>
         // Track metrics for observability
         resp match {

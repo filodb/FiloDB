@@ -19,13 +19,16 @@ class CassandraPartKeyUpdatesPublisher(override val shard: Int,
                                        ref: DatasetRef,
                                        colStore: ColumnStore,
                                        tagSet: TagSet) extends PartKeyUpdatesPublisher {
-  final val hourInMillis = 3600000L
+  /**
+   * NOTE: DO-NOT change the time bucket without considering the consuming pattern of the downstream applications.
+   * */
+  final val timeBucket5mInMillis = 300000L
 
   override def publish(offset: Long, partKeyRecords: Iterator[PartKeyRecord]): Future[Response] = {
     assertThreadName(IOSchedName)
     val currentTime = System.currentTimeMillis()
-    val epochHour = currentTime / hourInMillis
+    val epoch5mBucket = currentTime / timeBucket5mInMillis
     colStore.writePartKeyUpdates(
-      ref, epochHour, currentTime, offset, tagSet, Observable.fromIteratorUnsafe(partKeyRecords))
+      ref, epoch5mBucket, currentTime, offset, tagSet, Observable.fromIteratorUnsafe(partKeyRecords))
   }
 }

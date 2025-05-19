@@ -23,13 +23,13 @@ class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
       |CREATE TABLE IF NOT EXISTS $tableString (
       | shard int,
       | split int,
-      | epochHour bigint,
+      | epoch5mBucket bigint,
       | startTimeMs bigint,
       | endTimeMs bigint,
       | updatedTimeMs bigint,
       | offset bigint,
       | partKey blob,
-      | PRIMARY KEY ((shard, split, epochHour), partKey))
+      | PRIMARY KEY ((shard, split, epoch5mBucket), partKey))
       | WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
 
   private lazy val writeDirtyPartKeyCql = session.prepare(
@@ -38,13 +38,13 @@ class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
     .setConsistencyLevel(writeConsistencyLevel)
     .setIdempotent(true)
 
-  def writePartKey(split: Int, ttlSeconds: Int, epochHour: Long,
+  def writePartKey(split: Int, ttlSeconds: Int, epoch5mBucket: Long,
                    updatedTimeMs: Long, offset: Long, pk: PartKeyRecord): Future[Response] = {
     connector.execStmtWithRetries(
       writeDirtyPartKeyCql.bind(
         pk.shard: JInt,
         split: JInt,
-        epochHour: JLong,
+        epoch5mBucket: JLong,
         pk.startTime: JLong,
         pk.endTime: JLong,
         updatedTimeMs: JLong,
