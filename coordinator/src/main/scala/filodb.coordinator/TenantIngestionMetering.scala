@@ -106,12 +106,12 @@ case class TenantIngestionMetering(
       Kamon.gauge(METRIC_QUERY_BYTES_SCANNED)
         .withTags(TagSet.from(tags))
         .update(bytesScannedPerMin)
-    }
 
-    logger.debug(s"Published quota metrics for ws=$ws ns=$ns: " +
+      logger.debug(s"Published quota metrics for ws=$ws ns=$ns: " +
       s"retained=${data.counts.active}, " +
       s"samples_per_min=${samplesPerMin}, " +
       s"bytes_scanned_per_min=${bytesScannedPerMin}")
+    }
   }
 
   private def handleQueryResponse(dsRef: DatasetRef, response: Any): Unit = response match {
