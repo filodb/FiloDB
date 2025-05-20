@@ -577,6 +577,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     ret
   }
 
+  def getUpdatedPartKeysByTimeBucket(ref: DatasetRef,
+                                     shard: Int,
+                                     timeBucket: Long): Observable[PartKeyRecord] = {
+    val updatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(ref)
+    Observable.fromIterable(0 until pkByUTNumSplits)
+      .flatMap { split => updatesTable.scanPartKeys(shard, timeBucket, split) }
+  }
+
   def writePartKeys(ref: DatasetRef,
                     shard: Int, // TODO not used if v2. Remove after migration to v2 tables
                     partKeys: Observable[PartKeyRecord],
@@ -787,7 +795,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     partKeysPublishedUpdatesTableCache.getOrElseUpdate(
       dataset,
       { dataset: DatasetRef =>
-        new PartKeyPublishedUpdatesTable(dataset, getClusterConnector(dataset), ingestionConsistencyLevel)(readEc)
+        new PartKeyPublishedUpdatesTable(dataset, getClusterConnector(dataset),
+          ingestionConsistencyLevel, readConsistencyLevel)(readEc)
       }
     )
   }

@@ -65,6 +65,13 @@ trait ChunkSink {
                           tagSet: TagSet,
                           partKeys: Observable[PartKeyRecord]): Future[Response]
 
+  /**
+   * Can be used by any downstream applications who is using this library. Also helpful for testing purposes.
+   * */
+  def getUpdatedPartKeysByTimeBucket(ref: DatasetRef,
+                                     shard: Int,
+                                     updateHour: Long): Observable[PartKeyRecord]
+
   def writePartKeys(ref: DatasetRef, shard: Int,
                     partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                     updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
@@ -199,6 +206,9 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
                                    partKeys: Observable[PartKeyRecord]): Future[Response] = {
     partKeys.countL.map(c => sinkStats.partKeyUpdatesSuccess(c.toInt, TagSet.Empty)).runToFuture.map(_ => Success)
   }
+
+  override def getUpdatedPartKeysByTimeBucket(ref: DatasetRef, shard: Int,
+                                              updateHour: Long): Observable[PartKeyRecord] = Observable.empty
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,

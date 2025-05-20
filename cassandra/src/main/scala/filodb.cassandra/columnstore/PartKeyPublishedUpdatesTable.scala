@@ -5,16 +5,19 @@ import java.lang.{Integer => JInt, Long => JLong}
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.ConsistencyLevel
+import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
-import filodb.cassandra.Util.toBuffer
 import filodb.core.{DatasetRef, Response}
 import filodb.core.store.PartKeyRecord
 
-class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
+sealed class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
                                    val connector: FiloCassandraConnector,
-                                   writeConsistencyLevel: ConsistencyLevel)
+                                   writeConsistencyLevel: ConsistencyLevel,
+                                   readConsistencyLevel: ConsistencyLevel)
                                   (implicit ec: ExecutionContext) extends BaseDatasetTable {
+
+  import filodb.cassandra.Util._
 
   override def suffix: String = "pks_published_updates"
 
@@ -33,9 +36,15 @@ class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
       | WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
 
   private lazy val writeDirtyPartKeyCql = session.prepare(
-      s"INSERT INTO $tableString (shard, split, epochHour, startTimeMs, endTimeMs, updatedTimeMs, offset, partKey) " +
-        s"VALUES (?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?")
+    s"INSERT INTO $tableString (shard, split, epoch5mBucket, startTimeMs, endTimeMs, updatedTimeMs, offset, partKey) " +
+    s"VALUES (?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
+
+  private lazy val readCql = session.prepare(
+      s"SELECT * FROM $tableString " +
+        s"WHERE shard = ? AND epoch5mBucket = ? AND split = ? ")
+    .setConsistencyLevel(readConsistencyLevel)
     .setIdempotent(true)
 
   def writePartKey(split: Int, ttlSeconds: Int, epoch5mBucket: Long,
@@ -53,5 +62,11 @@ class PartKeyPublishedUpdatesTable(val dataset: DatasetRef,
         ttlSeconds: JInt
       )
     )
+  }
+
+  def scanPartKeys(shard: Int, timeBucket: Long, split: Int): Observable[PartKeyRecord] = {
+    session.executeAsync(readCql.bind(shard: JInt, timeBucket: JLong, split: JInt))
+      .toObservable.handleObservableErrors
+      .map(r => PartitionKeysTable.updatesRowToPartKeyRecord(r, shard))
   }
 }
