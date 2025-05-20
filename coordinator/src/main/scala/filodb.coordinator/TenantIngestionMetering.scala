@@ -74,7 +74,7 @@ case class TenantIngestionMetering(
     val tags = Map(
       "metric_ws" -> ws,
       "metric_ns" -> ns,
-      "dataset" -> dsRef.dataset,
+      "dataset" -> Option(dsRef.dataset).getOrElse("unknown"),
       "cluster_type" -> CLUSTER_TYPE,
       "_ws_" -> ws,
       "_ns_" -> ns
@@ -102,15 +102,15 @@ case class TenantIngestionMetering(
       // Update query bytes scanned per minute based on active timeseries and configured max data per shard
       val maxDataPerShardQuery = settings.config.getBytes("max-data-per-shard-query").longValue()
       val avgBytesPerTs = maxDataPerShardQuery / 1000000 // Convert to MB for better readability
-      val bytesScannedPerMin = data.counts.active * avgBytesPerTs
+      val MegabytesScannedPerMin = data.counts.active * avgBytesPerTs
       Kamon.gauge(METRIC_QUERY_BYTES_SCANNED)
         .withTags(TagSet.from(tags))
-        .update(bytesScannedPerMin)
+        .update(MegabytesScannedPerMin)
 
       logger.debug(s"Published quota metrics for ws=$ws ns=$ns: " +
       s"retained=${data.counts.active}, " +
       s"samples_per_min=${samplesPerMin}, " +
-      s"bytes_scanned_per_min=${bytesScannedPerMin}")
+      s"bytes_scanned_per_min=${MegabytesScannedPerMin}")
     }
   }
 

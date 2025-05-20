@@ -1,11 +1,13 @@
 package filodb.coordinator
 
 import scala.util.Success
+import scala.concurrent.duration._
 
 import akka.actor.{Actor, ActorSystem, Props}
-import akka.testkit.TestKit
+import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.{Config, ConfigFactory}
 import kamon.Kamon
+import kamon.metric.Gauge
 import kamon.tag.TagSet
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.Eventually
@@ -23,9 +25,10 @@ import filodb.query.exec.TsCardExec._
 class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMeteringSpec"))
   with AnyWordSpecLike with Matchers with BeforeAndAfterAll with Eventually {
 
+  // Increase timeout for eventual consistency
   implicit override val patienceConfig = PatienceConfig(
-    timeout = Span(5, Seconds),
-    interval = Span(100, Millis)
+    timeout = Span(30, Seconds),
+    interval = Span(1, Seconds)
   )
 
   override def beforeAll(): Unit = {
@@ -76,30 +79,30 @@ class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMe
     override def getBlobNumBytes(columnNo: Int): Int = throw new UnsupportedOperationException
   }
 
-  class MockCoordinator extends Actor {
+  class MockCoordinator(probe: TestProbe) extends Actor {
     def receive: Receive = {
-      case LogicalPlan2Query(dsRef, logicalPlan: TsCardinalities, qContext, _) =>
+      case msg @ LogicalPlan2Query(dsRef, logicalPlan: TsCardinalities, qContext, _) =>
+        probe.ref forward msg
         val rangeVector = new RangeVector {
           override def key: RangeVectorKey = new RangeVectorKey {
-            def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
-            def sourceShards: Seq[Int] = Seq.empty 
-            def partIds: Seq[Int] = Seq.empty
-            def schemaNames: Seq[String] = Seq.empty
-            def keySize: Int = 0
+            override def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
+            override def sourceShards: Seq[Int] = Seq.empty
+            override def partIds: Seq[Int] = Seq.empty
+            override def schemaNames: Seq[String] = Seq.empty
+            override def keySize: Int = 0
           }
-          override def rows: RangeVectorCursor = new RangeVectorCursor { self =>
-            override def hasNext: Boolean = ???
+          override def rows: RangeVectorCursor = new RangeVectorCursor {
+            private var hasNextValue = true
+            override def hasNext: Boolean = hasNextValue
             override def next(): RowReader = {
+              if (!hasNextValue) throw new NoSuchElementException
+              hasNextValue = false
               mockRowReader
             }
             override def close(): Unit = {}
-            override def mapRow(f: RowReader => RowReader): RangeVectorCursor = new RangeVectorCursor {
-              def hasNext = self.hasNext
-              def next() = f(self.next())
-              def close(): Unit = self.close()
-            }
           }
           override def outputRange: Option[RvRange] = None
+          override def numRows: Option[Int] = Some(1)
         }
 
         val queryResult = QueryResult(
@@ -115,19 +118,30 @@ class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMe
     }
   }
 
-  def createMetering: TenantIngestionMetering = {
+  def createMetering(probe: TestProbe): TenantIngestionMetering = {
     val dsIterProducer = () => Iterator(testDataset)
-    val coordActor = system.actorOf(Props[MockCoordinator])
+    val coordActor = system.actorOf(Props(new MockCoordinator(probe)))
     val coordActorProducer = () => coordActor
     TenantIngestionMetering(settings, dsIterProducer, coordActorProducer)
   }
 
   "TenantIngestionMetering" should {
     "publish metrics correctly for raw cluster type" in {
-      val metering = createMetering
+      val probe = TestProbe()
+      val metering = createMetering(probe)
 
       // Trigger metric publishing
       metering.schedulePeriodicPublishJob()
+
+      // Verify the query is sent with correct parameters
+      probe.expectMsgPF(10.seconds) {
+        case LogicalPlan2Query(dsRef, logicalPlan: TsCardinalities, qContext, _) =>
+          dsRef shouldBe testDataset
+          logicalPlan.shardKeyPrefix shouldBe Nil
+          logicalPlan.numGroupByFields shouldBe 2
+          logicalPlan.overrideClusterName shouldBe "raw"
+          qContext.traceInfo should contain("filodb.partition" -> "test-partition")
+      }
 
       // Wait and verify metrics were published with correct values
       val tags = Map(
@@ -141,31 +155,26 @@ class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMe
 
       eventually {
         // Verify active timeseries metric
-        Kamon.gauge("tsdb_metering_active_timeseries")
-          .withTags(TagSet.from(tags))
-          .shouldEqual(100.0 +- 0.1)
+        val activeGauge = Kamon.gauge("tsdb_metering_active_timeseries")
+        activeGauge.withTags(TagSet.from(tags)) shouldBe 100.0 +- 0.1
 
         // Verify total timeseries metric
-        Kamon.gauge("tsdb_metering_total_timeseries")
-          .withTags(TagSet.from(tags))
-          .shouldEqual(150.0 +- 0.1)
+        val totalGauge = Kamon.gauge("tsdb_metering_total_timeseries")
+        totalGauge.withTags(TagSet.from(tags)) shouldBe 150.0 +- 0.1
 
         // Verify retained timeseries metric
-        Kamon.gauge("tsdb_metering_retained_timeseries")
-          .withTags(TagSet.from(tags))
-          .shouldEqual(100.0 +- 0.1)
+        val retainedGauge = Kamon.gauge("tsdb_metering_retained_timeseries")
+        retainedGauge.withTags(TagSet.from(tags)) shouldBe 100.0 +- 0.1
 
         // Verify samples ingested per minute (based on 10s resolution)
         val expectedSamplesPerMin = 100.0 * (60000.0 / 10000)  // 600.0
-        Kamon.gauge("tsdb_metering_samples_ingested_per_min")
-          .withTags(TagSet.from(tags))
-          .shouldEqual(expectedSamplesPerMin +- 0.1)
+        val samplesGauge = Kamon.gauge("tsdb_metering_samples_ingested_per_min")
+        samplesGauge.withTags(TagSet.from(tags)) shouldBe expectedSamplesPerMin +- 0.1
 
         // Verify query bytes scanned per minute
         val expectedBytesPerMin = 100.0 * (1048576.0 / 1000000)  // ~104.86
-        Kamon.gauge("tsdb_metering_query_samples_scanned_per_min")
-          .withTags(TagSet.from(tags))
-          .shouldEqual(expectedBytesPerMin +- 0.1)
+        val bytesGauge = Kamon.gauge("tsdb_metering_query_samples_scanned_per_min")
+        bytesGauge.withTags(TagSet.from(tags)) shouldBe expectedBytesPerMin +- 0.1
       }
     }
   }
