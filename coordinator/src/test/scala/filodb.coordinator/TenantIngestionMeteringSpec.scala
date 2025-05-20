@@ -15,7 +15,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
 
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
-import filodb.core.query.{QueryStats, QueryWarnings, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema}
+import filodb.core.query.{QueryStats, QueryWarnings, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.{QueryResult, TsCardinalities}
 import filodb.query.exec.TsCardExec._
