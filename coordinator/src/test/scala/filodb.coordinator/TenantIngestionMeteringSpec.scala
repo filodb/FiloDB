@@ -7,17 +7,24 @@ import akka.actor.{Actor, ActorSystem, Props}
 import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.{Config, ConfigFactory}
 import kamon.Kamon
-import kamon.metric.Gauge
 import kamon.tag.TagSet
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.time.{Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpecLike
 
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
-import filodb.core.query.{QueryStats, QueryWarnings, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange}
+import filodb.core.query.{
+  QueryStats,
+  QueryWarnings,
+  RangeVector,
+  RangeVectorCursor,
+  RangeVectorKey,
+  ResultSchema,
+  RvRange
+}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.{QueryResult, TsCardinalities}
 import filodb.query.exec.TsCardExec._
@@ -25,7 +32,7 @@ import filodb.query.exec.TsCardExec._
 class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMeteringSpec"))
   with AnyWordSpecLike with Matchers with BeforeAndAfterAll with Eventually {
 
-  // Increase timeout for eventual consistency
+
   implicit override val patienceConfig = PatienceConfig(
     timeout = Span(30, Seconds),
     interval = Span(1, Seconds)
