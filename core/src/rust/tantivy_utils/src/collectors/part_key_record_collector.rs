@@ -31,9 +31,9 @@ impl UnresolvedPartKeyRecord {
         let part_key_field = searcher.schema().get_field(PART_KEY)?;
 
         let Some(OwnedValue::Bytes(part_key)) = doc_data
-            .into_iter()
-            .filter(|x| x.field == part_key_field)
-            .map(|x| x.value)
+            .field_values()
+            .filter(|(field, _)| *field == part_key_field)
+            .map(|(_, value)| value.into())
             .next()
         else {
             return Err(TantivyError::FieldNotFound(PART_KEY.to_string()));
