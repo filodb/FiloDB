@@ -91,6 +91,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     // Note the next two lines of code do not create the tables, just trigger the creation of proxy class
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
+    val pkPublishedUpdatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(dataset)
     if (createTablesEnabled) {
       createKeyspace(dataset, chunkTable.keyspace)
       val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
@@ -118,6 +119,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
            ixResp <- indexTable.initialize() if ixResp == Success
            pkutResp <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
            partKeyTablesResp <- partitionKeysV1TableInit() if partKeyTablesResp == Success
+           partKeyUpdatesTableResp <- pkPublishedUpdatesTable.initialize() if partKeyUpdatesTableResp == Success
       } yield Success
     } else {
       // ensure the table handles are eagerly created
@@ -135,6 +137,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
+    val pkPublishedUpdatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(dataset)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
 
@@ -159,12 +162,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
           ixResp    <- indexTable.clearAll() if ixResp == Success
           pkutResp  <- partitionKeysByUpdateTimeTable.clearAll() if pkutResp == Success
           partKeyTablesResp <- partitionKeysV1TableTruncate() if partKeyTablesResp == Success
+          partKeyUpdatesTableResp <- pkPublishedUpdatesTable.clearAll() if partKeyUpdatesTableResp == Success
     } yield Success
   }
 
   def dropDataset(dataset: DatasetRef, numShards: Int): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
+    val pkPublishedUpdatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(dataset)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
 
@@ -189,6 +194,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
          pkv2Resp  <- partitionKeysV2TableDrop() if pkv2Resp == Success
          pkutResp  <- partitionKeysByUpdateTimeTable.drop() if pkutResp == Success
          partKeyTablesResp <- partitionKeysV1TableDrop() if partKeyTablesResp == Success
+         partKeyUpdatesTableResp <- pkPublishedUpdatesTable.drop() if partKeyUpdatesTableResp == Success
     } yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)

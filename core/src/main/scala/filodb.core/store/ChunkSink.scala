@@ -110,6 +110,7 @@ class ChunkSinkStats {
 
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
+  val partKeysUpdatesPublished = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
@@ -134,6 +135,7 @@ class ChunkSinkStats {
 
   def partKeyUpdatesSuccess(num: Int, tagSet: TagSet): Unit = {
     partKeyUpdatesSuccess.withTags(tagSet).increment(num)
+    partKeysUpdatesPublished.addAndGet(num)
   }
 
   def partKeyUpdatesFailed(num: Int, tagSet: TagSet): Unit = {
@@ -194,7 +196,9 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def writePartKeyUpdates(ref: DatasetRef, epoch5mBucket: Long, updatedTimeMs: Long, offset: Long,
                                    tagSet: TagSet,
-                                   partKeys: Observable[PartKeyRecord]): Future[Response] = Future.successful(Success)
+                                   partKeys: Observable[PartKeyRecord]): Future[Response] = {
+    partKeys.countL.map(c => sinkStats.partKeyUpdatesSuccess(c.toInt, TagSet.Empty)).runToFuture.map(_ => Success)
+  }
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
