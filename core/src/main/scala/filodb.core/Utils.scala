@@ -84,6 +84,9 @@ object Utils extends StrictLogging {
       val sortedSchemas = Seq(schemaName, schemaNameToCheck).sortBy(_.length)
       val ret = if ((sortedSchemas(0) == "prom-histogram") && (sortedSchemas(1) == "otel-cumulative-histogram")) true
       else if ((sortedSchemas(0) == "delta-histogram") && (sortedSchemas(1) == "otel-delta-histogram")) true
+      else if (
+        (sortedSchemas(0) == "preagg-delta-histogram") && (sortedSchemas(1) == "preagg-otel-delta-histogram")
+      ) true
       else false
       ret
     }
