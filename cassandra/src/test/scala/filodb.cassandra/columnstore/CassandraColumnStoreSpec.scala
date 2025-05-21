@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
+import kamon.tag.TagSet
 
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
@@ -19,6 +20,7 @@ import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
+
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -75,13 +77,20 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
           .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, shard = 0)}.toSet
 
     val updateHour = 10
+    val timeBucket = 20
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
+    colStore.writePartKeyUpdates(dataset, timeBucket, System.currentTimeMillis(), 1, TagSet.Empty,
+        Observable.fromIterable(pks)).futureValue shouldEqual Success
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8))
 
     val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runToFuture.futureValue.toSet
     readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8)) shouldEqual expectedKeys
+
+    val updatedPartKeys = colStore.getUpdatedPartKeysByTimeBucket(
+      dataset, 0, timeBucket).toListL.runToFuture.futureValue.toSet
+    updatedPartKeys.map(pk => new String(pk.partKey, StandardCharsets.UTF_8)) shouldEqual expectedKeys
 
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue.toSet
     readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8)) shouldEqual expectedKeys

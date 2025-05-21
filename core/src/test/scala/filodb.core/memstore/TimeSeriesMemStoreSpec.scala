@@ -32,6 +32,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                                             |filodb.memstore.ensure-block-memory-headroom-percent = 10
                                             |filodb.memstore.ensure-tsp-count-headroom-percent = 10
                                             |filodb.memstore.ensure-native-memory-headroom-percent = 10
+                                            |filodb.memstore.index-updates-publishing-enabled = true
                                             |  """.stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
@@ -249,6 +250,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                                                         flushInterval = 10.minutes), 1)
     Thread sleep 1000
     val numPartKeysWritten = partKeysWritten
+    val numPartKeysPublished = partKeysPublished
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.dirtyPartitionsForIndexFlush.isEmpty shouldEqual true
 
@@ -262,6 +264,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     memStore.startIngestion(dataset1.ref, 0, stream, s).futureValue
 
     partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
+    partKeysPublished shouldEqual numPartKeysPublished + 10
     0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
     0.until(10).foreach{i => tsShard.activelyIngesting(i) shouldEqual true}
 
@@ -278,6 +281,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
     partKeysWritten shouldEqual numPartKeysWritten + 30
+    partKeysPublished shouldEqual numPartKeysPublished + 30
     0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
     0.until(10).foreach {i => tsShard.activelyIngesting(i) shouldEqual false}
     10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
@@ -297,6 +301,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started + 10 set2 series ended +
     // 10 set1 series restarted
     partKeysWritten shouldEqual numPartKeysWritten + 50
+    partKeysPublished shouldEqual numPartKeysPublished + 50
     0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
     0.until(10).foreach {i => tsShard.activelyIngesting(i) shouldEqual true}
     10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
@@ -508,6 +513,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   private def chunksetsWritten = memStore.store.sinkStats.chunksetsWritten.get()
   private def partKeysWritten = memStore.store.sinkStats.partKeysWritten.get()
+  // Partkeys published is tracking the published updates for downstream consumers
+  private def partKeysPublished = memStore.store.sinkStats.partKeysUpdatesPublished.get()
 
   // returns the "endTime" or last sample time of evicted partitions
   // used for testing only
