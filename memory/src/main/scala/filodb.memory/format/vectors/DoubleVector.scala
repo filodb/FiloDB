@@ -181,7 +181,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
     case DoubleCorrection(lastValue, correction) =>
       val firstValue = apply(acc, vector, 0)
       // Last value is the new delta correction
-      if (firstValue < lastValue) DoubleCorrection(lastValue, correction + lastValue)
+      if (firstValue.isNaN || firstValue < lastValue) DoubleCorrection(lastValue, correction + lastValue)
       else                        meta
   }
 

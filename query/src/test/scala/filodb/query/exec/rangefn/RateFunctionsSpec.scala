@@ -90,6 +90,28 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
+  it("should be able to handle NAN at the beginning") {
+    val chunk2Data = Seq(8173000L -> Double.NaN,
+      8183000L -> 511.00,
+      8193000L -> 614.00,
+      8203000L -> 724.00,
+      8213000L -> 909.00)
+    val rv = timeValueRVPk(counterSamples)
+
+    // Add data and chunkify chunk2Data
+    addChunkToRV(rv, chunk2Data)
+
+    val startTs = 8071950L
+    val endTs = 8213070L
+    val correction = q.last.value
+    val expected = (chunk2Data.last._2 + correction - q.head.value) / (chunk2Data.last._1 - q.head.timestamp) * 1000
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
+      new ChunkedRateFunction, querySession)
+    it.next().getDouble(1) shouldEqual expected +- errorOk
+  }
+
   val resetChunk1 = Seq(8072000L->4419.00,
                         8082100L->4511.00,
                         8092196L->4614.00,
