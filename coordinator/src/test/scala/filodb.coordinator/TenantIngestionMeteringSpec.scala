@@ -163,25 +163,38 @@ class TenantIngestionMeteringSpec extends TestKit(ActorSystem("TenantIngestionMe
       eventually {
         // Verify active timeseries metric
         val activeGauge = Kamon.gauge("tsdb_metering_active_timeseries")
-        activeGauge.withTags(TagSet.from(tags)) shouldBe 100.0 +- 0.1
+        val activeValue = activeGauge.withTags(TagSet.from(tags))
+        println(s"Active timeseries - Expected: 100.0, Actual: $activeValue")
+        activeValue shouldBe 100.0 +- 0.1
 
         // Verify total timeseries metric
         val totalGauge = Kamon.gauge("tsdb_metering_total_timeseries")
-        totalGauge.withTags(TagSet.from(tags)) shouldBe 150.0 +- 0.1
+        val totalValue = totalGauge.withTags(TagSet.from(tags))
+        println(s"Total timeseries - Expected: 150.0, Actual: $totalValue")
+        totalValue shouldBe 150.0 +- 0.1
 
         // Verify retained timeseries metric
         val retainedGauge = Kamon.gauge("tsdb_metering_retained_timeseries")
-        retainedGauge.withTags(TagSet.from(tags)) shouldBe 100.0 +- 0.1
+        val retainedValue = retainedGauge.withTags(TagSet.from(tags))
+        println(s"Retained timeseries - Expected: 100.0, Actual: $retainedValue")
+        retainedValue shouldBe 100.0 +- 0.1
 
         // Verify samples ingested per minute (based on 10s resolution)
         val expectedSamplesPerMin = 100.0 * (60000.0 / 10000)  // 600.0
         val samplesGauge = Kamon.gauge("tsdb_metering_samples_ingested_per_min")
-        samplesGauge.withTags(TagSet.from(tags)) shouldBe expectedSamplesPerMin +- 0.1
+        val samplesValue = samplesGauge.withTags(TagSet.from(tags))
+        println(s"Samples ingested per min - Expected: $expectedSamplesPerMin, Actual: $samplesValue")
+        samplesValue shouldBe expectedSamplesPerMin +- 0.1
 
         // Verify query bytes scanned per minute
-        val expectedBytesPerMin = 100.0 * (1048576.0 / 1000000)  // ~104.86
+        val expectedBytesPerMin = 100.0 * 1048576.0  // Using raw bytes now
         val bytesGauge = Kamon.gauge("tsdb_metering_query_samples_scanned_per_min")
-        bytesGauge.withTags(TagSet.from(tags)) shouldBe expectedBytesPerMin +- 0.1
+        val bytesValue = bytesGauge.withTags(TagSet.from(tags))
+        println(s"Query bytes scanned per min - Expected: $expectedBytesPerMin, Actual: $bytesValue")
+        bytesValue shouldBe expectedBytesPerMin +- 0.1
+
+        // Print all tags being used
+        println(s"Using tags: $tags")
       }
     }
   }
