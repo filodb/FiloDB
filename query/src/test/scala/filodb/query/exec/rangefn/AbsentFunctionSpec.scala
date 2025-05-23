@@ -149,8 +149,8 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows.zip(expectedRows).foreach {
       case ((tsActual, vActual), (tsExp, vExp)) =>
         tsActual shouldEqual tsExp
-        if (vExp.isNaN)    vActual.isNaN shouldBe true
-        else               vActual shouldEqual vExp
+        if (vExp.isNaN)    { vActual.isNaN shouldBe true }
+        else               { vActual shouldEqual vExp }
     }
   }
 
