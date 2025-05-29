@@ -1137,6 +1137,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                    forceDispatcher: Option[PlanDispatcher] = None): PlanResult = {
     val canPushdownInner = !LogicalPlanUtils.hasDescendantAggregateOrJoin(lp.vectors) ||
       getPushdownShards(qContext, lp.vectors).isDefined
+    // Child plan should not skip Aggregate Present such as Topk in Sum(Topk)
     var toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
       qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     if (!canPushdownInner) {

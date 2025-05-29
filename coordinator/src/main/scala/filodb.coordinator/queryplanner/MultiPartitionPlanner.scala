@@ -434,20 +434,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                                  queryContext: QueryContext,
                                                  timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val leftContext = queryContext.copy(origQueryParams =
-      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.lhs)))
     val proportionMap = assignment.proportionMap
     val lhsList = proportionMap.map(entry => {
       val partitionDetails = entry._2
       materializeForPartition(binaryJoin.lhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, leftContext, timeRangeOverride)
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
     }).toSeq
-    val rightContext = queryContext.copy(origQueryParams =
-      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.lhs)))
     val rhsList = proportionMap.map(entry => {
       val partitionDetails = entry._2
       materializeForPartition(binaryJoin.rhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, rightContext, timeRangeOverride)
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
     }).toSeq
     val dispatcher = PlannerUtil.pickDispatcher(lhsList ++ rhsList)
     if (binaryJoin.operator.isInstanceOf[SetOperator])
@@ -468,7 +464,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                                 queryContext: QueryContext,
                                                 timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val proportionMap = assignment.proportionMap
-    // Child plan should not skip Aggregate Present such as Topk in Sum(Topk)
     val childQueryContext = queryContext.copy(
       plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
     val plans = proportionMap.values.map(details => {
@@ -701,11 +696,11 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   // FIXME: this is a near-exact copy-paste of a method in the ShardKeyRegexPlanner --
   //  more evidence that these two classes should be merged.
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext,
-                                   isMultiPartition: Boolean): PlanResult = {
+                                   hasMultiPartitionNamespace: Boolean): PlanResult = {
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(isMultiPartition && hasOnClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasOnClause(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(
@@ -714,7 +709,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     } else {
       val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val (assignments, _, _, _) = resolveAssignmentsAndRoutingKeys(aggregate, queryParams)
-      // Child plan should not skip Aggregate Present such as Topk in Sum(Topk)
       val execPlans = assignments.map(
         assignment => materializeForAggregateAssignment(aggregate, assignment, queryContext)
       )
