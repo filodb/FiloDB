@@ -11,7 +11,7 @@ import kamon.Kamon
 import filodb.coordinator._
 import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
-import filodb.core.downsample.DownsampleConfig
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, StoreConfig}
@@ -75,12 +75,16 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     clusterDiscovery.registerDatasetForDiscovery(dataset.ref, ingestConfig.numShards)
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
-    memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
-    // if downsampling is enabled, then initialize downsample datasets
-    ingestConfig.downsampleConfig
-                .downsampleDatasetRefs(dataset.ref.dataset)
-                  .foreach { downsampleDataset =>
-                    memStore.store.initialize(downsampleDataset, ingestConfig.numShards, ingestConfig.resources) }
+    memStore match {
+      case tsMemStore: DownsampledTimeSeriesStore =>
+        tsMemStore.rawColStore.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
+        memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
+        ingestConfig.downsampleConfig
+          .downsampleDatasetRefs(dataset.ref.dataset)
+          .foreach { downsampleDataset =>
+            memStore.store.initialize(downsampleDataset, ingestConfig.numShards, ingestConfig.resources) }
+      case _ => memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
+    }
 
     setupDataset( dataset,
                   ingestConfig.storeConfig, ingestConfig.numShards,

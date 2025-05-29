@@ -30,7 +30,7 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
  * @param ioPool the executor used to perform network IO
  */
 class DownsampledTimeSeriesStore(val store: ColumnStore,
-                                 rawColStore: ColumnStore,
+                                 val rawColStore: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
