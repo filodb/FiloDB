@@ -1,25 +1,17 @@
 package filodb.labelchurnfinder
 
-import com.typesafe.config.ConfigFactory
-
 import scala.collection.mutable
+
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import kamon.Kamon
 import monix.execution.Scheduler
-import net.ceedubs.ficus.Ficus._
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
-import filodb.core.DatasetRef
-import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.metadata.Schemas
-import filodb.downsampler.DownsamplerContext
+import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.downsampler.index.DSIndexJobSettings
-import filodb.labelchurnfinder.LCFContext.sched
-import filodb.memory.format.UnsafeUtils
 
 object LabelChurnFinder extends App {
 
@@ -28,7 +20,6 @@ object LabelChurnFinder extends App {
   val labelChurnFinder = new LabelChurnFinder(dsSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
   labelChurnFinder.run(sparkConf)
-
 }
 
 object LCFContext extends StrictLogging {
@@ -56,108 +47,69 @@ case class ChurnSketches(active: CpcSketch, total: CpcSketch) {
  * ]
  *
  */
-class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable {
-  private val logK = 10
-  private val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
-  private val rawDatasetRef = DatasetRef(dsSettings.rawDatasetName)
-
-  @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
-  @transient lazy private[labelchurnfinder] val colStore =
-    new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
-  @transient lazy val filter = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.mapValues(_.r.pattern).toSeq)
-
-  @transient lazy val numShards = dsSettings.filodbSettings.streamConfigs
-    .find(_.getString("dataset") == rawDatasetRef.dataset)
-    .getOrElse(ConfigFactory.empty())
-    .as[Option[Int]]("num-shards").get
+class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable with StrictLogging {
 
   // scalastyle:off
-  def run(conf: SparkConf): SparkSession = {
+  def run(conf: SparkConf): Array[(Seq[String], ChurnSketches)] = {
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    conf.registerKryoClasses(Array(classOf[CpcSketch]));
+
     val spark = SparkSession.builder()
-      .appName("FiloDB_Cardinality_Buster")
+      .appName("LabelChurnFinder")
       .config(conf)
       .getOrCreate()
 
-    LCFContext.log.info(s"This is the Label Churn Finder. Starting job.")
 
-    val pkGroups = if (colStore.partKeysV2TableEnabled) {
+    LCFContext.log.info(s"This is the Label Churn Finder. Starting job.")
+    val lcfTask = new LcfTask(dsSettings)
+
+    val splits = if (lcfTask.colStore.partKeysV2TableEnabled) {
       spark.sparkContext
-        .makeRDD(colStore.getScanSplits(rawDatasetRef))
+        .makeRDD(lcfTask.colStore.getScanSplits(lcfTask.rawDatasetRef))
         .mapPartitions { split =>
           Kamon.init() // kamon init should be first thing in worker jvm
           split.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens)
-        }.flatMap { sp =>
-          Kamon.init() // kamon init should be first thing in worker jvm
-          colStore.scanPartKeysByStartEndTimeRangeNoAsync(rawDatasetRef, -1 /* not used for v2 */, sp, 0,
-            Long.MaxValue, 0, Long.MaxValue)
-            .filter( _ => true) // TODO add filters
-            .grouped(10000)
-        }
+        }.map( sp => (sp, -1))
     } else {
       spark.sparkContext
-        .makeRDD(colStore.getScanSplits(rawDatasetRef))
+        .makeRDD(lcfTask.colStore.getScanSplits(lcfTask.rawDatasetRef))
         .mapPartitions { split =>
           Kamon.init() // kamon init should be first thing in worker jvm
           split.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens)
             .flatMap { split =>
-              for { shard <- 0 to numShards } yield (split, shard)
+              for { shard <- 0 until lcfTask.numShards } yield (split, shard)
             }
-        }.flatMap { case (split, shard) =>
-          Kamon.init() // kamon init should be first thing in worker jvm
-          colStore.scanPartKeysByStartEndTimeRangeNoAsync(rawDatasetRef, shard, split, 0,
-              Long.MaxValue, 0, Long.MaxValue)
-            .filter( _ => true) // TODO add filters
-            .grouped(10000)
         }
     }
 
-    val result = pkGroups.map { pks =>
-      val sketches = mutable.HashMap.empty[Seq[String], ChurnSketches]
-      Kamon.init() // kamon init should be first thing in worker jvm
-      pks.foreach { pk =>
-        val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
-        val schema = schemas(rawSchemaId)
-        val wsNs = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, Seq("_ws_", "_ns_", "_metric_"))
-        val ws = wsNs(0)
-        val ns = wsNs(1)
-        val metric = wsNs(2)
-        schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset).foreach { case (pkKey, pkVal) =>
-          val key = Seq(ws, ns, metric, pkKey)
-          val sketch = sketches.getOrElseUpdate(key, ChurnSketches(new CpcSketch(logK), new CpcSketch(logK)))
-          val valBytes = pkVal.getBytes
-          sketch.total.update(valBytes)
-          if (pk.endTime == Long.MaxValue) sketch.active.update(valBytes)
+    val result = splits.map { case (split, shard) =>
+      lcfTask.computeLabelChurn(split, shard)
+    }.fold(mutable.HashMap.empty[Seq[String], ChurnSketches]) { (acc, m) =>
+      m.foreach { case (key, sketch) =>
+        if (acc.contains(key)) {
+          val unionActive = new CpcUnion(lcfTask.logK)
+          unionActive.update(acc(key).active)
+          unionActive.update(sketch.active)
+          val unionTotal = new CpcUnion(lcfTask.logK)
+          unionTotal.update(acc(key).total)
+          unionTotal.update(sketch.total)
+        } else {
+          acc.put(key, sketch)
         }
       }
-      sketches
-    }.fold(mutable.HashMap.empty[Seq[String], ChurnSketches]) { (acc, m) =>
-      m.foreach({
-        case (key, sketch) =>
-          if (acc.contains(key)) {
-            val unionActive = new CpcUnion(logK)
-            unionActive.update(acc(key).active)
-            unionActive.update(sketch.active)
-            val unionTotal = new CpcUnion(logK)
-            unionTotal.update(acc(key).total)
-            unionTotal.update(sketch.total)
-            acc + (key -> ChurnSketches(unionActive.getResult, unionTotal.getResult))
-          } else {
-            acc + (key -> sketch)
-          }
-      })
       acc
     }
     val sortedResult = result.toArray.sortBy(-_._2.churn()) // negative for descending order
     sortedResult.foreach { case (key, sketch) =>
         // TODO, for now logging to log files. Can write this to durable store in subsequent iterations
-        val labelActiveCard = sketch.active.getEstimate
-        val labelTotalCard = sketch.total.getEstimate
+        val labelActiveCard = Math.round(sketch.active.getEstimate)
+        val labelTotalCard = Math.round(sketch.total.getEstimate)
         LCFContext.log.info(s"Estimated label cardinality: label=$key " +
           s"active=$labelActiveCard total=$labelTotalCard churn=${labelTotalCard / labelActiveCard}")
     }
     LCFContext.log.info(s"LabelChurnFinder completed successfully")
-    spark
+    spark.close()
+    sortedResult
   }
 
 }

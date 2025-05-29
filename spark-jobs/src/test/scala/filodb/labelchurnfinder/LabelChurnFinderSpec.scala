@@ -18,12 +18,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.io.File
-import java.time.Instant
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+  val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
   val jobConfig = ConfigFactory.parseString(
     s"""
        |filodb.labelchurnfinder.pk-filters.0._ws_ = bulk_ws
@@ -58,11 +57,15 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     start until start + 6
   }
 
-  val numShards = lcf.numShards
+  val numShards = settings.numShards
+  val lcfTask = new LcfTask(settings)
+
+  val numPods = 30
+  val numInstances = 10
 
   override def beforeAll(): Unit = {
-    lcf.colStore.initialize(rawDataset.ref, numShards, settings.rawDatasetIngestionConfig.resources).futureValue
-    lcf.colStore.truncate(rawDataset.ref, numShards).futureValue
+    lcfTask.colStore.initialize(rawDataset.ref, numShards, settings.rawDatasetIngestionConfig.resources).futureValue
+    lcfTask.colStore.truncate(rawDataset.ref, numShards).futureValue
   }
 
   override def afterAll(): Unit = {
@@ -77,18 +80,20 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     case class PkToWrite(pkr: PartKeyRecord, updateHour: Long)
     val pks = for { i <- 0 to 10000 } yield {
       val schema = schemas(i % schemas.size)
-      val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric${i % 10}", bulkSeriesTags ++ Map(
+      val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric", bulkSeriesTags ++ Map(
         "_ws_".utf8 -> "bulk_ws".utf8,
-        "_ns_".utf8 -> s"bulk_ns${i % 3}".utf8,
-        "pod".utf8 -> s"pod$i".utf8,
+        "_ns_".utf8 -> s"bulk_ns".utf8,
+        "pod".utf8 -> s"pod${i % numPods}".utf8,
+        "instance".utf8 -> s"instance${i % numInstances}".utf8,
         "container".utf8 -> s"container$i".utf8))
       val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
-      PkToWrite(PartKeyRecord(bytes, i, i + 500, i % numShards), bulkPkUpdateHours(i % bulkPkUpdateHours.size))
+      val endTime = if (i % 2 == 0) Long.MaxValue else i + 500
+      PkToWrite(PartKeyRecord(bytes, i, endTime, i % numShards), bulkPkUpdateHours(i % bulkPkUpdateHours.size))
     }
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
     pks.groupBy(k => (k.pkr.shard, k.updateHour)).foreach { case ((shard, updHour), shardPks) =>
-      lcf.colStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr),
+      lcfTask.colStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr),
         259200, updHour).futureValue
     }
   }
@@ -97,8 +102,17 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
-    lcf.run(sparkConf).close()
+    val result = lcf.run(sparkConf)
+    result.length shouldEqual 6
+    val cards = result.map { case (key, sketch) => (key, sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
+    cards shouldEqual Seq(
+      (Seq("bulk_ws", "bulk_ns", "container"), 1000, 1000),
+      (Seq("bulk_ws", "bulk_ns", "_ns_"), 1, 1),
+      (Seq("bulk_ws", "bulk_ns", "_ws_"), 1, 1),
+      (Seq("bulk_ws", "bulk_ns", "instance"), numInstances, numInstances),
+      (Seq("bulk_ws", "bulk_ns", "_metric_"), 1, 1),
+      (Seq("bulk_ws", "bulk_ns", "pod"), numPods, numPods)
+    )
   }
 
 
