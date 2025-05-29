@@ -108,15 +108,17 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
+
+    // additional ColumnStore initialization for downsample datasets
     memStore match {
       case tsMemStore: DownsampledTimeSeriesStore =>
         tsMemStore.rawColStore.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
-        memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
         ingestConfig.downsampleConfig
           .downsampleDatasetRefs(dataset.ref.dataset)
           .foreach { downsampleDataset =>
             memStore.store.initialize(downsampleDataset, ingestConfig.numShards, ingestConfig.resources) }
-      case _ => memStore.store.initialize(dataset.ref, ingestConfig.numShards, ingestConfig.resources)
+      case _ =>
     }
 
     setupDataset( dataset,
