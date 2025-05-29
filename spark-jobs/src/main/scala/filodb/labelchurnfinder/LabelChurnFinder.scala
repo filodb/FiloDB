@@ -50,7 +50,7 @@ case class ChurnSketches(active: CpcSketch, total: CpcSketch) {
 class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable with StrictLogging {
 
   // scalastyle:off
-  def run(conf: SparkConf): Array[(Seq[String], ChurnSketches)] = {
+  def run(conf: SparkConf): mutable.HashMap[Seq[String], ChurnSketches] = {
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     conf.registerKryoClasses(Array(classOf[CpcSketch]));
 
@@ -93,23 +93,16 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
           val unionTotal = new CpcUnion(lcfTask.logK)
           unionTotal.update(acc(key).total)
           unionTotal.update(sketch.total)
+          acc.put(key, ChurnSketches(unionActive.getResult, unionTotal.getResult))
         } else {
           acc.put(key, sketch)
         }
       }
       acc
     }
-    val sortedResult = result.toArray.sortBy(-_._2.churn()) // negative for descending order
-    sortedResult.foreach { case (key, sketch) =>
-        // TODO, for now logging to log files. Can write this to durable store in subsequent iterations
-        val labelActiveCard = Math.round(sketch.active.getEstimate)
-        val labelTotalCard = Math.round(sketch.total.getEstimate)
-        LCFContext.log.info(s"Estimated label cardinality: label=$key " +
-          s"active=$labelActiveCard total=$labelTotalCard churn=${labelTotalCard / labelActiveCard}")
-    }
     LCFContext.log.info(s"LabelChurnFinder completed successfully")
     spark.close()
-    sortedResult
+    result
   }
 
 }

@@ -18,6 +18,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.io.File
+import scala.collection.mutable
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
@@ -103,15 +104,15 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     val result = lcf.run(sparkConf)
-    result.length shouldEqual 6
-    val cards = result.map { case (key, sketch) => (key, sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
-    cards shouldEqual Seq(
-      (Seq("bulk_ws", "bulk_ns", "container"), 1000, 1000),
-      (Seq("bulk_ws", "bulk_ns", "_ns_"), 1, 1),
-      (Seq("bulk_ws", "bulk_ns", "_ws_"), 1, 1),
-      (Seq("bulk_ws", "bulk_ns", "instance"), numInstances, numInstances),
-      (Seq("bulk_ws", "bulk_ns", "_metric_"), 1, 1),
-      (Seq("bulk_ws", "bulk_ns", "pod"), numPods, numPods)
+    result.size shouldEqual 6
+    val cards = result.mapValues { sketch => (sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
+    cards shouldEqual mutable.HashMap(
+      List("bulk_ws", "bulk_ns", "container") -> ((5075, 9862)),
+      List("bulk_ws", "bulk_ns", "instance") -> ((numInstances/2,numInstances)),
+      List("bulk_ws", "bulk_ns", "_ns_") -> ((1,1)),
+      List("bulk_ws", "bulk_ns", "pod") -> ((numPods/2, numPods)),
+      List("bulk_ws", "bulk_ns", "_ws_") -> ((1,1)),
+      List("bulk_ws", "bulk_ns", "_metric_") -> ((1,1))
     )
   }
 
