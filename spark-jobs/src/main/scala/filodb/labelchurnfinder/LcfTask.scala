@@ -1,10 +1,12 @@
 package filodb.labelchurnfinder
 
 import scala.collection.mutable
+
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.datasketches.cpc.CpcSketch
+
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
