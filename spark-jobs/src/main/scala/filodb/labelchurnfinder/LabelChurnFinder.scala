@@ -14,12 +14,19 @@ import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.downsampler.index.DSIndexJobSettings
 
 object LabelChurnFinder extends App {
-
   val dsSettings = new DownsamplerSettings()
   val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
   val labelChurnFinder = new LabelChurnFinder(dsSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
-  labelChurnFinder.run(sparkConf)
+  val result = labelChurnFinder.run(sparkConf)
+  val sortedResult = result.toArray.sortBy(-_._2.churn()) // negative for descending order
+  sortedResult.foreach { case (key, sketch) =>
+    // TODO, for now logging to log files. Can write this to durable store in subsequent iterations
+    val labelActiveCard = Math.round(sketch.active.getEstimate)
+    val labelTotalCard = Math.round(sketch.total.getEstimate)
+    LCFContext.log.info(s"Estimated label cardinality: label=$key " +
+      s"active=$labelActiveCard total=$labelTotalCard churn=${labelTotalCard / labelActiveCard}")
+  }
 }
 
 object LCFContext extends StrictLogging {
