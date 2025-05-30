@@ -23,7 +23,7 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
   @transient lazy private[labelchurnfinder] val colStore =
     new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
-  @transient lazy val filter = dsSettings.filodbConfig
+  @transient lazy val filters = dsSettings.filodbConfig
     .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.mapValues(_.r.pattern).toSeq)
 
   @transient lazy val numShards = dsSettings.filodbSettings.streamConfigs
@@ -34,7 +34,6 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
   def computeLabelChurn(split: (String, String),
                         shard: Int): mutable.HashMap[Seq[String], ChurnSketches] = {
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(rawDatasetRef, shard, split, 0, Long.MaxValue, 0, Long.MaxValue)
-    .filter(_ => true) // TODO add filters
     .foldLeft(mutable.HashMap.empty[Seq[String], ChurnSketches]) { case (acc, pk) =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
@@ -42,12 +41,23 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
       val ws = wsNs(0)
       val ns = wsNs(1)
       val metric = wsNs(2)
-      schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset).foreach { case (pkKey, pkVal) =>
-        val key = Seq(ws, ns, pkKey)
-        val sketch = acc.getOrElseUpdate(key, ChurnSketches(new CpcSketch(logK), new CpcSketch(logK)))
-        val valBytes = pkVal.getBytes
-        sketch.total.update(valBytes)
-        if (pk.endTime == Long.MaxValue) sketch.active.update(valBytes)
+
+      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+      val filterMatches = filters.exists { filter => // at least one filter should match
+        filter.forall { case (filterKey, filterValRegex) => // should match all tags in this filter
+          pkPairs.exists { case (pkKey, pkVal) =>
+            pkKey == filterKey && filterValRegex.matcher(pkVal).matches
+          }
+        }
+      }
+      if (filterMatches) {
+        pkPairs.foreach { case (pkKey, pkVal) =>
+          val key = Seq(ws, ns, pkKey)
+          val sketch = acc.getOrElseUpdate(key, ChurnSketches(new CpcSketch(logK), new CpcSketch(logK)))
+          val valBytes = pkVal.getBytes
+          sketch.total.update(valBytes)
+          if (pk.endTime == Long.MaxValue) sketch.active.update(valBytes)
+        }
       }
       acc
     }
