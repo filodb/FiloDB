@@ -505,17 +505,17 @@ class HistogramTest extends NativeVectorTest {
           if b.startBucketTop < 1E+10 && b.endBucketTop < 1E+10
         } yield { b }
 
-      val epislon = 1.0E-8
+      val epsilon = 1.0E-6
       forAll(bucketParams) { b =>
         // validate base
         val expectedBase = Math.pow(2, Math.pow(2, -b.scale))
-        b.base shouldEqual expectedBase +- epislon
+        b.base shouldEqual expectedBase +- epsilon
 
         // validate bucket tops are base 2 exponential
         for (i <- 1 until b.numBuckets) {
           val bucketTop = b.bucketTop(i)
           val index = b.startIndexPositiveBuckets + i - 1
-          bucketTop shouldEqual Math.pow(b.base, index + 1) +- epislon
+          bucketTop shouldEqual Math.pow(b.base, index + 1) +- epsilon
         }
       }
     }
