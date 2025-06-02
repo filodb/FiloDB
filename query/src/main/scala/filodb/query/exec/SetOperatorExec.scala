@@ -413,7 +413,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     }
 
     // 4) Prepare result accumulator
-    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], // join‐key
+      mutable.Map[Map[Utf8Str, Utf8Str], RangeVector]]() // inner: full labelValues → RV
     val period = lhsRvs.headOption.flatMap(_.outputRange)
 
     // 5) For each LHS, either emit unchanged (if no RHS) or do the “unless”‐zip
@@ -421,15 +422,17 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val jk = joinKeys(lhs.key)
 
       if (rhsMap.contains(jk)) {
-        var index = -1
-        val lhsStitched =
-          if (result.contains(jk)) {
-            val resVal = result(jk)
-            index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
-            if (index >= 0) {
-              StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
-            } else lhs
-          } else lhs
+        // Fetch (or create) the inner map for this join‐key
+        val innerMap = result.getOrElse(jk, mutable.Map.empty)
+
+        // Stitch any duplicate LHS series by full labelValues
+        val prevRvOpt = innerMap.get(lhs.key.labelValues)
+        val lhsStitched = prevRvOpt match {
+          case Some(prevRv) =>
+            StitchRvsExec.stitch(lhs, prevRv, outputRvRange)
+          case None =>
+            lhs
+        }
 
         // build an “unless” cursor: NaN where RHS had any sample
         val lhsRows = lhsStitched.rows()
@@ -454,28 +457,27 @@ final case class SetOperatorExec(queryContext: QueryContext,
           }
         }
 
-        // append or update into the ArrayBuffer for this join‐key
-        val buf   = result.getOrElse(jk, ArrayBuffer.empty[RangeVector])
         val outRv = IteratorBackedRangeVector(lhs.key, cursor, period)
-        if (index >= 0) buf.update(index, outRv) else buf.append(outRv)
-        result.put(jk, buf)
-
+        innerMap.put(lhs.key.labelValues, outRv)
+        result.put(jk, innerMap)
       } else {
         // no RHS for this key ⇒ emit LHS (and stitch duplicates)
-        val buf = result.getOrElseUpdate(jk, ArrayBuffer.empty[RangeVector])
-        buf.indexWhere(r => r.key.labelValues == lhs.key.labelValues) match {
-          case i if i >= 0 =>
-            val merged = StitchRvsExec.stitch(lhs, buf(i), outputRvRange)
-            buf.update(i, merged)
-          case _ =>
-            buf.append(lhs)
+        val innerMap = result.getOrElseUpdate(jk, mutable.Map.empty)
+
+        innerMap.get(lhs.key.labelValues) match {
+          case Some(prevRv) =>
+            val merged = StitchRvsExec.stitch(lhs, prevRv, outputRvRange)
+            innerMap.put(lhs.key.labelValues, merged)
+          case None =>
+            innerMap.put(lhs.key.labelValues, lhs)
         }
-        result.put(jk, buf)
+
+        result.put(jk, innerMap)
       }
     }
 
     // 6) flatten all per-key buffers back into one Iterator
-    result.valuesIterator.flatMap(_.toIterator)
+    result.valuesIterator.flatMap(_.valuesIterator)
   }
   // scalastyle:on method.length
 
