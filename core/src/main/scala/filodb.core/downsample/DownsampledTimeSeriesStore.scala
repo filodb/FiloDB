@@ -25,12 +25,13 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
  * An implementation of TimeSeriesStore with data fetched from a column store
  *
  * @param store the store which houses the downsampled data
- * @param rawColStore the store which houses the original raw data from which downsampled data was derived
+ * @param rawColStore the store which houses the original raw data from which downsampled data was derived,
+ *                    need to have public access, as it gets initialized during dataset setup phase.
  * @param filodbConfig filodb configuration
  * @param ioPool the executor used to perform network IO
  */
 class DownsampledTimeSeriesStore(val store: ColumnStore,
-                                 rawColStore: ColumnStore,
+                                 val rawColStore: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
