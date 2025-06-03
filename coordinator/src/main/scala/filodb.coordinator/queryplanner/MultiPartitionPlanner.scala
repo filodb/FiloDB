@@ -743,16 +743,14 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val assignments = LogicalPlan.findLeafLogicalPlans(logicalPlan)
       .filter(_.isInstanceOf[RawSeries])
-      .flatMap(getPartitions(_, qParams))
-      .groupBy(_.timeRange)
-      .mapValues(_.distinct)
+      .map(getPartitions(_, qParams))
+   val hasMultiAssignmentLeaves = assignments.exists(_.size > 1)
 
-    val hasMultiAssignmentLeaves = assignments.size > 1
     if (hasMultiAssignmentLeaves) {
       materializeSplitLeafPlan(logicalPlan, qContext)
     } else { logicalPlan match {
-      case agg: Aggregate => materializeAggregate(agg, qContext, assignments.flatMap(_._2)
-        .exists(_.proportionMap.size > 1))
+      case agg: Aggregate => materializeAggregate(agg, qContext,
+        assignments.flatMap(_.map(_.proportionMap)).exists(_.size > 1))
       case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
