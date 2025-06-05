@@ -550,6 +550,17 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     opt.getOrElse(pkr)
   }
 
+  /**
+   * Writes the part-key updates to the cassandra table.
+   * @param ref DatasetRef
+   * @param epoch5mBucket This is the current 5-min bucket in epoch representation, i.e. "epoch-time / 5 min"
+   * @param updatedTimeMs Current epoch time when the updates are being published.
+   * @param offset Value of "IngestConsumer._offset" when the flushTask was triggered. This is expected to be
+   *               monotonically increasing. Downstream consumers can de-dup updates based on this.
+   * @param tagSet Labels for publishing metrics.
+   * @param partKeys List of PartKeyRecord, which have been updated in the flush window.
+   * @return Response i.e., Success or Error like DataDropped, NotApplied etc.
+   */
   def writePartKeyUpdates(ref: DatasetRef,
                           epoch5mBucket: Long,
                           updatedTimeMs: Long,
