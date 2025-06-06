@@ -7,6 +7,8 @@ import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 import scala.util.{Failure, Try}
 
+import filodb.core.metadata.Schemas
+
 object Utils extends StrictLogging {
   private val threadMbean = ManagementFactory.getThreadMXBean
   private val cpuTimeEnabled = threadMbean.isCurrentThreadCpuTimeSupported && threadMbean.isThreadCpuTimeEnabled
@@ -82,10 +84,17 @@ object Utils extends StrictLogging {
     if (schemaHash == schemaHashToCheck) { true }
     else {
       val sortedSchemas = Seq(schemaName, schemaNameToCheck).sortBy(_.length)
-      val ret = if ((sortedSchemas(0) == "prom-histogram") && (sortedSchemas(1) == "otel-cumulative-histogram")) true
-      else if ((sortedSchemas(0) == "delta-histogram") && (sortedSchemas(1) == "otel-delta-histogram")) true
+      val ret = if (
+        (sortedSchemas(0) == Schemas.promHistogram.name) &&
+        (sortedSchemas(1) == Schemas.otelCumulativeHistogram.name)
+      ) true
       else if (
-        (sortedSchemas(0) == "preagg-delta-histogram") && (sortedSchemas(1) == "preagg-otel-delta-histogram")
+        (sortedSchemas(0) == Schemas.deltaHistogram.name) &&
+        (sortedSchemas(1) == Schemas.otelDeltaHistogram.name)
+      ) true
+      else if (
+        (sortedSchemas(0) == Schemas.preaggDeltaHistogram.name) &&
+        (sortedSchemas(1) == Schemas.preaggOtelDeltaHistogram.name)
       ) true
       else false
       ret
