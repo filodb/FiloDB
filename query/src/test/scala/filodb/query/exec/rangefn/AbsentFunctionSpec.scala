@@ -93,7 +93,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows shouldEqual expectedRows
   }
 
-  it("should not generate range vector when sample is present") {
+  it("should generate range vector with NaN as value when sample is present") {
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 20, 1), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
@@ -182,7 +182,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows shouldEqual expectedRows
   }
 
-  it("should not generate range vector when sample is present for instant query") {
+  it("should generate range vector with NaN as value when sample is present for instant query") {
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 0, 1), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
