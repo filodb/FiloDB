@@ -156,6 +156,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val logAllRowErrors = downsamplerConfig.getBoolean("data-export.log-all-row-errors")
 
+  @transient lazy val numShards = filodbSettings.streamConfigs
+    .find(_.getString("dataset") == rawDatasetName)
+    .getOrElse(ConfigFactory.empty())
+    .as[Option[Int]]("num-shards").get
+
   /**
    * Two conditions should satisfy for eligibility:
    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
