@@ -93,14 +93,18 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows shouldEqual expectedRows
   }
 
-  it("should not generate range vector when sample is present") {
+  it("should generate range vector with NaN as value when sample is present") {
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 20, 1), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runToFuture.futureValue
     val keys = result.map(_.key.labelValues)
     val rows = result.flatMap(_.rows.map(_.getDouble(1)).toList)
-    rows.isEmpty shouldEqual true
+    val expectedKeys = Map(ZeroCopyUTF8String("host") -> ZeroCopyUTF8String("host1"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
+    keys.head shouldEqual expectedKeys
+    rows.size shouldEqual 1
+    rows.head.isNaN shouldEqual true
   }
 
   it("should not have keys Filter is not Equals") {
@@ -134,7 +138,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val expectedKeys = Map(ZeroCopyUTF8String("host") -> ZeroCopyUTF8String("host1"),
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
-    val expectedRows = List((3000, 1.0))
+    val expectedRows = List((1000,Double.NaN), (2000,Double.NaN), (3000,1.0))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 1, 3), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSampleNan), querySession, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runToFuture.futureValue
@@ -142,7 +146,12 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     val keys = result.map(_.key.labelValues)
     val rows = result.flatMap(_.rows.map(x => (x.getLong(0), x.getDouble(1))).toList)
     keys.head shouldEqual expectedKeys
-    rows shouldEqual expectedRows
+    rows.zip(expectedRows).foreach {
+      case ((tsActual, vActual), (tsExp, vExp)) =>
+        tsActual shouldEqual tsExp
+        if (vExp.isNaN)    { vActual.isNaN shouldBe true }
+        else               { vActual shouldEqual vExp }
+    }
   }
 
   it("should not have keys when ColumnFilter is empty") {
@@ -173,12 +182,13 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows shouldEqual expectedRows
   }
 
-  it("should not generate range vector when sample is present for instant query") {
+  it("should generate range vector with NaN as value when sample is present for instant query") {
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 0, 1), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runToFuture.futureValue
     val rows = result.flatMap(_.rows.map(_.getDouble(1)).toList)
-    rows.isEmpty shouldEqual true
+    rows.size shouldEqual 1
+    rows.head.isNaN shouldEqual true
   }
 }

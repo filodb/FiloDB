@@ -446,7 +446,9 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
         val timestamp = i + rangeParams.startSecs
         if (!t.contains(timestamp * 1000))
           rowList += new TransientRow(timestamp * 1000, 1)
-       }
+        else
+          rowList += new TransientRow(timestamp * 1000, Double.NaN)
+        }
 
       // address step == 0 case
       if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
