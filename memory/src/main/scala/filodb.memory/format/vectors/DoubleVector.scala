@@ -177,11 +177,12 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   def detectDropAndCorrection(acc: MemoryReader,
                               vector: BinaryVectorPtr,
                               meta: CorrectionMeta): CorrectionMeta = meta match {
+
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
     case DoubleCorrection(lastValue, correction) =>
       val firstValue = apply(acc, vector, 0)
       // Last value is the new delta correction
-      if (firstValue < lastValue) DoubleCorrection(lastValue, correction + lastValue)
+      if (firstValue.isNaN || firstValue < lastValue) DoubleCorrection(lastValue, correction + lastValue)
       else                        meta
   }
 
@@ -367,7 +368,15 @@ extends DoubleVectorDataReader {
 
   override def updateCorrection(acc2: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
     assert(vector == vect && acc == acc2)
-    val lastValue = apply(acc2, vector, length(acc2, vector) - 1)
+    var index = length(acc2, vector) - 1
+    var lastValue = 0.0
+    do {
+      lastValue = apply(acc2, vector, index)
+      index -= 1
+    } while (lastValue.isNaN && index >= 0)
+    if (lastValue.isNaN) {
+      lastValue = 0.0
+    }
     // Return the last (original) value and all corrections onward
     meta match {
       case DoubleCorrection(_, corr) => DoubleCorrection(lastValue, corr + _correction)
