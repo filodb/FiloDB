@@ -100,7 +100,21 @@ class DoubleVectorTest extends NativeVectorTest {
         DoubleVector(a, 0).toBuffer(a, 0).toList shouldEqual orig
       }
     }
+    it("should encode counter drops when NaN is ingested at the beginning") {
+      val orig = Seq(Double.NaN, 3904.0, 3904.0, 3905.0, 3908.0, 3909.0)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100, true)
+      orig.foreach(appender.addData)
+      appender.reader.asDoubleReader.detectDropAndCorrection(acc, appender.addr, DoubleCorrection(300, 0.0)) shouldEqual DoubleCorrection(300.0,300.0)
+      appender.reader.asDoubleReader.updateCorrection(acc, appender.addr, DoubleCorrection(300, 0.0)) shouldEqual DoubleCorrection(3909,0)
+    }
 
+    it("should encode counter drops when first and last are NaN") {
+      val orig = Seq(Double.NaN, 3904.0, 3904.0, 3905.0, Double.NaN, Double.NaN)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100, true)
+      orig.foreach(appender.addData)
+      appender.reader.asDoubleReader.detectDropAndCorrection(acc, appender.addr, DoubleCorrection(300, 0.0)) shouldEqual DoubleCorrection(300.0, 300.0)
+      appender.reader.asDoubleReader.updateCorrection(acc, appender.addr, DoubleCorrection(300, 0.0)) shouldEqual DoubleCorrection(3905, 0)
+    }
 
     it("should encode counter drops when NaN is ingested at the end") {
       val orig = Seq(3904.0,3904.0,3905.0,3908.0,3909.0,3910.0,3912.0,3914.0,3914.0,3915.0,3916.0,3917.0,3918.0,3919.0,3920.0,3922.0,Double.NaN)
