@@ -110,6 +110,25 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     agg1 shouldEqual (3 + 8 + 13 + 18)
   }
 
+  it("should ingest map/tags column as partition key and read using _type_ filter") {
+    memStore.setup(dataset2.ref, schemas2h, 0, TestData.storeConf, 1)
+    val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
+    memStore.ingest(dataset2.ref, 0, data)
+
+    memStore.refreshIndexForTesting(dataset2.ref)
+    val split = memStore.getScanSplits(dataset2.ref, 1).head
+    val filter1 = ColumnFilter("n", Filter.Equals("2".utf8))
+    val filter2 = ColumnFilter("_type_", Filter.Equals("schemaID:11228".utf8))
+
+    val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter2))).map(_.getDouble(0)).sum
+    agg1 shouldEqual (3 + 8 + 13 + 18)
+
+    // invalid _type_ should return no results
+    val filter3 = ColumnFilter("_type_", Filter.Equals("non-existent-type".utf8))
+    memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter3))).toSeq shouldEqual Nil
+
+  }
+
   it("should ingest histograms and read them back properly") {
     memStore.setup(histDataset.ref, schemas2h, 0, TestData.storeConf, 1)
     val data = linearHistSeries().take(40)

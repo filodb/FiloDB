@@ -924,12 +924,11 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-    * If there is a _type_ filter, remove it and populate the schema name string.  This is because while
-    * the _type_ filter is a real filter on time series, we don't index it using Lucene at the moment.
+    * If there is a _type_ filter, return it.
     */
-  private def extractSchemaFilter(filters: Seq[ColumnFilter]): (Seq[ColumnFilter], Option[String]) = {
+  private def extractSchemaFilter(filters: Seq[ColumnFilter]): Option[String] = {
     var schemaOpt: Option[String] = None
-    val newFilters = filters.filterNot { case ColumnFilter(label, filt) =>
+    filters.foreach { case ColumnFilter(label, filt) =>
       val isTypeFilt = label == TypeLabel
       if (isTypeFilt) filt match {
         case Filter.Equals(schema) => schemaOpt = Some(schema.asInstanceOf[String])
@@ -937,7 +936,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
       isTypeFilt
     }
-    (newFilters, schemaOpt)
+    schemaOpt
   }
 
   // scalastyle:off method.length
@@ -947,7 +946,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
     val offsetMillis: Long = lp.offsetMs.getOrElse(0)
     val colName = lp.columns.headOption
-    val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val schemaOpt = extractSchemaFilter(renamedFilters)
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
 
     val rangeSelectorWithOffset = lp.rangeSelector match {
@@ -1113,7 +1113,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                                       forceInProcess: Boolean): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) None else Some(lp.column)
-    val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val schemaOpt = extractSchemaFilter(renamedFilters)
     val metaExec = shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       val ep = SelectChunkInfosExec(
