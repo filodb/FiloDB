@@ -1,6 +1,5 @@
 package filodb.coordinator.queryplanner
 
-
 import java.util.concurrent.ThreadLocalRandom
 
 import akka.serialization.SerializationExtension
@@ -403,7 +402,9 @@ trait  DefaultPlanner {
    def materializeAggregate(qContext: QueryContext,
                             lp: Aggregate,
                             forceInProcess: Boolean = false): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    // Child plan should not skip Aggregate Present such as Topk in Sum(Topk)
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
+      qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     val reducer = addAggregator(lp, qContext, toReduceLevel1)
     PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }
