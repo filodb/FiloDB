@@ -19,6 +19,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._
+import filodb.query.RangeFunctionId.AbsentOverTime
 import filodb.query.exec._
 
 //scalastyle:off file.size.limit
