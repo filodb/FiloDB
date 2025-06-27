@@ -110,7 +110,6 @@ object AggregationOperator extends Enum[AggregationOperator] {
   case object BottomK extends AggregationOperator("bottomk")
   case object CountValues extends AggregationOperator("count_values")
   case object Quantile extends AggregationOperator("quantile")
-  case object Absent extends AggregationOperator("absent")
 }
 
 sealed abstract class BinaryOperator extends EnumEntry {
