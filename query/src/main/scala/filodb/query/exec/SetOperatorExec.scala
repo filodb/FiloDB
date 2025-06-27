@@ -401,14 +401,12 @@ final case class SetOperatorExec(queryContext: QueryContext,
     mappedRhs.foreach { rv =>
       val jk = joinKeys(rv.key)
       if (!isEmpty(rv, rhsSchema)) {
-        if (rhsMap.contains(jk)) {
-          val resVal = rhsMap(jk)
-          if (resVal.key.labelValues == rv.key.labelValues) {
+        rhsMap.get(jk) match {
+          case Some(resVal) if resVal.key.labelValues == rv.key.labelValues =>
             rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal, outputRvRange))
-          } else {
+          case _ =>
             rhsMap.put(jk, rv)
-          }
-        } else rhsMap.put(jk, rv)
+        }
       }
     }
 
