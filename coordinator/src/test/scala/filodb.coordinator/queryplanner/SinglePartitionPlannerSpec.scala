@@ -72,12 +72,20 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("rules1", logicalPlan)
     }
+     override def childPlanners(): Seq[QueryPlanner] = Nil
+     def getRootPlanner(): Option[QueryPlanner] = None
+     def setRootPlanner(rootPlanner: QueryPlanner): Unit = {}
+     initRootPlanner()
   }
 
   val rrPlanner2 = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("rules2", logicalPlan)
     }
+    override def childPlanners(): Seq[QueryPlanner] = Nil
+    def getRootPlanner(): Option[QueryPlanner] = None
+    def setRootPlanner(rootPlanner: QueryPlanner): Unit = {}
+    initRootPlanner()
   }
 
   val planners = Map("local" -> highAvailabilityPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
