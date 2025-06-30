@@ -698,11 +698,11 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * @param logicalPlan the logic plan.
    * @return true if the binary join or aggregation has clauses.
    */
-  private def hasJoinOrAggClause(logicalPlan: LogicalPlan): Boolean = {
+  private def hasJoinClause(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin => binaryJoin.on.nonEmpty || binaryJoin.ignoring.nonEmpty
-      case aggregate: Aggregate => hasJoinOrAggClause(aggregate.vectors)
-      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinOrAggClause)
+      case aggregate: Aggregate => hasJoinClause(aggregate.vectors)
+      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinClause)
       case _ => false
     }
   }
@@ -714,7 +714,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasJoinClause(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(
