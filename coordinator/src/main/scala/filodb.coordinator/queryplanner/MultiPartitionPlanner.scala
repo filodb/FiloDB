@@ -435,15 +435,19 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                                  timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val proportionMap = assignment.proportionMap
+    val leftContext = queryContext.copy(origQueryParams =
+      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.lhs)))
     val lhsList = proportionMap.map(entry => {
       val partitionDetails = entry._2
       materializeForPartition(binaryJoin.lhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, leftContext, timeRangeOverride)
     }).toSeq
+    val rightContext = queryContext.copy(origQueryParams =
+      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.rhs)))
     val rhsList = proportionMap.map(entry => {
       val partitionDetails = entry._2
       materializeForPartition(binaryJoin.rhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, rightContext, timeRangeOverride)
     }).toSeq
     val dispatcher = PlannerUtil.pickDispatcher(lhsList ++ rhsList)
     if (binaryJoin.operator.isInstanceOf[SetOperator])
@@ -684,11 +688,21 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     } else None
   }
 
-  private def hasOnClause(logicalPlan: LogicalPlan): Boolean = {
+  /**
+   * check if the plan has join or aggregation clause.
+   * This is a helper function to decide if a plan should be pushed down.
+   * For binary join and aggregation they cannot be pushed down when they have on or by clauses.
+   * sum(foo) by(label) + sum(bar) by(label) cannot be pushed down
+   * because label can be distributed in different partitions.
+   *
+   * @param logicalPlan the logic plan.
+   * @return true if the binary join or aggregation has clauses.
+   */
+  private def hasJoinOrAggClause(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin => binaryJoin.on.nonEmpty || binaryJoin.ignoring.nonEmpty
-      case aggregate: Aggregate => hasOnClause(aggregate.vectors)
-      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasOnClause)
+      case aggregate: Aggregate => hasJoinOrAggClause(aggregate.vectors)
+      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinOrAggClause)
       case _ => false
     }
   }
@@ -700,7 +714,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(hasMultiPartitionNamespace && hasOnClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClause(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(
