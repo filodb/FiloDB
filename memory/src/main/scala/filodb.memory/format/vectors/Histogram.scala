@@ -245,6 +245,12 @@ trait HistogramWithBuckets extends Histogram {
     values
   }
   def hasExponentialBuckets: Boolean = buckets.isInstanceOf[Base2ExpHistogramBuckets]
+
+  override def toString: String = {
+    s"${buckets}: " +
+      (0 until numBuckets).map { b => s"${bucketTop(b)}=${bucketValue(b)}" }.mkString("{", ", ", "}")
+  }
+
 }
 
 object HistogramWithBuckets {
@@ -375,6 +381,15 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
         ourBuckets.addValues(values, otherBuckets, other)
         // since we are making the exp histogram buckets cumulative during
         // ingestion, we can assume cumulative bucket values
+        false
+      } else if (ourBuckets.numPositiveBuckets == 0) { // zero-only
+        buckets = otherBuckets.copy() // just use the other buckets
+        val thisValues = values
+        values = other.valueArray.clone()
+        values(0) += thisValues(0)
+        false
+      } else if (otherBuckets.numPositiveBuckets == 0) { // zero-only
+        values(0) += other.bucketValue(0)
         false
       } else {
         val newBuckets = ourBuckets.add(otherBuckets) // create new buckets that can accommodate both
@@ -618,7 +633,7 @@ final case class GeometricBuckets(firstBucket: Double,
 object Base2ExpHistogramBuckets {
   // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
   // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
-  val maxBuckets = 180
+  val maxBuckets = 180 // this is maxPositiveBuckets; not renaming for now to avoid breaking changes
   val maxAbsScale = 20
 
   val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray

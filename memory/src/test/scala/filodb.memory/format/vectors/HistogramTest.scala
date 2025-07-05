@@ -456,7 +456,7 @@ class HistogramTest extends NativeVectorTest {
       val binEmptyHist = BinaryHistogram.BinHistogram(Histogram.empty.serialize())
       binEmptyHist.numBuckets shouldEqual 0
       binEmptyHist.toHistogram shouldEqual Histogram.empty
-      Histogram.empty.toString shouldEqual "{}"
+      Histogram.empty.toString shouldEqual "buckets[]: {}"
     }
 
     it("should compare different histograms correctly") {
@@ -602,6 +602,21 @@ class HistogramTest extends NativeVectorTest {
       bAdd2.addValues(bAdd2Values, b5, MutableHistogram(b5, Array(0.0, 10.0, 11, 12, 13, 14, 15)))
       bAdd2Values.toSeq shouldEqual Seq(0.0, 0.0, 1.0, 4.0, 7.0, 10.0, 14.0, 25.0, 34.0, 42.0, 61.0, 66.0, 68.0, 68.0)
 
+    }
+
+    it("should add empty exponential histogram and not change original") {
+      val b1 = Base2ExpHistogramBuckets(20, 10, 0) // histogram with zero positive buckets
+      val b2 = Base2ExpHistogramBuckets(3, 10, 6)
+
+      val m1 = MutableHistogram(b1, Array(1.0))
+      val m2 = MutableHistogram(b2, Array(1.0, 10.0, 11, 12, 13, 14, 15))
+      m1.addNoCorrection(m2)
+      m1 shouldEqual MutableHistogram(b2, Array(2.0, 10.0, 11, 12, 13, 14, 15))
+
+      val m3 = MutableHistogram(b1, Array(1.0))
+      val m4 = MutableHistogram(b2, Array(1.0, 10.0, 11, 12, 13, 14, 15))
+      m4.addNoCorrection(m3)
+      m4 shouldEqual MutableHistogram(b2, Array(2.0, 10.0, 11, 12, 13, 14, 15))
     }
 
     it("should create non-overlapping OTel exponential buckets and add them correctly") {
