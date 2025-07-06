@@ -155,8 +155,9 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   def length(acc: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
-  // bug fix: use buckets.numBuckets below. Previously, we were using maxBuckets and not accommodating zero bucket
-  private val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  // bug fix: use buckets.maxPositiveBuckets+1 below. Previously,
+  // we were using maxPositiveBuckets (without +1) and not accommodating zero bucket
+  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxPositiveBuckets + 1))
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
   /**
