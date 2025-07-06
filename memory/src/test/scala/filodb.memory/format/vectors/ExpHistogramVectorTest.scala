@@ -116,7 +116,7 @@ class ExpHistogramVectorTest extends NativeVectorTest {
   }
 
   it ("should encode and decode histogram with maxBucket (180) number of buckets") {
-    val bucketScheme = Base2ExpHistogramBuckets(5, -1, Base2ExpHistogramBuckets.maxBuckets)
+    val bucketScheme = Base2ExpHistogramBuckets(5, -1, Base2ExpHistogramBuckets.maxPositiveBuckets)
     val counts = Array.fill(bucketScheme.numBuckets)(0L)
     counts(bucketScheme.numBuckets - 1) = 2
     val hist = LongHistogram(bucketScheme, counts)

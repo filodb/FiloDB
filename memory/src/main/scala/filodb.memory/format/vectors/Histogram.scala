@@ -631,9 +631,12 @@ final case class GeometricBuckets(firstBucket: Double,
 }
 
 object Base2ExpHistogramBuckets {
-  // TODO: make maxBuckets default configurable; not straightforward to get handle to global config from here
-  // see PR for benchmark test results based on which maxBuckets was fixed. Dont increase without analysis.
-  val maxBuckets = 180 // this is maxPositiveBuckets; not renaming for now to avoid breaking changes
+  // TODO: make maxPositiveBuckets default configurable; not straightforward to get handle to global config from here
+  // see PR for benchmark test results based on which maxPositiveBuckets was fixed. Dont increase without analysis.
+  @deprecated("Use maxPositiveBuckets instead")
+  val maxBuckets = maxPositiveBuckets
+  // keeping maxBuckets around to not cause breaking changes. Remove later when we have rolled out release
+  val maxPositiveBuckets = 180
   val maxAbsScale = 20
 
   val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray
@@ -678,8 +681,8 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
                                           var numPositiveBuckets: Int
                                         ) extends HistogramBuckets {
   import Base2ExpHistogramBuckets._
-  require(numPositiveBuckets <= maxBuckets && numPositiveBuckets >= 0,
-    s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxBuckets=${maxBuckets}")
+  require(numPositiveBuckets <= maxPositiveBuckets && numPositiveBuckets >= 0,
+    s"Invalid buckets: numPositiveBuckets=$numPositiveBuckets  maxPositiveBuckets=${maxPositiveBuckets}")
   require(scale >= -maxAbsScale && scale <= maxAbsScale,
     s"Invalid scale $scale should be between ${-maxAbsScale} and ${maxAbsScale}")
 

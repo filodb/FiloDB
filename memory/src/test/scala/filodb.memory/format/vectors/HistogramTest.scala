@@ -499,7 +499,7 @@ class HistogramTest extends NativeVectorTest {
         for {
           scale <- Gen.chooseNum(-Base2ExpHistogramBuckets.maxAbsScale, Base2ExpHistogramBuckets.maxAbsScale)
           bucketStart <- Gen.choose(-100000, 100000)
-          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxBuckets)
+          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxPositiveBuckets)
           b = Base2ExpHistogramBuckets(scale, bucketStart, numBuckets)
           // restrict test for reasonable values for now. We are getting into double precision comparison & overflow issues
           if b.startBucketTop < 1E+10 && b.endBucketTop < 1E+10
