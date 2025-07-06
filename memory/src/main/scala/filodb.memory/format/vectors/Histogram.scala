@@ -633,10 +633,12 @@ final case class GeometricBuckets(firstBucket: Double,
 object Base2ExpHistogramBuckets {
   // TODO: make maxPositiveBuckets default configurable; not straightforward to get handle to global config from here
   // see PR for benchmark test results based on which maxPositiveBuckets was fixed. Dont increase without analysis.
-  @deprecated("Use maxPositiveBuckets instead")
-  val maxBuckets = maxPositiveBuckets
-  // keeping maxBuckets around to not cause breaking changes. Remove later when we have rolled out release
   val maxPositiveBuckets = 180
+
+  // keeping maxBuckets around to not cause breaking changes. Remove later when we have rolled out release
+  @deprecated(message = "Use maxPositiveBuckets instead", since = "0.9.30.8")
+  val maxBuckets = maxPositiveBuckets
+
   val maxAbsScale = 20
 
   val precomputedBase = (-maxAbsScale to maxAbsScale).map(b => Math.pow(2, Math.pow(2, -b))).toArray
@@ -765,7 +767,7 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
   }
 
   def add(o: Base2ExpHistogramBuckets,
-          maxBuckets: Int = Base2ExpHistogramBuckets.maxBuckets): Base2ExpHistogramBuckets = {
+          maxPosBuckets: Int = Base2ExpHistogramBuckets.maxPositiveBuckets): Base2ExpHistogramBuckets = {
     if (canAccommodate(o)) {
       this
     } else {
@@ -778,8 +780,8 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
       var newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1 // exclusive
       var newBucketIndexStart = Math.floor(Math.log(minBucketTopNeeded) / Math.log(newBase)).toInt - 1 // inclusive
       // Even if the two schemes are of same scale, they can have non-overlapping bucket ranges.
-      // The new bucket scheme should have at most maxBuckets, so keep reducing scale until within limits.
-      while (newBucketIndexEnd - newBucketIndexStart + 1 > maxBuckets) {
+      // The new bucket scheme should have at most maxPosBuckets, so keep reducing scale until within limits.
+      while (newBucketIndexEnd - newBucketIndexStart + 1 > maxPosBuckets) {
         newScale -= 1
         newBase = Base2ExpHistogramBuckets.base(newScale)
         newBucketIndexEnd = Math.ceil(Math.log(maxBucketTopNeeded) / Math.log(newBase)).toInt - 1

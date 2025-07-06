@@ -630,12 +630,12 @@ class HistogramTest extends NativeVectorTest {
     it("should reduce scale when more than 120 buckets to keep memory and compute in check") {
       val b1 = Base2ExpHistogramBuckets(6, -50, 21)
       val b2 = Base2ExpHistogramBuckets(6, 100, 26)
-      val add1 = b1.add(b2, maxBuckets = 128)
+      val add1 = b1.add(b2, maxPosBuckets = 128)
       add1 shouldEqual Base2ExpHistogramBuckets(5, -26, 90)
       add1.canAccommodate(b1) shouldEqual true
       add1.canAccommodate(b2) shouldEqual true
 
-      val add2 = b1.add(b2, maxBuckets = 64)
+      val add2 = b1.add(b2, maxPosBuckets = 64)
       add2 shouldEqual Base2ExpHistogramBuckets(4, -14, 46)
       add2.canAccommodate(b1) shouldEqual true
       add2.canAccommodate(b2) shouldEqual true
