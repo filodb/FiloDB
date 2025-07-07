@@ -456,7 +456,7 @@ class HistogramTest extends NativeVectorTest {
       val binEmptyHist = BinaryHistogram.BinHistogram(Histogram.empty.serialize())
       binEmptyHist.numBuckets shouldEqual 0
       binEmptyHist.toHistogram shouldEqual Histogram.empty
-      Histogram.empty.toString shouldEqual "{}"
+      Histogram.empty.toString shouldEqual "buckets[]: {}"
     }
 
     it("should compare different histograms correctly") {
@@ -499,7 +499,7 @@ class HistogramTest extends NativeVectorTest {
         for {
           scale <- Gen.chooseNum(-Base2ExpHistogramBuckets.maxAbsScale, Base2ExpHistogramBuckets.maxAbsScale)
           bucketStart <- Gen.choose(-100000, 100000)
-          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxBuckets)
+          numBuckets <- Gen.choose(1, Base2ExpHistogramBuckets.maxPositiveBuckets)
           b = Base2ExpHistogramBuckets(scale, bucketStart, numBuckets)
           // restrict test for reasonable values for now. We are getting into double precision comparison & overflow issues
           if b.startBucketTop < 1E+10 && b.endBucketTop < 1E+10
@@ -604,6 +604,21 @@ class HistogramTest extends NativeVectorTest {
 
     }
 
+    it("should add empty exponential histogram and not change original") {
+      val b1 = Base2ExpHistogramBuckets(20, 10, 0) // histogram with zero positive buckets
+      val b2 = Base2ExpHistogramBuckets(3, 10, 6)
+
+      val m1 = MutableHistogram(b1, Array(1.0))
+      val m2 = MutableHistogram(b2, Array(1.0, 10.0, 11, 12, 13, 14, 15))
+      m1.addNoCorrection(m2)
+      m1 shouldEqual MutableHistogram(b2, Array(2.0, 10.0, 11, 12, 13, 14, 15))
+
+      val m3 = MutableHistogram(b1, Array(1.0))
+      val m4 = MutableHistogram(b2, Array(1.0, 10.0, 11, 12, 13, 14, 15))
+      m4.addNoCorrection(m3)
+      m4 shouldEqual MutableHistogram(b2, Array(2.0, 10.0, 11, 12, 13, 14, 15))
+    }
+
     it("should create non-overlapping OTel exponential buckets and add them correctly") {
       val b1 = Base2ExpHistogramBuckets(3, -5, 11)
       val b2 = Base2ExpHistogramBuckets(3, 15, 11)
@@ -615,12 +630,12 @@ class HistogramTest extends NativeVectorTest {
     it("should reduce scale when more than 120 buckets to keep memory and compute in check") {
       val b1 = Base2ExpHistogramBuckets(6, -50, 21)
       val b2 = Base2ExpHistogramBuckets(6, 100, 26)
-      val add1 = b1.add(b2, maxBuckets = 128)
+      val add1 = b1.add(b2, maxPosBuckets = 128)
       add1 shouldEqual Base2ExpHistogramBuckets(5, -26, 90)
       add1.canAccommodate(b1) shouldEqual true
       add1.canAccommodate(b2) shouldEqual true
 
-      val add2 = b1.add(b2, maxBuckets = 64)
+      val add2 = b1.add(b2, maxPosBuckets = 64)
       add2 shouldEqual Base2ExpHistogramBuckets(4, -14, 46)
       add2.canAccommodate(b1) shouldEqual true
       add2.canAccommodate(b2) shouldEqual true
