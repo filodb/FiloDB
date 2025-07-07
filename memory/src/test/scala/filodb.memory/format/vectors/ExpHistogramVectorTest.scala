@@ -115,6 +115,19 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     reader.length shouldEqual 159
   }
 
+  it ("should encode and decode histogram with maxBucket (180) number of buckets") {
+    val bucketScheme = Base2ExpHistogramBuckets(5, -1, Base2ExpHistogramBuckets.maxPositiveBuckets)
+    val counts = Array.fill(bucketScheme.numBuckets)(0L)
+    counts(bucketScheme.numBuckets - 1) = 2
+    val hist = LongHistogram(bucketScheme, counts)
+    hist.serialize(Some(buffer))
+    val appender = HistogramVector.appendingExp(memFactory, 15000) // 15k bytes is default blob size
+    appender.addData(buffer) shouldEqual Ack
+    val reader = appender.reader.asInstanceOf[RowExpHistogramReader]
+    reader.length shouldEqual 1
+    reader(0).compare(hist) shouldEqual 0
+  }
+
   it ("should be able to create a vector of one observation histograms of large bucket offset") {
     val appender = HistogramVector.appendingExp(memFactory, 15000) // 15k bytes is default blob size
     val bucketScheme = Base2ExpHistogramBuckets(20, 9037032, 1)
