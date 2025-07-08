@@ -497,14 +497,17 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None,
-                                       atMs: Option[Long] = None,
-                                       columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
+                                       atMs: Option[Long] = None) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
+  def columnFilters: Seq[ColumnFilter] = {
+    // The filters are the raw series filters, which are used to filter the raw series data
+    series.rawSeriesFilters()
+  }
+
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
-    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
-              series = series.replaceRawSeriesFilters(filters),
+    this.copy(series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
@@ -517,9 +520,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
       case true =>
         val newRawSeries = series.useAggregatedMetricIfApplicable(
           params, parentLogicalPlans :+ this.getClass.getSimpleName)
-        this.copy(
-          columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, newRawSeries.rawSeriesFilters()),
-          series = newRawSeries)
+        this.copy(series = newRawSeries)
       case false => this
     }
   }
