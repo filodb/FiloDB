@@ -88,7 +88,8 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     )
 
     val expectedResults = expected.map { case (key, value) =>
-      s"($key,{${value.map { case (k, v) => s"$k=$v" }.mkString(", ")}})"
+      s"($key,buckets[${value.keys.map {k => s"$k"}.mkString(", ")}]:" +
+        s" {${value.map { case (k, v) => s"$k=$v" }.mkString(", ")}})"
     }.mkString("List(", ", ", ")")
 
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None,
