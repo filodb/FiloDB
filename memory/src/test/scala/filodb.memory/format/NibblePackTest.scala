@@ -245,7 +245,8 @@ class NibblePackTest extends AnyFunSpec with Matchers with ScalaCheckPropertyChe
 
       // maxBucket length so that we can test the array sink with a larger buffer
       // This is what happens with RowExpHistogramReader
-      val sink = NibblePack.DeltaSink(new Array[Long](Base2ExpHistogramBuckets.maxBuckets))
+      // +1 to accommodate zero bucket
+      val sink = NibblePack.DeltaSink(new Array[Long](Base2ExpHistogramBuckets.maxPositiveBuckets + 1))
       sink.setLength(inputs.length)
       val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
       val res = NibblePack.unpackToSink(bufSlice, sink, inputs.length)
