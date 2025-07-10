@@ -3,6 +3,7 @@ package filodb.query
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
+import filodb.query.lpopt.AggLpOptimization
 import filodb.query.util.{HierarchicalQueryExperience, HierarchicalQueryExperienceParams}
 
 //scalastyle:off number.of.types
@@ -81,6 +82,15 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
    * @return Raw series column filters
    */
   def rawSeriesFilters(): Seq[ColumnFilter]
+
+  /**
+   * @return Metric name from the raw series filters
+   *         Throws IllegalArgumentException if no metric name is found in the filters
+   */
+  def metricName(): String
+
+  def rangeSelector(): RangeSelector
+
 }
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
@@ -175,36 +185,16 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  /**
-   * Updates the metric ColumnFilter if the higher level aggregation rule is applicable
-   * @param params AggRule object - contains details of the higher level aggregation rule and metric
-   * @return Updated RawSeriesLikePlan if Applicable. Else return the same RawSeriesLikePlan
-   */
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
-    // Example leaf periodic series plans which has access to raw series - PeriodicSeries, PeriodicSeriesWithWindowing,
-    // ApplyInstantFunctionRaw. This can be configured as required.
-    // Only the last plan is checked here for the config. The higher level parent plans is checked in the
-    // PeriodicSeries and PeriodicSeriesWithWindowing plans
-    val leafPeriodicSeriesPlan = parentLogicalPlans.lastOption
-    leafPeriodicSeriesPlan match {
-      case Some(leafPeriodicPlan) =>
-        // Check 1: Check if the leaf periodic series plan is allowed for raw series update
-        HierarchicalQueryExperience.isLeafPeriodicSeriesPlanAllowedForRawSeriesUpdate(leafPeriodicPlan) match {
-          case true =>
-            // check if the metric used is raw metric and if the OptimizeWithAgg plan is used in the query
-            val isOptimizeWithAggLp = parentLogicalPlans
-              .contains(HierarchicalQueryExperience.logicalPlanForRawToAggMetric)
-            val updatedFilters = HierarchicalQueryExperience
-              .upsertMetricColumnFilterIfHigherLevelAggregationApplicable(params, filters, isOptimizeWithAggLp)
-            this.copy(filters = updatedFilters)
-          case false => this
-        }
-      case None => this
-    }
+  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
+                                                  parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
+    this // RawSeries queries are not optimized for higher level aggregation
   }
 
   override def rawSeriesFilters(): Seq[ColumnFilter] = filters
+
+  override def metricName(): String = filters.collectFirst {
+    case ColumnFilter(GlobalConfig.PromMetricLabel, Equals(value)) => value.toString
+  }.getOrElse(throw new IllegalArgumentException(s"RawSeries query must always have a metric name"))
 }
 
 case class LabelValues(labelNames: Seq[String],
@@ -510,19 +500,10 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
     this.copy(series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // Checks:
-    // 1. Check if the range function is allowed
-    // 2. Check if any of the parent plan is allowed for raw series update
-    HierarchicalQueryExperience.isRangeFunctionAllowed(function.entryName) &&
-      HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(parentLogicalPlans) match {
-      case true =>
-        val newRawSeries = series.useAggregatedMetricIfApplicable(
-          params, parentLogicalPlans :+ this.getClass.getSimpleName)
-        this.copy(series = newRawSeries)
-      case false => this
-    }
+  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
+                                      parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    // cannot be optimized further at this level, so return the same plan
+    this
   }
 }
 
@@ -572,30 +553,14 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // Modify the map to retain all the AggRules which satisfies the current Aggregate clause labels.
-    // We should do this for both the maps.
-    val updatedAggRulesMap = params.aggRulesByAggregationSuffix.map { case (suffix, rules) =>
-      val updatedRules = rules.filter(rule => HierarchicalQueryExperience
-        .checkAggregateQueryEligibleForHigherLevelAggregatedMetric(rule, operator, clauseOpt))
-      suffix -> updatedRules
-    }
-
-    val updatedRawMetricAggRulesMap = params.aggRulesByRawMetricName.map { case (metricName, rules) =>
-      val updatedRules = rules.filter(rule => HierarchicalQueryExperience
-        .checkAggregateQueryEligibleForHigherLevelAggregatedMetric(rule, operator, clauseOpt))
-      metricName -> updatedRules
-    }
-
-    if (updatedAggRulesMap.isEmpty && updatedRawMetricAggRulesMap.isEmpty) {
-      // none of the aggregation rules matched with the aggregation clauses. No optimization possible
-      this
-    } else {
-      val updatedParams = params.copy(aggRulesByAggregationSuffix = updatedAggRulesMap,
-        aggRulesByRawMetricName = updatedRawMetricAggRulesMap)
-      this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-        updatedParams, parentLogicalPlans :+ this.getClass.getSimpleName))
+  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
+                                      parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    AggLpOptimization.optimizeWithPreaggregatedDataset(this) match {
+      case Some(aggPlan) => aggPlan
+      case None =>  // the query at this level is not eligible for pre-aggregation optimization
+                    // check if the child plan is eligible for pre-aggregation optimization
+                    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
+                                                     params, parentLogicalPlans :+ this.getClass.getSimpleName))
     }
   }
 }
@@ -713,16 +678,14 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
 
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
                                                parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
-    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
-    this.copy(
-      vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated).asInstanceOf[RawSeries],
-      functionArgs = functionArgs.map(_.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated).asInstanceOf[FunctionArgsPlan])
-    )
+    this // this plan is not optimized for higher level aggregation
   }
 
   override def rawSeriesFilters(): Seq[ColumnFilter] = vectors.rawSeriesFilters()
+
+  override def metricName(): String = vectors.metricName()
+
+  override def rangeSelector(): RangeSelector = vectors.rangeSelector
 }
 
 /**

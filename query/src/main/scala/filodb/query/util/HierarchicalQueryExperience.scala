@@ -47,10 +47,14 @@ case class HierarchicalQueryExperienceParams(metricDelimiter: String,
  * @param tags include/exclude tags for the given aggregation rule
  */
 sealed trait AggRule {
+  val ruleId: String
   val metricSuffix: String
   val level: String
   val tags: Set[String]
+  val versionEffectiveTime: Long
   def isHigherLevelAggregationApplicable(shardKeyColumns: Set[String], filterTags: Seq[String]): Boolean
+  def numExcludedLabels: Int
+  def numIncludedLabels: Int
 }
 
 /**
@@ -58,7 +62,8 @@ sealed trait AggRule {
  * @param tags - Set[String] - Include tags as specified in the aggregation rule
  * @param level - String - level of the aggregation rule
  */
-case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String = "1") extends AggRule {
+case class IncludeAggRule(ruleId: String, metricSuffix: String, tags: Set[String], versionEffectiveTime: Long,
+                          level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with IncludeTags.
@@ -71,6 +76,9 @@ case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String
   override def isHigherLevelAggregationApplicable(shardKeyColumns: Set[String], filterTags: Seq[String]): Boolean = {
     filterTags.forall( tag => shardKeyColumns.contains(tag) || tags.contains(tag))
   }
+
+  override def numIncludedLabels: Int = tags.size
+  override def numExcludedLabels: Int = 0
 }
 
 /**
@@ -78,7 +86,8 @@ case class IncludeAggRule(metricSuffix: String, tags: Set[String], level: String
  * @param tags - Set[String] - Exclude tags as specified in the aggregation rule
  * @param level - String - level of the aggregation rule
  */
-case class ExcludeAggRule(metricSuffix: String, tags: Set[String], level: String = "1") extends AggRule {
+case class ExcludeAggRule(ruleId: String, metricSuffix: String, tags: Set[String], versionEffectiveTime: Long,
+                          level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with ExcludeTags. Here we need to check if the column filter
@@ -92,6 +101,8 @@ case class ExcludeAggRule(metricSuffix: String, tags: Set[String], level: String
   override def isHigherLevelAggregationApplicable(shardKeyColumns: Set[String], filterTags: Seq[String]): Boolean = {
     filterTags.forall { tag => shardKeyColumns.contains(tag) || (!tags.contains(tag)) }
   }
+  override def numIncludedLabels: Int = 0
+  override def numExcludedLabels: Int = tags.size
 }
 
 object HierarchicalQueryExperience extends StrictLogging {
@@ -407,10 +418,10 @@ object HierarchicalQueryExperience extends StrictLogging {
                 //   the includeTags. This requires the knowledge of all the tags/labels which are being published
                 //   for a metric. This info is not available during planning and hence we can't optimize this scenario.
                 params match {
-                  case IncludeAggRule( _, _, _) =>
+                  case IncludeAggRule( _, _, _, _, _) =>
                     // can't optimize this scenario as we don't have the required info at the planning stage
                     false
-                  case ExcludeAggRule(_, excludeTags, _) =>
+                  case ExcludeAggRule(_, _, excludeTags, _, _) =>
                     if (excludeTags.subsetOf(clause.labels.toSet)) { true }
                     else { false }
                 }
