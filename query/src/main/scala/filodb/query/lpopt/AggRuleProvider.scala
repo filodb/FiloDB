@@ -15,11 +15,8 @@ trait AggRuleProvider {
    * @return list of AggRules that match the filters and range selector
    */
   def getAggRuleVersions(filters: Seq[ColumnFilter], rs: RangeSelector): List[AggRule]
+
+  def aggRuleOptimizationEnabled: Boolean
 }
 
-object AggRuleProvider {
-  // var is poor man's abstract factory for now, to be replaced by injection later
-  var instance: AggRuleProvider = new AggRuleProvider {
-    def getAggRuleVersions(filters: Seq[ColumnFilter], rs: RangeSelector): List[AggRule] = ???
-  }
-}
+

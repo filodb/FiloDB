@@ -4,8 +4,7 @@ import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 import filodb.query.MiscellaneousFunctionId.NoOptimize
-import filodb.query.lpopt.AggLpOptimization
-import filodb.query.util.{HierarchicalQueryExperience, HierarchicalQueryExperienceParams}
+import filodb.query.lpopt.{AggLpOptimization, AggRuleProvider}
 
 //scalastyle:off number.of.types
 //scalastyle:off file.size.limit
@@ -44,12 +43,12 @@ sealed trait LogicalPlan {
    * @param params AggRule object - contains details of the higher level aggregation rule and metric
    * @return Updated LogicalPlan if Applicable. Else return the same LogicalPlan
    */
-  def useHigherLevelAggregatedMetric(params: HierarchicalQueryExperienceParams): LogicalPlan = {
+  def useHigherLevelAggregatedMetric(aggRuleProvider: AggRuleProvider): LogicalPlan = {
     // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
     this match {
       // We start with no parent plans from the root
-      case p: PeriodicSeriesPlan   => p.useAggregatedMetricIfApplicable(params, Seq())
-      case r: RawSeriesLikePlan    => r.useAggregatedMetricIfApplicable(params, Seq())
+      case p: PeriodicSeriesPlan   => p.useAggregatedMetricIfApplicable(aggRuleProvider)
+      case r: RawSeriesLikePlan    => r.useAggregatedMetricIfApplicable(aggRuleProvider)
       case _                       => this
     }
   }
@@ -65,19 +64,10 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
   /**
-   * Updates the `metric` ColumnFilter if the raw ColumnFilters satisfy the constraints of the
-   * higher level aggregation rule.
-   *
-   * @param params AggRule object - contains details of the higher level aggregation rule and metric
-   * @param parentLogicalPlans Seq of parent logical plans name in the query plan tree.
-   *                           For example:
-   *                           1. query - sum(rate(foo{}[5m])) + sum(rate(bar{}[5m]))
-   *                           2. parentLogicalPlans when in RawSeriesLikePlan will be:
-   *                              Seq(BinaryJoin, Aggregate, PeriodicSeriesWithWindowing)
+   * Optimizes the plan to use aggregated metric where possible
    * @return Updated logical plan if optimized for higher level aggregation. Else return the same logical plan
    */
-  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                      parentLogicalPlans: Seq[String]): RawSeriesLikePlan
+  def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan
 
   /**
    * @return Raw series column filters
@@ -132,8 +122,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
    *                                    Seq(BinaryJoin, Aggregate)
    * @return Updated logical plan if optimized for higher level aggregation. Else return the same logical plan
    */
-  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                      parentLogicalPlans: Seq[String]): PeriodicSeriesPlan
+  def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -186,8 +175,7 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                                  parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
+  def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // RawSeries queries are not optimized for higher level aggregation
   }
 
@@ -315,8 +303,7 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // RawChunkMeta queries are not optimized for higher level aggregation
     this
   }
@@ -344,15 +331,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
     rawSeries.replaceRawSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // Check 1: Check if the parent logical plans are allowed for hierarchical aggregation update
-    HierarchicalQueryExperience.isParentPeriodicSeriesPlanAllowed(parentLogicalPlans) match {
-      case true =>
-        this.copy(rawSeries = rawSeries.useAggregatedMetricIfApplicable(params,
-          parentLogicalPlans :+ this.getClass.getSimpleName))
-      case false => this
-    }
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    this.copy(rawSeries = rawSeries.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -417,11 +397,9 @@ case class SubqueryWithWindowing(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // recurse to the leaf level
-    this.copy(innerPeriodicSeries = innerPeriodicSeries.useAggregatedMetricIfApplicable(
-      params, parentLogicalPlans :+ this.getClass.getSimpleName))
+    this.copy(innerPeriodicSeries = innerPeriodicSeries.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -462,11 +440,9 @@ case class TopLevelSubquery(
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // recurse to the leaf level
-    this.copy(innerPeriodicSeries = innerPeriodicSeries.useAggregatedMetricIfApplicable(
-      params, parentLogicalPlans :+ this.getClass.getSimpleName))
+    this.copy(innerPeriodicSeries = innerPeriodicSeries.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -501,10 +477,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
     this.copy(series = series.replaceRawSeriesFilters(filters),
               functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                      parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    // cannot be optimized further at this level, so return the same plan
-    this
+  def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    this.copy(series = series.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -554,14 +528,12 @@ case class Aggregate(operator: AggregationOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                      parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    AggLpOptimization.optimizeWithPreaggregatedDataset(this) match {
+  def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    AggLpOptimization.optimizeWithPreaggregatedDataset(this, aggRuleProvider) match {
       case Some(aggPlan) => aggPlan
       case None =>  // the query at this level is not eligible for pre-aggregation optimization
                     // check if the child plan is eligible for pre-aggregation optimization
-                    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-                                                     params, parentLogicalPlans :+ this.getClass.getSimpleName))
+                    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
     }
   }
 }
@@ -595,14 +567,11 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // No special handling for BinaryJoin. Just pass the call to lhs and rhs recursively
     this.copy(
-      lhs = lhs.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ this.getClass.getSimpleName),
-      rhs = rhs.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ this.getClass.getSimpleName)
+      lhs = lhs.useAggregatedMetricIfApplicable(aggRuleProvider),
+      rhs = rhs.useAggregatedMetricIfApplicable(aggRuleProvider)
     )
   }
 }
@@ -623,15 +592,11 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
     this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
               scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // No special handling for ScalarVectorBinaryOperation. Just pass the call to vector and and scalar plan recursively
-    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
     this.copy(
-      vector = vector.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated),
-      scalarArg = scalarArg.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated).asInstanceOf[ScalarPlan])
+      vector = vector.useAggregatedMetricIfApplicable(aggRuleProvider),
+      scalarArg = scalarArg.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarPlan])
   }
 }
 
@@ -652,15 +617,11 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     // No special handling for ApplyInstantFunction. Just pass the call to vectors and functionArgs recursively
-    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
     this.copy(
-      vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated),
-      functionArgs = functionArgs.map(_.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated).asInstanceOf[FunctionArgsPlan]))
+     vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider),
+     functionArgs = functionArgs.map(_.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[FunctionArgsPlan]))
   }
 }
 
@@ -677,8 +638,7 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): RawSeriesLikePlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // this plan is not optimized for higher level aggregation
   }
 
@@ -703,11 +663,9 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     if (function != NoOptimize && AggLpOptimization.featureEnabled)
-      this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ (this.getClass.getSimpleName + '-' + function.entryName)))
+      this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
     else
       this
   }
@@ -725,10 +683,8 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-      params, parentLogicalPlans :+ this.getClass.getSimpleName))
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -761,14 +717,10 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
     vectors = vectors.replacePeriodicSeriesFilters(filters),
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     this.copy(
-      vectors = vectors.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated),
-      functionArgs = functionArgs.map(_.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlansUpdated).asInstanceOf[FunctionArgsPlan]))
+     vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider),
+     functionArgs = functionArgs.map(_.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[FunctionArgsPlan]))
   }
 }
 
@@ -784,8 +736,7 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this // No Filter
 
   // No optimization for the scalar plan without raw or periodic series
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = this
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = this
 }
 
 /**
@@ -802,8 +753,7 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this
 
   // No optimization for the scalar plan without raw or periodic series
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = this
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = this
 }
 
 //scalastyle:off number.of.types
@@ -820,11 +770,9 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(scalars =
     scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     this.copy(
-      scalars = scalars.useAggregatedMetricIfApplicable(
-        params, parentLogicalPlans :+ this.getClass.getSimpleName).asInstanceOf[ScalarPlan])
+      scalars = scalars.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarPlan])
   }
 }
 
@@ -847,14 +795,14 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    val parentLogicalPlansUpdated = parentLogicalPlans :+ this.getClass.getSimpleName
-    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.useAggregatedMetricIfApplicable(params,
-      parentLogicalPlansUpdated).asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    val updatedLhs = if (lhs.isRight)
+      Right(lhs.right.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
+    else Left(lhs.left.get)
 
-    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.useAggregatedMetricIfApplicable(params,
-      parentLogicalPlansUpdated).asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+    val updatedRhs = if (rhs.isRight)
+      Right(rhs.right.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
+    else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 }
@@ -874,10 +822,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(params,
-      parentLogicalPlans :+ this.getClass.getSimpleName))
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 
@@ -896,10 +842,8 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
               vectors = vectors.replacePeriodicSeriesFilters(filters))
 
-  override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
-                                               parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
-    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
-      params, parentLogicalPlans :+ this.getClass.getSimpleName))
+  override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
+    this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 }
 

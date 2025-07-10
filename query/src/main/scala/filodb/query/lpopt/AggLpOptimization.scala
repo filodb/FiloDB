@@ -3,17 +3,15 @@ package filodb.query.lpopt
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
-import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
 import filodb.query._
+import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
 
 /**
  * This object contains the logic to optimize Aggregate logical plans to use pre-aggregated metrics
  * if available.
  */
 object AggLpOptimization {
-  // TODO add config to enable/disable this optimization
-  val featureEnabled = true
-  
+
   /**
    * Facade method for this utility. Optimizes the given Aggregate logical plan to use a pre-aggregated metric if
    * possible. If pre-aggregated data is being queried, it will try to find a higher level pre-aggregated metric
@@ -21,10 +19,10 @@ object AggLpOptimization {
    *
    * @return Some(optimizedLogicalPlan) if the optimization was possible, None if it cannot be optimized.
    */
-  def optimizeWithPreaggregatedDataset(agg: Aggregate): Option[Aggregate] = {
+  def optimizeWithPreaggregatedDataset(agg: Aggregate, aggRuleProvider: AggRuleProvider): Option[Aggregate] = {
     val metricNameAndFilterColumns = canTranslateQueryToPreagg(agg)
     if (metricNameAndFilterColumns.isDefined) {
-      val rules: List[AggRule] = AggRuleProvider.instance.getAggRuleVersions(
+      val rules: List[AggRule] = aggRuleProvider.getAggRuleVersions(
                                                       metricNameAndFilterColumns.get._2.rawSeriesFilters(),
                                                       metricNameAndFilterColumns.get._2.rangeSelector())
       // grouping by level+id results in all versions of the rule as value
