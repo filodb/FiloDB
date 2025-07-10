@@ -3,6 +3,7 @@ package filodb.query
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
+import filodb.query.MiscellaneousFunctionId.NoOptimize
 import filodb.query.lpopt.AggLpOptimization
 import filodb.query.util.{HierarchicalQueryExperience, HierarchicalQueryExperienceParams}
 
@@ -704,8 +705,11 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
 
   override def useAggregatedMetricIfApplicable(params: HierarchicalQueryExperienceParams,
                                                parentLogicalPlans: Seq[String]): PeriodicSeriesPlan = {
+    if (function != NoOptimize && AggLpOptimization.featureEnabled)
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(
         params, parentLogicalPlans :+ (this.getClass.getSimpleName + '-' + function.entryName)))
+    else
+      this
   }
 }
 

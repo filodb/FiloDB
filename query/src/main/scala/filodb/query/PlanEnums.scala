@@ -180,6 +180,7 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
   case object HistToPromVectors extends MiscellaneousFunctionId("hist_to_prom_vectors")
   case object OptimizeWithAgg extends MiscellaneousFunctionId("optimize_with_agg")
+  case object NoOptimize extends MiscellaneousFunctionId("no_optimize")
 }
 
 sealed abstract class SortFunctionId(override val entryName: String) extends EnumEntry

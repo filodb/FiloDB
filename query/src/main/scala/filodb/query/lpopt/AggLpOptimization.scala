@@ -11,6 +11,9 @@ import filodb.query._
  * if available.
  */
 object AggLpOptimization {
+  // TODO add config to enable/disable this optimization
+  val featureEnabled = true
+  
   /**
    * Facade method for this utility. Optimizes the given Aggregate logical plan to use a pre-aggregated metric if
    * possible. If pre-aggregated data is being queried, it will try to find a higher level pre-aggregated metric

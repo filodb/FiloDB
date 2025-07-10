@@ -655,6 +655,7 @@ enum MiscellaneousFunctionId {
   LABEL_JOIN           = 1;
   HIST_TO_PROM_VECTORS = 2;
   OPTIMIZE_WITH_AGG    = 3;
+  NO_OPTIMIZE          = 4;
 }
 
 enum BinaryOperator {
