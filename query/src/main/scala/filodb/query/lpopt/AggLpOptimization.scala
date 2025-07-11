@@ -4,7 +4,7 @@ import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query._
-import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
+import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, IncludeAggRule}
 
 /**
  * This object contains the logic to optimize Aggregate logical plans to use pre-aggregated metrics
@@ -127,6 +127,8 @@ object AggLpOptimization {
     s"$metricName${ruleSuffix.map(s => s":::$s").getOrElse("")}${col.map(c => s":$c").getOrElse("")}"
   }
 
+
+  lazy val shardKeys = HierarchicalQueryExperience.shardKeyColumnsOption.toSeq.flatten
   /**
    * Checks if the given AggRule can be used for the given filter tags and aggregate clause.
    *
@@ -142,10 +144,9 @@ object AggLpOptimization {
   private def canUseRule(rule: AggRule, filterTags: Set[String], aggClause: Option[AggregateClause]): Boolean = {
     // Note: We assume that the rule is relevant since it is already filtered by the column filters in the query.
     // and we just need to check if the filter tags and aggregate clause match the rule.
-    // TODO do we need to shard key columns ? They will never be dropped by aggregation rules.
     rule match {
       case in: IncludeAggRule =>
-        filterTags.subsetOf(in.tags) && // filter tags should be included in the rule
+        (filterTags -- shardKeys).subsetOf(in.tags) && // filter tags should be included in the rule
           (aggClause.isEmpty || // no group by or without clause
             (aggClause.get.clauseType == AggregateClause.ClauseType.By &&
               aggClause.get.labels.toSet.subsetOf(in.tags))  // by clause labels are all included in rule
