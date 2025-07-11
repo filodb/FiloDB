@@ -161,9 +161,9 @@ object AggLpOptimization {
    * A rule is considered better if it has more excluded labels or less included labels.
    */
   private def firstRuleIsBetterThanSecond(first: AggRule, second: AggRule): Boolean = {
-    (second.numExcludedLabels > 0 && first.numExcludedLabels > 0 && // both rules have excluded labels
+    (first.numExcludedLabels > 0 && second.numExcludedLabels > 0 && // both rules have excluded labels
       first.numExcludedLabels > second.numExcludedLabels) || // first rule has more excluded labels than second
-      (second.numIncludedLabels > 0 && first.numIncludedLabels > 0 && // both rules have included labels
+      (first.numIncludedLabels > 0 && second.numIncludedLabels > 0 && // both rules have included labels
         first.numIncludedLabels < second.numIncludedLabels) // first rule has less included labels than second
   }
 

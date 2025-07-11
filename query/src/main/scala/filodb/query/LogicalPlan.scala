@@ -664,9 +664,9 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
     vectors.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    if (function != NoOptimize && AggLpOptimization.featureEnabled)
+    if (function != NoOptimize && aggRuleProvider.aggRuleOptimizationEnabled) {
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
-    else
+    } else
       this
   }
 }

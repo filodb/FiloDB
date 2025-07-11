@@ -12,7 +12,6 @@ import org.scalatest.matchers.should.Matchers
 class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   private val now = 1634777330000L
-
   private val endSeconds = now / 1000
   private val step = 300
 
@@ -33,26 +32,61 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
   }
 
   private val rules1 = List(
-    ExcludeAggRule("1", "agg1", Set("instance", "pod"), 10, level="1"),
-      ExcludeAggRule("1", "agg2", Set("instance", "pod", "container"), 10, level="2")
+    // Rule1 Level1
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10, level="1"),
+
+    // Rule1 Level2 and its versions
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 12, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "fixed_guid"), 13, level="2"),
+
+    // Rule2 Level1 and its versions
+    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container"), 10, level="1"),
+    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "guid"), 12, level="1"),
+    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "fixed_guid"), 13, level="1"),
   )
 
-  private val lpToOptimizedWithIncludes = Seq(
+  private val lpToOptimizedWithExcludes = Seq(
+    // should use rule 1 level 1 since container is needed
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-      -> """sum(rate(foo:::agg1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+      -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
 
-
+    // should use rule 2 since it excludes more labels
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-      -> """sum(rate(foo:::agg2{_ws_="demo",_ns_="localNs"}[300s]))""",
+      -> """sum(rate(foo:::agg2_1{_ws_="demo",_ns_="localNs"}[300s]))""",
 
+    // binary join of above 2 test cases
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-      -> """(sum(rate(foo:::agg1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg2{_ws_="demo",_ns_="localNs"}[300s])))""",
-
+      -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg2_1{_ws_="demo",_ns_="localNs"}[300s])))""",
   )
 
   it("should optimize when include rules are found") {
     val arp = newProvider(rules1)
-    for { (query, optimizedExpected) <- lpToOptimizedWithIncludes } {
+    for { (query, optimizedExpected) <- lpToOptimizedWithExcludes } {
+      println(s"Testing query: $query")
+      val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
+      val optimized = lp.useHigherLevelAggregatedMetric(arp)
+      LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
+    }
+  }
+
+  private val lpNoOptimizWithRules = Seq(
+    // same
+    """no_optimize(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container))"""
+      -> """no_optimize(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container))""",
+
+    // same
+    """no_optimize(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))"""
+      -> """no_optimize(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))""",
+
+    // util adds parens around binary ops - thats all
+    """no_optimize(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))"""
+      -> """no_optimize((sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))))""",
+  )
+
+  it("should not optimize when no_optimize is set") {
+    val arp = newProvider(rules1)
+    for { (query, optimizedExpected) <- lpNoOptimizWithRules } {
       println(s"Testing query: $query")
       val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)
