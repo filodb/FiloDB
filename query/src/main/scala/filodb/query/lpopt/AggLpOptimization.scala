@@ -64,27 +64,27 @@ object AggLpOptimization {
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[(String, RawSeriesLikePlan)] = {
     agg match {
       case Aggregate(AggregationOperator.Sum,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case Aggregate(AggregationOperator.Sum,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case Aggregate(AggregationOperator.Sum,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case Aggregate(AggregationOperator.Sum,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case Aggregate(AggregationOperator.Min,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case Aggregate(AggregationOperator.Max,
-                    psww @ PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
                     _) => Some((rs.metricName(), rs))
       case _ => None
@@ -106,7 +106,7 @@ object AggLpOptimization {
     val metricName = c1.head
     if (c1.length > 1) {
       // if there is a suffix, then it is an aggregated metric
-      val c2 = c1(1).split(":")
+      val c2 = c1(1).split("::")
       if (c2.length > 1) {
         (metricName, Some(c2.head), Some(c2(1)))
       } else {

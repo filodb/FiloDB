@@ -42,27 +42,58 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
   )
 
   private val lpToOptimizedWithExcludes = Seq(
-    // should use rule 1 level 1 since container is needed
+    // picking rule that has necessary labels: should use rule 1 level 1 since container is needed
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
       -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """sum(increase(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """sum(increase(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
 
-    // should use rule 1 level 2 since it excludes more labels
+    //  Gauge queries that need to choose an aggregated column
+    // FIXME fails right now
+//    """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+//      -> """sum(sum(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+//    """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+//      -> """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+//    """max(max_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+//      -> """max(max_over_time(foo:::agg1_1::max{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+
+    // picking rule with excludes more labels: should use rule 1 level 2 since it excludes more labels
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-      -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
-
-    // should use higher level aggregation rule 1 level 2 since it excludes more labels
-    """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s]))"""
       -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
 
     // binary join of above 2 test cases
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
       -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s])))""",
+
+    // selection of column as in average latency on histograms: should use rule 1 level 1 since container is needed
+    """sum(rate(foo::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container) / sum(rate(foo::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """(sum(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container) / sum(rate(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container))""",
+
+    // choose higher level aggregation which excludes more labels: should use higher level aggregation rule 1 level 2 since it excludes more labels
+    """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
+
+    // choose higher level aggregation which excludes more labels when asking a column: should use rule 1 level 1 since container is needed
+    """sum(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) / sum(rate(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """(sum(rate(foo:::agg1_2::sum{_ws_="demo",_ns_="localNs"}[300s])) / sum(rate(foo:::agg1_2::count{_ws_="demo",_ns_="localNs"}[300s])))""",
+
+    // nested aggregation: should use rule 1 level 1 for inner aggregate since container is needed
+    """min(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container))"""
+      -> """min(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container))""",
+
+    // group without: should use rule 1 level 2 since container is excluded and most number of labels excluded
+    """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (container)"""
+      -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s])) without (container)""",
+
+    // group without label that is not excluded: should not optimize since dc is not excluded in any rule
+    """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)"""
+      -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)""",
+
   )
 
   it("should optimize when include rules are found") {
     val arp = newProvider(rules1)
     for { (query, optimizedExpected) <- lpToOptimizedWithExcludes } {
-      println(s"Testing query: $query")
       val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)
       LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
@@ -86,7 +117,6 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
   it("should not optimize when no_optimize is set") {
     val arp = newProvider(rules1)
     for { (query, optimizedExpected) <- lpNoOptimizWithRules } {
-      println(s"Testing query: $query")
       val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)
       LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
