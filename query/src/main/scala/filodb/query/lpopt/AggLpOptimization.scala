@@ -150,7 +150,7 @@ object AggLpOptimization {
             (aggClause.get.clauseType == AggregateClause.ClauseType.By &&
               aggClause.get.labels.toSet.subsetOf(in.tags))  // by clause labels are all included in rule
           )
-        // Include rules do not work with without clause since wew do not know all the labels that will be dropped
+        // Include rules do not work with without clause since we do not know all the labels that will be dropped
       case ex: ExcludeAggRule =>
         filterTags.intersect(ex.tags).isEmpty && // none of the filter tags should be excluded
           (aggClause.isEmpty || // no group by or without clause
