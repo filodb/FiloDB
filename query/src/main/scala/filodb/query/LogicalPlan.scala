@@ -63,6 +63,8 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
+  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan
+
   /**
    * Optimizes the plan to use aggregated metric where possible
    * @return Updated logical plan if optimized for higher level aggregation. Else return the same logical plan
@@ -79,6 +81,8 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
    *         Throws IllegalArgumentException if no metric name is found in the filters
    */
   def metricName(): String
+
+  def columns(): Seq[String]
 
   def rangeSelector(): RangeSelector
 
@@ -175,6 +179,11 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
+  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = {
+    val filterColumns = newFilters.map(_.column)
+    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
+    this.copy(filters = updatedFilters, columns = columns)
+  }
   def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // RawSeries queries are not optimized for higher level aggregation
   }
@@ -638,6 +647,9 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
+  // Should not be called. ApplyInstantFunctionRaw is not optimized for higher level aggregation
+  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = ???
+
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // this plan is not optimized for higher level aggregation
   }
@@ -645,6 +657,8 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
   override def rawSeriesFilters(): Seq[ColumnFilter] = vectors.rawSeriesFilters()
 
   override def metricName(): String = vectors.metricName()
+
+  override def columns(): Seq[String] = vectors.columns
 
   override def rangeSelector(): RangeSelector = vectors.rangeSelector
 }

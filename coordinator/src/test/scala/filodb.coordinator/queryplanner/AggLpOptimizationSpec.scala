@@ -48,15 +48,6 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     """sum(increase(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
       -> """sum(increase(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
 
-    //  Gauge queries that need to choose an aggregated column
-    // FIXME fails right now
-//    """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-//      -> """sum(sum(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
-//    """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-//      -> """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
-//    """max(max_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-//      -> """max(max_over_time(foo:::agg1_1::max{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
-
     // picking rule with excludes more labels: should use rule 1 level 2 since it excludes more labels
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
       -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
@@ -89,11 +80,43 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)"""
       -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)""",
 
+    //  Raw Gauge queries that need to choose an aggregated column
+    """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """max(max_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """max(max_over_time(foo:::agg1_1::max{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """sum(sum_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """sum(sum_over_time(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+
+    //  Agg Gauge queries that can use higher level aggregated rule
+    """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))""",
+    """max(max_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """max(max_over_time(foo:::agg1_2::max{_ws_="demo",_ns_="localNs"}[300s]))""",
+    """sum(sum_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """sum(sum_over_time(foo:::agg1_2::sum{_ws_="demo",_ns_="localNs"}[300s]))""",
+
+    // Do not optimize wierd cases where query already has a column that is not the right aggregation column
+    """max(max_over_time(foo::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """max(max_over_time(foo::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """sum(rate(foo::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """sum(rate(foo::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """sum(rate(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """sum(rate(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    """min(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+      -> """min(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+
+    //  Gauge queries that need to change the over_time function and aggregated column
+    // FIXME fails right now - this is a known feature gap to be closed later if needed
+    //    """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+    //      -> """sum(sum(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+
   )
 
   it("should optimize when include rules are found") {
     val arp = newProvider(rules1)
     for { (query, optimizedExpected) <- lpToOptimizedWithExcludes } {
+      println(s"Testing query $query")
       val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)
       LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
