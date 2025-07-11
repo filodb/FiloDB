@@ -20,18 +20,18 @@ object AggLpOptimization {
    * @return Some(optimizedLogicalPlan) if the optimization was possible, None if it cannot be optimized.
    */
   def optimizeWithPreaggregatedDataset(agg: Aggregate, aggRuleProvider: AggRuleProvider): Option[Aggregate] = {
-    val metricNameAndFilterColumns = canTranslateQueryToPreagg(agg)
-    if (metricNameAndFilterColumns.isDefined) {
+    val canTranslateResult = canTranslateQueryToPreagg(agg)
+    if (canTranslateResult.isDefined) {
       val rules: List[AggRule] = aggRuleProvider.getAggRuleVersions(
-                                                      metricNameAndFilterColumns.get._2.rawSeriesFilters(),
-                                                      metricNameAndFilterColumns.get._2.rangeSelector())
+                                                      canTranslateResult.get.rs.rawSeriesFilters(),
+                                                      canTranslateResult.get.rs.rangeSelector())
       // grouping by level+id results in all versions of the rule as value
       val rulesGroupedByIdLevel = rules.groupBy(r => (r.ruleId, r.level))
       var chosenRule: Option[AggRule] = None
 
       for {rule <- rulesGroupedByIdLevel} { // iterate to see which id/level the best rule to use
         val ruleIsEligible = rule._2.forall { r =>
-          canUseRule(r, metricNameAndFilterColumns.get._2.rawSeriesFilters().map(_.column).toSet, agg.clauseOpt)
+          canUseRule(r, canTranslateResult.get.rs.rawSeriesFilters().map(_.column).toSet, agg.clauseOpt)
         }
         if (ruleIsEligible &&
           (chosenRule.isEmpty || firstRuleIsBetterThanSecond(rule._2.head, chosenRule.get))) {
@@ -44,7 +44,7 @@ object AggLpOptimization {
         None
       } else {
         // rule was chosen, rewrite the logical plan to use the pre-aggregated metric
-        val queryMetricName = metricNameAndFilterColumns.get._1
+        val queryMetricName = canTranslateResult.get.metricName
         val (metricName, _, colOpt) = metricNameComponents(queryMetricName)
         val aggRuleSuffix = chosenRule.get.metricSuffix
         val aggMetricName = metricNameString(metricName, Some(aggRuleSuffix), colOpt)
@@ -55,38 +55,40 @@ object AggLpOptimization {
     }
   }
 
+  private case class CanTranslateResult(metricName: String, rs: RawSeriesLikePlan, aggColumn: Option[String])
+
   /**
    * Used to determine if the given Aggregate logical plan can be translated to a pre-aggregated metric.
    *
-   * Returns Option((metricName, Seq[filterColumns])) if the query can be translated to a pre-aggregated metric,
+   * Returns Option(CanTranslateResult) if the query can be translated to a pre-aggregated metric,
    * None if it cannot be translated.
    */
-  private def canTranslateQueryToPreagg(agg: Aggregate): Option[(String, RawSeriesLikePlan)] = {
+  private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
     agg match {
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, None))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, None))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("sum")))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("count")))
       case Aggregate(AggregationOperator.Min,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("min")))
       case Aggregate(AggregationOperator.Max,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
-                    _) => Some((rs.metricName(), rs))
+                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("max")))
       case _ => None
     }
   }
@@ -161,10 +163,24 @@ object AggLpOptimization {
    * A rule is considered better if it has more excluded labels or less included labels.
    */
   private def firstRuleIsBetterThanSecond(first: AggRule, second: AggRule): Boolean = {
-    (first.numExcludedLabels > 0 && second.numExcludedLabels > 0 && // both rules have excluded labels
-      first.numExcludedLabels > second.numExcludedLabels) || // first rule has more excluded labels than second
-      (first.numIncludedLabels > 0 && second.numIncludedLabels > 0 && // both rules have included labels
-        first.numIncludedLabels < second.numIncludedLabels) // first rule has less included labels than second
+    hasMoreExcludedLabels(first, second) || hasFewerIncludedLabels(first, second)
   }
 
+  /**
+   * Checks if the first rule has more excluded labels than the second rule.
+   * Both rules must have excluded labels for this comparison to be valid.
+   */
+  private def hasMoreExcludedLabels(first: AggRule, second: AggRule): Boolean = {
+    first.numExcludedLabels > 0 && second.numExcludedLabels > 0 &&
+      first.numExcludedLabels > second.numExcludedLabels
+  }
+
+  /**
+   * Checks if the first rule has fewer included labels than the second rule.
+   * Both rules must have included labels for this comparison to be valid.
+   */
+  private def hasFewerIncludedLabels(first: AggRule, second: AggRule): Boolean = {
+    first.numIncludedLabels > 0 && second.numIncludedLabels > 0 &&
+      first.numIncludedLabels < second.numIncludedLabels
+  }
 }
