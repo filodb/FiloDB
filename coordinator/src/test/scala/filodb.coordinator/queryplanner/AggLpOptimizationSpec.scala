@@ -39,11 +39,6 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10, level="2"),
     ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 12, level="2"),
     ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "fixed_guid"), 13, level="2"),
-
-    // Rule2 Level1 and its versions
-    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container"), 10, level="1"),
-    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "guid"), 12, level="1"),
-    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "fixed_guid"), 13, level="1"),
   )
 
   private val lpToOptimizedWithExcludes = Seq(
@@ -51,13 +46,17 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
       -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
 
-    // should use rule 2 since it excludes more labels
+    // should use rule 1 level 2 since it excludes more labels
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-      -> """sum(rate(foo:::agg2_1{_ws_="demo",_ns_="localNs"}[300s]))""",
+      -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
+
+    // should use higher level aggregation rule 1 level 2 since it excludes more labels
+    """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s]))"""
+      -> """sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s]))""",
 
     // binary join of above 2 test cases
     """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-      -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg2_1{_ws_="demo",_ns_="localNs"}[300s])))""",
+      -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s])))""",
   )
 
   it("should optimize when include rules are found") {
