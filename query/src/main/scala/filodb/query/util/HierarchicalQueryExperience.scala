@@ -47,11 +47,12 @@ case class HierarchicalQueryExperienceParams(metricDelimiter: String,
  * @param tags include/exclude tags for the given aggregation rule
  */
 sealed trait AggRule {
-  val ruleId: String
-  val metricSuffix: String
-  val level: String
-  val tags: Set[String]
-  val versionEffectiveTime: Long
+  def ruleId: String
+  def metricSuffix: String
+  def level: String
+  def tags: Set[String]
+  def versionEffectiveTime: Long
+  def active: Boolean
   def isHigherLevelAggregationApplicable(shardKeyColumns: Set[String], filterTags: Seq[String]): Boolean
   def numExcludedLabels: Int
   def numIncludedLabels: Int
@@ -63,7 +64,7 @@ sealed trait AggRule {
  * @param level - String - level of the aggregation rule
  */
 case class IncludeAggRule(ruleId: String, metricSuffix: String, tags: Set[String], versionEffectiveTime: Long,
-                          level: String = "1") extends AggRule {
+                          active: Boolean, level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with IncludeTags.
@@ -87,7 +88,7 @@ case class IncludeAggRule(ruleId: String, metricSuffix: String, tags: Set[String
  * @param level - String - level of the aggregation rule
  */
 case class ExcludeAggRule(ruleId: String, metricSuffix: String, tags: Set[String], versionEffectiveTime: Long,
-                          level: String = "1") extends AggRule {
+                          active: Boolean, level: String = "1") extends AggRule {
 
   /**
    * Checks if the higher level aggregation is applicable with ExcludeTags. Here we need to check if the column filter
@@ -418,10 +419,10 @@ object HierarchicalQueryExperience extends StrictLogging {
                 //   the includeTags. This requires the knowledge of all the tags/labels which are being published
                 //   for a metric. This info is not available during planning and hence we can't optimize this scenario.
                 params match {
-                  case IncludeAggRule( _, _, _, _, _) =>
+                  case IncludeAggRule( _, _, _, _, _, _) =>
                     // can't optimize this scenario as we don't have the required info at the planning stage
                     false
-                  case ExcludeAggRule(_, _, excludeTags, _, _) =>
+                  case ExcludeAggRule(_, _, excludeTags, _, _, _) =>
                     if (excludeTags.subsetOf(clause.labels.toSet)) { true }
                     else { false }
                 }

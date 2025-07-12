@@ -23,15 +23,15 @@ object AggLpOptimization {
     require(aggRuleProvider.aggRuleOptimizationEnabled,
       "AggRuleProvider must have aggRuleOptimizationEnabled=true to use this optimization")
     val canTranslateResult = canTranslateQueryToPreagg(agg)
-    if (canTranslateResult.isDefined) {
+    if (canTranslateResult.isDefined && canTranslateResult.get.rs.rangeSelector().isInstanceOf[IntervalSelector]) {
       val rules: List[AggRule] = aggRuleProvider.getAggRuleVersions(
-                                                      canTranslateResult.get.rs.rawSeriesFilters(),
-                                                      canTranslateResult.get.rs.rangeSelector())
-      // grouping by level+id results in all versions of the rule as value
-      val rulesGroupedByIdLevel = rules.groupBy(r => (r.ruleId, r.level))
+                                              canTranslateResult.get.rs.rawSeriesFilters(),
+                                              canTranslateResult.get.rs.rangeSelector().asInstanceOf[IntervalSelector])
+      // grouping by suffix results in all rule and versions for given suffix
+      val rulesBySuffix = rules.groupBy(r => r.metricSuffix)
       var chosenRule: Option[AggRule] = None
 
-      for {rule <- rulesGroupedByIdLevel} { // iterate to see which id/level the best rule to use
+      for { rule <- rulesBySuffix } { // iterate to see which suffix is the best to use
         val ruleIsEligible = rule._2.forall { r =>
           canUseRule(r, canTranslateResult.get.rs.rawSeriesFilters().map(_.column).toSet, agg.clauseOpt)
         }

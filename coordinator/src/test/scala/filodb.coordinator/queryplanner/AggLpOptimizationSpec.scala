@@ -3,7 +3,7 @@ package filodb.coordinator.queryplanner
 import filodb.core.query.ColumnFilter
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
-import filodb.query.RangeSelector
+import filodb.query.IntervalSelector
 import filodb.query.lpopt.AggRuleProvider
 import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
 import org.scalatest.funspec.AnyFunSpec
@@ -18,7 +18,7 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
   private val step = 300
 
   def newProvider(aggRules: List[AggRule]): AggRuleProvider = new AggRuleProvider {
-    override def getAggRuleVersions(filters: Seq[ColumnFilter], rs: RangeSelector): List[AggRule] = aggRules
+    override def getAggRuleVersions(filters: Seq[ColumnFilter], rs: IntervalSelector): List[AggRule] = aggRules
     override def aggRuleOptimizationEnabled: Boolean = true
   }
 
@@ -35,12 +35,12 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   private val excludeRules1 = List(
     // Rule1 Level1
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10, active = true, level="1"),
 
     // Rule1 Level2 and its versions
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10, level="2"),
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 12, level="2"),
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "port"), 13, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10, active = true, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 12, active = true, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "port"), 13, active = true, level="2"),
   )
 
   it ("[exclude rules] should pick rule that has necessary labels") {
@@ -185,14 +185,21 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  it("[exclude rules] should handle when some rules are inactive and there is a different rule from that timestamp") {
+    val testCases = Seq(
+      // TODO
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
   private val includeRules1 = List(
     // Rule1 Level1
-    IncludeAggRule("1", "agg1_1", Set("dc", "service"), 10, level="1"),
+    IncludeAggRule("1", "agg1_1", Set("dc", "service"), 10, active = true, level="1"),
 
     // Rule1 Level2 and its versions
-    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region"), 10, level="2"),
-    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region", "guid"), 12, level="2"),
-    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region", "port"), 13, level="2"),
+    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region"), 10, active = true, level="2"),
+    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region", "guid"), 12, active = true, level="2"),
+    IncludeAggRule("1", "agg1_2", Set("dc", "service", "region", "port"), 13, active = true, level="2"),
   )
 
   it ("[include rules] should pick rule that has necessary labels") {
