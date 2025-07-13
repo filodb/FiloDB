@@ -187,11 +187,32 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  private val excludeRules2WithInactive = List(
+    // Rule1 Level1 and its versions
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container"), 10, active = true, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 12, active = true, level="1"),
+    // this rule1 for multiple namespaces (queried namespace included) is inactive at 13, rule2 is active at 13
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 13, active = false, level="1"),
+    // a rule for multiple namespaces (queried namespace included) is active enabled again at 14, rule2 is disabled
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 14, active = true, level="1"),
+
+    // Rule2 Level1 and its versions
+    // a different rule (with same suffix) for queried namespaces is added and is active at 13
+    ExcludeAggRule("2", "agg1_1", Set("instance", "pod", "container", "port"), 13, active = true, level="1"),
+    // this rule (with same suffix) for queried namespaces is disabled at 14, and rule1 is active again at 14
+    ExcludeAggRule("2", "agg1_1", Set("instance", "pod", "container", "port"), 14, active = false, level="1"),
+  )
+
   it("[exclude rules] should handle when some rules are inactive and there is a different rule from that timestamp") {
     val testCases = Seq(
-      // TODO
+      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (dc)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (dc)""",
     )
-    testOptimization(excludeRules1, testCases)
+    testOptimization(excludeRules2WithInactive, testCases)
+
+    // TODO test cases with gaps in pre-aggregated data due to rule version changes.
+    // We assume for now that user can use `no_optimize` function if they see gaps and want to query raw data
+    // Improve in later iterations if prioritized
   }
 
   private val includeRules1 = List(
