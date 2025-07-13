@@ -65,39 +65,58 @@ object AggLpOptimization {
    * the underlying RawSeriesLikePlan and the column to use for aggregation. Method returns None if it cannot be
    * translated / optimized.
    */
+  // scalastyle:off method.length
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
     val ret = agg match {
+      // sum(rate(foo))
+      // sum(rate(foo::sum))
+      // sum(rate(foo::count))
+      // sum(rate(foo:::agg::count))
+      // sum(rate(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // rate only on sum and count columns
           => Some(CanTranslateResult(rs, rs.columns().headOption))
 
+      // sum(increase(foo))
+      // sum(increase(foo::sum))
+      // sum(increase(foo::count))
+      // sum(increase(foo:::agg::count))
+      // sum(increase(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // increase only on sum and count columns
           => Some(CanTranslateResult(rs, rs.columns().headOption))
 
+      // sum(sum_over_time(foo))
+      // sum(sum_over_time(foo:::agg::sum))
+      // sum(sum_over_time(foo:::agg::count))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("sum")) // SumOverTime only on sum column
-          => Some(CanTranslateResult(rs, Some("sum")))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // SumOverTime only on sum/count column
+          => Some(CanTranslateResult(rs, rs.columns().headOption.orElse(Some("sum"))))
 
 // FIXME optimization of query to count number of samples still does not work since it requires replacement of
 // range function. Leaving it out for now since it is not a common query. Cross the bridge later when really needed.
+//      // sum(count_over_time(foo))
 //      case Aggregate(AggregationOperator.Sum,
 //                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
 //                    _,
-//                    _) => Some(CanTranslateResult(rs, Some("count")))
+//                    _) if rs.columns().isEmpty() => Some(CanTranslateResult(rs, Some("count")))
 
+      // sum(min_over_time(min))
+      // sum(min_over_time(foo::min))
       case Aggregate(AggregationOperator.Min,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("min"))
           => Some(CanTranslateResult(rs, Some("min")))
 
+      // sum(max_over_time(max))
+      // sum(max_over_time(foo::max))
       case Aggregate(AggregationOperator.Max,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
@@ -127,8 +146,7 @@ object AggLpOptimization {
     s"$metricName${ruleSuffix.map(s => s":::$s").getOrElse("")}${col.map(c => s":$c").getOrElse("")}"
   }
 
-
-  lazy val shardKeys = HierarchicalQueryExperience.shardKeyColumnsOption.toSeq.flatten
+  private lazy val shardKeys = HierarchicalQueryExperience.shardKeyColumnsOption.toSeq.flatten
   /**
    * Checks if the given AggRule can be used for the given filter tags and aggregate clause.
    *

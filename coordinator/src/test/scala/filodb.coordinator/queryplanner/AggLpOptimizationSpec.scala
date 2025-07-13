@@ -133,12 +133,12 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
           // This is a known feature gap to be closed later if needed
           """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
               -> """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-//   correct expected output when feature is done -> """sum(sum(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+//   correct expected output when feature is done -> """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
     )
     testOptimization(excludeRules1, testCases)
   }
 
-  it("[exclude rules] should optimize Raw Gauge queries that need to choose an aggregated column") {
+  it("[exclude rules] should optimize raw gauge queries that need to choose an aggregated column") {
     val testCases = Seq(
       """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
         -> """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
@@ -150,23 +150,16 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
-  it("[exclude rules] should not optimize with group without label that is not excluded") {
-    // should not optimize since dc is not excluded in any rule
+  it("[exclude rules] should optimize agg gauge queries to use highest level aggregated rule") {
     val testCases = Seq(
-      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)"""
-        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)""",
-    )
-    testOptimization(excludeRules1, testCases)
-  }
-
-  it("[exclude rules] should optimize agg Gauge queries that can use higher level aggregated rule") {
-    val testCases = Seq(
-      """min(min_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))""",
-      """max(max_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      """max(max_over_time(foo:::agg1_1::max{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """max(max_over_time(foo:::agg1_2::max{_ws_="demo",_ns_="localNs"}[300s]))""",
-      """sum(sum_over_time(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+      """sum(sum_over_time(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """sum(sum_over_time(foo:::agg1_2::sum{_ws_="demo",_ns_="localNs"}[300s]))""",
+      """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s]))"""
+        -> """sum(sum_over_time(foo:::agg1_2::count{_ws_="demo",_ns_="localNs"}[300s]))""",
     )
     testOptimization(excludeRules1, testCases)
   }
@@ -181,6 +174,15 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
         -> """sum(rate(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
       """min(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
         -> """min(rate(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
+  it("[exclude rules] should not optimize with group without label that is not excluded") {
+    // should not optimize since dc is not excluded in any rule
+    val testCases = Seq(
+      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) without (dc)""",
     )
     testOptimization(excludeRules1, testCases)
   }
