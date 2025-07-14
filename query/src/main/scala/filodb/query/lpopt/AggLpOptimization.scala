@@ -4,6 +4,7 @@ import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query._
+import filodb.query.RangeFunctionId.SumOverTime
 import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, IncludeAggRule}
 
 /**
@@ -48,34 +49,51 @@ object AggLpOptimization {
         val aggRuleSuffix = chosenRule.get.metricSuffix
         val aggMetricName = metricNameString(metricNameWithoutSuffix(canTranslateResult.get.rawSeriesMetricName),
           Some(aggRuleSuffix), None)
-        Some(replaceMetricNameInQuery(agg, aggMetricName, canTranslateResult.get.aggColumnToUse.toSeq))
+        Some(replaceMetricNameInQuery(agg, aggMetricName, canTranslateResult.get.aggColumnToUse.toSeq,
+                                      canTranslateResult.get.rangeFunctionToUse))
       }
     } else {
       None
     }
   }
 
+  /**
+   * Result of canTranslateQueryToPreagg method. It contains data from the underlying RawSeriesLikePlan
+   * plan and data needed to formulate the new aggregated query.
+   *
+   * @param rawSeriesMetricName The metric name in the underlying RawSeriesLikePlan. This is needed to formulate
+   *                            the new aggregated metric name. It may contain suffixes and column specifiers.
+   * @param rawSeriesFilters The filters in the underlying RawSeriesLikePlan. This is needed to find the relevant rules
+   * @param rawSeriesColumn The column in the underlying RawSeriesLikePlan. This is the column that is being queried
+   *                        in the original query issued by user.
+   * @param timeInterval return timeInterval from the underlying RawSeriesLikePlan. This is needed to find the relevant
+   *                     rules.
+   * @param aggColumnToUse Some means replace the column in optimized query; None means use the same column as in query
+   * @param rangeFunctionToUse Some means replace the range function in optimized query; None means use the same
+   *                           column as in query
+   */
   private case class CanTranslateResult(rawSeriesMetricName: String,
                                         rawSeriesFilters: Seq[ColumnFilter],
                                         rawSeriesColumn: Option[String],
                                         timeInterval: IntervalSelector,
-                                        aggColumnToUse: Option[String])
+                                        aggColumnToUse: Option[String],
+                                        rangeFunctionToUse: Option[RangeFunctionId])
 
   /**
    * Used to determine if the given Aggregate logical plan can be translated to a pre-aggregated metric.
    *
-   * Returns Option(CanTranslateResult) if the query can be translated to a pre-aggregated metric. It contains
-   * data from the underlying RawSeriesLikePlan and the column to use for aggregation. Method returns None if it cannot be
+   * Returns Option(CanTranslateResult) if the query can be translated to a pre-aggregated metric. It contains data
+   * from the underlying RawSeriesLikePlan and the column to use for aggregation. Method returns None if it cannot be
    * translated / optimized.
    */
   // scalastyle:off method.length
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
 
-    def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String]) = {
+    def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String], rangeFunctionId: Option[RangeFunctionId]) = {
       val metricName = rs.metricName()
       rs.rangeSelector() match {
         case is: IntervalSelector => Some(CanTranslateResult(metricName, rs.rawSeriesFilters(),
-                                                               rs.columns().headOption, is, colOpt))
+                                                             rs.columns().headOption, is, colOpt, rangeFunctionId))
         case _ => None
       }
     }
@@ -90,7 +108,7 @@ object AggLpOptimization {
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // rate only on sum and count columns
-          => makeResult(rs, rs.columns().headOption)
+          => makeResult(rs, rs.columns().headOption, None)
 
       // sum(increase(foo))
       // sum(increase(foo::sum))
@@ -101,7 +119,7 @@ object AggLpOptimization {
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // increase only on sum and count columns
-          => makeResult(rs, rs.columns().headOption)
+          => makeResult(rs, rs.columns().headOption, None)
 
       // sum(sum_over_time(foo))
       // sum(sum_over_time(foo:::agg::sum))
@@ -110,15 +128,14 @@ object AggLpOptimization {
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // SumOverTime only on sum/count column
-          => makeResult(rs, rs.columns().headOption.orElse(Some("sum")))
+          => makeResult(rs, rs.columns().headOption.orElse(Some("sum")), None)
 
-// FIXME optimization of query to count number of samples still does not work since it requires replacement of
-// range function. Leaving it out for now since it is not a common query. Cross the bridge later when really needed.
-//      // sum(count_over_time(foo))
-//      case Aggregate(AggregationOperator.Sum,
-//                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
-//                    _,
-//                    _) if rs.columns().isEmpty() => makeResult(rs, Some("count"))
+      // sum(count_over_time(foo))
+      case Aggregate(AggregationOperator.Sum,
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
+                    _,
+                    _) if rs.columns().isEmpty
+          => makeResult(rs, Some("count"), Some(SumOverTime))
 
       // sum(min_over_time(min))
       // sum(min_over_time(foo::min))
@@ -126,7 +143,7 @@ object AggLpOptimization {
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("min"))
-          => makeResult(rs, Some("min"))
+          => makeResult(rs, Some("min"), None)
 
       // sum(max_over_time(max))
       // sum(max_over_time(foo::max))
@@ -134,7 +151,7 @@ object AggLpOptimization {
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("max"))
-          => makeResult(rs, Some("max"))
+          => makeResult(rs, Some("max"), None)
 
       case _ => None
     }
@@ -147,10 +164,10 @@ object AggLpOptimization {
     }
   }
 
-  private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String, col: Seq[String]): Aggregate = {
-    agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing].copy(
-      series = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing].series.replaceRawSeriesFiltersAndColumn(
-          Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col)))
+  private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String,
+                                       col: Seq[String], rf: Option[RangeFunctionId]): Aggregate = {
+    agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing]
+      .replaceRFFiltersAndColumn(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
   }
 
   private def metricNameWithoutSuffix(metricNameStr: String): String = metricNameStr.split(":::").head

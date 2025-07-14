@@ -526,6 +526,12 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     this.copy(series = series.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
+
+  def replaceRFFiltersAndColumn(filters: Seq[ColumnFilter], col: Seq[String],
+                                       rf: Option[RangeFunctionId]): PeriodicSeriesWithWindowing = {
+    this.copy(series = series.replaceRawSeriesFiltersAndColumn(filters, col),
+      function = rf.getOrElse(function))
+  }
 }
 
 /**

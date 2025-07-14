@@ -128,12 +128,10 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(rules, testCases)
   }
 
-  it("[exclude rules] should not optimize (later feature) gauge queries that need to change the range function and aggregated column") {
+  it("[exclude rules] should optimize gauge queries that need to change the range function and aggregated column") {
     val testCases = Seq(
-          // This is a known feature gap to be closed later if needed
-          """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-              -> """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
-//   correct expected output when feature is done -> """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+      """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+         -> """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
     )
     testOptimization(excludeRules1, testCases)
   }
