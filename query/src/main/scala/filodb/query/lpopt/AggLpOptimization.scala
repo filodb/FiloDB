@@ -20,8 +20,6 @@ object AggLpOptimization {
    * @return Some(optimizedLogicalPlan) if the optimization was possible, None if it cannot be optimized.
    */
   def optimizeWithPreaggregatedDataset(agg: Aggregate, aggRuleProvider: AggRuleProvider): Option[Aggregate] = {
-    require(aggRuleProvider.aggRuleOptimizationEnabled,
-      "AggRuleProvider must have aggRuleOptimizationEnabled=true to use this optimization")
     val canTranslateResult = canTranslateQueryToPreagg(agg)
     if (canTranslateResult.isDefined) {
       val rules: List[AggRule] = aggRuleProvider.getAggRuleVersions(

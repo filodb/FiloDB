@@ -17,9 +17,9 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
   private val endSeconds = now / 1000
   private val step = 300
 
-  def newProvider(aggRules: List[AggRule]): AggRuleProvider = new AggRuleProvider {
+  def newProvider(aggRules: List[AggRule], enabled: Boolean = true): AggRuleProvider = new AggRuleProvider {
     override def getAggRuleVersions(filters: Seq[ColumnFilter], rs: IntervalSelector): List[AggRule] = aggRules
-    override def aggRuleOptimizationEnabled: Boolean = true
+    override def aggRuleOptimizationEnabled: Boolean = enabled
   }
 
   // Placeholder for unit tests on plan optimization
@@ -293,6 +293,35 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     )
 
     val arp = newProvider(excludeRules1)
+    for { (query, optimizedExpected) <- testCases } {
+      val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
+      val optimized = lp.useHigherLevelAggregatedMetric(arp)
+      LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
+    }
+  }
+
+  it("should not optimize when agg is disabled") {
+    val testCases = Seq(
+      // same  query
+      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+    )
+
+    val arp = newProvider(excludeRules1, enabled = false)
+    for { (query, optimizedExpected) <- testCases } {
+      val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
+      val optimized = lp.useHigherLevelAggregatedMetric(arp)
+      LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
+    }
+  }
+
+  it("should optimize when agg is disabled but optimize_with_agg function is used") {
+    val testCases = Seq(
+      """optimize_with_agg(sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container))"""
+        -> """optimize_with_agg(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container))""",
+    )
+
+    val arp = newProvider(excludeRules1, enabled = false)
     for { (query, optimizedExpected) <- testCases } {
       val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)

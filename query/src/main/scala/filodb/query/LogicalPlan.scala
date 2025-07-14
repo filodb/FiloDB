@@ -3,7 +3,7 @@ package filodb.query
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
-import filodb.query.MiscellaneousFunctionId.NoOptimize
+import filodb.query.MiscellaneousFunctionId.{NoOptimize, OptimizeWithAgg}
 import filodb.query.lpopt.{AggLpOptimization, AggRuleProvider}
 
 //scalastyle:off number.of.types
@@ -44,14 +44,51 @@ sealed trait LogicalPlan {
    * @return Updated LogicalPlan if Applicable. Else return the same LogicalPlan
    */
   def useHigherLevelAggregatedMetric(aggRuleProvider: AggRuleProvider): LogicalPlan = {
-    // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
-    this match {
-      // We start with no parent plans from the root
-      case p: PeriodicSeriesPlan   => p.useAggregatedMetricIfApplicable(aggRuleProvider)
-      case r: RawSeriesLikePlan    => r.useAggregatedMetricIfApplicable(aggRuleProvider)
-      case _                       => this
+    // invoke if aggRuleProvider.aggRuleOptimizationEnabled is true, or if the query has optimize_with_agg function
+    if (aggRuleProvider.aggRuleOptimizationEnabled ||
+      hasOptimizeWithAgg(this) && !aggRuleProvider.aggRuleOptimizationEnabled) {
+      // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
+      this match {
+        // We start with no parent plans from the root
+        case p: PeriodicSeriesPlan => p.useAggregatedMetricIfApplicable(aggRuleProvider)
+        case r: RawSeriesLikePlan => r.useAggregatedMetricIfApplicable(aggRuleProvider)
+        case _ => this
+      }
+    } else this
+  }
+
+  // scalastyle:off cyclomatic.complexity
+  private def hasOptimizeWithAgg(logicalPlan: LogicalPlan): Boolean = {
+    logicalPlan match {
+      case lp: PeriodicSeries              => false
+      case lp: PeriodicSeriesWithWindowing => false
+      case lp: ApplyInstantFunction        => hasOptimizeWithAgg(lp.vectors)
+      case lp: Aggregate                   => hasOptimizeWithAgg(lp.vectors)
+      case lp: BinaryJoin                  => hasOptimizeWithAgg(lp.rhs) || hasOptimizeWithAgg(lp.lhs)
+      case lp: ScalarVectorBinaryOperation => hasOptimizeWithAgg(lp.vector)
+      case lp: ApplyMiscellaneousFunction  => lp.function == OptimizeWithAgg || hasOptimizeWithAgg(lp.vectors)
+      case lp: ApplySortFunction           => hasOptimizeWithAgg(lp.vectors)
+      case lp: ScalarVaryingDoublePlan     => hasOptimizeWithAgg(lp.vectors)
+      case lp: ScalarTimeBasedPlan         => false
+      case lp: VectorPlan                  => hasOptimizeWithAgg(lp.scalars)
+      case lp: ApplyAbsentFunction         => hasOptimizeWithAgg(lp.vectors)
+      case lp: ApplyLimitFunction          => hasOptimizeWithAgg(lp.vectors)
+      case lp: RawSeries                   => false
+      case lp: LabelValues                 => false
+      case lp: LabelCardinality            => false
+      case lp: LabelNames                  => false
+      case lp: TsCardinalities             => false
+      case lp: SeriesKeysByFilters         => false
+      case lp: ApplyInstantFunctionRaw     => hasOptimizeWithAgg(lp.vectors)
+      case lp: ScalarBinaryOperation       => false
+      case lp: ScalarFixedDoublePlan       => false
+      case sq: SubqueryWithWindowing       => hasOptimizeWithAgg(sq.innerPeriodicSeries)
+      case tlsq: TopLevelSubquery          => hasOptimizeWithAgg(tlsq.innerPeriodicSeries)
+      case lp: RawChunkMeta                => false
     }
   }
+  // scalastyle:on cyclomatic.complexity
+
 }
 
 /**
@@ -678,7 +715,8 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
     vectors.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    if (function != NoOptimize && aggRuleProvider.aggRuleOptimizationEnabled) {
+    if ( (function != NoOptimize && aggRuleProvider.aggRuleOptimizationEnabled) ||
+         (function == OptimizeWithAgg && !aggRuleProvider.aggRuleOptimizationEnabled) ) {
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
     } else
       this
