@@ -22,17 +22,6 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     override def aggRuleOptimizationEnabled: Boolean = enabled
   }
 
-  // Placeholder for unit tests on plan optimization
-  // @Sandeep, we can move all the tests from LogicalPlanParser to here to avoid bloating of that spec?
-
-  it("should not optimize when no rules are found") {
-    val query = """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
-    val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
-    val arp = newProvider(Nil)
-    val optimized = lp.useHigherLevelAggregatedMetric(arp)
-    LogicalPlanParser.convertToQuery(optimized) shouldEqual query
-  }
-
   private val excludeRules1 = List(
     // Rule1 Level1
     ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10, active = true, level="1"),
@@ -132,6 +121,9 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     val testCases = Seq(
       """sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
          -> """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container)""",
+      // average of values in a gauge over time is sum/count
+      """sum(sum_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) / sum(count_over_time(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
+        -> """(sum(sum_over_time(foo:::agg1_1::sum{_ws_="demo",_ns_="localNs"}[300s])) by (container) / sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s])) by (container))""",
     )
     testOptimization(excludeRules1, testCases)
   }
@@ -327,4 +319,11 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  it("should not optimize when no rules are found") {
+    val query = """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+    val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
+    val arp = newProvider(Nil)
+    val optimized = lp.useHigherLevelAggregatedMetric(arp)
+    LogicalPlanParser.convertToQuery(optimized) shouldEqual query
+  }
 }

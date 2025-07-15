@@ -1,5 +1,7 @@
 package filodb.query.lpopt
 
+import kamon.Kamon
+
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
@@ -12,6 +14,9 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  * if available.
  */
 object AggLpOptimization {
+
+  private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
+  private val numAggLpNotOptimized = Kamon.counter(s"num_agg_lps_not_optimized")
 
   /**
    * Facade method for this utility. Optimizes the given Aggregate logical plan to use a pre-aggregated metric if
@@ -42,6 +47,7 @@ object AggLpOptimization {
       }
 
       if (chosenRule.isEmpty) {
+        numAggLpNotOptimized.withTag("reason", "noRules").increment()
         // no rule was chosen, return this plan as is
         None
       } else {
@@ -49,10 +55,12 @@ object AggLpOptimization {
         val aggRuleSuffix = chosenRule.get.metricSuffix
         val aggMetricName = metricNameString(metricNameWithoutSuffix(canTranslateResult.get.rawSeriesMetricName),
           Some(aggRuleSuffix), None)
+        numAggLpOptimized.increment()
         Some(replaceMetricNameInQuery(agg, aggMetricName, canTranslateResult.get.aggColumnToUse.toSeq,
                                       canTranslateResult.get.rangeFunctionToUse))
       }
     } else {
+      numAggLpNotOptimized.withTag("reason", "cannotOptimize").increment()
       None
     }
   }

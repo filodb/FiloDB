@@ -111,7 +111,7 @@ object HierarchicalQueryExperience extends StrictLogging {
   private val hierarchicalQueryOptimizedCounter = Kamon.counter("hierarchical-query-plans-optimized")
 
   // Get the shard key columns from the dataset options along with all the metric labels used
-  lazy val shardKeyColumnsOption: Option[Set[String]] = GlobalConfig.datasetOptions match {
+  private[query] lazy val shardKeyColumnsOption: Option[Set[String]] = GlobalConfig.datasetOptions match {
     case Some(datasetOptions) =>
       Some((datasetOptions.shardKeyColumns ++ Seq( datasetOptions.metricColumn, GlobalConfig.PromMetricLabel)).toSet)
     case None => None
