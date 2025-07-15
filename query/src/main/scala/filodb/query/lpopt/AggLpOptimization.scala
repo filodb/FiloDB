@@ -1,16 +1,22 @@
 package filodb.query.lpopt
 
+import kamon.Kamon
+
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query._
-import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
+import filodb.query.RangeFunctionId.SumOverTime
+import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, IncludeAggRule}
 
 /**
  * This object contains the logic to optimize Aggregate logical plans to use pre-aggregated metrics
  * if available.
  */
 object AggLpOptimization {
+
+  private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
+  private val numAggLpNotOptimized = Kamon.counter(s"num_agg_lps_not_optimized")
 
   /**
    * Facade method for this utility. Optimizes the given Aggregate logical plan to use a pre-aggregated metric if
@@ -23,15 +29,16 @@ object AggLpOptimization {
     val canTranslateResult = canTranslateQueryToPreagg(agg)
     if (canTranslateResult.isDefined) {
       val rules: List[AggRule] = aggRuleProvider.getAggRuleVersions(
-                                                      canTranslateResult.get.rs.rawSeriesFilters(),
-                                                      canTranslateResult.get.rs.rangeSelector())
-      // grouping by level+id results in all versions of the rule as value
-      val rulesGroupedByIdLevel = rules.groupBy(r => (r.ruleId, r.level))
+                                              canTranslateResult.get.rawSeriesFilters,
+                                              canTranslateResult.get.timeInterval)
+        .filter(_.active) // only active rules are relevant for now. We deal with gaps in pre-aggregated data later
+      // grouping by suffix results in all rule and versions for given suffix
+      val rulesBySuffix = rules.groupBy(r => r.metricSuffix)
       var chosenRule: Option[AggRule] = None
 
-      for {rule <- rulesGroupedByIdLevel} { // iterate to see which id/level the best rule to use
+      for { rule <- rulesBySuffix } { // iterate to see which suffix is the best to use
         val ruleIsEligible = rule._2.forall { r =>
-          canUseRule(r, canTranslateResult.get.rs.rawSeriesFilters().map(_.column).toSet, agg.clauseOpt)
+          canUseRule(r, canTranslateResult.get.rawSeriesFilters.map(_.column).toSet, agg.clauseOpt)
         }
         if (ruleIsEligible &&
           (chosenRule.isEmpty || firstRuleIsBetterThanSecond(rule._2.head, chosenRule.get))) {
@@ -40,89 +47,144 @@ object AggLpOptimization {
       }
 
       if (chosenRule.isEmpty) {
+        numAggLpNotOptimized.withTag("reason", "noRules").increment()
         // no rule was chosen, return this plan as is
         None
       } else {
         // rule was chosen, rewrite the logical plan to use the pre-aggregated metric
-        val queryMetricName = canTranslateResult.get.metricName
-        val (metricName, _, colOpt) = metricNameComponents(queryMetricName)
         val aggRuleSuffix = chosenRule.get.metricSuffix
-        val aggMetricName = metricNameString(metricName, Some(aggRuleSuffix), colOpt)
-        Some(replaceMetricNameInQuery(agg, aggMetricName))
+        val aggMetricName = metricNameString(metricNameWithoutSuffix(canTranslateResult.get.rawSeriesMetricName),
+          Some(aggRuleSuffix), None)
+        numAggLpOptimized.increment()
+        Some(replaceMetricNameInQuery(agg, aggMetricName, canTranslateResult.get.aggColumnToUse.toSeq,
+                                      canTranslateResult.get.rangeFunctionToUse))
       }
     } else {
+      numAggLpNotOptimized.withTag("reason", "cannotOptimize").increment()
       None
     }
   }
 
-  private case class CanTranslateResult(metricName: String, rs: RawSeriesLikePlan, aggColumn: Option[String])
+  /**
+   * Result of canTranslateQueryToPreagg method. It contains data from the underlying RawSeriesLikePlan
+   * plan and data needed to formulate the new aggregated query.
+   *
+   * @param rawSeriesMetricName The metric name in the underlying RawSeriesLikePlan. This is needed to formulate
+   *                            the new aggregated metric name. It may contain suffixes and column specifiers.
+   * @param rawSeriesFilters The filters in the underlying RawSeriesLikePlan. This is needed to find the relevant rules
+   * @param rawSeriesColumn The column in the underlying RawSeriesLikePlan. This is the column that is being queried
+   *                        in the original query issued by user.
+   * @param timeInterval return timeInterval from the underlying RawSeriesLikePlan. This is needed to find the relevant
+   *                     rules.
+   * @param aggColumnToUse Some means replace the column in optimized query; None means use the same column as in query
+   * @param rangeFunctionToUse Some means replace the range function in optimized query; None means use the same
+   *                           column as in query
+   */
+  private case class CanTranslateResult(rawSeriesMetricName: String,
+                                        rawSeriesFilters: Seq[ColumnFilter],
+                                        rawSeriesColumn: Option[String],
+                                        timeInterval: IntervalSelector,
+                                        aggColumnToUse: Option[String],
+                                        rangeFunctionToUse: Option[RangeFunctionId])
 
   /**
    * Used to determine if the given Aggregate logical plan can be translated to a pre-aggregated metric.
    *
-   * Returns Option(CanTranslateResult) if the query can be translated to a pre-aggregated metric,
-   * None if it cannot be translated.
+   * Returns Option(CanTranslateResult) if the query can be translated to a pre-aggregated metric. It contains data
+   * from the underlying RawSeriesLikePlan and the column to use for aggregation. Method returns None if it cannot be
+   * translated / optimized.
    */
+  // scalastyle:off method.length
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
-    agg match {
+
+    def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String], rangeFunctionId: Option[RangeFunctionId]) = {
+      val metricName = rs.metricName()
+      rs.rangeSelector() match {
+        case is: IntervalSelector => Some(CanTranslateResult(metricName, rs.rawSeriesFilters(),
+                                                             rs.columns().headOption, is, colOpt, rangeFunctionId))
+        case _ => None
+      }
+    }
+
+    val ret = agg match {
+      // sum(rate(foo))
+      // sum(rate(foo::sum))
+      // sum(rate(foo::count))
+      // sum(rate(foo:::agg::count))
+      // sum(rate(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, None))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // rate only on sum and count columns
+          => makeResult(rs, rs.columns().headOption, None)
+
+      // sum(increase(foo))
+      // sum(increase(foo::sum))
+      // sum(increase(foo::count))
+      // sum(increase(foo:::agg::count))
+      // sum(increase(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, None))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // increase only on sum and count columns
+          => makeResult(rs, rs.columns().headOption, None)
+
+      // sum(sum_over_time(foo))
+      // sum(sum_over_time(foo:::agg::sum))
+      // sum(sum_over_time(foo:::agg::count))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("sum")))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // SumOverTime only on sum/count column
+          => makeResult(rs, rs.columns().headOption.orElse(Some("sum")), None)
+
+      // sum(count_over_time(foo))
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("count")))
+                    _) if rs.columns().isEmpty
+          => makeResult(rs, Some("count"), Some(SumOverTime))
+
+      // sum(min_over_time(min))
+      // sum(min_over_time(foo::min))
       case Aggregate(AggregationOperator.Min,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("min")))
+                    _) if rs.columns().toSet.subsetOf(Set("min"))
+          => makeResult(rs, Some("min"), None)
+
+      // sum(max_over_time(max))
+      // sum(max_over_time(foo::max))
       case Aggregate(AggregationOperator.Max,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
-                    _) => Some(CanTranslateResult(rs.metricName(), rs, Some("max")))
+                    _) if rs.columns().toSet.subsetOf(Set("max"))
+          => makeResult(rs, Some("max"), None)
+
       case _ => None
     }
-  }
-
-  private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String): Aggregate = {
-    agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing].copy(
-      series = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing].series
-        .replaceRawSeriesFilters(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))))))
-  }
-
-  /**
-   * Extracts the metric name components from the metric name string.
-   * @return (metricName, Some(aggRuleSuffix), Some(column))
-   */
-  private def metricNameComponents(metricNameStr: String): (String, Option[String], Option[String]) = {
-    val c1 = metricNameStr.split(":::")
-    val metricName = c1.head
-    if (c1.length > 1) {
-      // if there is a suffix, then it is an aggregated metric
-      val c2 = c1(1).split("::")
-      if (c2.length > 1) {
-        (metricName, Some(c2.head), Some(c2(1)))
-      } else {
-        (metricName, Some(c2.head), None)
-      }
+    if (ret.isEmpty) {
+      None
     } else {
-      (metricName, None, None)
+      // if the query column is not the same as the suggested aggregation column, it is a wierd case, so don't optimize
+      val queryColumnOpt = ret.get.rawSeriesColumn
+      if (queryColumnOpt.isEmpty || queryColumnOpt == ret.get.aggColumnToUse) ret else None
     }
   }
+
+  private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String,
+                                       col: Seq[String], rf: Option[RangeFunctionId]): Aggregate = {
+    agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing]
+      .replaceRFFiltersAndColumn(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
+  }
+
+  private def metricNameWithoutSuffix(metricNameStr: String): String = metricNameStr.split(":::").head
 
   private def metricNameString(metricName: String, ruleSuffix: Option[String], col: Option[String]): String = {
     s"$metricName${ruleSuffix.map(s => s":::$s").getOrElse("")}${col.map(c => s":$c").getOrElse("")}"
   }
 
+  private lazy val shardKeys = HierarchicalQueryExperience.shardKeyColumnsOption.toSeq.flatten
   /**
    * Checks if the given AggRule can be used for the given filter tags and aggregate clause.
    *
@@ -138,15 +200,14 @@ object AggLpOptimization {
   private def canUseRule(rule: AggRule, filterTags: Set[String], aggClause: Option[AggregateClause]): Boolean = {
     // Note: We assume that the rule is relevant since it is already filtered by the column filters in the query.
     // and we just need to check if the filter tags and aggregate clause match the rule.
-    // TODO do we need to shard key columns ? They will never be dropped by aggregation rules.
     rule match {
       case in: IncludeAggRule =>
-        filterTags.subsetOf(in.tags) && // filter tags should be included in the rule
+        (filterTags -- shardKeys).subsetOf(in.tags) && // filter tags should be included in the rule
           (aggClause.isEmpty || // no group by or without clause
             (aggClause.get.clauseType == AggregateClause.ClauseType.By &&
               aggClause.get.labels.toSet.subsetOf(in.tags))  // by clause labels are all included in rule
           )
-        // Include rules do not work with without clause since wew do not know all the labels that will be dropped
+        // Include rules do not work with without clause since we do not know all the labels that will be dropped
       case ex: ExcludeAggRule =>
         filterTags.intersect(ex.tags).isEmpty && // none of the filter tags should be excluded
           (aggClause.isEmpty || // no group by or without clause
