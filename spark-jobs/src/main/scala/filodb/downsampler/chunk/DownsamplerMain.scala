@@ -4,18 +4,21 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
 
+import scala.collection.mutable.ListBuffer
 import scala.collection.parallel.ForkJoinTaskSupport
 
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.types._
 
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.query.ColumnFilter
+import filodb.core.store.{RawPartData, ScanSplit}
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
 
@@ -36,6 +39,54 @@ class DefaultSparkSessionFactory extends SparkSessionFactory {
   }
 }
 
+trait ChunkPersistor {
+  def init(sparkConf: SparkConf): Unit
+  def persist(downsampledChunks: DataFrame, batchDownsampler: BatchDownsampler): Unit
+}
+
+class DefaultChunkPersistor extends ChunkPersistor {
+  override def init(sparkConf: SparkConf): Unit = ()
+
+  override def persist(downsampledChunks: DataFrame, batchDownsampler: BatchDownsampler): Unit = {
+    batchDownsampler.persistDownsampledChunks(downsampledChunks)
+  }
+}
+
+trait DSPartitionReader {
+  def read(spark: SparkSession, batchDownsampler: BatchDownsampler,
+           ingestionTimeStart: Long, ingestionTimeEnd: Long,
+           userTimeStart: Long, userTimeEndExclusive: Long): RDD[Seq[RawPartData]]
+}
+
+class DefaultDSPartitionReader extends DSPartitionReader {
+  override def read(spark: SparkSession, batchDownsampler: BatchDownsampler,
+                    ingestionTimeStart: Long, ingestionTimeEnd: Long,
+                    userTimeStart: Long, userTimeEndExclusive: Long): RDD[Seq[RawPartData]] = {
+    val splits: Seq[ScanSplit] = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef)
+    val settings = batchDownsampler.settings
+    DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
+      s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
+    spark.sparkContext
+      .makeRDD(splits)
+      .mapPartitions { splitIter: Iterator[ScanSplit] =>
+        Kamon.init()
+        KamonShutdownHook.registerShutdownHook() // ???
+        val rawDataSource = batchDownsampler.rawCassandraColStore
+        rawDataSource.initialize(
+          batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources
+        )
+        val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
+          datasetRef = batchDownsampler.rawDatasetRef,
+          splits = splitIter, ingestionTimeStart = ingestionTimeStart,
+          ingestionTimeEnd = ingestionTimeEnd,
+          userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
+          maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          batchSize = settings.batchSize,
+          cassFetchSize = settings.cassFetchSize)
+        batchIter
+      }
+  }
+}
 /**
   *
   * Goal: Downsample all real-time data.
@@ -72,6 +123,7 @@ object DownsamplerMain extends App {
   val settings = new DownsamplerSettings()
   val d = new Downsampler(settings)
   val sparkConf = new SparkConf(loadDefaults = true)
+    .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
   d.run(sparkConf)
 }
 
@@ -164,24 +216,19 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
-    val rdd = spark.sparkContext
-      .makeRDD(splits)
-      .mapPartitions { splitIter =>
-        Kamon.init()
-        KamonShutdownHook.registerShutdownHook()
-        val rawDataSource = batchDownsampler.rawCassandraColStore
-        rawDataSource.initialize(batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources)
-        val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
-          datasetRef = batchDownsampler.rawDatasetRef,
-          splits = splitIter, ingestionTimeStart = ingestionTimeStart,
-          ingestionTimeEnd = ingestionTimeEnd,
-          userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
-          maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = settings.batchSize,
-          cassFetchSize = settings.cassFetchSize)
-        batchIter
-      }
-      .map { rawPartsBatch =>
+
+    val dsIndexReader = Class.forName(settings.dsIndexReader)
+      .getDeclaredConstructor()
+      .newInstance()
+      .asInstanceOf[DSPartitionReader]
+
+    val sourceRdd: RDD[Seq[RawPartData]] = dsIndexReader.read(
+      spark, batchDownsampler,
+      ingestionTimeStart, ingestionTimeEnd, userTimeStart, userTimeEndExclusive
+    )
+
+    val pagedReadablePartitionsRdd: RDD[Seq[PagedReadablePartition]] =
+      sourceRdd.map { rawPartsBatch: Seq[RawPartData] =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
@@ -192,14 +239,6 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         }
       }
 
-    val rddWithDs = if (settings.chunkDownsamplerIsEnabled) {
-      // Downsample the data.
-      // NOTE: this step returns each row of the RDD as-is; it does NOT return downsampled data.
-      rdd.map { part =>
-        batchDownsampler.downsampleBatch(part)
-        part
-      }
-    } else rdd
 
     if (settings.exportIsEnabled && settings.exportKeyToConfig.nonEmpty) {
       // Used to process tasks in parallel. Allows configurable parallelism.
@@ -208,11 +247,11 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         // downsample the data as the first key is exported
         val firstExportTaskWithDs = Seq(() => {
           val (filters, config) = settings.exportKeyToConfig.head
-          exportForKey(rddWithDs, filters, config, batchExporter, spark)
+          exportForKey(pagedReadablePartitionsRdd, filters, config, batchExporter, spark)
         })
         // export all remaining keys without the downsample step
         val remainingExportTasksWithoutDs = settings.exportKeyToConfig.tail.map { case (filters, config) =>
-          () => exportForKey(rdd, filters, config, batchExporter, spark)
+          () => exportForKey(pagedReadablePartitionsRdd, filters, config, batchExporter, spark)
         }
         // create a parallel sequence of tasks
         (firstExportTaskWithDs ++ remainingExportTasksWithoutDs).par
@@ -221,9 +260,59 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       exportTasks.tasksupport = taskSupport
       // export/downsample RDDs in parallel
       exportTasks.foreach(_.apply())
-    } else {
-      // Just invoke the DS step.
-      rddWithDs.foreach(_ => {})
+    }
+
+    // Here we essentially say, that downsampler logic is overloaded with understanding whether the downsampler
+    // actually needs to WRITE the data to C* or not.
+    // settings.shouldUseChunkPersistor tells downsampler whether it will save the data to C* or not and even more
+    // importantly whether the downsampler will actually RETURN the downsampled data as a collection of Spark Rows
+
+    // exportIsEnabled - this controls whether we dump the downsampled rows to some storage
+
+    // chunkDownsamplerIsEnabled - this controls whether the downsample job actually downsamples anything, the flag
+    // seemingly does not make sense (why would you run a downsample job if you do not downsample anything?) but
+    // you can run the job to export the data (so, you can disable downsample logic).
+    if (settings.chunkDownsamplerIsEnabled) {
+      val downsampledRowsRdd: RDD[ListBuffer[Row]] = {
+        // Downsample the data.
+        pagedReadablePartitionsRdd.map { part =>
+          // here we do not save any data to C* if settings.shouldUseChunksPersistor == true
+          // but in that case we get the a list of downsampled rows
+          val rows: ListBuffer[Row] = batchDownsampler.downsampleBatch(part)
+          if (settings.shouldUseChunksPersistor) {
+            rows
+          } else {
+            ListBuffer.empty[Row]
+          }
+        }
+      }
+      val prpCount = pagedReadablePartitionsRdd.count()
+      DownsamplerContext.dsLogger.info(s"Processed $prpCount PagedReadablePartitions")
+      val downsampledBatches: Long = downsampledRowsRdd.count()
+      downsampledRowsRdd.foreach(_ => {})
+      DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
+
+      if (settings.shouldUseChunksPersistor) {
+        val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
+            .getDeclaredConstructor()
+            .newInstance()
+            .asInstanceOf[ChunkPersistor]
+        persistor.init(sparkConf)
+
+        val chunkRows: RDD[Row] = downsampledRowsRdd.flatMap(x => x)
+        val schema = StructType(Seq(
+          StructField("res", StringType, true),
+          StructField("partition", BinaryType, true),
+          StructField("chunkid", LongType, true),
+          StructField("info", BinaryType, true),
+          StructField("chunks", ArrayType(BinaryType), true),
+          StructField("ingestion_time", LongType, true),
+          StructField("start_time", LongType, true),
+          StructField("index_info", BinaryType, true)
+        ))
+        val downsampledDf = spark.createDataFrame(chunkRows, schema)
+        persistor.persist(downsampledDf, batchDownsampler)
+      }
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +

@@ -1,25 +1,32 @@
 package filodb.downsampler.chunk
 
-import scala.collection.mutable.{ArrayBuffer, Map => MMap}
-import scala.concurrent.Await
-import scala.concurrent.duration.FiniteDuration
+import java.nio.ByteBuffer
 
+import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map => MMap}
+import scala.concurrent.Await
+import scala.concurrent.duration.{Duration, FiniteDuration}
+
+import com.datastax.driver.core.ConsistencyLevel
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
+import org.apache.spark.sql.{DataFrame, Row}
 import spire.syntax.cfor._
 
+import filodb.cassandra.Util.toBuffer
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.downsample._
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.store.{ChunkSet, ReadablePartition}
+import filodb.core.store.{ChunkSet, ChunkSetInfo, ReadablePartition}
 import filodb.downsampler.{DownsamplerContext, Utils}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.exec.UnknownSchemaQueryErr
+
+//import org.apache.spark.sql.Row
 
 /**
   * This object maintains state during the processing of a batch of TSPartitions to downsample. Namely
@@ -34,7 +41,7 @@ import filodb.query.exec.UnknownSchemaQueryErr
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-class BatchDownsampler(settings: DownsamplerSettings,
+class BatchDownsampler(val settings: DownsamplerSettings,
                        userTimeStart: Long,
                        userTimeEndExclusive: Long) extends Instance with Serializable {
 
@@ -60,11 +67,11 @@ class BatchDownsampler(settings: DownsamplerSettings,
 
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
 
-  @transient lazy private[downsampler] val downsampleCassandraColStore =
+  @transient lazy val downsampleCassandraColStore =
     new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
                              true)(DownsamplerContext.writeSched)
 
-  @transient lazy private[downsampler] val rawCassandraColStore =
+  @transient lazy val rawCassandraColStore =
     new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
                              false)(DownsamplerContext.writeSched)
 
@@ -98,7 +105,7 @@ class BatchDownsampler(settings: DownsamplerSettings,
   /**
     * Raw dataset from which we downsample data
     */
-  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
+  @transient lazy val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
   // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
   // possible mis-calculation of max block meta size.
@@ -107,7 +114,7 @@ class BatchDownsampler(settings: DownsamplerSettings,
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  @transient lazy private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
+  @transient lazy val downsampleRefsByRes = settings.downsampleResolutions
                 .zip(settings.downsampledDatasetRefs).toMap
 
   @transient lazy private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
@@ -116,7 +123,7 @@ class BatchDownsampler(settings: DownsamplerSettings,
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   // scalastyle:off method.length
-  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition]): Unit = {
+  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition]): ListBuffer[Row] = {
 
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${readablePartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
@@ -133,6 +140,7 @@ class BatchDownsampler(settings: DownsamplerSettings,
     val offHeapMem = new OffHeapMemory(rawSchemas.flatMap(_.downsample),
       kamonTags, maxMetaSize, settings.downsampleStoreConfig)
     var numDsChunks = 0
+    var chunksToPersist = ListBuffer.empty[Row]
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
     try {
       numPartitionsEncountered.increment(readablePartsBatch.length)
@@ -160,7 +168,12 @@ class BatchDownsampler(settings: DownsamplerSettings,
           DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
         }
       }
-      numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
+      //numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
+      if (settings.shouldUseChunksPersistor) {
+        chunksToPersist = getDownsampledChunksAsList(downsampledChunksToPersist)
+      } else {
+        numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
+      }
     } catch { case e: Exception =>
       numBatchesFailed.increment()
       throw e // will be logged by spark
@@ -174,6 +187,7 @@ class BatchDownsampler(settings: DownsamplerSettings,
     DownsamplerContext.dsLogger.info(
       s"Finished iterating through and downsampling batchSize=${readablePartsBatch.size} " +
       s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
+    chunksToPersist
   }
 
   /**
@@ -343,9 +357,56 @@ class BatchDownsampler(settings: DownsamplerSettings,
   }
 
   /**
+   * Get downsampled chunks
+   */
+  private def getDownsampledChunksAsList(
+    downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]
+  ): ListBuffer[Row] = {
+    val start = System.currentTimeMillis()
+    @volatile var numChunks = 0
+    // write all chunks to cassandra
+    val allRows = new ListBuffer[Row]
+    downsampledChunksToPersist.foreach { case (res, chunks) =>
+      // FIXME if listener in chunkset below is not copied + overridden to no-op, we get a SEGV because
+      // of a bug in either monix's mapAsync or cassandra driver where the future is completed prematurely.
+      // This causes a race condition between free memory and chunkInfo.id access in updateFlushedId.
+      val chunksToPersist = chunks.map { c =>
+        numChunks += 1
+        c.copy(listener = _ => {})
+      }
+      chunksToPersist.foreach { c =>
+        val partBytes = BinaryRegionLarge.asNewByteArray(c.partition)
+        var chunkBytes = 0L
+        val chunkList = c.chunks.map { bytes =>
+          val finalBytes = bytes // TODO compressChunk(bytes)
+          chunkBytes += finalBytes.capacity.toLong
+          val arr = new Array[Byte](finalBytes.remaining)
+          finalBytes.get(arr)
+          arr
+        }
+        allRows += Row(
+          res.toString(),
+          toBuffer(partBytes).array(),
+          c.info.id,
+          toBuffer(ChunkSetInfo.toBytes(c.info)).array(),
+          chunkList.toArray,
+          c.info.ingestionTime,
+          c.info.startTime,
+          ChunkSetInfo.toBytes(c.info)
+        )
+      }
+      //      downsampleCassandraColStore.write(downsampleRefsByRes(res),
+      //      Observable.fromIteratorUnsafe(chunksToPersist), settings.ttlByResolution(res))
+    }
+    allRows
+  }
+
+  /**
     * Persist chunks in `downsampledChunksToPersist` to Cassandra.
     */
-  private def persistDownsampledChunks(downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Int = {
+  private def persistDownsampledChunks(
+    downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]
+  ): Int = {
     val start = System.currentTimeMillis()
     @volatile var numChunks = 0
     // write all chunks to cassandra
@@ -372,6 +433,40 @@ class BatchDownsampler(settings: DownsamplerSettings,
     numDownsampledChunksWritten.increment(numChunks)
     downsampleBatchPersistLatency.record(System.currentTimeMillis() - start)
     numChunks
+    //ListBuffer.empty[Row]
   }
 
+
+  def persistDownsampledChunks(downsampledChunksToPersist: DataFrame): Unit = {
+    downsampledChunksToPersist.foreach { row =>
+      val res = Duration.apply(row.getString(0)).asInstanceOf[FiniteDuration]
+      val chunkTable = downsampleCassandraColStore.getOrCreateChunkTable(
+        downsampleRefsByRes(res))
+      import collection.JavaConverters._
+      val chunks = row.getAs[Seq[Array[Byte]]](4).map(ByteBuffer.wrap).toList.asJava
+      val insert = chunkTable.writeChunksCql.bind()
+        .setBytes(0, ByteBuffer.wrap(row.getAs[Array[Byte]](1)))
+        .setLong(1, row.getLong(2))
+        .setBytes(2, ByteBuffer.wrap(row.getAs[Array[Byte]](3)))
+        .setList(3, chunks, classOf[ByteBuffer])
+        .setInt(4, settings.ttlByResolution(res))
+      Await.result(
+        chunkTable.connector.execStmtWithRetries(insert.setConsistencyLevel(ConsistencyLevel.ALL)),
+        Duration.Inf
+      )
+
+      val indexTable = downsampleCassandraColStore
+        .getOrCreateIngestionTimeIndexTable(downsampleRefsByRes(res))
+      val indexInsert = indexTable.writeIndexCql.bind(ByteBuffer.wrap(row.getAs[Array[Byte]](1)),
+        row.getLong(5): java.lang.Long,
+        row.getLong(6): java.lang.Long,
+        ByteBuffer.wrap(row.getAs[Array[Byte]](7)),
+        downsampleCassandraColStore.writeTimeIndexTtlSeconds: java.lang.Integer)
+      Await.result(
+        indexTable.connector.execStmtWithRetries(indexInsert.setConsistencyLevel(ConsistencyLevel.ALL)),
+        Duration.Inf
+      )
+      ()
+    }
+  }
 }
