@@ -145,16 +145,16 @@ object AggLpOptimization {
                     _) if rs.columns().isEmpty
           => makeResult(rs, Some("count"), Some(SumOverTime))
 
-      // sum(min_over_time(min))
-      // sum(min_over_time(foo::min))
+      // min(min_over_time(foo))
+      // min(min_over_time(foo:::agg::min))
       case Aggregate(AggregationOperator.Min,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
                     _) if rs.columns().toSet.subsetOf(Set("min"))
           => makeResult(rs, Some("min"), None)
 
-      // sum(max_over_time(max))
-      // sum(max_over_time(foo::max))
+      // max(max_over_time(foo))
+      // max(max_over_time(foo:::agg::max))
       case Aggregate(AggregationOperator.Max,
                     PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
