@@ -43,6 +43,17 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  it ("[exclude rules] should not optimize if window less than 60s") {
+    val testCases = Seq(
+      // should use rule 1 level 1 since container is needed
+      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
+      """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
+        -> """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
   it ("[exclude rules] should optimize by picking rule with excludes more labels") {
     val testCases = Seq(
       // should use rule 1 level 2 since it excludes more labels
