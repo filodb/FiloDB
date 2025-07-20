@@ -170,9 +170,11 @@ object PartitionSchema {
  */
 final case class Schema(partition: PartitionSchema, data: DataSchema, var downsample: Option[Schema] = None) {
   val allColumns = data.columns ++ partition.columns
+  private val oooColIndex = allColumns.find(_.name == RecordSchema.oooColName).map(_.id)
   val ingestionSchema = new RecordSchema(allColumns.map(c => ColumnInfo(c.name, c.columnType)),
                                          Some(data.columns.length),
-                                         partition.predefinedKeys)
+                                         partition.predefinedKeys,
+                                         oooColIndex = oooColIndex.map(_ + data.columns.length))
 
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema

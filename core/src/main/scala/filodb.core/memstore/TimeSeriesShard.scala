@@ -623,7 +623,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
           }
         } else {
-          getOrAddPartitionAndIngest(ingestionTime, recBase, recOffset, group, schema)
+          getOrAddPartitionAndIngest(ingestionTime, recBase, recOffset, group, schema, 0)
           numActuallyIngested += 1
         }
       } else {
@@ -1009,6 +1009,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.evictablePartKeysSize.increment()
   }
 
+  /**
+   * Looks up the partition for the given record, or adds a new one if not found.
+   * Does not ingest the record. Hence oooSeq number is not needed. oooSeq is only needed when ingesting
+   * a sample - it is passed through and incremented when ingestion fails.
+   *
+   * @return the partition, or OutOfMemPartition if memory allocation failed
+   */
   private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                             group: Int, schema: Schema) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
@@ -1112,7 +1119,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   def getOrAddPartitionAndIngest(ingestionTime: Long,
                                  recordBase: Any, recordOff: Long,
-                                 group: Int, schema: Schema): Unit = {
+                                 group: Int, schema: Schema, oooSeq: Int): Unit = {
     assertThreadName(IngestSchedName)
     try {
       val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, schema)
@@ -1123,26 +1130,32 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+        val isOOO = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
-        // time series was inactive and has just started re-ingesting
-        if (!tsp.ingesting) {
-          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
-          activelyIngesting.synchronized {
-            if (!tsp.ingesting) {
-              // This is coded to work concurrently with logic in updateIndexWithEndTime
-              // where we try to de-activate an active time series.
-              // Checking ts.ingesting second time needed since the time series may have ended
-              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
-              // DO NOT remove the second tsp.ingesting check without understanding this fully.
-              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              dirtyPartitionsForIndexFlush += part.partID
-              activelyIngesting += part.partID
-              tsp.ingesting = true
-              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
-                tsp.schema.options.shardKeyColumns)
-              if (storeConfig.meteringEnabled) {
-                modifyCardinalityCountNoThrow(shardKey, 0, 1)
+
+        if (!isOOO) { // out of order sample; try to ingest again with higher oooSeq
+          schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
+          getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
+        } else {
+          // time series was inactive and has just started re-ingesting
+          if (!tsp.ingesting) {
+            // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
+            activelyIngesting.synchronized {
+              if (!tsp.ingesting) {
+                // This is coded to work concurrently with logic in updateIndexWithEndTime
+                // where we try to de-activate an active time series.
+                // Checking ts.ingesting second time needed since the time series may have ended
+                // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
+                // DO NOT remove the second tsp.ingesting check without understanding this fully.
+                updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+                dirtyPartitionsForIndexFlush += part.partID
+                activelyIngesting += part.partID
+                tsp.ingesting = true
+                val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                  tsp.schema.options.shardKeyColumns)
+                if (storeConfig.meteringEnabled) {
+                  modifyCardinalityCountNoThrow(shardKey, 0, 1)
+                }
               }
             }
           }
