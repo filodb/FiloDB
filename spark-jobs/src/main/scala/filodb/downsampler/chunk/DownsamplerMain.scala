@@ -170,6 +170,16 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   // See https://medium.com/onzo-tech/serialization-challenges-with-spark-and-scala-a2287cd51c54
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): SparkSession = {
+    val chunkPersistor = if (settings.shouldUseChunksPersistor) {
+      val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
+        .getDeclaredConstructor()
+        .newInstance()
+        .asInstanceOf[ChunkPersistor]
+      persistor.init(sparkConf)
+      Some(persistor)
+    } else {
+      None
+    }
 
     val spark = Class.forName(settings.sparkSessionFactoryClass)
       .getDeclaredConstructor()
@@ -293,11 +303,12 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
 
       if (settings.shouldUseChunksPersistor) {
-        val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
-            .getDeclaredConstructor()
-            .newInstance()
-            .asInstanceOf[ChunkPersistor]
-        persistor.init(sparkConf)
+        val persistor = chunkPersistor.get
+//        val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
+//            .getDeclaredConstructor()
+//            .newInstance()
+//            .asInstanceOf[ChunkPersistor]
+//        persistor.init(sparkConf)
 
         val chunkRows: RDD[Row] = downsampledRowsRdd.flatMap(x => x)
         val schema = StructType(Seq(
