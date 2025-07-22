@@ -111,27 +111,33 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   it("should ingest ooo data map/tags column as partition key and aggregate") {
-    memStore.setup(dataset2_1.ref, schemas2_1, 0, TestData.storeConf, 1)
+    val config2 = ConfigFactory.parseString("""
+                                            |memstore.ooo-data-points-enabled = true
+                                            |""".stripMargin)
+                            .withFallback(config)
+
+    val memStore1 = new TimeSeriesMemStore(config2, new NullColumnStore, new InMemoryMetaStore())
+    memStore1.setup(dataset2_1.ref, schemas2_1, 0, TestData.storeConf, 1)
     val series = withMap(linearOooMultiSeries(numSeries = 1).take(200), 1)
     val data = records(dataset2_1, series)
-    memStore.ingest(dataset2_1.ref, 0, data)
+    memStore1.ingest(dataset2_1.ref, 0, data)
 
-    memStore.refreshIndexForTesting(dataset2_1.ref)
+    memStore1.refreshIndexForTesting(dataset2_1.ref)
 
-    val parts = memStore.getShard(dataset2_1.ref, 0).get.partitions
+    val parts = memStore1.getShard(dataset2_1.ref, 0).get.partitions
     parts.size shouldEqual 2
     parts.get(0).stringPartition shouldEqual "b2[schema=schemaID:51001  _o_=0,series=Series 0,tags={n: 0}]"
     parts.get(1).stringPartition shouldEqual "b2[schema=schemaID:51001  _o_=1,series=Series 0,tags={n: 0}]"
 
-    val split = memStore.getScanSplits(dataset2_1.ref, 1).head
+    val split = memStore1.getScanSplits(dataset2_1.ref, 1).head
     val filter1 = ColumnFilter("n", Filter.Equals("0".utf8))
     val filter2 = ColumnFilter("_o_", Filter.Equals("0".utf8))
-    val agg1 = memStore.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter2))).map(_.getDouble(0)).sum
+    val agg1 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter2))).map(_.getDouble(0)).sum
     agg1 shouldEqual 2550
 
     val filter3 = ColumnFilter("n", Filter.Equals("0".utf8))
     val filter4 = ColumnFilter("_o_", Filter.Equals("1".utf8))
-    val agg2 = memStore.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter3, filter4))).map(_.getDouble(0)).sum
+    val agg2 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter3, filter4))).map(_.getDouble(0)).sum
     agg2 shouldEqual 2500
   }
 

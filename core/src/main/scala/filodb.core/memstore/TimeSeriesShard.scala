@@ -287,6 +287,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private val clusterType = filodbConfig.getString("cluster-type")
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
+  private val oooDataPointsEnabled = filodbConfig.getBoolean("memstore.ooo-data-points-enabled")
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
@@ -1133,7 +1134,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val isNotOOO = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
 
-        if (!isNotOOO) { // out of order sample; try to ingest again with higher oooSeq
+        if (!isNotOOO && oooDataPointsEnabled) {
+          // out of order sample; try to ingest again with higher oooSeq
           schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
           getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
         } else {
