@@ -226,7 +226,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
-
+    DownsamplerContext.dsLogger.info(s"Downsample Index Reader: ${settings.dsIndexReader}")
     val dsIndexReader = Class.forName(settings.dsIndexReader)
       .getDeclaredConstructor()
       .newInstance()
@@ -303,6 +303,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
 
       if (settings.shouldUseChunksPersistor) {
+        DownsamplerContext.dsLogger.info(s"Using Chunk Persistor ${settings.chunksPersistor}")
         val persistor = chunkPersistor.get
 //        val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
 //            .getDeclaredConstructor()
