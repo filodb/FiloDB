@@ -1130,10 +1130,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        val isOOO = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+        val isNotOOO = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
 
-        if (!isOOO) { // out of order sample; try to ingest again with higher oooSeq
+        if (!isNotOOO) { // out of order sample; try to ingest again with higher oooSeq
           schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
           getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
         } else {

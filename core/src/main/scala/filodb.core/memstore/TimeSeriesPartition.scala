@@ -134,13 +134,12 @@ extends ChunkMap(initMapSize) with ReadablePartition {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
     // accept duplicate sample when acceptDuplicateSamples = true, drop otherwise
-    if (ts > timestampOfLatestSample
-      ||  ts == timestampOfLatestSample && acceptDuplicateSamples) {
+    val lastTs = timestampOfLatestSample
+    if (ts > lastTs ||  ts == lastTs && acceptDuplicateSamples) {
       val newChunk = currentChunks == nullChunks
       if (newChunk) initNewChunk(ts, ingestionTime)
 
-      if(!newChunk && createChunkAtFlushBoundary
-        && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
+      if(!newChunk && createChunkAtFlushBoundary && ts/flushIntervalMillis.get != lastTs/flushIntervalMillis.get) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
         switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
