@@ -165,6 +165,18 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  it("[exclude rules] should optimize subqueries") {
+    val testCases = Seq(
+      // top level subquery
+      """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s]"""
+        -> """min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s]""",
+      // subquery with windowing
+      """sum_over_time(min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
+      -> """sum_over_time(min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
   it("[exclude rules] should not optimize wierd cases where query already has a column that is not the right aggregation column") {
     val testCases = Seq(
       """max(max_over_time(foo::min{_ws_="demo",_ns_="localNs"}[300s])) by (container)"""
