@@ -170,6 +170,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   // See https://medium.com/onzo-tech/serialization-challenges-with-spark-and-scala-a2287cd51c54
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): SparkSession = {
+    // Chunk Persistor has to be initialized BEFORE spark session is created
     val chunkPersistor = if (settings.shouldUseChunksPersistor) {
       val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
         .getDeclaredConstructor()
@@ -296,11 +297,9 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
           }
         }
       }
-      val prpCount = pagedReadablePartitionsRdd.count()
-      DownsamplerContext.dsLogger.info(s"Processed $prpCount PagedReadablePartitions")
-      val downsampledBatches: Long = downsampledRowsRdd.count()
-      downsampledRowsRdd.foreach(_ => {})
-      DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
+//      val downsampledBatches: Long = downsampledRowsRdd.count()
+//      downsampledRowsRdd.foreach(_ => {})
+//      DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
 
       if (settings.shouldUseChunksPersistor) {
         DownsamplerContext.dsLogger.info(s"Using Chunk Persistor ${settings.chunksPersistor}")
@@ -323,7 +322,11 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
           StructField("index_info", BinaryType, true)
         ))
         val downsampledDf = spark.createDataFrame(chunkRows, schema)
-        persistor.persist(downsampledDf, batchDownsampler)
+        val cachedDownsampledDf = downsampledDf.cache()
+        val rows = cachedDownsampledDf.count()
+        DownsamplerContext.dsLogger.info(s"Downsampled rows/time series: $rows")
+
+        persistor.persist(cachedDownsampledDf, batchDownsampler)
       }
     }
 
