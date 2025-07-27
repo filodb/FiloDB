@@ -338,9 +338,9 @@ object MachineMetricsData {
         seriesPrefix + (n % numSeries))
     }.take(100).toArray
     // swap every 2nd record to create out-of-order timestamps
-    for (i <- 0 until buffer.length - 1 by 2) {
-      val temp = buffer(i)
-      buffer(i) = buffer(i + 1)
+    for (i <- 1 until buffer.length-1 by 3) {
+      val temp = buffer(i-1)
+      buffer(i-1) = buffer(i + 1)
       buffer(i + 1) = temp
     }
     buffer.toStream

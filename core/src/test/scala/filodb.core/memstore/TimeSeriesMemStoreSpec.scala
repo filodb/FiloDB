@@ -124,21 +124,46 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore1.refreshIndexForTesting(dataset2_1.ref)
 
-    val parts = memStore1.getShard(dataset2_1.ref, 0).get.partitions
-    parts.size shouldEqual 2
+    val shard = memStore1.getShard(dataset2_1.ref, 0).get
+    val parts = shard.partitions
+    parts.size shouldEqual 3
     parts.get(0).stringPartition shouldEqual "b2[schema=schemaID:51001  _o_=0,series=Series 0,tags={n: 0}]"
     parts.get(1).stringPartition shouldEqual "b2[schema=schemaID:51001  _o_=1,series=Series 0,tags={n: 0}]"
+    parts.get(2).stringPartition shouldEqual "b2[schema=schemaID:51001  _o_=2,series=Series 0,tags={n: 0}]"
 
     val split = memStore1.getScanSplits(dataset2_1.ref, 1).head
+
     val filter1 = ColumnFilter("n", Filter.Equals("0".utf8))
     val filter2 = ColumnFilter("_o_", Filter.Equals("0".utf8))
     val agg1 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter2))).map(_.getDouble(0)).sum
-    agg1 shouldEqual 2550
+    agg1 shouldEqual 1783.0
 
-    val filter3 = ColumnFilter("n", Filter.Equals("0".utf8))
-    val filter4 = ColumnFilter("_o_", Filter.Equals("1".utf8))
-    val agg2 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter3, filter4))).map(_.getDouble(0)).sum
-    agg2 shouldEqual 2500
+    val filter3 = ColumnFilter("_o_", Filter.Equals("1".utf8))
+    val agg2 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter3))).map(_.getDouble(0)).sum
+    agg2 shouldEqual 1650.0
+
+    val filter4 = ColumnFilter("_o_", Filter.Equals("2".utf8))
+    val agg3 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter4))).map(_.getDouble(0)).sum
+    agg3 shouldEqual 1617.0
+
+    // Switch buffers, encode and release/return buffers for all partitions
+    val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
+    for { n <- 0 until parts.size() } {
+      val part = shard.partitions.get(n)
+      part.switchBuffers(blockFactory, encode = true)
+    }
+
+    // ingest same data again - it should be out of order, and should result in overlapping chunks
+    val series2 = withMap(linearOooMultiSeries(numSeries = 1).take(200), 1)
+    val data2 = records(dataset2_1, series2)
+    memStore1.ingest(dataset2_1.ref, 0, data2)
+
+    memStore1.refreshIndexForTesting(dataset2_1.ref)
+    parts.size shouldEqual 6
+
+    val agg4 = memStore1.scanRows(dataset2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1))).map(_.getDouble(0)).sum
+    agg4 shouldEqual 10100.0 // (1783 + 1650 + 1617) * 2 since we ingested the same data again
+
   }
 
   it("should ingest map/tags column as partition key and read using _type_ filter") {
