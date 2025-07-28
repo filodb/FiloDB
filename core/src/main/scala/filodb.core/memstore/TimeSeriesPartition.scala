@@ -178,7 +178,6 @@ extends ChunkMap(initMapSize) with ReadablePartition {
         true
       }
     } else {
-      shardInfo.stats.outOfOrderDropped.increment()
       false
     }
   }

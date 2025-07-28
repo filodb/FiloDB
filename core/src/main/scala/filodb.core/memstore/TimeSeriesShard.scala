@@ -288,6 +288,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val clusterType = filodbConfig.getString("cluster-type")
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
   private val oooDataPointsEnabled = filodbConfig.getBoolean("memstore.ooo-data-points-enabled")
+  private val oooMaxSeq = filodbConfig.getInt("memstore.ooo-max-sequence-number")
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
@@ -1131,13 +1132,17 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        val isNotOOO = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+        val inOrderAndIngested = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
 
-        if (!isNotOOO && oooDataPointsEnabled) {
-          // out of order sample; try to ingest again with higher oooSeq
-          schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
-          getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
+        if (!inOrderAndIngested) {
+          if (oooDataPointsEnabled && oooSeq < oooMaxSeq) {
+            // out of order sample; try to ingest again with higher oooSeq
+            schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
+            getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
+          } else {
+            shardInfo.stats.outOfOrderDropped.increment()
+          }
         } else {
           // time series was inactive and has just started re-ingesting
           if (!tsp.ingesting) {
