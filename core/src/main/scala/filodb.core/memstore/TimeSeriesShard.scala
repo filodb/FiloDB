@@ -319,7 +319,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
     */
-  private[memstore] val partitions = new NonBlockingHashMapLong[TimeSeriesPartition](InitialNumPartitions, false)
+  private[filodb] val partitions = new NonBlockingHashMapLong[TimeSeriesPartition](InitialNumPartitions, false)
 
   /**
     * next partition ID number
@@ -438,7 +438,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock, evictionLock)
-  private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+  private[filodb] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)

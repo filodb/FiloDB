@@ -308,7 +308,7 @@ object MachineMetricsData {
         (60 + nextInt(25)).toDouble,
         (99.9 + nextInt(15)).toDouble,
         (85 + nextInt(12)).toLong,
-        "Series " + (n % 10))
+        "Series" + (n % 10))
     }
   }
 
@@ -368,10 +368,10 @@ object MachineMetricsData {
   }
 
   // Dataset2_1: Partition keys (series) / Row key timestamp that are out of order
-  val dataset2_1 = Dataset("metrics2.1", Seq("_o_:int", "series:string", "tags:map"), columns,
+  val datasetOoo2_1 = Dataset("metrics2.1", Seq("_o_:int", "_metric_:string", "tags:map"), columns,
     options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
-  val schema2_1 = dataset2_1.schema
-  val schemas2_1 = Schemas(schema2_1.partition, Map(schema2_1.name -> schema2_1))
+  val schemaOoo2_1 = datasetOoo2_1.schema
+  val schemasOoo2_1 = Schemas(schemaOoo2_1.partition, Map(schemaOoo2_1.name -> schemaOoo2_1))
 
   val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns,
     options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
