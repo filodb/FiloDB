@@ -182,12 +182,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
    * aggregation clauses and the column filters satisfies the constraints of the higher level aggregation rule. If so,
    * we update the raw series metric column filter with the higher level aggregation metric to reduce number of
    * timeseries to be scanned and reduce the query latency.
-   * @param params AggRule object - contains details of the higher level aggregation rule and metric
-   * @param parentLogicalPlans Seq of parent logical plans name in the query plan tree.
-   *                           For example:
-   *                           1. query - sum(rate(foo{}[5m])) + sum(rate(bar{}[5m]))
-   *                           2. parentLogicalPlans when execution in PeriodicSeriesWithWindowing will be:
-   *                                    Seq(BinaryJoin, Aggregate)
+   * @param aggRuleProvider can provide the aggregation rules
    * @return Updated logical plan if optimized for higher level aggregation. Else return the same logical plan
    */
   def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan

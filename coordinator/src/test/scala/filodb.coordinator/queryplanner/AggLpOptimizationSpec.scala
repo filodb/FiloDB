@@ -43,6 +43,17 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  it ("[exclude rules] should not optimize if window less than 60s") {
+    val testCases = Seq(
+      // should use rule 1 level 1 since container is needed
+      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
+      """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
+        -> """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
   it ("[exclude rules] should optimize by picking rule with excludes more labels") {
     val testCases = Seq(
       // should use rule 1 level 2 since it excludes more labels
@@ -150,6 +161,18 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
         -> """sum(sum_over_time(foo:::agg1_2::sum{_ws_="demo",_ns_="localNs"}[300s]))""",
       """sum(sum_over_time(foo:::agg1_1::count{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """sum(sum_over_time(foo:::agg1_2::count{_ws_="demo",_ns_="localNs"}[300s]))""",
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
+  it("[exclude rules] should optimize subqueries") {
+    val testCases = Seq(
+      // top level subquery
+      """min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s]"""
+        -> """min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s]""",
+      // subquery with windowing
+      """sum_over_time(min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
+      -> """sum_over_time(min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
     )
     testOptimization(excludeRules1, testCases)
   }
