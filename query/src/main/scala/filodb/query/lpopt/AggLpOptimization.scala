@@ -15,6 +15,7 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  */
 object AggLpOptimization {
 
+  private val aggTimeWindow = 60000L // 1 minute in millis
   private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
   private val numAggLpNotOptimized = Kamon.counter(s"num_agg_lps_not_optimized")
 
@@ -94,14 +95,15 @@ object AggLpOptimization {
    * from the underlying RawSeriesLikePlan and the column to use for aggregation. Method returns None if it cannot be
    * translated / optimized.
    */
-  // scalastyle:off method.length
+  // scalastyle:off method.length cyclomatic.complexity
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
 
-    def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String], rangeFunctionId: Option[RangeFunctionId]) = {
+    def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String],
+                   rangeFunctionId: Option[RangeFunctionId]): Option[CanTranslateResult] = {
       val metricName = rs.metricName()
       rs.rangeSelector() match {
         case is: IntervalSelector => Some(CanTranslateResult(metricName, rs.rawSeriesFilters(),
-                                                             rs.columns().headOption, is, colOpt, rangeFunctionId))
+          rs.columns().headOption, is, colOpt, rangeFunctionId))
         case _ => None
       }
     }
@@ -113,9 +115,9 @@ object AggLpOptimization {
       // sum(rate(foo:::agg::count))
       // sum(rate(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Rate, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Rate, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // rate only on sum and count columns
+                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(increase(foo))
@@ -124,42 +126,60 @@ object AggLpOptimization {
       // sum(increase(foo:::agg::count))
       // sum(increase(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Increase, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // increase only on sum and count columns
+                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(sum_over_time(foo))
       // sum(sum_over_time(foo:::agg::sum))
       // sum(sum_over_time(foo:::agg::count))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("sum", "count")) // SumOverTime only on sum/count column
+                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption.orElse(Some("sum")), None)
 
       // sum(count_over_time(foo))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
-                    _) if rs.columns().isEmpty
+                    _) if aggTimeWindow <= window && rs.columns().isEmpty
           => makeResult(rs, Some("count"), Some(SumOverTime))
 
-      // sum(min_over_time(min))
-      // sum(min_over_time(foo::min))
+      // min(min_over_time(foo))
+      // min(min_over_time(foo:::agg::min))
       case Aggregate(AggregationOperator.Min,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("min"))
+                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("min"))
           => makeResult(rs, Some("min"), None)
 
-      // sum(max_over_time(max))
-      // sum(max_over_time(foo::max))
+      // max(max_over_time(foo))
+      // max(max_over_time(foo:::agg::max))
       case Aggregate(AggregationOperator.Max,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
-                    _) if rs.columns().toSet.subsetOf(Set("max"))
+                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("max"))
           => makeResult(rs, Some("max"), None)
+
+      /*
+         We could optimize queries like sum(foo), max(foo), min(foo), count(foo) by looking back [1m] and optimizing
+         with sum(last_over_time(foo:::agg::sum[1m])) etc with aggregated time series. However, aggregation would
+         happen for all samples arriving in the 1m window, and not strictly using the last sample of each series.
+         The time series could be publishing at a higher frequency than 1m, and thus the aggregation would be over more
+         samples. Thus, the query results may be incorrect and not match with raw if we optimize queries this way.
+
+         In such cases where publish interval is 1m, and optimization is a must-have, users can use optimized queries
+         that approximate. Know that this is not 100% reliable because publish interval is not exactly 1m, and there
+         could be jitter. But it should be close enough.
+
+         Examples of such queries that can be approximately optimized when publish interval is 1m:
+              sum(sum_over_time(foo[1m])) is an optimizable approximation of sum(foo)
+              max(max_over_time(foo[1m])) is an optimizable approximation of max(foo)
+              min(min_over_time(foo[1m])) is an optimizable approximation of min(foo)
+              sum(count_over_time(foo[1m])) is an optimizable approximation of count(foo)
+       */
 
       case _ => None
     }
