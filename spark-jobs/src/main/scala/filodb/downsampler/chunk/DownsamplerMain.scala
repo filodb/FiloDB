@@ -250,7 +250,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         }
       }
 
-
+    // exportIsEnabled - this controls whether we dump the downsampled rows to some storage which is NOT FiloDB
+    // downsample cluster. This is deprecated now and needs to be removed.
     if (settings.exportIsEnabled && settings.exportKeyToConfig.nonEmpty) {
       // Used to process tasks in parallel. Allows configurable parallelism.
       val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
@@ -273,42 +274,28 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       exportTasks.foreach(_.apply())
     }
 
-    // Here we essentially say, that downsampler logic is overloaded with understanding whether the downsampler
-    // actually needs to WRITE the data to C* or not.
-    // settings.shouldUseChunkPersistor tells downsampler whether it will save the data to C* or not and even more
-    // importantly whether the downsampler will actually RETURN the downsampled data as a collection of Spark Rows
-
-    // exportIsEnabled - this controls whether we dump the downsampled rows to some storage
-
     // chunkDownsamplerIsEnabled - this controls whether the downsample job actually downsamples anything, the flag
     // seemingly does not make sense (why would you run a downsample job if you do not downsample anything?) but
-    // you can run the job to export the data (so, you can disable downsample logic).
+    // you can run the job to export the data, not to downsample anything at all (deprecated functionality).
     if (settings.chunkDownsamplerIsEnabled) {
       val downsampledRowsRdd: RDD[ListBuffer[Row]] = {
         // Downsample the data.
         pagedReadablePartitionsRdd.map { part =>
-          // here we do not save any data to C* if settings.shouldUseChunksPersistor == true
-          // but in that case we get the a list of downsampled rows
+          // Here we do NOT save any data to C* if settings.shouldUseChunksPersistor == true, we will get
+          // a list of downsampled rows that we can persist LATER
+          // If, however, shouldUseChunksPersistor == false we will not only downsample but also persist the data
+          // to C* using C* driver and get back ListBuffer.empty[Row]
           val rows: ListBuffer[Row] = batchDownsampler.downsampleBatch(part)
-          if (settings.shouldUseChunksPersistor) {
-            rows
-          } else {
-            ListBuffer.empty[Row]
-          }
+          rows
         }
       }
-//      val downsampledBatches: Long = downsampledRowsRdd.count()
-//      downsampledRowsRdd.foreach(_ => {})
-//      DownsamplerContext.dsLogger.info(s"Downsampled $downsampledBatches batches")
 
+      // instead of saving downsampled data using BatchDownsampler, we will make a dataframe and pass it to
+      // the chunk persistor that can persist the dataframe, ie BatchDownsampler does not perform both functions
+      // (1) downsampleing and (2) persisting. The function of persisiting the data is delegated to ChunkPersitor
       if (settings.shouldUseChunksPersistor) {
         DownsamplerContext.dsLogger.info(s"Using Chunk Persistor ${settings.chunksPersistor}")
         val persistor = chunkPersistor.get
-//        val persistor: ChunkPersistor = Class.forName(settings.chunksPersistor)
-//            .getDeclaredConstructor()
-//            .newInstance()
-//            .asInstanceOf[ChunkPersistor]
-//        persistor.init(sparkConf)
 
         val chunkRows: RDD[Row] = downsampledRowsRdd.flatMap(x => x)
         val schema = StructType(Seq(

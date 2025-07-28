@@ -168,7 +168,6 @@ class BatchDownsampler(val settings: DownsamplerSettings,
           DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
         }
       }
-      //numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
       if (settings.shouldUseChunksPersistor) {
         chunksToPersist = getDownsampledChunksAsList(downsampledChunksToPersist)
       } else {
@@ -186,7 +185,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     val endedAt = System.currentTimeMillis()
     DownsamplerContext.dsLogger.info(
       s"Finished iterating through and downsampling batchSize=${readablePartsBatch.size} " +
-      s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
+      s"partitions in current executor timeTakenMs=${endedAt-startedAt}, persisted downsampled chunks=$numDsChunks")
     chunksToPersist
   }
 
@@ -433,7 +432,6 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     numDownsampledChunksWritten.increment(numChunks)
     downsampleBatchPersistLatency.record(System.currentTimeMillis() - start)
     numChunks
-    //ListBuffer.empty[Row]
   }
 
 
