@@ -3,15 +3,15 @@ package filodb.core.query
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.jdk.CollectionConverters._
 
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
 
-
 object QueryConfig {
   val DefaultVectorsLimit = 150
-
+  // scalastyle:off method.length
   def apply(queryConfig: Config): QueryConfig = {
     val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
     val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
@@ -35,13 +35,18 @@ object QueryConfig {
       FiniteDuration(
         queryConfig.getDuration("routing.max-time-range-remote-raw-export").toMillis, TimeUnit.MILLISECONDS)
     val periodOfUncertaintyMs = queryConfig.getDuration("routing.period-of-uncertainty-ms").toMillis
+    val tenantsWithDisabledRemoteStitch : Set[String] =
+      queryConfig.getStringList("routing.disabled-remote-stitch-tenants").asScala.toSet
+    val stitchDisabledTenantColumn = queryConfig.getString("routing.disabled-remote-stitch-tenant-column-name")
 
     val rc = RoutingConfig(
-      supportRemoteRawExport,
-      maxRemoteRawExportTimeRange,
-      enableApproximatelyEqualCheckInStitch,
-      periodOfUncertaintyMs
-      )
+        supportRemoteRawExport,
+        maxRemoteRawExportTimeRange,
+        enableApproximatelyEqualCheckInStitch,
+        periodOfUncertaintyMs,
+        tenantsWithDisabledRemoteStitch,
+        stitchDisabledTenantColumn
+    )
 
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
     val scCacheSize = queryConfig.as[Int]("single.cluster.cache.cache-size")
@@ -59,6 +64,7 @@ object QueryConfig {
       None,
       containerOverrides, rc, cachingConfig, enableLocalDispatch)
   }
+  // scalastyle:on method.length
 
   import scala.concurrent.duration._
   /**
@@ -86,7 +92,10 @@ case class RoutingConfig(
                           supportRemoteRawExport: Boolean                = false,
                           maxRemoteRawExportTimeRange: FiniteDuration    = 3 days,
                           enableApproximatelyEqualCheckInStitch: Boolean = true,
-                          periodOfUncertaintyMs: Long                    = (5 minutes).toMillis
+                          periodOfUncertaintyMs: Long                    = (5 minutes).toMillis,
+                          tenantsWithDisabledRemoteStitch: Set[String]   = Set.empty,
+                          stitchDisabledTenantColumn: String             = ""
+
                         )
 
 case class CachingConfig(

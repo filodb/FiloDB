@@ -22,6 +22,33 @@ sealed trait LogicalPlan {
     */
   def isTimeSplittable: Boolean = true
 
+  // scalastyle:off cyclomatic.complexity
+  def planColumnFilters(): Seq[ColumnFilter] = this match {
+    case lp: ApplyInstantFunction        => lp.vectors.planColumnFilters()
+    case lp: ApplyInstantFunctionRaw     => lp.rawSeriesFilters()
+    case lp: Aggregate                   => lp.vectors.planColumnFilters()
+    case lp: BinaryJoin                  => lp.rhs.planColumnFilters() ++ lp.lhs.planColumnFilters()
+    case lp: ScalarVectorBinaryOperation => lp.vector.planColumnFilters()
+    case lp: ApplyMiscellaneousFunction  => lp.vectors.planColumnFilters()
+    case lp: ApplySortFunction           => lp.vectors.planColumnFilters()
+    case lp: ScalarVaryingDoublePlan     => lp.vectors.planColumnFilters()
+    case _: ScalarTimeBasedPlan          => Seq.empty
+    case lp: VectorPlan                  => lp.scalars.planColumnFilters()
+    case _: ScalarFixedDoublePlan        => Seq.empty
+    case lp: ApplyAbsentFunction         => lp.vectors.planColumnFilters() ++ lp.columnFilters
+    case lp: ApplyLimitFunction          => lp.vectors.planColumnFilters() ++ lp.columnFilters
+    case _: ScalarBinaryOperation        => Seq.empty
+    case lp: SubqueryWithWindowing       => lp.innerPeriodicSeries.planColumnFilters()
+    case lp: TopLevelSubquery            => lp.innerPeriodicSeries.planColumnFilters()
+    case lp: PeriodicSeries              => lp.rawSeries.rawSeriesFilters()
+    case lp: PeriodicSeriesWithWindowing => lp.series.rawSeriesFilters()
+    case lp: RawSeries                   => lp.rawSeriesFilters()
+    case lp: RawChunkMeta                => lp.filters
+    case lp: MetadataQueryPlan           => lp.filters
+    case lp: TsCardinalities             => lp.filters()
+  }
+  // scalastyle:on cyclomatic.complexity
+
   /**
     * Replace filters present in logical plan
     */
@@ -918,9 +945,9 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
  * Apply Limit Function to a collection of RangeVectors
  */
 case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
-                               columnFilters: Seq[ColumnFilter],
-                               rangeParams: RangeParams,
-                               limit: Int) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                              columnFilters: Seq[ColumnFilter],
+                              rangeParams: RangeParams,
+                              limit: Int) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
