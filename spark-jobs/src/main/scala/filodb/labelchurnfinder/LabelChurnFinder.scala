@@ -19,7 +19,7 @@ import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.downsampler.index.DSIndexJobSettings
 
-object LabelChurnFinder extends App {
+object LabelChurnFinderMain extends App {
   val dsSettings = new DownsamplerSettings()
   val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
   val labelChurnFinder = new LabelChurnFinder(dsSettings)
