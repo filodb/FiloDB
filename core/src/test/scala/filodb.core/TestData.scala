@@ -300,6 +300,18 @@ object MachineMetricsData {
     }
   }
 
+  def multiSeriesOooData(): Stream[Seq[Any]] = {
+    val initTs = System.currentTimeMillis
+    Stream.from(0).map { n =>
+      Seq(initTs + n * 1000,
+        (45 + nextInt(10)).toDouble,
+        (60 + nextInt(25)).toDouble,
+        (99.9 + nextInt(15)).toDouble,
+        (85 + nextInt(12)).toLong,
+        "Series" + (n % 10))
+    }
+  }
+
   // Everything increments by 1 for simple predictability and testing
   def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
                         seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
@@ -311,6 +323,27 @@ object MachineMetricsData {
          (85 + n).toLong,
          seriesPrefix + (n % numSeries))
     }
+  }
+
+  def linearOooMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
+                           oooDeviation: Int = 5,
+                        seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
+    val buffer = Stream.from(0).map { n =>
+      Seq(startTs + n * timeStep,
+        (1 + n).toDouble,
+        (20 + n).toDouble,
+        (99.9 + n).toDouble,
+        (85 + n).toLong,
+        0,
+        seriesPrefix + (n % numSeries))
+    }.take(100).toArray
+    // swap every 2nd record to create out-of-order timestamps
+    for (i <- 1 until buffer.length-1 by 3) {
+      val temp = buffer(i-1)
+      buffer(i-1) = buffer(i + 1)
+      buffer(i + 1) = temp
+    }
+    buffer.toStream
   }
 
   def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]], schema: Schema = dataset1.schema): Unit = {
@@ -333,6 +366,12 @@ object MachineMetricsData {
       builder.endRecord()
     }
   }
+
+  // Dataset2_1: Partition keys (series) / Row key timestamp that are out of order
+  val datasetOoo2_1 = Dataset("metrics2.1", Seq("_o_:int", "_metric_:string", "tags:map"), columns,
+    options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
+  val schemaOoo2_1 = datasetOoo2_1.schema
+  val schemasOoo2_1 = Schemas(schemaOoo2_1.partition, Map(schemaOoo2_1.name -> schemaOoo2_1))
 
   val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns,
     options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
