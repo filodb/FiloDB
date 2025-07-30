@@ -312,6 +312,9 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /////// START MEMBER STATE FIELDS ///////////////////
 
+  private val cumulativeSchemas = schemas.schemas.values.filter(_.hasCumulativeTemporalityColumn)
+                                                        .map(_.schemaHash).toSet
+
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
   @volatile var isReadyForQuery = false
 
@@ -1136,7 +1139,9 @@ class TimeSeriesShard(val ref: DatasetRef,
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
 
         if (!inOrderAndIngested) {
-          if (oooDataPointsEnabled && oooSeq < oooMaxSeq) {
+          if (oooDataPointsEnabled && // ooo should be enabled, disabled by default
+              oooSeq < oooMaxSeq && // have a limit on number of ooo timeseries per main partKey
+              !cumulativeSchemas.contains(schema.schemaHash) ) { // cumulative schemas are not supported for ooo
             // out of order sample; try to ingest again with higher oooSeq
             schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
             getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)

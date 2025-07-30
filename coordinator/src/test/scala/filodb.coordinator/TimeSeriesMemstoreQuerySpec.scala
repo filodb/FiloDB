@@ -35,7 +35,7 @@ class TimeSeriesMemstoreQuerySpec extends AnyFunSpec with Matchers with BeforeAn
                                            |  """.stripMargin)
     .withFallback(ConfigFactory.load("application_test.conf"))
 
-  it("should ingest ooo data and respond correctly to PromQL aggregation queries with overlapping chunks") {
+  it("should ingest ooo data and respond correctly to PromQL aggregation queries") {
     val config2 = ConfigFactory.parseString("""
                                               |memstore.ooo-data-points-enabled = true
                                               |""".stripMargin)
@@ -84,7 +84,6 @@ class TimeSeriesMemstoreQuerySpec extends AnyFunSpec with Matchers with BeforeAn
     println(qr1.result(0).prettyPrint())
     qr1.result(0).rows().map(_.getDouble(1)).filter(!_.isNaN).sum shouldEqual 14075.0
 
-
     // Switch buffers, encode and release/return buffers for all partitions
     val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
     for { n <- 0 until parts.size() } {
@@ -92,7 +91,7 @@ class TimeSeriesMemstoreQuerySpec extends AnyFunSpec with Matchers with BeforeAn
       part.switchBuffers(blockFactory, encode = true)
     }
 
-    // ingest same data again - it should be out of order, and should result in overlapping chunks
+    // ingest same data again - it should be out of order
     val series2 = withMap(linearOooMultiSeries(numSeries = 1).take(200), 1, Map("_ws_".utf8 -> "myWs".utf8, "_ns_".utf8 -> "myNs".utf8))
     val data2 = records(datasetOoo2_1, series2)
     memStore1.ingest(datasetOoo2_1.ref, 0, data2)
@@ -106,6 +105,7 @@ class TimeSeriesMemstoreQuerySpec extends AnyFunSpec with Matchers with BeforeAn
     println(qr2.result(0).prettyPrint())
     qr2.result(0).rows().map(_.getDouble(1)).filter(!_.isNaN).sum shouldEqual 28150.0
 
+    memStore1.shutdown()
   }
 
 }

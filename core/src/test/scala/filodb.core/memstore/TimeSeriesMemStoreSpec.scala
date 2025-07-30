@@ -1,16 +1,14 @@
 package filodb.core.memstore
 
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
 import org.apache.lucene.util.BytesRef
-import org.scalatest.BeforeAndAfter
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
@@ -21,7 +19,7 @@ import filodb.memory.format.vectors.LongHistogram
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class TimeSeriesMemStoreSpec extends AnyFunSpec with BeforeAndAfterAll with Matchers with BeforeAndAfter with ScalaFutures {
   implicit val s = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._
@@ -38,6 +36,12 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                             .getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
+
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    memStore.shutdown()
+  }
 
   after {
     memStore.reset()
@@ -164,6 +168,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val agg4 = memStore1.scanRows(datasetOoo2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1))).map(_.getDouble(0)).sum
     agg4 shouldEqual 10100.0 // (1783 + 1650 + 1617) * 2 since we ingested the same data again
 
+    memStore1.shutdown()
   }
 
   it("should ingest map/tags column as partition key and read using _type_ filter") {
