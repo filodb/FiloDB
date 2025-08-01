@@ -41,7 +41,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                     |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  private lazy val writeChunksCql = session.prepare(
+  lazy val writeChunksCql = session.prepare(
     s"INSERT INTO $tableString (partition, chunkid, info, chunks) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
