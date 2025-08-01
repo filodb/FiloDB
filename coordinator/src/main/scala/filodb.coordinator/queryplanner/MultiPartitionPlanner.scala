@@ -286,7 +286,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       case raw: RawSeries                  =>
                                               val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
                                               if(getPartitions(raw, params).tail.nonEmpty
-                                                && queryConfig.routingConfig.supportRemoteRawExport)
+                                                && supportRemoteRawExport(raw))
                                                 this.walkLogicalPlanTree(
                                                   raw.copy(supportsRemoteDataCall = true),
                                                   qContext,
@@ -313,7 +313,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               val values = QueryUtils.splitAtUnescapedPipes(re.value.toString)
               values.foreach(valueSet.add)
             case _ => throw new IllegalArgumentException(
-              s"""shard keys must be filtered by equality or "|"-only regex. filter=${colFilter}""")
+              s"""shard keys must be filtered by equality or "|"-only regex. filter=$colFilter""")
           }
           acc
         }
@@ -797,6 +797,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
     val assignmentRanges = getAssignmentQueryRanges(partitions, timeRange,
         lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
+    val supportRemoteStitch = supportRemoteRawExport(logicalPlan)
     val execPlans = if (assignmentRanges.isEmpty) {
       // Assignment ranges empty means we cant run this query fully on one partition and needs
       // remote raw export Check if the total time of raw export is within the limits, if not return Empty result
@@ -805,12 +806,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       // what that partition contains.
       val (startTime, endTime) = (qParams.startSecs, qParams.endSecs)
       val totalExpectedRawExport = (endTime - startTime) + lookbackMs + offsetMs.max
-      if (queryConfig.routingConfig.supportRemoteRawExport &&
+      if (supportRemoteStitch &&
         queryConfig.routingConfig.maxRemoteRawExportTimeRange.toMillis > totalExpectedRawExport) {
         val newLp = rewritePlanWithRemoteRawExport(logicalPlan, IntervalSelector(startTime * 1000, endTime * 1000))
         walkLogicalPlanTree(newLp, qContext, forceInProcess = true).plans
       } else {
-        if (queryConfig.routingConfig.supportRemoteRawExport) {
+        if (supportRemoteStitch) {
           logger.warn(
             s"Remote raw export is supported and the $totalExpectedRawExport ms" +
               s" is greater than the max allowed raw export duration of " +
@@ -839,7 +840,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
 
             // If we enable stitching the missing part of time range between the previous time range's end time and
             // current time range's start time, we will perform remote/local partition raw data export
-            if (queryConfig.routingConfig.supportRemoteRawExport && gapStartTimeMs < gapEndTimeMs) {
+            if (supportRemoteStitch && gapStartTimeMs < gapEndTimeMs) {
               //  We need to perform raw data export from two partitions, for simplicity we will assume the time range
               //  spans 2 partition, one partition is on the left and one on the right
               // Walk the plan to make all RawSeries support remote export fetching the data from previous partition
@@ -927,7 +928,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       // period 1 - 1:10 can not be served from one partition alone and needs to be computed on query service. Here
       // we will handle this case and add the missing execPlan if needed
 
-      if (partitions.length > 1 && queryConfig.routingConfig.supportRemoteRawExport) {
+      if (partitions.length > 1 && supportRemoteStitch) {
         // Here we check if the assignment ranges cover the entire query duration
         val (_, lastTimeRange) = assignmentRanges.last
         if (lastTimeRange.endMs < timeRange.endMs) {
@@ -972,6 +973,20 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     PlanResult(Seq(resPlan))
   }
   //scalastyle:on method.length
+
+  def supportRemoteRawExport(lp: LogicalPlan): Boolean = {
+    val matchingColumnNameForDisabledTenants = queryConfig.routingConfig.stitchDisabledTenantColumn
+    val matchingColumnValues = lp.planColumnFilters().filter(_ match {
+      case ColumnFilter(name, Equals(_: String)) if name == matchingColumnNameForDisabledTenants         => true
+      case _                                                                                             => false
+    }).map(f => f.filter.valuesStrings.head.asInstanceOf[String]).toSet
+    // Check if any value in this set is present in disabled tenants
+    val isDisabledTenant = matchingColumnValues
+                            .intersect(queryConfig.routingConfig.tenantsWithDisabledRemoteStitch).nonEmpty
+    queryConfig.routingConfig.supportRemoteRawExport && !isDisabledTenant
+
+  }
+
   /**
    * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
    */

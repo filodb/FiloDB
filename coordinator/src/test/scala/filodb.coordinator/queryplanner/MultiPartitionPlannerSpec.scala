@@ -18,6 +18,7 @@ import filodb.query.InstantFunctionId.Ln
 import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
+
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -1924,4 +1925,93 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val expected = Set(Map("job" -> "abc"), Map("job" -> "def"), Map("job" -> "ghi"))
     mpp.getRoutingKeys(lp) shouldEqual expected
   }
+
+  describe("supportRemoteRawExport") {
+
+    // Helper to create a planner with a specific routing config for testing this method
+    def makePlanner(routingConfig: RoutingConfig): MultiPartitionPlanner = {
+      val qc = queryConfig.copy(routingConfig = routingConfig)
+      new MultiPartitionPlanner(
+        new PartitionLocationProvider {
+          override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+          override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = Nil
+        },
+        localPlanner,
+        "local",
+        dataset,
+        qc
+      )
+    }
+
+    val tenantColumn = "tenant"
+    val disabledTenants = Set("t-disabled-1", "t-disabled-2")
+
+    it("should return false if global flag is false") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = false, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"}""", TimeStepParams(1000, 100, 2000))
+      // Should be false even for an enabled tenant because the global flag is off
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return true if global flag is true and no tenant filter is present") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{job="some-job"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return true if global flag is true and tenant is not in the disabled list") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return false if global flag is true and tenant IS in the disabled list") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return false for a binary join where one side has a disabled tenant") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric_a{tenant="t-enabled-1"} + metric_b{tenant="t-disabled-2"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return true for a binary join where both tenants are enabled") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric_a{tenant="t-enabled-1"} + metric_b{tenant="t-enabled-2"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should ignore non-Equals filters on the tenant column") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      // Regex filter on a disabled tenant should be ignored, so export should be enabled.
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant=~"t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should ignore filters on other columns") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      // A filter on 'job' with a value that matches a disabled tenant should be ignored.
+      val lp = Parser.queryRangeToLogicalPlan("""metric{job="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return false if any of multiple tenant filters is disabled") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lpWithMultipleFilters = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"} + metric{tenant="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lpWithMultipleFilters) shouldBe false
+    }
+  }
+
+
 }
