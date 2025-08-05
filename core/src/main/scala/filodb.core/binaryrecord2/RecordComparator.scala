@@ -22,8 +22,9 @@ final class RecordComparator(ingestSchema: RecordSchema) {
   require(ingestSchema.columnTypes.length > ingestSchema.partitionFieldStart.get, "no partition fields")
 
   val partitionKeySchema = new RecordSchema(ingestSchema.columns.drop(ingestSchema.partitionFieldStart.get),
-                                            Some(0),
-                                            ingestSchema.predefinedKeys)
+                            Some(0),
+                            ingestSchema.predefinedKeys,
+                            oooColIndex = ingestSchema.oooColIndex.map(_ - ingestSchema.partitionFieldStart.get))
   // NOTE: remember that private final val results in a Java field, much much faster
   // the ingest BR offset of the first partition fixed area field
   private final val ingestPartOffset = ingestSchema.fieldOffset(ingestSchema.partitionFieldStart.get)
