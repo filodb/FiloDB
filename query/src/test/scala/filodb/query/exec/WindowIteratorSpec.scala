@@ -141,7 +141,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator,
            1538416154000L, 20000, 1538416649000L, 20000,
       RangeFunction(tsResSchema, Some(InternalRangeFunction.Rate),
-          ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding, queryConfig)
+          ColumnType.DoubleColumn, queryConfig, useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.foreach{ v =>
       // if out of order samples are not removed, counter correction causes rate to spike up to very high value
       v.getDouble(1) should be < 10000d
@@ -168,7 +168,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     import filodb.core.query.NoCloseCursor._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
       end, 0, RangeFunction(tsResSchema,
-        None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding, queryConfig)
+        None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSlidingD, queryConfig)
     val result = slidingWinIterator.map(v => (v.getLong(0), v.getDouble(1))).toSeq
     result.map(_._1) shouldEqual (start to end).by(step)
     result.foreach{ v =>
@@ -204,7 +204,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 1100000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.SumOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     // NOTE: dum_over_time sliding iterator does not handle the NaN at the end correctly!
     // slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual windowResults
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
@@ -240,7 +240,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.foreach { v =>
       windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
@@ -273,7 +273,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1614822880000L, 15000, 1614822880000L, 900000L,
       RangeFunction(tsResSchema,
         Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
-        useChunked = false).asSliding, queryConfig)
+        useChunked = false).asSlidingD, queryConfig)
       slidingWinIterator.next().getDouble(1) shouldEqual 0.5870753512132821
 
     val rv = timeValueRVPk(samples)
@@ -307,7 +307,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191796000L, 1, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
         Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
-        useChunked = false).asSliding, queryConfig)
+        useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.foreach { v =>
       windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
@@ -422,7 +422,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 1540845090000L,
                                15000, 1540855905000L, queryConfig.staleSampleAfterMs,
                                RangeFunction(tsResSchema,
-                                 None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
+                                 None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSlidingD,
                                queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
 
@@ -451,7 +451,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 100000L,
       100000, 600000L, queryConfig.staleSampleAfterMs + 1,
       RangeFunction(tsResSchema,
-        None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
+        None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSlidingD,
       queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
 
@@ -489,7 +489,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
     slidingWinIterator.close()
 
@@ -525,7 +525,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.CountOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
     slidingWinIterator.close();
 
@@ -615,7 +615,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MinOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
     slidingWinIterator.close()
 
@@ -652,7 +652,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MaxOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = false).asSliding, queryConfig)
+                    useChunked = false).asSlidingD, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
     slidingWinIterator.close()
 

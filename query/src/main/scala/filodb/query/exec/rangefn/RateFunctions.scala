@@ -16,7 +16,7 @@ object RateFunctions {
    */
   def extrapolatedRate(startTimestamp: Long,
                        endTimestamp: Long,
-                       window: Window,
+                       window: Window[TransientRow],
                        isCounter: Boolean,
                        isRate: Boolean): Double =
     if (window.size < 2) {
@@ -78,15 +78,15 @@ object RateFunctions {
 }
 //scalastyle:on parameter.number
 
-object IncreaseFunction extends RangeFunction {
+object IncreaseFunction extends RangeFunction[TransientRow] {
 
   override def needsCounterCorrection: Boolean = true
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
@@ -95,15 +95,15 @@ object IncreaseFunction extends RangeFunction {
   }
 }
 
-object RateFunction extends RangeFunction {
+object RateFunction extends RangeFunction[TransientRow] {
 
   override def needsCounterCorrection: Boolean = true
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
@@ -112,14 +112,14 @@ object RateFunction extends RangeFunction {
   }
 }
 
-object DeltaFunction extends RangeFunction {
+object DeltaFunction extends RangeFunction[TransientRow] {
 
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
@@ -128,13 +128,15 @@ object DeltaFunction extends RangeFunction {
   }
 }
 
-class RateOverDeltaFunction extends RangeFunction {
-  var sumOverTime = new SumOverTimeFunction
-  override def addedToWindow(row: TransientRow, window: Window): Unit = sumOverTime.addedToWindow(row, window)
+class RateOverDeltaFunction extends RangeFunction[TransientRow] {
+  private val sumOverTime = new SumOverTimeFunction
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit =
+    sumOverTime.addedToWindow(row, window)
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = sumOverTime.removedFromWindow(row, window)
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit =
+    sumOverTime.removedFromWindow(row, window)
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, sumOverTime.sum / (endTimestamp - startTimestamp) * 1000 )

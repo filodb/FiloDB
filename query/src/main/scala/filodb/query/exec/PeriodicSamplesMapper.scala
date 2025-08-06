@@ -115,20 +115,23 @@ final case class PeriodicSamplesMapper(startMs: Long,
                     extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
-      case f: RangeFunction if valColType == ColumnType.LongColumn =>
+      case f: RangeFunction[_] if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
-              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows()), startWithOffset, adjustedStep, endWithOffset,
+              windowPlusPubInt,
+              rangeFuncGen().asSlidingD, querySession.queryConfig, leftInclusiveWindow,
+              new TransientRow()), outputRvRange)
         }
       // Otherwise just feed in the double column
-      case f: RangeFunction =>
+      case f: RangeFunction[_] =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
-              rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
+            new SlidingWindowIterator(rv.rows(), startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+              rangeFuncGen().asSlidingD,
+              querySession.queryConfig, leftInclusiveWindow, new TransientRow()), outputRvRange)
         }
     }
 
@@ -320,36 +323,38 @@ class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
 ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, querySession)
 
-class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
+class QueueBasedWindow[T <: MutableRowReader](q: IndexedArrayQueue[T]) extends Window[T] {
   def size: Int = q.size
-  def apply(i: Int): TransientRow = q(i)
-  def head: TransientRow = q.head
-  def last: TransientRow = q.last
-  override def toString: String = q.toString
+
+  def apply(i: Int): T = q(i)
+  def head: T = q.head
+  def last: T = q.last
+  override def toString: String = q.toString()
 }
 
 /**
   * Decorates a raw series iterator to apply a range vector function
   * on periodic time windows
   */
-class SlidingWindowIterator(raw: RangeVectorCursor,
+class SlidingWindowIterator[T <: MutableRowReader](raw: RangeVectorCursor,
                             start: Long,
                             step: Long,
                             end: Long,
                             window: Long,
-                            rangeFunction: RangeFunction,
+                            rangeFunction: RangeFunction[T],
                             queryConfig: QueryConfig,
-                            leftWindowInclusive : Boolean = false
-) extends RangeVectorCursor {
+                            leftWindowInclusive : Boolean = false, rowReaderFactory: => T)
+  extends RangeVectorCursor {
   require(step > 0, s"Adjusted step $step not > 0")
-  private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
+  private val sampleToEmit: T = rowReaderFactory
+
   // sliding window queue
-  private val windowQueue = new IndexedArrayQueue[TransientRow]()
+  private val windowQueue = new IndexedArrayQueue[T]()
 
   // this is the object that will be exposed to the RangeFunction
-  private val windowSamples = new QueueBasedWindow(windowQueue)
+  private val windowSamples = new QueueBasedWindow[T](windowQueue)
 
   // NOTE: Ingestion now has a facility to drop out of order samples.  HOWEVER, there is one edge case that may happen
   // which is that the first sample ingested after recovery may not be in order w.r.t. previous persisted timestamp.
@@ -365,12 +370,12 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
   }
 
   // to avoid creation of object per sample, we use a pool
-  val windowSamplesPool = new TransientRowPool()
+  private val windowSamplesPool = new TransientRowPool[T](rowReaderFactory)
 
   override def close(): Unit = raw.close()
 
   override def hasNext: Boolean = curWindowEnd <= end
-  override def next(): TransientRow = {
+  override def next(): T = {
     val curWindowStart = curWindowEnd - window
     // current window is: [curWindowStart, curWindowEnd]. Includes start, end.
 
@@ -444,10 +449,10 @@ class LongToDoubleIterator(iter: RangeVectorCursor) extends RangeVectorCursor {
   * Exists so that we can reuse TransientRow objects and reduce object creation per
   * raw sample. Beware: This is mutable, and not thread-safe.
   */
-class TransientRowPool {
-  val pool = new SpscUnboundedArrayQueue[TransientRow](16)
-  @inline final def get: TransientRow = if (pool.isEmpty) new TransientRow() else pool.remove()
-  @inline final def putBack(r: TransientRow): Unit = pool.add(r)
+class TransientRowPool[T <: MutableRowReader](inst: => T) {
+  val pool = new SpscUnboundedArrayQueue[T](16)
+  @inline final def get: T = if (pool.isEmpty) inst else pool.remove()
+  @inline final def putBack(r: T): Unit = pool.add(r)
 }
 
 /**

@@ -12,21 +12,21 @@ import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
-class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
+class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       while (!minMaxDeque.isEmpty && ord.compare(minMaxDeque.peekLast().value, row.value) < 0) minMaxDeque.removeLast()
       minMaxDeque.addLast(row)
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     while (!minMaxDeque.isEmpty && minMaxDeque.peekFirst().timestamp <= row.timestamp) minMaxDeque.removeFirst()
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     if (minMaxDeque.isEmpty) sampleToEmit.setValues(endTimestamp, Double.NaN)
@@ -112,8 +112,8 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
-class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d
@@ -123,7 +123,7 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d
@@ -136,22 +136,22 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
 }
 
-object ChangesOverTimeFunction extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+object ChangesOverTimeFunction extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-    startTimestamp: Long, endTimestamp: Long, window: Window,
+    startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
     sampleToEmit: TransientRow,
     queryConfig: QueryConfig
   ): Unit = {
@@ -192,15 +192,15 @@ object QuantileOverTimeFunction {
   }
 }
 
-class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-    startTimestamp: Long, endTimestamp: Long, window: Window,
+    startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
     sampleToEmit: TransientRow,
     queryConfig: QueryConfig
   ): Unit = {
@@ -228,15 +228,15 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
   }
 }
 
-class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-                      startTimestamp: Long, endTimestamp: Long, window: Window,
+                      startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                       sampleToEmit: TransientRow,
                       queryConfig: QueryConfig
                     ): Unit = {
@@ -271,7 +271,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
   }
 }
 
-class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFunction {
+class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
   require(funcParams.size == 2, "last_over_time_is_mad_outlier function needs a two scalar arguments" +
                   " (tolerance, bounds)")
   require(funcParams(0).isInstanceOf[StaticFuncArgs], "first tolerance parameter must be a number; " +
@@ -285,13 +285,13 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
   private val tolerance = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
   require(tolerance > 0, "tolerance must be a positive number")
 
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                       sampleToEmit: TransientRow,
                       queryConfig: QueryConfig
                     ): Unit = {
@@ -555,8 +555,8 @@ class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunct
   }
 }
 
-class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (count.isNaN) {
         count = 0d
@@ -565,7 +565,7 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (count.isNaN) {
         count = 0d
@@ -577,7 +577,7 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, count)
@@ -620,8 +620,8 @@ class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends Chun
   }
 }
 
-class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d;
@@ -631,7 +631,7 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d;
@@ -641,7 +641,7 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     if (count == 0) {
@@ -692,8 +692,8 @@ class AvgOverTimeChunkedFunctionL extends AvgOverTimeChunkedFunction() with Chun
 
 class StdDevOverTimeFunction(var sum: Double = 0d,
                              var count: Int = 0,
-                             var squaredSum: Double = 0d) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+                             var squaredSum: Double = 0d) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       sum += row.value
       squaredSum += row.value * row.value
@@ -701,7 +701,7 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       sum -= row.value
       squaredSum -= row.value * row.value
@@ -709,7 +709,7 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count
@@ -720,20 +720,20 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
 
 class StdVarOverTimeFunction(var sum: Double = 0d,
                              var count: Int = 0,
-                             var squaredSum: Double = 0d) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+                             var squaredSum: Double = 0d) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
     count += 1
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     sum -= row.value
     squaredSum -= row.value * row.value
     count -= 1
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count

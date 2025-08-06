@@ -14,16 +14,16 @@ import filodb.query.exec._
   * Container for samples within a window of samples
   * over which a range function can be applied
   */
-trait Window {
-  def apply(i: Int): TransientRow
+trait Window[T <: MutableRowReader] {
+  def apply(i: Int): T
   def size: Int
-  def head: TransientRow
-  def last: TransientRow
+  def head: T
+  def last: T
 }
 
 // Just a marker trait for all RangeFunction implementations, sliding and chunked
 sealed trait BaseRangeFunction {
-  def asSliding: RangeFunction = this.asInstanceOf[RangeFunction]
+  def asSlidingD: RangeFunction[TransientRow] = this.asInstanceOf[RangeFunction[TransientRow]]
   def asChunkedD: ChunkedRangeFunction[TransientRow] = this.asInstanceOf[ChunkedRangeFunction[TransientRow]]
   def asChunkedH: ChunkedRangeFunction[TransientHistRow] = this.asInstanceOf[ChunkedRangeFunction[TransientHistRow]]
 }
@@ -36,7 +36,7 @@ sealed trait BaseRangeFunction {
   * 2. Use the entire window content in `apply` to emit the next value. Depending on whether the
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
   */
-trait RangeFunction extends BaseRangeFunction {
+trait RangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
   /**
     * Values added to window will be converted to monotonically increasing. Mark
     * as true only if the function will always operate on counters.
@@ -46,12 +46,12 @@ trait RangeFunction extends BaseRangeFunction {
   /**
     * Called when a sample is added to the sliding window
     */
-  def addedToWindow(row: TransientRow, window: Window): Unit
+  def addedToWindow(row: R, window: Window[R]): Unit
 
   /**
     * Called when a sample is removed from sliding window
     */
-  def removedFromWindow(row: TransientRow, window: Window): Unit
+  def removedFromWindow(row: R, window: Window[R]): Unit
 
   /**
     * Called when wrapping iterator needs to emit a sample using the window.
@@ -70,8 +70,8 @@ trait RangeFunction extends BaseRangeFunction {
     */
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
-            sampleToEmit: TransientRow,
+            window: Window[R],
+            sampleToEmit: R,
             queryConfig: QueryConfig): Unit
 }
 
@@ -436,12 +436,12 @@ object RangeFunction {
   }
 }
 
-object LastSampleFunction extends RangeFunction {
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+object LastSampleFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     for (i <- (window.size - 1) to 0 by -1) {

@@ -3,7 +3,7 @@ package filodb.query.exec.rangefn
 import filodb.core.query.{QueryConfig, TransientRow}
 
 object RangeInstantFunctions {
-  def derivFunction(window: Window): Double = {
+  def derivFunction(window: Window[TransientRow]): Double = {
     if (window.size < 2) {
       Double.NaN  // cannot calculate result without 2 samples
     } else {
@@ -17,7 +17,8 @@ object RangeInstantFunctions {
     * Logic is kept consistent with Prometheus' linearRegression function in order to get consistent results.
     * We can look at optimizations (if any) later.
     */
-  def linearRegression(window: Window, interceptTime: Long, isPredict: Boolean = false): Double = {
+  private def linearRegression(window: Window[TransientRow],
+                                                      interceptTime: Long, isPredict: Boolean = false): Double = {
     var n = 0.0
     var sumX = 0.0
     var sumY = 0.0
@@ -41,7 +42,7 @@ object RangeInstantFunctions {
 
   def instantValue(startTimestamp: Long,
                    endTimestamp: Long,
-                   window: Window,
+                   window: Window[TransientRow],
                    isRate: Boolean): Double = {
     if (window.size < 2) {
       Double.NaN  // cannot calculate result without 2 samples
@@ -71,7 +72,7 @@ object RangeInstantFunctions {
   // instant value for a period-counter is the last value in a window.
   def instantValueDeltaCounter(startTimestamp: Long,
                                endTimestamp: Long,
-                               window: Window,
+                               window: Window[TransientRow],
                                isRate: Boolean): Double = {
     if (window.size < 2) {
       Double.NaN // cannot calculate result without 2 samples
@@ -94,15 +95,15 @@ object RangeInstantFunctions {
   }
 }
 
-object IRateFunction extends RangeFunction {
+object IRateFunction extends RangeFunction[TransientRow] {
 
   override def needsCounterCorrection: Boolean = true
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValue(startTimestamp,
@@ -111,15 +112,15 @@ object IRateFunction extends RangeFunction {
   }
 }
 
-object IDeltaFunction extends RangeFunction {
+object IDeltaFunction extends RangeFunction[TransientRow] {
 
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValue(startTimestamp,
@@ -128,15 +129,15 @@ object IDeltaFunction extends RangeFunction {
   }
 }
 
-object IRatePeriodicFunction extends RangeFunction {
+object IRatePeriodicFunction extends RangeFunction[TransientRow] {
 
   var lastFunc = LastSampleFunction
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     if (window.size < 1) {
@@ -157,14 +158,14 @@ object IRatePeriodicFunction extends RangeFunction {
   }
 }
 
-object IDeltaPeriodicFunction extends RangeFunction {
+object IDeltaPeriodicFunction extends RangeFunction[TransientRow] {
 
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValueDeltaCounter(startTimestamp,
@@ -173,14 +174,14 @@ object IDeltaPeriodicFunction extends RangeFunction {
   }
 }
 
-object DerivFunction extends RangeFunction {
+object DerivFunction extends RangeFunction[TransientRow] {
 
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.derivFunction(window)
@@ -188,10 +189,10 @@ object DerivFunction extends RangeFunction {
   }
 }
 
-class ResetsFunction extends RangeFunction {
+class ResetsFunction extends RangeFunction[TransientRow] {
   var resets = Double.NaN // NaN for windows that do not have data
 
-  def addedToWindow(row: TransientRow, window: Window): Unit = {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     val size = window.size
     val currentValue = if (row.value.isNaN) 0 else row.value
     if (resets.isNaN && size > 0) resets = 0
@@ -201,7 +202,7 @@ class ResetsFunction extends RangeFunction {
     }
   }
 
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     val currentValue = if (row.value.isNaN) 0 else row.value
     if (window.size > 0) {
       val prevValue = if (window.head.value.isNaN) 0 else window.head.value
@@ -211,7 +212,7 @@ class ResetsFunction extends RangeFunction {
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, resets)
