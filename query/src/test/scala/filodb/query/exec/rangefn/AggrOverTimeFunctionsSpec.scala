@@ -237,14 +237,15 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
   def slidingWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,
-                      func: RangeFunction,
+                      func: RangeFunction[TransientRow],
                       windowSize: Int,
-                      step: Int): SlidingWindowIterator = {
+                      step: Int): SlidingWindowIterator[TransientRow] = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new SlidingWindowIterator(rv.rows, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+    new SlidingWindowIterator[TransientRow](rv.rows(), windowStartTS, stepTimeMillis, windowEndTS, windowTime,
+      func, queryConfig, false, new TransientRow())
   }
 }
 
