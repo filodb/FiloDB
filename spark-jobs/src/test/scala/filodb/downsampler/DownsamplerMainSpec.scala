@@ -1508,8 +1508,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
-      SinglePartitionScan(dsGaugePartKeyBytes))
-      .toListL.runToFuture.futureValue.head
+      SinglePartitionScan(dsGaugePartKeyBytes)
+    ).toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
       downsampledPartData1, 1.minute.toMillis.toInt)
