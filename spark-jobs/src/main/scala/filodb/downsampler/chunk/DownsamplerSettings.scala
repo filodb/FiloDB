@@ -86,7 +86,6 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val shouldUseChunksPersistor = downsamplerConfig.getBoolean("use-chunks-persistor")
   @transient lazy val chunksPersistor = downsamplerConfig.getString("chunks-persistor")
-  @transient lazy val chunkPersistorSplits = downsamplerConfig.getString("chunks-persistor-splits")
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 

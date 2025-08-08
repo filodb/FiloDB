@@ -70,7 +70,7 @@ class DefaultDSPartitionReader extends DSPartitionReader {
       .makeRDD(splits)
       .mapPartitions { splitIter: Iterator[ScanSplit] =>
         Kamon.init()
-        KamonShutdownHook.registerShutdownHook() // ???
+        KamonShutdownHook.registerShutdownHook()
         val rawDataSource = batchDownsampler.rawCassandraColStore
         rawDataSource.initialize(
           batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources
@@ -314,6 +314,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         DownsamplerContext.dsLogger.info(s"Downsampled rows/time series: $rows")
 
         persistor.persist(cachedDownsampledDf, batchDownsampler)
+      } else {
+        downsampledRowsRdd.foreach(_ => {})
       }
     }
 

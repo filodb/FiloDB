@@ -12,7 +12,6 @@ trait BaseDatasetTable extends StrictLogging {
   def dataset: DatasetRef
   def suffix: String
   lazy val keyspace = connector.keyspace
-  //lazy val tableString = s"${keyspace}.${dataset.dataset + s"_$suffix"}"
   lazy val tableName = s"${dataset.dataset + s"_$suffix"}"
   lazy val tableString = s"${keyspace}.${tableName}"
   lazy val session = connector.session

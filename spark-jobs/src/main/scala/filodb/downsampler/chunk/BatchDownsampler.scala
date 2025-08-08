@@ -363,7 +363,6 @@ class BatchDownsampler(val settings: DownsamplerSettings,
   ): ListBuffer[Row] = {
     val start = System.currentTimeMillis()
     @volatile var numChunks = 0
-    // write all chunks to cassandra
     val allRows = new ListBuffer[Row]
     downsampledChunksToPersist.foreach { case (res, chunks) =>
       // FIXME if listener in chunkset below is not copied + overridden to no-op, we get a SEGV because
@@ -384,18 +383,16 @@ class BatchDownsampler(val settings: DownsamplerSettings,
           arr
         }
         allRows += Row(
-          res.toString(),
-          toBuffer(partBytes).array(),
-          c.info.id,
-          toBuffer(ChunkSetInfo.toBytes(c.info)).array(),
-          chunkList.toArray,
-          c.info.ingestionTime,
-          c.info.startTime,
-          ChunkSetInfo.toBytes(c.info)
+          res.toString(), //Resolution
+          toBuffer(partBytes).array(), //PK
+          c.info.id, // chunk Id
+          toBuffer(ChunkSetInfo.toBytes(c.info)).array(), //info
+          chunkList.toArray, // chunks
+          c.info.ingestionTime, // ingestion_time
+          c.info.startTime, // start_time
+          ChunkSetInfo.toBytes(c.info) //index_info
         )
       }
-      //      downsampleCassandraColStore.write(downsampleRefsByRes(res),
-      //      Observable.fromIteratorUnsafe(chunksToPersist), settings.ttlByResolution(res))
     }
     allRows
   }
