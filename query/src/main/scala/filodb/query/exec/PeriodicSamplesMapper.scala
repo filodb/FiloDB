@@ -3,13 +3,12 @@ package filodb.query.exec
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
-
 import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
-import filodb.memory.format.vectors.LongBinaryVector
+import filodb.memory.format.vectors.{CustomBuckets, HistogramBuckets, LongBinaryVector, MutableHistogram}
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.InternalRangeFunction.AvgWithSumAndCountOverTime
@@ -359,14 +358,14 @@ class SlidingWindowIterator[T <: MutableRowReader](raw: RangeVectorCursor,
   // NOTE: Ingestion now has a facility to drop out of order samples.  HOWEVER, there is one edge case that may happen
   // which is that the first sample ingested after recovery may not be in order w.r.t. previous persisted timestamp.
   // So this is retained for now while we consider a more permanent out of order solution.
-  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
+  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw, rowReaderFactory)
 
   // we need buffered iterator so we can use to peek at next element.
   // At same time, do counter correction if necessary
   private val rows = if (rangeFunction.needsCounterCorrection) {
     new BufferableCounterCorrectionIterator(rawInOrder).buffered
   } else {
-    new BufferableIterator(rawInOrder).buffered
+    new BufferableIterator(rawInOrder, rowReaderFactory).buffered
   }
 
   // to avoid creation of object per sample, we use a pool
@@ -409,7 +408,7 @@ class SlidingWindowIterator[T <: MutableRowReader](raw: RangeVectorCursor,
     * @param cur sample to check for eligibility
     * @param curWindowStart start time of the current window
     */
-  private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
+  private def shouldAddCurToWindow(curWindowStart: Long, cur: MutableRowReader): Boolean = {
     // cur is inside current window
     val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart + 1
     cur.timestamp >= windowStart
@@ -459,11 +458,12 @@ class TransientRowPool[T <: MutableRowReader](inst: => T) {
   * Iterator of mutable objects that allows look-ahead for ONE value.
   * Caller can do iterator.buffered safely
   */
-class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  private var prev = new TransientRow()
-  private var cur = new TransientRow()
+class BufferableIterator[R <: MutableRowReader](iter: Iterator[RowReader],
+                                                rowReaderFactory: => R) extends Iterator[R] {
+  private var prev = rowReaderFactory
+  private var cur = rowReaderFactory
   override def hasNext: Boolean = iter.hasNext
-  override def next(): TransientRow = {
+  override def next(): R = {
     // swap prev an cur
     val temp = prev
     prev = cur
@@ -473,6 +473,50 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
     cur
   }
 }
+
+class BufferableCounterCorrectionIteratorH(iter: Iterator[RowReader]) extends Iterator[TransientHistRow] {
+  private var corrections: Array[Double] = Array.empty
+  private var prevBuckets: Array[Double] = Array.empty
+  private var buckets: HistogramBuckets = CustomBuckets(Array.empty)
+  private var prev = new TransientHistRow()
+  private var cur = new TransientHistRow()
+
+  override def hasNext: Boolean = iter.hasNext
+
+  override def next(): TransientHistRow = {
+    val next = iter.next()
+    val nextHist = next.getHistogram(1)
+
+    if (corrections.isEmpty) {
+      corrections = Array.fill(nextHist.numBuckets)(0.0)
+      prevBuckets = Array.fill(nextHist.numBuckets)(0.0)
+      buckets = CustomBuckets((0 until nextHist.numBuckets).map(nextHist.bucketTop).toArray)
+    }
+
+    // Apply counter correction to each bucket
+    val correctedBuckets = Array.ofDim[Double](nextHist.numBuckets)
+    for (i <- 0 until nextHist.numBuckets) {
+      var bucketVal = nextHist.bucketValue(i)
+      if (bucketVal.isNaN) bucketVal = 0 // explicit counter reset
+      if (bucketVal < prevBuckets(i)) {
+        corrections(i) += prevBuckets(i)
+      }
+      prevBuckets(i) = bucketVal
+      correctedBuckets(i) = bucketVal + corrections(i)
+    }
+
+    // swap prev and cur
+    val temp = prev
+    prev = cur
+    cur = temp
+
+    // place values in cur and return
+    cur.setLong(0, next.getLong(0))
+    cur.setValues(1, MutableHistogram(buckets, correctedBuckets))
+    cur
+  }
+}
+
 
 /**
   * Used to create a monotonically increasing counter from raw reported counter values.
@@ -503,10 +547,14 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
   }
 }
 
-class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+class DropOutOfOrderSamplesIterator[R <: MutableRowReader](
+                                    iter: Iterator[RowReader],
+                                    rowReaderFactory: => R) extends Iterator[R] {
   // Initial -1 time since it will be less than any valid timestamp and will allow first sample to go through
-  private val cur = new TransientRow(-1, -1)
-  private val nextVal = new TransientRow(-1, -1)
+  private val cur = rowReaderFactory
+  cur.setLong(0, -1)
+  private val nextVal = rowReaderFactory
+  nextVal.setLong(0, -1)
   private var hasNextVal = false
   private var hasNextDefined = false
 
@@ -518,7 +566,7 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
     hasNextVal
   }
 
-  override def next(): TransientRow = {
+  override def next(): R = {
     if (!hasNextDefined) {
       setNext()
       hasNextDefined = true
@@ -533,9 +581,8 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
     while (!hasNextVal && iter.hasNext) {
       val nxt = iter.next()
       val t = nxt.getLong(0)
-      val v = nxt.getDouble(1)
       if (t > cur.timestamp) { // if next sample is later than current sample
-        nextVal.setValues(t, v)
+        nextVal.copyFrom(nxt)
         hasNextVal = true
       } else {
         Query.droppedSamples.increment()
