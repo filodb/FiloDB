@@ -26,6 +26,8 @@ import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 
+//scalastyle:off file.size.limit
+
 /**
  * Implementation of a column store using Apache Cassandra tables.
  * This class must be thread-safe as it is intended to be used concurrently.
@@ -70,7 +72,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     Math.min(cassandraConfig.getInt("index-scan-parallelism-per-shard"), Runtime.getRuntime.availableProcessors())
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
   private val pkv2NumBuckets = cassandraConfig.getInt("pk-v2-table-num-buckets")
-  private val writeTimeIndexTtlSeconds = cassandraConfig.getDuration("write-time-index-ttl", TimeUnit.SECONDS).toInt
+  val writeTimeIndexTtlSeconds = cassandraConfig.getDuration("write-time-index-ttl", TimeUnit.SECONDS).toInt
   // NOTE: the following TTL is used in the `writePartKeyUpdates` call.
   private val pkUpdatesTTLSeconds = cassandraConfig.getDuration("pk-published-updates-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
@@ -279,6 +281,27 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
 
+    val chunksTable = getOrCreateChunkTable(datasetRef)
+    partKeys.sliding(batchSize, batchSize).map { parts =>
+      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
+        s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
+      // This could be more parallel, but decision was made to control parallelism at one place: In spark (via its
+      // parallelism configuration. Revisit if needed later.
+      val start = System.currentTimeMillis()
+      try {
+        chunksTable.readRawPartitionRangeBBNoAsync(parts, userTimeStart - maxChunkTime, endTimeExclusive)
+      } finally {
+        readChunksBatchLatency.record(System.currentTimeMillis() - start)
+      }
+    }
+  }
+
+  def getChunksByPartKey(datasetRef: DatasetRef,
+                         partKeys: Iterator[ByteBuffer],
+                         userTimeStart: Long,
+                         endTimeExclusive: Long,
+                         maxChunkTime: Long,
+                         batchSize: Int): Iterator[Seq[RawPartData]] = {
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.sliding(batchSize, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
