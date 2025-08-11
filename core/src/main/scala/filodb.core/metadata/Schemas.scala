@@ -473,7 +473,7 @@ object Schemas extends StrictLogging {
   val otelExpDeltaHistogram = global.schemas("otel-exp-delta-histogram")
   val dsGauge = global.schemas("ds-gauge")
   val preaggGauge = global.schemas("preagg-gauge")
-  val preaggGaugeLot = global.schemas("preagg-gauge-lot")
+  val preaggGaugeV2 = global.schemas("preagg-gauge-v2")
   val preaggDeltaCounter = global.schemas("preagg-delta-counter")
   val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
   val preaggOtelDeltaHistogram = global.schemas("preagg-otel-delta-histogram")
