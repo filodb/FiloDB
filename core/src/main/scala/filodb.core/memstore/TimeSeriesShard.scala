@@ -224,7 +224,7 @@ object PartitionIterator {
   * @param firstSchemaId if defined, the first Schema ID found. If not defined, probably there's no data.
   * @param partIdsMemTimeGap contains partIDs in memory but with potential time gaps in data. Their
   *                          startTimes from Lucene are mapped from the ID.
-  * @param partIdsNotInMemory is a collection of partIds fully not in memory
+  * @param partIdsNotInMemory is a collection of partIds fully not in memory-
   */
 case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
