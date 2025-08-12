@@ -105,6 +105,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         }
     }
 
+    var count = 0
     val result = splits.map { case (split, shard) =>
       lcfTask.computeLabelChurn(split, shard, totalFromTs)
     }.fold(mutable.HashMap.empty[Seq[String], ChurnSketches]) { (acc, m) =>
@@ -121,9 +122,11 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
           acc.put(key, sketch)
         }
       }
+      count += 1
+      if (count % 100 == 0) LCFContext.log.info(s"Merged $count sketches so far")
       acc
     }
-    LCFContext.log.info(s"LabelChurnFinder completed successfully")
+    LCFContext.log.info(s"LabelChurnFinder completed successfully with ${result.size} unique ws/ns/labels")
     spark.close()
     result
   }
