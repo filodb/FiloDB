@@ -37,14 +37,16 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
   def computeLabelChurn(split: (String, String),
                         shard: Int,
                         totalFromTs: Long): mutable.HashMap[Seq[String], ChurnSketches] = {
-    colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0, Long.MaxValue, 0, Long.MaxValue)
+    var count = 0
+    val ret = colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
+        Long.MaxValue, 0, Long.MaxValue)
     .foldLeft(mutable.HashMap.empty[Seq[String], ChurnSketches]) { case (acc, pk) =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
-      val wsNs = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, Seq("_ws_", "_ns_", "_metric_"))
+      val wsNs = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, Seq("_ws_", "_ns_" /*,"_metric_"*/))
       val ws = wsNs(0)
       val ns = wsNs(1)
-      val metric = wsNs(2)
+      // val metric = wsNs(2)
 
       val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
       val filterMatches = filters.exists { filter => // at least one filter should match
@@ -55,15 +57,20 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
         }
       }
       if (filterMatches) {
-        pkPairs.foreach { case (pkKey, pkVal) =>
-          val key = Seq(ws, ns, pkKey)
+        pkPairs.foreach { case (label, labelVal) =>
+          val key = Seq(ws, ns, label)
           val sketch = acc.getOrElseUpdate(key, ChurnSketches(new CpcSketch(logK), new CpcSketch(logK)))
-          val valBytes = pkVal.getBytes
+          val valBytes = labelVal.getBytes
           if (pk.endTime > totalFromTs) sketch.total.update(valBytes)
           if (pk.endTime == Long.MaxValue) sketch.active.update(valBytes)
         }
       }
+      count += 1
+      if (count % 100000 == 0 ) logger.info(s"Shard $shard split $split processed $count part keys so far and has " +
+        s"${acc.size} unique ws/ns/labels")
       acc
     }
+    logger.info(s"Final shard $shard result has ${ret.size} ws/ns/labels in split $split")
+    ret
   }
 }
