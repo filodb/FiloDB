@@ -130,6 +130,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
       queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
       queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getSamplesScannedCounter(stat.group).addAndGet(stat.samplesScanned)
       queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
       queryStats.getCpuNanosCounter(stat.group).addAndGet(stat.cpuNanos)
     }

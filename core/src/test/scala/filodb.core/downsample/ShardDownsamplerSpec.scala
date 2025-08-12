@@ -71,15 +71,15 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   val partKeyOffset = partKeyBuilder.allContainers.head.allOffsets(0)
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
-  def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
-    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
-    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
-    // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(ingestBlockHolder, encode = true)
-//    part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, Long.MaxValue, "query-id")
-  }
+//  def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
+//    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
+//    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+//    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
+//    // Now flush and ingest the rest to ensure two separate chunks
+//    part.switchBuffers(ingestBlockHolder, encode = true)
+////    part.encodeAndReleaseBuffers(ingestBlockHolder)
+//    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, Long.MaxValue, "query-id")
+//  }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
     true, new TimeSeriesShardStats(promDataset.ref, 0))

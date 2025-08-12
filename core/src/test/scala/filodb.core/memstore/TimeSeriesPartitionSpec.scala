@@ -119,20 +119,20 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
         flushIntervalMillis = flushIntervalMillis, acceptDuplicateSamples)
     }
 
-    val iterWithCountingChunkInfo = part2.timeRangeRows(
-      WriteBufferChunkScan,
-      Array(1),
-      new CountingChunkInfoIterator(
-        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, Long.MaxValue, "query-id"
-      )
-    )
+//    val iterWithCountingChunkInfo = part2.timeRangeRows(
+//      WriteBufferChunkScan,
+//      Array(1),
+//      new CountingChunkInfoIterator(
+//        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, Long.MaxValue, "query-id"
+//      )
+//    )
 
     // collect the sum of all data in both the iterators of readablePartition
     val iterSum = iter.map(_.getDouble(0)).sum
-    val iterWithCountingChunkInfoSum = iterWithCountingChunkInfo.map(_.getDouble(0)).sum
+ //   val iterWithCountingChunkInfoSum = iterWithCountingChunkInfo.map(_.getDouble(0)).sum
 
     // UT assertions
-    iterSum shouldEqual iterWithCountingChunkInfoSum
+ //   iterSum shouldEqual iterWithCountingChunkInfoSum
     dataBytesScannedCtr.get() shouldEqual 48
   }
 

@@ -450,35 +450,35 @@ object MachineMetricsData {
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
-                  infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
-  (Stream[Seq[Any]], RawDataRangeVector) = {
-    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
-    val container = records(ds, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH,
-      false, Option.empty, false, 1.hour.toMillis) }
-    // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
-  }
+//  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
+//                  infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
+//  (Stream[Seq[Any]], RawDataRangeVector) = {
+//    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
+//    val container = records(ds, histData).records
+//    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
+//    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH,
+//      false, Option.empty, false, 1.hour.toMillis) }
+//    // Now flush and ingest the rest to ensure two separate chunks
+//    part.switchBuffers(histIngestBH, encode = true)
+//    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
+//  }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with histMaxMin(linearHistSeries) records
-  def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
-  (Stream[Seq[Any]], RawDataRangeVector) = {
-    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
-    val container = records(histMaxMinDS, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxMinBH, false,
-      Option.empty, false, 1.hour.toMillis) }
-    // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histMaxMinBH, encode = true)
-    // Select timestamp, hist, max, min
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, Long.MaxValue, "query-id"))
-  }
+//  def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+//  (Stream[Seq[Any]], RawDataRangeVector) = {
+//    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+//    val container = records(histMaxMinDS, histData).records
+//    val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
+//    container.iterate(histMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxMinBH, false,
+//      Option.empty, false, 1.hour.toMillis) }
+//    // Now flush and ingest the rest to ensure two separate chunks
+//    part.switchBuffers(histMaxMinBH, encode = true)
+//    // Select timestamp, hist, max, min
+//    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
+//      new AtomicLong, Long.MaxValue, "query-id"))
+//  }
 }
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket

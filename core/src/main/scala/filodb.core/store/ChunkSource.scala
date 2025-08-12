@@ -196,7 +196,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
       RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr,
+        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, lookupRes.samplesScannedCtr,
         querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
       )
     }
