@@ -1,7 +1,9 @@
 package filodb.core.query
 
+import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.metadata.Column.ColumnType
 import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.Histogram
+import filodb.memory.format.vectors.{Histogram, HistogramWithBuckets}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -109,9 +111,14 @@ class TransientHistRow(var timestamp: Long = 0L,
   override def toString: String = s"TransientHistRow(t=$timestamp, v=$value)"
 
   override def copyFrom(r: RowReader): Unit = r match {
-    case h: TransientHistRow         => timestamp = h.timestamp
-                                        value = h.value
-    case _                           => throw new IllegalArgumentException("Unknown Row reader")
+    case h: TransientHistRow                                       => timestamp = h.timestamp
+                                                                      value = h.value
+    case b: BinaryRecordRowReader
+        if b.schema.columnTypes(1) == ColumnType.HistogramColumn   =>
+                                                           timestamp = b.getLong(0)
+                                                           value = b.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+    case _                                                         =>
+                                                           throw new IllegalArgumentException("Unknown Row reader")
   }
 }
 
@@ -126,6 +133,7 @@ final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0)
   override def toString: String = s"TransientHistMaxMinRow(t=$timestamp, h=$value, max=$max, min=$min)"
 
   override def copyFrom(r: RowReader): Unit = r match {
+    // TODO: Change the copy for this to handle BinaryRowReader
     case k: TransientHistMaxMinRow =>
                                           super.copyFrom(r)
                                           max = k.max

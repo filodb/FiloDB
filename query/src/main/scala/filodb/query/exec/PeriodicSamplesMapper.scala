@@ -3,6 +3,7 @@ package filodb.query.exec
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
+
 import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -55,7 +56,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length
+ //scalastyle:off
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -79,7 +80,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val windowLength = windowToUse.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
 
     val rvs = sampleRangeFunc match {
-      case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
+      case _: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
@@ -95,7 +96,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
                     extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
         }
-      case c: ChunkedRangeFunction[_] =>
+      case _: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
             s"windowLength=$windowLength")
@@ -114,7 +115,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
                     extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
-      case f: RangeFunction[_] if valColType == ColumnType.LongColumn =>
+      case _: RangeFunction[_] if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
@@ -123,8 +124,17 @@ final case class PeriodicSamplesMapper(startMs: Long,
               rangeFuncGen().asSlidingD, querySession.queryConfig, leftInclusiveWindow,
               new TransientRow()), outputRvRange)
         }
+      case _: RangeFunction[_]   if valColType == ColumnType.HistogramColumn =>
+        source.map { rv =>
+          val windowPlusPubInt = extendLookback(rv, windowLength)
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows(), startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+              rangeFuncGen().asSlidingH,
+              querySession.queryConfig, leftInclusiveWindow,
+              if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()), outputRvRange)
+        }
       // Otherwise just feed in the double column
-      case f: RangeFunction[_] =>
+      case _: RangeFunction[_] =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
@@ -164,7 +174,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
       }
     }).getOrElse(rvs)
   }
-  //scalastyle:on method.length
+  //scalastyle:on
 
   /**
    * If a rate function is used in the downsample dataset where publish interval is known,
@@ -363,7 +373,10 @@ class SlidingWindowIterator[T <: MutableRowReader](raw: RangeVectorCursor,
   // we need buffered iterator so we can use to peek at next element.
   // At same time, do counter correction if necessary
   private val rows = if (rangeFunction.needsCounterCorrection) {
-    new BufferableCounterCorrectionIterator(rawInOrder).buffered
+    sampleToEmit match {
+      case _: TransientRow      => new BufferableCounterCorrectionIterator(rawInOrder).buffered
+      case _: TransientHistRow  => new BufferableCounterCorrectionIteratorH(rawInOrder).buffered
+    }
   } else {
     new BufferableIterator(rawInOrder, rowReaderFactory).buffered
   }

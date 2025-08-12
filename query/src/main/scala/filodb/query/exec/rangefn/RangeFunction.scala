@@ -6,6 +6,7 @@ import filodb.core.query._
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
 //import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
@@ -23,6 +24,7 @@ trait Window[T <: MutableRowReader] {
 
 // Just a marker trait for all RangeFunction implementations, sliding and chunked
 sealed trait BaseRangeFunction {
+  def asSlidingH: RangeFunction[TransientHistRow] = this.asInstanceOf[RangeFunction[TransientHistRow]]
   def asSlidingD: RangeFunction[TransientRow] = this.asInstanceOf[RangeFunction[TransientRow]]
   def asChunkedD: ChunkedRangeFunction[TransientRow] = this.asInstanceOf[ChunkedRangeFunction[TransientRow]]
   def asChunkedH: ChunkedRangeFunction[TransientHistRow] = this.asInstanceOf[ChunkedRangeFunction[TransientHistRow]]
@@ -295,7 +297,11 @@ object RangeFunction {
       case ColumnType.HistogramColumn => histChunkedFunction(schema, func, funcParams)
       case other: ColumnType => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
-      iteratingFunction(func, schema, funcParams)
+      if (columnType == ColumnType.HistogramColumn) {
+        iteratingFunctionH(func, schema, funcParams)
+      } else {
+        iteratingFunction(func, schema, funcParams)
+      }
     }
   }
 
@@ -402,6 +408,44 @@ object RangeFunction {
    * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
    */
   // scalastyle:off cyclomatic.complexity
+  def iteratingFunctionH(func: Option[InternalRangeFunction],
+                        schema: ResultSchema,
+                        funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    // when no window function is asked, use last sample for instant
+    case None                                   => () => LastSampleFunctionH
+    case Some(Last)                             => () => LastSampleFunctionH
+//    case Some(Rate) if schema.columns(1).isCumulative
+//    => () => RateFunction
+//    case Some(Increase) if schema.columns(1).isCumulative
+//    => () => IncreaseFunction
+//    case Some(Rate)                             => () => new RateOverDeltaFunction()
+//    case Some(Increase)                         => () => new SumOverTimeFunction() // Sum of deltas over time
+//    case Some(Delta)                            => () => DeltaFunction
+//    case Some(Resets)                           => () => new ResetsFunction()
+//    case Some(Irate) if schema.columns(1).isCumulative
+//    => () => IRateFunction
+//    case Some(Idelta)                           => () => IDeltaFunction
+//    case Some(Irate)                            => () => IRatePeriodicFunction
+//    case Some(Deriv)                            => () => DerivFunction
+//    case Some(MaxOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double])
+//    case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+//    case Some(CountOverTime)                    => () => new CountOverTimeFunction()
+//    case Some(SumOverTime)                      => () => new SumOverTimeFunction()
+//    case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()
+//    case Some(StdDevOverTime)                   => () => new StdDevOverTimeFunction()
+//    case Some(StdVarOverTime)                   => () => new StdVarOverTimeFunction()
+//    case Some(Changes)                          => () => ChangesOverTimeFunction
+//    case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
+//    case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
+//    case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+    case _                                      => ??? //TODO enumerate all possible cases
+  }
+
+  /**
+   * Returns a function to generate the RangeFunction for SlidingWindowIterator.
+   * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
+   */
+  // scalastyle:off cyclomatic.complexity
   def iteratingFunction(func: Option[InternalRangeFunction],
                         schema: ResultSchema,
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
@@ -433,6 +477,32 @@ object RangeFunction {
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
     case _                                      => ??? //TODO enumerate all possible cases
+  }
+}
+
+
+object LastSampleFunctionH extends RangeFunction[TransientHistRow] {
+
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+
+    for (i <- (window.size - 1) to 0 by -1) {
+      val row = window(i)
+      // TODO: Is this ok? The only implementation that's not HistogramWithBuckets is PromRateHistogram
+      //  That's private in HistogramQuantileMapper, also is one bucket not NaN a good check?
+      val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+      if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN ) {
+        sampleToEmit.setValues(endTimestamp, hist)
+        return
+      }
+    }
+    sampleToEmit.setValues(endTimestamp, HistogramWithBuckets.empty)
   }
 }
 
