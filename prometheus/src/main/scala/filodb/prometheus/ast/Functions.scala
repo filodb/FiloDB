@@ -214,8 +214,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       rangeExpression.window.timeUnit == IntervalMultiple,
       otherParams,
       rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
-      rangeExpression.atTimestamp.map(_.getTimestampInSec(timeParams) * 1000),
-      rangeExpression.columnFilters
+      rangeExpression.atTimestamp.map(_.getTimestampInSec(timeParams) * 1000)
     )
   }
 

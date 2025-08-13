@@ -695,11 +695,17 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
   def setScheme(scale: Int,
                 startIndexPositiveBuckets: Int,
                 numPositiveBuckets: Int): Unit = {
-    this.scale = scale
-    this.startIndexPositiveBuckets = startIndexPositiveBuckets
-    this.numPositiveBuckets = numPositiveBuckets
-    startBucketTop = bucketTop(1)
-    endBucketTop = bucketTop(numBuckets - 1)
+    if (scale != this.scale ||
+        startIndexPositiveBuckets != this.startIndexPositiveBuckets ||
+        numPositiveBuckets != this.numPositiveBuckets) {
+      // Don't pay the cost of recalculating bucket tops if nothing changed.
+      // This method gets invoked for each and every sample queried, so it is important to keep it performant.
+      this.scale = scale
+      this.startIndexPositiveBuckets = startIndexPositiveBuckets
+      this.numPositiveBuckets = numPositiveBuckets
+      startBucketTop = bucketTop(1)
+      endBucketTop = bucketTop(numBuckets - 1)
+    }
   }
 
   override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count

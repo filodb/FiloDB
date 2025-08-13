@@ -9,6 +9,8 @@ import scala.concurrent.Future
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
@@ -56,6 +58,20 @@ trait ChunkSink {
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord]
 
+  def writePartKeyUpdates(ref: DatasetRef,
+                          epoch5mBucket: Long,
+                          updatedTimeMs: Long,
+                          offset: Long,
+                          tagSet: TagSet,
+                          partKeys: Observable[PartKeyRecord]): Future[Response]
+
+  /**
+   * Can be used by any downstream applications who is using this library. Also helpful for testing purposes.
+   * */
+  def getUpdatedPartKeysByTimeBucket(ref: DatasetRef,
+                                     shard: Int,
+                                     updateHour: Long): Observable[PartKeyRecord]
+
   def writePartKeys(ref: DatasetRef, shard: Int,
                     partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                     updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
@@ -94,8 +110,14 @@ class ChunkSinkStats {
   private val chunksetWrites     = Kamon.counter("chunkset-writes").withoutTags
   private val partKeysWrites     = Kamon.counter("partKey-writes").withoutTags
 
+  // PartKeyUpdatesPublisher metrics
+  private val partKeyUpdatesSuccess = Kamon.counter("partKey-updates-published")
+  private val partKeyUpdatesError   = Kamon.counter("partKey-updates-failed")
+  private val partKeyUpdatesLatency = Kamon.histogram("partKey-updates-latency", MeasurementUnit.time.milliseconds)
+
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
+  val partKeysUpdatesPublished = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
@@ -116,6 +138,19 @@ class ChunkSinkStats {
   def partKeysWrite(numKeys: Int): Unit = {
     partKeysWrites.increment(numKeys)
     partKeysWritten.addAndGet(numKeys)
+  }
+
+  def partKeyUpdatesSuccess(num: Int, tagSet: TagSet): Unit = {
+    partKeyUpdatesSuccess.withTags(tagSet).increment(num)
+    partKeysUpdatesPublished.addAndGet(num)
+  }
+
+  def partKeyUpdatesFailed(num: Int, tagSet: TagSet): Unit = {
+    partKeyUpdatesError.withTags(tagSet).increment(num)
+  }
+
+  def partKeyUpdatesLatency(latency: Long, tagSet: TagSet): Unit = {
+    partKeyUpdatesLatency.withTags(tagSet).record(latency)
   }
 }
 
@@ -165,6 +200,15 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
+
+  override def writePartKeyUpdates(ref: DatasetRef, epoch5mBucket: Long, updatedTimeMs: Long, offset: Long,
+                                   tagSet: TagSet,
+                                   partKeys: Observable[PartKeyRecord]): Future[Response] = {
+    partKeys.countL.map(c => sinkStats.partKeyUpdatesSuccess(c.toInt, TagSet.Empty)).runToFuture.map(_ => Success)
+  }
+
+  override def getUpdatedPartKeysByTimeBucket(ref: DatasetRef, shard: Int,
+                                              updateHour: Long): Observable[PartKeyRecord] = Observable.empty
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,

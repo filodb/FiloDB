@@ -335,4 +335,114 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     queryParamsMap.get("verbose").get shouldEqual "true"
     queryParamsMap.get("match[]").get shouldEqual "{_ws_=\"a\",_ns_=\"b\",__name__=\"c\"}"
   }
+
+  describe("columnFilters()") {
+
+    // Helper to create a simple RawSeries for tests
+    def makeRawSeries(filters: Seq[ColumnFilter]): RawSeries = {
+      RawSeries(IntervalSelector(1000, 5000), filters, Seq("value"))
+    }
+
+    it("should extract filters from a simple RawSeries plan") {
+      val filters = Seq(ColumnFilter("job", Equals("node")), ColumnFilter("instance", NotEquals("localhost")))
+      val plan = makeRawSeries(filters)
+      plan.planColumnFilters() should contain theSameElementsAs filters
+    }
+
+    it("should extract filters from a nested PeriodicSeriesWithWindowing plan") {
+      val filters = Seq(ColumnFilter("__name__", Equals("http_requests_total")),
+                        ColumnFilter("status", EqualsRegex("5..")))
+      val raw = makeRawSeries(filters)
+      val plan = PeriodicSeriesWithWindowing(raw, 1000, 100, 5000, 300, SumOverTime)
+
+      plan.planColumnFilters() should contain theSameElementsAs filters
+    }
+
+    it("should combine filters from both sides of a BinaryJoin") {
+      val lhsFilters = Seq(ColumnFilter("__name__", Equals("metric_a")), ColumnFilter("dc", Equals("us-east-1")))
+      val rhsFilters = Seq(ColumnFilter("__name__", Equals("metric_b")), ColumnFilter("dc", Equals("us-east-1")))
+      val lhs = PeriodicSeries(makeRawSeries(lhsFilters), 1000, 100, 5000)
+      val rhs = PeriodicSeries(makeRawSeries(rhsFilters), 1000, 100, 5000)
+      val plan = BinaryJoin(lhs, DIV, OneToOne, rhs)
+
+      val expected = lhsFilters ++ rhsFilters
+      plan.planColumnFilters() should contain theSameElementsAs expected
+    }
+
+    it("should combine filters from a deeply nested BinaryJoin") {
+      val filters1 = Seq(ColumnFilter("app", Equals("app-1")))
+      val filters2 = Seq(ColumnFilter("app", Equals("app-2")))
+      val filters3 = Seq(ColumnFilter("app", Equals("app-3")))
+
+      val p1 = PeriodicSeries(makeRawSeries(filters1), 1000, 100, 5000)
+      val p2 = PeriodicSeries(makeRawSeries(filters2), 1000, 100, 5000)
+      val p3 = PeriodicSeries(makeRawSeries(filters3), 1000, 100, 5000)
+
+      val innerJoin = BinaryJoin(p1, DIV, OneToOne, p2)
+      val outerJoin = BinaryJoin(innerJoin, DIV, OneToOne, p3)
+
+      val expected = filters1 ++ filters2 ++ filters3
+      outerJoin.planColumnFilters() should contain theSameElementsAs expected
+    }
+
+    it("should return an empty sequence for scalar plans") {
+      val scalarPlan1 = ScalarTimeBasedPlan(ScalarFunctionId.Time, RangeParams(1000, 100, 5000))
+      val scalarPlan2 = ScalarFixedDoublePlan(123.4, RangeParams(1000, 100, 5000))
+
+      scalarPlan1.planColumnFilters() should be (empty)
+      scalarPlan2.planColumnFilters() should be (empty)
+    }
+
+    it("should extract filters from a VectorPlan wrapping a scalar with filters") {
+      val innerFilters = Seq(ColumnFilter("mode", Equals("idle")))
+      val scalarWithVector = ScalarVaryingDoublePlan(
+        PeriodicSeries(makeRawSeries(innerFilters), 1000, 100, 5000),
+        ScalarFunctionId.Scalar
+      )
+      val plan = VectorPlan(scalarWithVector)
+
+      plan.planColumnFilters() should contain theSameElementsAs innerFilters
+    }
+
+    it("should combine filters from child and the node itself for ApplyAbsentFunction") {
+      val childFilters = Seq(ColumnFilter("__name__", Equals("some_metric")))
+      val absentFilters = Seq(ColumnFilter("job", Equals("prometheus")), ColumnFilter("instance", Equals("localhost")))
+
+      val childPlan = PeriodicSeries(makeRawSeries(childFilters), 1000, 100, 5000)
+      val plan = ApplyAbsentFunction(childPlan, absentFilters, RangeParams(1000, 100, 5000))
+
+      val expected = childFilters ++ absentFilters
+      plan.planColumnFilters() should contain theSameElementsAs expected
+    }
+
+    it("should combine filters from child and the node itself for ApplyLimitFunction") {
+      val childFilters = Seq(ColumnFilter("__name__", Equals("some_metric")))
+      val limitFilters = Seq(ColumnFilter("job", Equals("prometheus")), ColumnFilter("instance", Equals("localhost")))
+
+      val childPlan = PeriodicSeries(makeRawSeries(childFilters), 1000, 100, 5000)
+      val plan = ApplyLimitFunction(childPlan, limitFilters, RangeParams(1000, 100, 5000), 10)
+
+      val expected = childFilters ++ limitFilters
+      plan.planColumnFilters() should contain theSameElementsAs expected
+    }
+
+    it("should extract filters from a MetadataQueryPlan like LabelValues") {
+      val filters = Seq(ColumnFilter("namespace", Equals("my-ns")), ColumnFilter("pod", EqualsRegex("api-.*")))
+      val plan = LabelValues(Seq("pod"), filters, 1000, 5000)
+
+      plan.planColumnFilters() should contain theSameElementsAs filters
+    }
+
+    it("should generate and extract filters from a TsCardinalities plan") {
+      val plan = TsCardinalities(Seq("my-ws", "my-ns"), 2)
+      val expected = Seq(
+        ColumnFilter("_ws_", Equals("my-ws")),
+        ColumnFilter("_ns_", Equals("my-ns"))
+      )
+      plan.planColumnFilters() should contain theSameElementsAs expected
+    }
+  }
+
+
+
 }
