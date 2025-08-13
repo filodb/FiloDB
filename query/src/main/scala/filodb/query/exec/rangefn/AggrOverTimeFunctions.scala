@@ -112,6 +112,54 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
+class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, var count: Int = 0)
+  extends RangeFunction[TransientHistRow] {
+
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    val histValue = row.value
+
+    if (histValue.numBuckets > 0) {
+      sum match {
+        // First histogram - copy it to ensure we have our own mutable copy
+        case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(histValue)
+        // Add to existing sum
+        case hist: bv.MutableHistogram    => hist.add(histValue)
+      }
+      count += 1
+    }
+  }
+
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    // Very expensive, is there a better way?
+    val histValue = row.value
+    if (histValue.numBuckets > 0) {
+      // Since histogram subtraction is complex and not typically supported,
+      // we recalculate the sum from scratch using all remaining items in the window
+      sum = bv.Histogram.empty
+      count = 0
+
+      // Recalculate sum from all remaining items in window
+      for (i <- 0 until window.size) {
+        val windowRow = window(i)
+        val windowHist = windowRow.value
+        if (windowHist.numBuckets > 0) {
+          sum match {
+            case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(histValue)
+            case hist: bv.MutableHistogram    => hist.add(windowHist)
+          }
+          count += 1
+        }
+      }
+    }
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow, queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sum)
+  }
+}
+
+
 class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
   override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {

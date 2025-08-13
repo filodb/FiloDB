@@ -430,7 +430,7 @@ object RangeFunction {
 //    case Some(MaxOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double])
 //    case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
 //    case Some(CountOverTime)                    => () => new CountOverTimeFunction()
-//    case Some(SumOverTime)                      => () => new SumOverTimeFunction()
+      case Some(SumOverTime)                      => () => new SumOverTimeFunctionH()
 //    case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()
 //    case Some(StdDevOverTime)                   => () => new StdDevOverTimeFunction()
 //    case Some(StdVarOverTime)                   => () => new StdVarOverTimeFunction()
