@@ -9,7 +9,8 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
-import filodb.memory.format.vectors.{CustomBuckets, HistogramBuckets, LongBinaryVector, MutableHistogram}
+import filodb.memory.format.vectors.{CustomBuckets, HistogramBuckets,
+                                      HistogramWithBuckets, LongBinaryVector, MutableHistogram}
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.InternalRangeFunction.AvgWithSumAndCountOverTime
@@ -595,7 +596,14 @@ class DropOutOfOrderSamplesIterator[R <: MutableRowReader](
       val nxt = iter.next()
       val t = nxt.getLong(0)
       if (t > cur.timestamp) { // if next sample is later than current sample
-        nextVal.copyFrom(nxt)
+        nextVal match {
+          case tr: TransientRow         =>
+                                            val v = nxt.getDouble(1)
+                                            tr.setValues(t, v)
+          case thr: TransientHistRow    =>
+                                            val v = nxt.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+                                            thr.setValues(t, v)
+        }
         hasNextVal = true
       } else {
         Query.droppedSamples.increment()
