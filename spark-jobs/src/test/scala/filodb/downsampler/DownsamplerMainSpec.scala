@@ -1517,7 +1517,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -1554,7 +1554,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -1585,7 +1585,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1))
@@ -1629,7 +1629,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual false
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1))
@@ -1684,7 +1684,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -1730,7 +1730,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual false
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -1790,7 +1790,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -1837,7 +1837,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual false
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -1898,7 +1898,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual false
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData1 = rv1.rows.map { r =>
       val h = r.getHistogram(3).asInstanceOf[LongHistogram]
@@ -1939,7 +1939,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -1989,7 +1989,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv2 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart2, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val downsampledData2 = rv2.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -2016,7 +2016,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
@@ -2063,7 +2063,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -2106,7 +2106,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      new AtomicLong(), Long.MaxValue, "query-id")
+      new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
