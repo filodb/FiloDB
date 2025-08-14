@@ -140,11 +140,10 @@ class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, va
 
       // Recalculate sum from all remaining items in window
       for (i <- 0 until window.size) {
-        val windowRow = window(i)
-        val windowHist = windowRow.value
+        val windowHist = window(i).value
         if (windowHist.numBuckets > 0) {
           sum match {
-            case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(histValue)
+            case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(windowHist)
             case hist: bv.MutableHistogram    => hist.add(windowHist)
           }
           count += 1
