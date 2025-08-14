@@ -32,11 +32,11 @@ object TestData {
   def toRawPartData(chunkSetStream: Observable[ChunkSet]): Task[RawPartData] = {
     var partKeyBytes: Array[Byte] = null
     chunkSetStream.map { case ChunkSet(info, partKey, _, chunks, _) =>
-                    if (partKeyBytes == null) {
-                      partKeyBytes = BinaryRegionLarge.asNewByteArray(UnsafeUtils.ZeroPointer, partKey)
-                    }
-                    RawChunkSet(ChunkSetInfo.toBytes(info), chunks.toArray)
-                  }.toListL.map { rawChunkSets => RawPartData(partKeyBytes, rawChunkSets) }
+      if (partKeyBytes == null) {
+        partKeyBytes = BinaryRegionLarge.asNewByteArray(UnsafeUtils.ZeroPointer, partKey)
+      }
+      RawChunkSet(ChunkSetInfo.toBytes(info), chunks.toArray)
+    }.toListL.map { rawChunkSets => RawPartData(partKeyBytes, rawChunkSets) }
   }
 
   val sourceConfStr = """
@@ -78,18 +78,18 @@ object NamesTestData {
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
   // or the data column rowReader
   val names = Seq((Some(24L), Some("Khalil"),    Some("Mack"),     Some(0)),
-                  (Some(28L), Some("Ndamukong"), Some("Suh"),      Some(0)),
-                  (Some(25L), Some("Rodney"),    Some("Hudson"),   Some(0)),
-                  (Some(40L), Some("Jerry"),     None,             Some(0)),
-                  (Some(39L), Some("Peyton"),    Some("Manning"),  Some(0)),
-                  (Some(29L), Some("Terrance"),  Some("Knighton"), Some(0)))
+    (Some(28L), Some("Ndamukong"), Some("Suh"),      Some(0)),
+    (Some(25L), Some("Rodney"),    Some("Hudson"),   Some(0)),
+    (Some(40L), Some("Jerry"),     None,             Some(0)),
+    (Some(39L), Some("Peyton"),    Some("Manning"),  Some(0)),
+    (Some(29L), Some("Terrance"),  Some("Knighton"), Some(0)))
 
   val altNames = Seq((Some(24L), Some("Stacy"),    Some("McGee"),     Some(0)),
-                     (Some(28L), Some("Bruce"),     Some("Irvin"),    Some(0)),
-                     (Some(25L), Some("Amari"),     Some("Cooper"),   Some(0)),
-                     (Some(40L), Some("Jerry"),     None,             Some(0)),
-                     (Some(39L), Some("Derek"),     Some("Carr"),     Some(0)),
-                     (Some(29L), Some("Karl"),      Some("Joseph"),   Some(0)))
+    (Some(28L), Some("Bruce"),     Some("Irvin"),    Some(0)),
+    (Some(25L), Some("Amari"),     Some("Cooper"),   Some(0)),
+    (Some(40L), Some("Jerry"),     None,             Some(0)),
+    (Some(39L), Some("Derek"),     Some("Carr"),     Some(0)),
+    (Some(29L), Some("Karl"),      Some("Joseph"),   Some(0)))
 
   val firstKey = schema.timestamp(mapper(names).head)
   val lastKey = schema.timestamp(mapper(names).last)
@@ -115,9 +115,9 @@ object NamesTestData {
           startRowNo = numChunks * 10000 + chunk * 100
           rowNo  <- startRowNo to (startRowNo + 99) }
     yield { (Some(rowNo.toLong),             // the unique row key
-             names(rowNo % 6)._1, names(rowNo % 6)._2,
-             Some(rowNo / 10000 * 10000),    // the segment key
-             Some(league)) }                 // partition key
+      names(rowNo % 6)._1, names(rowNo % 6)._2,
+      Some(rowNo / 10000 * 10000),    // the segment key
+      Some(league)) }                 // partition key
   }
 }
 
@@ -127,7 +127,7 @@ object NamesTestData {
  */
 object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
-                         .getLines.toSeq.drop(1)     // drop the header line
+    .getLines.toSeq.drop(1)     // drop the header line
 
   val gdeltUniqueLines = Source.fromURL(getClass.getResource("/GDELT-unique-samples.csv"))
     .getLines.toSeq.drop(1)     // drop the header line
@@ -136,13 +136,13 @@ object GdeltTestData {
     .getLines.toSeq.drop(1)     // drop the header line
 
   val schema = Seq("GLOBALEVENTID:long",
-                   "SQLDATE:long",
-                   "MonthYear:int",
-                   "Year:int",
-                   "Actor2Code:string",
-                   "Actor2Name:string",
-                   "NumArticles:int",
-                   "AvgTone:double")
+    "SQLDATE:long",
+    "MonthYear:int",
+    "Year:int",
+    "Actor2Code:string",
+    "Actor2Name:string",
+    "NumArticles:int",
+    "AvgTone:double")
   val columnNames = schema.map(_.split(':').head)
 
   // WARNING: do not use these directly with toChunkSetStream, you won't get the right fields.
@@ -184,8 +184,8 @@ object GdeltTestData {
   val records = gdeltLines.map { line =>
     val parts = line.split(',')
     GdeltRecord(parts(0).toLong, DateTime.parse(parts(1)).getMillis,
-                parts(2).toInt, parts(3).toInt,
-                parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
+      parts(2).toInt, parts(3).toInt,
+      parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
   val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
@@ -210,7 +210,7 @@ object GdeltTestData {
   // Dataset7: partition Actor2Code,Actor2Name,NumArticles to test additional faceting
   val datasetOptionsWithFacets = datasetOptions.copy(
     multiColumnFacets = Map("Actor2Code-Actor2Name" -> Seq("Actor2Code", "Actor2Name"),
-                            "Actor2Name-Actor2Code" -> Seq("Actor2Name", "Actor2Code")))
+      "Actor2Name-Actor2Code" -> Seq("Actor2Name", "Actor2Code")))
   val dataset7 = Dataset("gdelt", schema.slice(4, 7), schema.patch(4, Nil, 2), datasetOptionsWithFacets)
 
 
@@ -238,10 +238,10 @@ object MachineMetricsData {
                        incr: Long = 1000): Stream[Product] = {
     Stream.from(0).map { n =>
       (Some(initTs + n * incr),
-       Some((45 + nextInt(10)).toDouble),
-       Some((60 + nextInt(25)).toDouble),
-       Some((100 + nextInt(15)).toDouble),
-       Some((85 + nextInt(12)).toLong))
+        Some((45 + nextInt(10)).toDouble),
+        Some((60 + nextInt(25)).toDouble),
+        Some((100 + nextInt(15)).toDouble),
+        Some((85 + nextInt(12)).toLong))
     }
   }
 
@@ -269,9 +269,9 @@ object MachineMetricsData {
   }
 
   /**
-    * @param ingestionTimeStep defines the ingestion time increment for each generated
-    * RecordContainer
-    */
+   * @param ingestionTimeStep defines the ingestion time increment for each generated
+   * RecordContainer
+   */
   def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
                      offset: Int = 0): Seq[SomeData] =
@@ -292,11 +292,11 @@ object MachineMetricsData {
     val initTs = System.currentTimeMillis
     Stream.from(0).map { n =>
       Seq(initTs + n * 1000,
-         (45 + nextInt(10)).toDouble,
-         (60 + nextInt(25)).toDouble,
-         (99.9 + nextInt(15)).toDouble,
-         (85 + nextInt(12)).toLong,
-         "Series " + (n % 10))
+        (45 + nextInt(10)).toDouble,
+        (60 + nextInt(25)).toDouble,
+        (99.9 + nextInt(15)).toDouble,
+        (85 + nextInt(12)).toLong,
+        "Series " + (n % 10))
     }
   }
 
@@ -305,11 +305,11 @@ object MachineMetricsData {
                         seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
     Stream.from(0).map { n =>
       Seq(startTs + n * timeStep,
-         (1 + n).toDouble,
-         (20 + n).toDouble,
-         (99.9 + n).toDouble,
-         (85 + n).toLong,
-         seriesPrefix + (n % numSeries))
+        (1 + n).toDouble,
+        (20 + n).toDouble,
+        (99.9 + n).toDouble,
+        (85 + n).toLong,
+        seriesPrefix + (n % numSeries))
     }
   }
 
@@ -343,9 +343,9 @@ object MachineMetricsData {
 
   val uuidString = java.util.UUID.randomUUID.toString
   val extraTags = Map("job".utf8 -> "prometheus".utf8,
-                      "cloudProvider".utf8 -> "AmazonAWS".utf8,
-                      "region".utf8 -> "AWS-USWest".utf8,
-                      "instance".utf8 -> uuidString.utf8)
+    "cloudProvider".utf8 -> "AmazonAWS".utf8,
+    "region".utf8 -> "AWS-USWest".utf8,
+    "instance".utf8 -> uuidString.utf8)
 
   val tagsWithDiffLen = extraTags ++ Map("job".utf8 -> "prometheus23".utf8)
   val tagsDiffSameLen = extraTags ++ Map("region".utf8 -> "AWS-USEast".utf8)
@@ -353,8 +353,8 @@ object MachineMetricsData {
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
   val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
-                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
-                            options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
+    Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
+    options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
   val expHistDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
     Seq("timestamp:ts", "count:long", "sum:long", "min:long", "max:long", "h:hist:counter=false"),
@@ -365,10 +365,10 @@ object MachineMetricsData {
                        infBucket: Boolean = false, ws: String = "demo"):
   Stream[Seq[Any]] = {
     val scheme = if (infBucket) {
-                   // Custom geometric buckets, with top bucket being +Inf
-                   val buckets = (0 to numBuckets - 2).map(n => Math.pow(2.0, n + 1)) ++ Seq(Double.PositiveInfinity)
-                   bv.CustomBuckets(buckets.toArray)
-                 } else bv.GeometricBuckets(2.0, 2.0, numBuckets)
+      // Custom geometric buckets, with top bucket being +Inf
+      val buckets = (0 to numBuckets - 2).map(n => Math.pow(2.0, n + 1)) ++ Seq(Double.PositiveInfinity)
+      bv.CustomBuckets(buckets.toArray)
+    } else bv.GeometricBuckets(2.0, 2.0, numBuckets)
     histBucketScheme = scheme
     val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
@@ -379,11 +379,11 @@ object MachineMetricsData {
     Stream.from(0).map { n =>
       updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
-          (1 + n).toLong,
-          buckets.sum.toLong,
-          bv.LongHistogram(scheme, buckets.map(x => x)),
-          "request-latency",
-          extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+        (1 + n).toLong,
+        buckets.sum.toLong,
+        bv.LongHistogram(scheme, buckets.map(x => x)),
+        "request-latency",
+        extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 
@@ -418,7 +418,7 @@ object MachineMetricsData {
 
   // dataset2 + histDataset
   val schemas2h = Schemas(schema2.partition,
-                        Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
+    Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
 
   val histMaxMinDS = Dataset.make("histmaxmin",
     Seq("metric:string", "tags:map"),
@@ -433,7 +433,7 @@ object MachineMetricsData {
       // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
       val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
       val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
-                            .lastOption.getOrElse(hist.numBuckets - 1)
+        .lastOption.getOrElse(hist.numBuckets - 1)
       val max = hist.bucketTop(lastBucketNum) * 0.8
       val min = hist.bucketTop(lastBucketNum) * 0.1
       ((row take 4):+ min :+ max) ++ (row drop 4)
@@ -444,41 +444,41 @@ object MachineMetricsData {
   val evictionLock = new EvictionLock
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16, evictionLock)
   val histIngestBH = new BlockMemFactory(blockStore, histDataset.schema.data.blockMetaSize,
-                                         dummyContext, true)
+    dummyContext, true)
   val histMaxMinBH = new BlockMemFactory(blockStore, histMaxMinDS.schema.data.blockMetaSize,
-                                      dummyContext, true)
+    dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-//  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
-//                  infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
-//  (Stream[Seq[Any]], RawDataRangeVector) = {
-//    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
-//    val container = records(ds, histData).records
-//    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-//    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH,
-//      false, Option.empty, false, 1.hour.toMillis) }
-//    // Now flush and ingest the rest to ensure two separate chunks
-//    part.switchBuffers(histIngestBH, encode = true)
-//    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
-//  }
+  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
+                  infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
+    val container = records(ds, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH,
+      false, Option.empty, false, 1.hour.toMillis) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
+  }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with histMaxMin(linearHistSeries) records
-//  def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
-//  (Stream[Seq[Any]], RawDataRangeVector) = {
-//    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
-//    val container = records(histMaxMinDS, histData).records
-//    val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
-//    container.iterate(histMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxMinBH, false,
-//      Option.empty, false, 1.hour.toMillis) }
-//    // Now flush and ingest the rest to ensure two separate chunks
-//    part.switchBuffers(histMaxMinBH, encode = true)
-//    // Select timestamp, hist, max, min
-//    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-//      new AtomicLong, Long.MaxValue, "query-id"))
-//  }
+  def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(histMaxMinDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
+    container.iterate(histMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxMinBH, false,
+      Option.empty, false, 1.hour.toMillis) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histMaxMinBH, encode = true)
+    // Select timestamp, hist, max, min
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
+      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+  }
 }
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket
@@ -488,35 +488,35 @@ object CustomMetricsData {
   //Partition Key with multiple string columns
   val partitionColumns = Seq("_metric_:string", "app:string")
   val metricdataset = Dataset.make("tsdbdata",
-                        partitionColumns,
-                        columns,
-                        Seq.empty,
-                        None,
-                        DatasetOptions(Seq("_metric_", "_ns_", "_ws_"), "_metric_", true)).get
+    partitionColumns,
+    columns,
+    Seq.empty,
+    None,
+    DatasetOptions(Seq("_metric_", "_ns_", "_ws_"), "_metric_", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
   //Partition Key with single map columns
   val partitionColumns2 = Seq("tags:map")
   val metricdataset2 = Dataset.make("tsdbdata",
-                        partitionColumns2,
-                        columns,
-                        Seq.empty,
-                        None,
-                        DatasetOptions(Seq("__name__"), "__name__", true)).get
+    partitionColumns2,
+    columns,
+    Seq.empty,
+    None,
+    DatasetOptions(Seq("__name__"), "__name__", true)).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
-                                                           Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
+    Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
 
 }
 
 object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
-                                  Seq("tags:map"),
-                                  Seq("timestamp:ts", "value:double:detectDrops=true"),
-                                  Seq.empty,
-                                  None,
-                                  DatasetOptions(Seq("__name__", "job"), "__name__")).get
+    Seq("tags:map"),
+    Seq("timestamp:ts", "value:double:detectDrops=true"),
+    Seq.empty,
+    None,
+    DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
   val timeseriesSchemas = Schemas(timeseriesSchema)
 
@@ -570,14 +570,14 @@ object MetricsTestData {
         val tags = record(5).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
         val metricName = record(4).toString
         val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
-                           tags + ("__name__".utf8 -> (metricName + "_count").utf8))
+          tags + ("__name__".utf8 -> (metricName + "_count").utf8))
         val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,
-                           tags + ("__name__".utf8 -> (metricName + "_sum").utf8))
+          tags + ("__name__".utf8 -> (metricName + "_sum").utf8))
         val hist = record(3).asInstanceOf[bv.MutableHistogram]
         val bucketTags = tags + ("__name__".utf8 -> (metricName + "_bucket").utf8)
         val bucketRecs = (0 until hist.numBuckets).map { b =>
           Seq(timestamp, hist.bucketValue(b),
-              bucketTags + ("le".utf8 -> hist.bucketTop(b).toString.utf8))
+            bucketTags + ("le".utf8 -> hist.bucketTop(b).toString.utf8))
         }
         Seq(countRec, sumRec) ++ bucketRecs
       }

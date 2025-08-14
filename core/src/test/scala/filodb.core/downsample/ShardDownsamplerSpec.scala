@@ -49,7 +49,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, promDataset.schema.data.blockMetaSize,
-                                                        MMD.dummyContext, true)
+    MMD.dummyContext, true)
 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset.schema.data, storeConf)
@@ -71,15 +71,15 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   val partKeyOffset = partKeyBuilder.allContainers.head.allOffsets(0)
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
-//  def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
-//    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
-//    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-//    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
-//    // Now flush and ingest the rest to ensure two separate chunks
-//    part.switchBuffers(ingestBlockHolder, encode = true)
-////    part.encodeAndReleaseBuffers(ingestBlockHolder)
-//    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, Long.MaxValue, "query-id")
-//  }
+  def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
+    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(ingestBlockHolder, encode = true)
+    //    part.encodeAndReleaseBuffers(ingestBlockHolder)
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
+  }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
     true, new TimeSeriesShardStats(promDataset.ref, 0))
@@ -199,7 +199,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
   val histDSDataset = modify(MMD.histDataset)(_.schema.data.downsamplers)
-                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers, Some("hist-ds")).get)
+    .setTo(Dataset.validateDownsamplers(histDSDownsamplers, Some("hist-ds")).get)
   val histDSSchema = histDSDataset.schema
 
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
@@ -232,7 +232,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
     val expectedSums = data.grouped(6).toSeq.map { dataRows =>
       dataRows.map(_(3).asInstanceOf[bv.LongHistogram])
-              .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
     }
 
     // Skip comparing the last sample because end of chunk=100 rows is not evenly divisible by 6
