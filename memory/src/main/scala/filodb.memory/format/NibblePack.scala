@@ -319,6 +319,15 @@ object NibblePack {
       val numElems = Math.min(numBuckets - i, 8)
       cforRange { 0 until numElems } { n =>
         if (data(n) < lastHistDeltas(i + n)) valueDropped = true
+        // delta(n) represents the increase in the Nth bucket between measurements.
+        // Each new delta should be greater than or equal to the previous one.
+        // A decrease indicates a dropped or reset value, which is invalid.
+        // Example of an invalid histogram due to a drop:
+        //   time1 = (0, 131, 131)
+        //   time2 = (433, 447, 447)
+        //   -> Bucket 1 increased by 131 at time1, but only by 14 at time2, violating the monotonicity rule.
+        //   Previous deltas:  0, 131, 0  // lastHistDeltas
+        //   Current deltas:   0, 14,  0  // data
         packArray(n) = data(n) - originalDeltas(i + n)
       }
       System.arraycopy(data, 0, lastHistDeltas, i, numElems)
