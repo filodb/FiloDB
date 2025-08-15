@@ -626,7 +626,7 @@ case class EmptyHistogramException(message: String) extends IllegalArgumentExcep
  * A reader for SectDelta encoded histograms, including correction/drop functionality
  */
 class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
-      extends RowHistogramReader(acc2, histVect) with CounterHistogramReader {
+      extends RowHistogramReader(acc2, histVect) with CounterHistogramReader with StrictLogging {
   // baseHist is section base histogram; summedHist used to compute base + delta or other sums
   private val summedHist = LongHistogram.empty(buckets)
   private val baseHist = summedHist.copy
@@ -683,11 +683,18 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
   // code to go through and build a list of corrections and corresponding index values.. (dropIndex, correction)
   private lazy val corrections = {
     var index = 0
+    var dropped = false
     // Step 1: build an iterator of (starting-index, section) for each section
-    iterateSections.map { case (s) => val o = (index, s); index += s.numElements(acc); o }.collect {
+    val correctionData = iterateSections.map { case (s) => val o = (index, s); index += s.numElements(acc); o }.collect {
       case (i, s) if i > 0 && s.sectionType(acc) == Section.TypeDrop =>
+        dropped = true
         (i, apply(i - 1).asInstanceOf[LongHistogram].copy)
     }.toBuffer
+    if (dropped) {
+      logger.warn(s"detected counter reset in histogram correction=${corrections}\n" +
+        s"allSections=${dumpAllSections}")
+    }
+    correctionData
   }
 
   def dropPositions(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): debox.Buffer[Int] = {

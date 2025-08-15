@@ -1432,6 +1432,7 @@ object ProtoConverters {
         case AggregationOperator.Stdvar => GrpcMultiPartitionQueryService.AggregationOperator.STDVAR
         case AggregationOperator.Quantile => GrpcMultiPartitionQueryService.AggregationOperator.QUANTILE
         case AggregationOperator.Max => GrpcMultiPartitionQueryService.AggregationOperator.MAX
+        case AggregationOperator.Absent => throw new UnsupportedOperationException("Absent is not supported")
       }
     }
   }
