@@ -362,9 +362,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(recs.length)
           querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
           val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
+          val samplesScannedCounter = querySession.queryStats.getSamplesScannedCounter(metricGroupBy)
 
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter)
+            _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter, samplesScannedCounter)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }

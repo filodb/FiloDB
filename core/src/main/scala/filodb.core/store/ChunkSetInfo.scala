@@ -337,6 +337,7 @@ object CountingChunkInfoIterator {
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
                                 columnIDs: Array[Int],
                                 dataBytesScannedCtr: AtomicLong,
+                                samplesScannedCtr: AtomicLong,
                                 maxBytesScanned: Long,
                                 queryId: String) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
@@ -357,6 +358,7 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
     // Why two counters ?
     // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
     dataBytesScannedCtr.addAndGet(bytesRead)
+    samplesScannedCtr.addAndGet(reader.numRows * bucketsFactor)
     if (dataBytesScannedCtr.get() > maxBytesScanned) {
       val exMessage = s"Actual raw data bytes scan of ${dataBytesScannedCtr.get()} bytes exceeds limit of " +
         s"${maxBytesScanned} bytes queried per shard. " +
