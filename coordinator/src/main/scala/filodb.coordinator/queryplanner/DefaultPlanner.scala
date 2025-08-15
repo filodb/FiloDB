@@ -234,7 +234,8 @@ trait  DefaultPlanner {
                                               lp: ApplyMiscellaneousFunction,
                                               forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
-      if (lp.function == MiscellaneousFunctionId.OptimizeWithAgg) {
+      if (lp.function == MiscellaneousFunctionId.OptimizeWithAgg ||
+            lp.function == MiscellaneousFunctionId.NoOptimize) {
         // Optimize with aggregation is a no-op, doing no transformation. It must pass through
         // the execution plan to apply optimization logic correctly during aggregation.
         vectors
@@ -403,7 +404,9 @@ trait  DefaultPlanner {
    def materializeAggregate(qContext: QueryContext,
                             lp: Aggregate,
                             forceInProcess: Boolean = false): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
+    // Child plan should not skip Aggregate Present such as Topk in Sum(Topk)
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
+      qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     val reducer = addAggregator(lp, qContext, toReduceLevel1)
     PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }
