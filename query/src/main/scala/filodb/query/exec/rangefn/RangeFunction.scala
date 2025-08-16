@@ -414,8 +414,8 @@ object RangeFunction {
     // when no window function is asked, use last sample for instant
     case None                                   => () => LastSampleFunctionH
     case Some(Last)                             => () => LastSampleFunctionH
-//    case Some(Rate) if schema.columns(1).isCumulative
-//    => () => RateFunction
+    case Some(Rate) if schema.columns(1).isCumulative
+    => () => RateFunctionH
 //    case Some(Increase) if schema.columns(1).isCumulative
 //    => () => IncreaseFunction
 //    case Some(Rate)                             => () => new RateOverDeltaFunction()

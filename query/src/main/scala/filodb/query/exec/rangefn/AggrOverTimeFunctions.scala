@@ -130,7 +130,7 @@ class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, va
   }
 
   override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
-    // Very expensive, is there a better way?
+    // TODO: Very expensive, is there a better way? Can we subtract assuming the counter correction is already done?
     val histValue = row.value
     if (histValue.numBuckets > 0) {
       // Since histogram subtraction is complex and not typically supported,

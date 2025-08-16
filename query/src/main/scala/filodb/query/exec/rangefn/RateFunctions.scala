@@ -31,6 +31,39 @@ object RateFunctions {
     }
 
   /**
+   * Histogram version of extrapolatedRate for TransientHistRow - returns HistogramWithBuckets
+   */
+  def extrapolatedRateH(startTimestamp: Long,
+                        endTimestamp: Long,
+                        window: Window[TransientHistRow],
+                        isCounter: Boolean,
+                        isRate: Boolean): bv.HistogramWithBuckets =
+    if (window.size < 2) {
+      bv.HistogramWithBuckets.empty  // cannot calculate result without 2 samples
+    } else {
+      require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
+      require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
+
+      val firstHist = window.head.value
+      val lastHist = window.last.value
+
+      // Check if histograms have compatible bucket schemes
+      if (firstHist.buckets == lastHist.buckets && firstHist.numBuckets > 0) {
+        val rateArray = new Array[Double](firstHist.numBuckets)
+        cforRange { 0 until rateArray.size } { b =>
+          rateArray(b) = extrapolatedRate(startTimestamp, endTimestamp, window.size,
+                                        window.head.timestamp, firstHist.bucketValue(b),
+                                        window.last.timestamp, lastHist.bucketValue(b),
+                                        isCounter, isRate)
+        }
+        bv.MutableHistogram(firstHist.buckets, rateArray)
+      } else {
+        // Return empty histogram for incompatible bucket schemes
+        bv.HistogramWithBuckets.empty
+      }
+    }
+
+  /**
    * Calculates rate/delta/increase based on window information and between sample1 and sample2
    * @param numSamples the number of samples inclusive of start and end
    */
@@ -107,6 +140,23 @@ object RateFunction extends RangeFunction[TransientRow] {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
+      endTimestamp, window, true, true)
+    sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
+  }
+}
+
+object RateFunctionH extends RangeFunction[TransientHistRow] {
+
+  override def needsCounterCorrection: Boolean = true
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.extrapolatedRateH(startTimestamp,
       endTimestamp, window, true, true)
     sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
   }
@@ -417,4 +467,38 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
     hFunc.addTimeChunks(vectAcc, vectPtr, reader, startRowNum, endRowNum)
 
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
+}
+
+// Histogram Range Functions using extrapolatedRate
+
+object IncreaseHistogramFunction extends RangeFunction[TransientHistRow] {
+  override def needsCounterCorrection: Boolean = true
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.extrapolatedRateH(startTimestamp,
+      endTimestamp, window, true, false)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+
+object DeltaHistogramFunction extends RangeFunction[TransientHistRow] {
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.extrapolatedRateH(startTimestamp,
+      endTimestamp, window, false, false)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
 }

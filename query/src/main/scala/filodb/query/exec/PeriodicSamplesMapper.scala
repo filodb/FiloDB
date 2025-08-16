@@ -525,8 +525,7 @@ class BufferableCounterCorrectionIteratorH(iter: Iterator[RowReader]) extends It
     cur = temp
 
     // place values in cur and return
-    cur.setLong(0, next.getLong(0))
-    cur.setValues(1, MutableHistogram(buckets, correctedBuckets))
+    cur.setValues(next.getLong(0), MutableHistogram(buckets, correctedBuckets))
     cur
   }
 }
