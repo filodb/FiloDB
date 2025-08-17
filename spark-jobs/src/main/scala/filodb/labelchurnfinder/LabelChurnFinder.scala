@@ -15,20 +15,18 @@ import org.apache.spark.sql.SparkSession
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.downsampler.chunk.DownsamplerSettings
-import filodb.downsampler.index.DSIndexJobSettings
 
 object LabelChurnFinderMain extends App {
-  val dsSettings = new DownsamplerSettings()
-  val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
-  val labelChurnFinder = new LabelChurnFinder(dsSettings)
-  val sparkConf = new SparkConf(loadDefaults = true)
+  private val dsSettings = new DownsamplerSettings()
+  private val labelChurnFinder = new LabelChurnFinder(dsSettings)
+  private val sparkConf = new SparkConf(loadDefaults = true)
   sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
   val spark = SparkSession.builder()
     .appName("LabelChurnFinder")
     .config(sparkConf)
     .getOrCreate()
 
-  val result = labelChurnFinder.run(spark)
+  private val result = labelChurnFinder.run(spark)
   result.show(truncate = false)
   spark.stop()
 }
@@ -56,6 +54,15 @@ object LCFContext extends StrictLogging {
  */
 class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable with StrictLogging {
 
+  /**
+   * Returns DataFrame with columns:
+   * WsNsLabel: Array of [ws, ns, labelName]
+   * ActiveCount: Approx count of distinct label values active now (endTime == Long.MaxValue)
+   * TotalCount: Approx count of distinct label values active since totalFromTs
+   * Churn: TotalCount / ActiveCount (0.0 if ActiveCount is 0)
+   *
+   * The spark session is not closed by this method.
+   */
   // scalastyle:off
   def run(spark: SparkSession) = {
 

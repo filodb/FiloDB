@@ -150,18 +150,19 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
                                      row.getAs[Long]("TotalCount")) }
     cards shouldEqual Array(
       (List("bulk_ws", "bulk_ns0", "_ns_"), 1, 1),
-      (List("bulk_ws", "bulk_ns0", "_ws_"), 1,1),
-      (List("bulk_ws", "bulk_ns1", "_ns_"), 0,1),
-      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2,numInstances/2),
-      (List("bulk_ws", "bulk_ns1", "_metric_"), 0,1),
-      (List("bulk_ws", "bulk_ns1", "container"), 0,10182),
-      (List("bulk_ws", "bulk_ns0", "container"), 10075,10075),
-      (List("bulk_ws", "bulk_ns1", "_ws_"), 0,1),
-      (List("bulk_ws", "bulk_ns0", "_metric_"), 1,1),
-      (List("bulk_ws", "bulk_ns1", "instance"), 0,numInstances/2),
-      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2,numPods/2),
-      (List("bulk_ws", "bulk_ns1", "pod"), 0,numPods/2)
+      (List("bulk_ws", "bulk_ns0", "_ws_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "_ns_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2, numInstances/2),
+      (List("bulk_ws", "bulk_ns1", "_metric_"), 0, 1),
+      (List("bulk_ws", "bulk_ns1", "container"), 0, 10182),
+      (List("bulk_ws", "bulk_ns0", "container"), 10075, 10075),
+      (List("bulk_ws", "bulk_ns1", "_ws_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "_metric_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "instance"), 0, numInstances/2),
+      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2, numPods/2),
+      (List("bulk_ws", "bulk_ns1", "pod"), 0, numPods/2)
     )
+    spark.stop()
   }
 
   it ("should run LCF job for different time range") {
@@ -183,21 +184,21 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     val result = lcf.run(spark).collect()
     result.length shouldEqual 12
     val cards = result.map { row => (row.getAs[List[String]]("WsNsLabel"),
-                             row.getAs[Long]("ActiveCount"),
-                             row.getAs[Long]("TotalCount")) }
+                                     row.getAs[Long]("ActiveCount"),
+                                     row.getAs[Long]("TotalCount")) }
     cards shouldEqual Array(
-      (List("bulk_ws", "bulk_ns0", "_ns_"), 1,1),
-      (List("bulk_ws", "bulk_ns0", "_ws_"), 1,1),
-      (List("bulk_ws", "bulk_ns1", "_ns_"), 0,1),
-      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2,numInstances/2),
-      (List("bulk_ws", "bulk_ns1", "_metric_"), 0,1),
-      (List("bulk_ws", "bulk_ns1", "container"), 0,7901), // reduced from 9922 above
-      (List("bulk_ws", "bulk_ns0", "container"), 10075,10075),
-      (List("bulk_ws", "bulk_ns1", "_ws_"), 0,1),
-      (List("bulk_ws", "bulk_ns0", "_metric_"), 1,1),
-      (List("bulk_ws", "bulk_ns1", "instance"), 0,numInstances/2),
-      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2,numPods/2),
-      (List("bulk_ws", "bulk_ns1", "pod"), 0,15))
+      (List("bulk_ws", "bulk_ns0", "_ns_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "_ws_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "_ns_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2, numInstances/2),
+      (List("bulk_ws", "bulk_ns1", "_metric_"), 0, 1),
+      (List("bulk_ws", "bulk_ns1", "container"), 0, 7901), // reduced from 9922 above
+      (List("bulk_ws", "bulk_ns0", "container"), 10075, 10075),
+      (List("bulk_ws", "bulk_ns1", "_ws_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "_metric_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "instance"), 0, numInstances/2),
+      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2, numPods/2),
+      (List("bulk_ws", "bulk_ns1", "pod"), 0, 15))
+    spark.stop()
   }
-
 }
