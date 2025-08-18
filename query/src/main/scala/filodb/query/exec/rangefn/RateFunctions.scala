@@ -3,9 +3,9 @@ package filodb.query.exec.rangefn
 import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
-import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
+import filodb.memory.format.{ vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.vectors.Base2ExpHistogramBuckets
+import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, MutableHistogram}
 import filodb.query.exec.FiloQueryConfig
 
 object RateFunctions {
@@ -190,6 +190,24 @@ class RateOverDeltaFunction extends RangeFunction[TransientRow] {
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, sumOverTime.sum / (endTimestamp - startTimestamp) * 1000 )
+  }
+}
+
+class RateOverDeltaFunctionH extends RangeFunction[TransientHistRow] {
+  private val sumOverTime = new SumOverTimeFunctionH
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.addedToWindow(row, window)
+
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.removedFromWindow(row, window)
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    val mh = sumOverTime.sum
+    val timeDelta = (endTimestamp - startTimestamp) / 1000.0
+    // divide each value of the histogram bucket by time
+    sampleToEmit.setValues(endTimestamp, MutableHistogram(mh.buckets, mh.values.map(_/timeDelta)))
   }
 }
 

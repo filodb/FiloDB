@@ -403,6 +403,8 @@ object RangeFunction {
     case _                    => ??? //TODO enumerate all possible cases
   }
 
+  private def notImplemented(function: String) =
+                      s"$function not implemented for RangeFunction[TransientHistRow]"
   /**
    * Returns a function to generate the RangeFunction for SlidingWindowIterator.
    * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
@@ -412,32 +414,35 @@ object RangeFunction {
                         schema: ResultSchema,
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
-    case None                                   => () => LastSampleFunctionH
-    case Some(Last)                             => () => LastSampleFunctionH
+    case None                                     => () => LastSampleFunctionH
+    case Some(Last)                               => () => LastSampleFunctionH
     case Some(Rate) if schema.columns(1).isCumulative
-    => () => RateFunctionH
-//    case Some(Increase) if schema.columns(1).isCumulative
-//    => () => IncreaseFunction
-//    case Some(Rate)                             => () => new RateOverDeltaFunction()
-//    case Some(Increase)                         => () => new SumOverTimeFunction() // Sum of deltas over time
-//    case Some(Delta)                            => () => DeltaFunction
-//    case Some(Resets)                           => () => new ResetsFunction()
-//    case Some(Irate) if schema.columns(1).isCumulative
-//    => () => IRateFunction
-//    case Some(Idelta)                           => () => IDeltaFunction
-//    case Some(Irate)                            => () => IRatePeriodicFunction
-//    case Some(Deriv)                            => () => DerivFunction
-//    case Some(MaxOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double])
-//    case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
-//    case Some(CountOverTime)                    => () => new CountOverTimeFunction()
-      case Some(SumOverTime)                      => () => new SumOverTimeFunctionH()
-//    case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()
-//    case Some(StdDevOverTime)                   => () => new StdDevOverTimeFunction()
-//    case Some(StdVarOverTime)                   => () => new StdVarOverTimeFunction()
-//    case Some(Changes)                          => () => ChangesOverTimeFunction
-//    case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
-//    case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
-//    case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+                                                  => () => RateFunctionH
+    case Some(Increase) if schema.columns(1).isCumulative
+                                                  => () => IncreaseFunctionH
+    // Since cumulative is already handled previously, this is for delta temporality
+    case Some(Rate)                               => () => new RateOverDeltaFunctionH()
+    case Some(Increase)                           => () => new SumOverTimeFunctionH() // Sum of deltas over time
+    case Some(Delta)                              => () => DeltaFunctionH
+    case Some(Resets)                             => throw new NotImplementedError(notImplemented("Resets"))
+    case Some(Irate) if schema.columns(1).isCumulative
+                                                  => () => IRateFunctionH
+    case Some(Idelta)                             => () => IDeltaFunctionH
+    case Some(Irate)                              => () => IRatePeriodicFunctionH
+    case Some(Deriv)                              => throw new NotImplementedError(notImplemented("Deriv"))
+    case Some(MaxOverTime)                        => throw new NotImplementedError(notImplemented("MaxOverTime"))
+    case Some(MinOverTime)                        => throw new NotImplementedError(notImplemented("MinOverTime"))
+    case Some(CountOverTime)                      => throw new NotImplementedError(notImplemented("CountOverTime"))
+    case Some(SumOverTime)                        => () => new SumOverTimeFunctionH()
+    case Some(AvgOverTime)                        => () => new AvgOverDeltaFunctionH()
+    case Some(StdDevOverTime)                     => throw new NotImplementedError(notImplemented("StdDevOverTime"))
+    case Some(StdVarOverTime)                     => throw new NotImplementedError(notImplemented("StdVarOverTime"))
+    case Some(Changes)                            => throw new NotImplementedError(notImplemented("Changes"))
+    case Some(QuantileOverTime)                   => throw new NotImplementedError(notImplemented("QuantileOverTime"))
+    case Some(MedianAbsoluteDeviationOverTime)    =>
+                                       throw new NotImplementedError(notImplemented("MedianAbsoluteDeviationOverTime"))
+    case Some(LastOverTimeIsMadOutlier)        =>
+                                       throw new NotImplementedError(notImplemented("LastOverTimeIsMadOutlier"))
     case _                                      => ??? //TODO enumerate all possible cases
   }
 

@@ -1,6 +1,9 @@
 package filodb.query.exec.rangefn
 
-import filodb.core.query.{QueryConfig, TransientRow}
+import spire.syntax.cfor._
+
+import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
+import filodb.memory.format.{vectors => bv}
 
 object RangeInstantFunctions {
   def derivFunction(window: Window[TransientRow]): Double = {
@@ -69,6 +72,51 @@ object RangeInstantFunctions {
     }
   }
 
+  def instantValueH(startTimestamp: Long,
+                    endTimestamp: Long,
+                    window: Window[TransientHistRow],
+                    isRate: Boolean): bv.HistogramWithBuckets = {
+    if (window.size < 2) {
+      bv.HistogramWithBuckets.empty  // cannot calculate result without 2 samples
+    } else {
+      require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
+      require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
+
+      val lastSample = window.last.value
+      val prevSampleRow = window(window.size - 2)
+      val prevSample = prevSampleRow.value
+
+      // Check if histograms have compatible bucket schemes
+      if (prevSample.buckets == lastSample.buckets && lastSample.numBuckets > 0) {
+        val resultArray = new Array[Double](lastSample.numBuckets)
+        cforRange { 0 until resultArray.size } { b =>
+          val lastValue = lastSample.bucketValue(b)
+          val prevValue = prevSample.bucketValue(b)
+          var bucketResult = lastValue - prevValue
+
+          if (isRate && lastValue < prevValue) {
+            bucketResult = lastValue
+          }
+
+          if (isRate) {
+            val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+            if (sampledInterval == 0) {
+              bucketResult = Double.NaN // Avoid dividing by 0
+            } else {
+              // Convert to per-second.
+              bucketResult = bucketResult / sampledInterval * 1000
+            }
+          }
+          resultArray(b) = bucketResult
+        }
+        bv.MutableHistogram(lastSample.buckets, resultArray)
+      } else {
+        // Return empty histogram for incompatible bucket schemes
+        bv.HistogramWithBuckets.empty
+      }
+    }
+  }
+
   // instant value for a period-counter is the last value in a window.
   def instantValueDeltaCounter(startTimestamp: Long,
                                endTimestamp: Long,
@@ -112,6 +160,40 @@ object IRateFunction extends RangeFunction[TransientRow] {
   }
 }
 
+object IRateFunctionH extends RangeFunction[TransientHistRow] {
+
+  override def needsCounterCorrection: Boolean = true
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RangeInstantFunctions.instantValueH(startTimestamp,
+      endTimestamp, window, true)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+
+object IDeltaFunctionH extends RangeFunction[TransientHistRow] {
+
+  override def needsCounterCorrection: Boolean = true
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RangeInstantFunctions.instantValueH(startTimestamp,
+      endTimestamp, window, false)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
 object IDeltaFunction extends RangeFunction[TransientRow] {
 
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
@@ -154,6 +236,47 @@ object IRatePeriodicFunction extends RangeFunction[TransientRow] {
     val result = if (sampledInterval == 0) {
       Double.NaN // Avoid dividing by 0
     } else sampleToEmit.value / sampledInterval * 1000
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+object IRatePeriodicFunctionH extends RangeFunction[TransientHistRow] {
+
+  var lastFunc = LastSampleFunctionH
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+    if (window.size < 1) {
+      // cannot calculate result without at least 1 sample
+      sampleToEmit.setValues(endTimestamp, bv.HistogramWithBuckets.empty)
+      return
+    }
+    //If there is only one sample, default the sample interval to 60 seconds
+    var sampledInterval: Double = 60000
+    lastFunc.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
+    if (window.size >= 2) {
+      val prevSampleRow = window(window.size - 2)
+      sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+    }
+
+    val lastHist = sampleToEmit.value
+    if (lastHist.numBuckets == 0 || sampledInterval == 0) {
+      // Return empty for empty histogram or zero interval
+      sampleToEmit.setValues(endTimestamp, bv.HistogramWithBuckets.empty)
+      return
+    }
+
+    // Calculate rate for each bucket
+    val rateArray = new Array[Double](lastHist.numBuckets)
+    cforRange { 0 until rateArray.size } { b =>
+      rateArray(b) = lastHist.bucketValue(b) / sampledInterval * 1000
+    }
+    val result = bv.MutableHistogram(lastHist.buckets, rateArray)
     sampleToEmit.setValues(endTimestamp, result)
   }
 }

@@ -158,6 +158,22 @@ class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, va
   }
 }
 
+class AvgOverDeltaFunctionH extends RangeFunction[TransientHistRow] {
+  private val sumOverTime = new SumOverTimeFunctionH
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.addedToWindow(row, window)
+
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.removedFromWindow(row, window)
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    val mh = sumOverTime.sum
+    sampleToEmit.setValues(endTimestamp, bv.MutableHistogram(mh.buckets, mh.values.map(_ / sumOverTime.count)))
+  }
+}
+
 
 class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
   override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {

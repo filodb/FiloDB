@@ -264,6 +264,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
 class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   val rand = new Random()
+  val errorOk = 0.0000001
 
   // TODO: replace manual loops with ScalaCheck/properties checker
   val numIterations = 10
@@ -955,6 +956,94 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     // Results should be identical
     slidingIt.zip(chunkedResults.iterator).foreach { case (sliding, chunked) =>
       sliding.getHistogram(1) shouldEqual chunked
+    }
+  }
+
+  it("AvgOverDeltaFunctionH should calculate average of delta histogram values") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    
+    // Create histogram samples with different values for averaging
+    val histSamples = Seq(
+      8072000L -> Array(100.0, 200.0, 300.0, 400.0),   // First sample
+      8082100L -> Array(50.0, 150.0, 250.0, 350.0),    // Second sample
+      8092196L -> Array(150.0, 250.0, 350.0, 450.0)    // Third sample
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val avgOverDeltaFunc = new AvgOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val row = new TransientHistRow(t, hist)
+      qHist.add(row)
+      avgOverDeltaFunc.addedToWindow(row, histWindow)
+    }
+    
+    val startTs = 8071950L
+    val endTs = 8092250L
+    val toEmit = new TransientHistRow
+    
+    avgOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 4
+    
+    // Expected averages: sum/count = [300, 600, 900, 1200]/3 = [100, 200, 300, 400]
+    val expectedAvgs = Array(100.0, 200.0, 300.0, 400.0)
+    for (b <- 0 until result.numBuckets) {
+      result.bucketValue(b) shouldEqual expectedAvgs(b) +- errorOk
+    }
+  }
+
+  it("AvgOverDeltaFunctionH should handle empty window") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val avgOverDeltaFunc = new AvgOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    avgOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for empty window
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("AvgOverDeltaFunctionH should handle single histogram sample") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val avgOverDeltaFunc = new AvgOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add single sample
+    val hist = bv.MutableHistogram(buckets, Array(100.0, 200.0, 300.0))
+    val row = new TransientHistRow(8072000L, hist)
+    qHist.add(row)
+    avgOverDeltaFunc.addedToWindow(row, histWindow)
+    
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    avgOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 3
+    
+    // Should return same values as input (average of single value is the value itself)
+    for (b <- 0 until result.numBuckets) {
+      result.bucketValue(b) shouldEqual hist.bucketValue(b) +- errorOk
     }
   }
 

@@ -572,4 +572,366 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual bv.HistogramWithBuckets.empty
   }
 
+  it("RateOverDeltaFunctionH should calculate rate over time for delta histograms") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    
+    // Create delta histogram samples (each represents values in that time period)
+    val histSamples = Seq(
+      8072000L -> Array(10.0, 15.0, 20.0, 25.0),   // First sample
+      8082100L -> Array(20.0, 30.0, 40.0, 50.0),   // Second sample
+      8092196L -> Array(15.0, 25.0, 35.0, 45.0)    // Third sample
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateOverDeltaFunc = new RateOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val row = new TransientHistRow(t, hist)
+      qHist.add(row)
+      rateOverDeltaFunc.addedToWindow(row, histWindow)
+    }
+    
+    val startTs = 8071950L
+    val endTs = 8092250L
+    val timeDelta = endTs - startTs  // 20300ms
+    val toEmit = new TransientHistRow
+    
+    rateOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 4
+    
+    // Expected sum: [45.0, 70.0, 95.0, 120.0]
+    // Expected rate per second: sum / (timeDelta/1000) = sum / 20.3
+    val expectedSum = Array(45.0, 70.0, 95.0, 120.0)
+    for (b <- 0 until result.numBuckets) {
+      val expectedRate = expectedSum(b) / (timeDelta / 1000.0)
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("RateOverDeltaFunctionH should handle empty window") {
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateOverDeltaFunc = new RateOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    rateOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for empty window
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("RateOverDeltaFunctionH should handle single histogram sample") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateOverDeltaFunc = new RateOverDeltaFunctionH()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add single sample
+    val hist = bv.MutableHistogram(buckets, Array(100.0, 200.0, 300.0))
+    val row = new TransientHistRow(8072000L, hist)
+    qHist.add(row)
+    rateOverDeltaFunc.addedToWindow(row, histWindow)
+    
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val timeDelta = endTs - startTs  // 11120ms
+    val toEmit = new TransientHistRow
+    
+    rateOverDeltaFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 3
+    
+    // Should return rate based on single sample values divided by time
+    for (b <- 0 until result.numBuckets) {
+      val expectedRate = hist.bucketValue(b) / (timeDelta / 1000.0)
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("IRateFunctionH should work with compatible histogram buckets") {
+    // Create histogram bucket scheme - matching the pattern from existing tests
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4) 
+    
+    // Create histogram samples with increasing counter values
+    val histSamples = Seq(
+      8072000L -> Array(100L, 120L, 140L, 160L),
+      8082100L -> Array(150L, 180L, 210L, 240L),
+      8092196L -> Array(200L, 240L, 280L, 320L),
+      8102215L -> Array(250L, 300L, 350L, 400L)
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues.map(_.toDouble))
+      val s = new TransientHistRow(t, hist)
+      qHist.add(s)
+    }
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8103070L
+    val toEmit = new TransientHistRow
+    
+    IRateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 4
+    
+    // Calculate expected instant rate between last two samples
+    val prevSample = histSamples(histSamples.length - 2)._2
+    val lastSample = histSamples.last._2
+    val prevTime = histSamples(histSamples.length - 2)._1
+    val lastTime = histSamples.last._1
+    val timeDiff = (lastTime - prevTime).toDouble / 1000.0  // Convert to seconds
+    
+    // Verify each bucket has correct instant rate value
+    for (b <- 0 until result.numBuckets) {
+      val bucketDiff = lastSample(b).toDouble - prevSample(b).toDouble
+      val expectedRate = bucketDiff / timeDiff
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("IRateFunctionH should handle counter reset correctly") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    
+    // Create histogram samples where the last sample has lower values (counter reset)
+    val histSamples = Seq(
+      8072000L -> Array(100.0, 120.0, 140.0, 160.0),
+      8082100L -> Array(200.0, 240.0, 280.0, 320.0),
+      8092196L -> Array(50.0, 60.0, 70.0, 80.0)  // Reset occurred here
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val s = new TransientHistRow(t, hist)
+      qHist.add(s)
+    }
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8093070L
+    val toEmit = new TransientHistRow
+    
+    IRateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 4
+    
+    // For counter reset, should use the last sample value as rate
+    val lastSample = histSamples.last._2
+    val prevTime = histSamples(histSamples.length - 2)._1
+    val lastTime = histSamples.last._1
+    val timeDiff = (lastTime - prevTime).toDouble / 1000.0
+    
+    for (b <- 0 until result.numBuckets) {
+      val expectedRate = lastSample(b) / timeDiff
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("IRateFunctionH should return empty histogram for insufficient samples") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Add only one sample (need at least 2 for instant rate calculation)
+    val hist = bv.MutableHistogram(buckets, Array(100.0, 120.0, 140.0, 160.0))
+    qHist.add(new TransientHistRow(8072000L, hist))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L  
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram when insufficient samples
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("IRateFunctionH should return empty histogram for incompatible bucket schemes") {
+    // Create two different bucket schemes
+    val buckets1 = bv.GeometricBuckets(2.0, 2.0, 4)
+    val buckets2 = bv.GeometricBuckets(3.0, 3.0, 4)
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // First sample with buckets1
+    val hist1 = bv.MutableHistogram(buckets1, Array(100.0, 120.0, 140.0, 160.0))
+    qHist.add(new TransientHistRow(8072000L, hist1))
+    
+    // Second sample with different bucket scheme (buckets2)
+    val hist2 = bv.MutableHistogram(buckets2, Array(150.0, 180.0, 210.0, 240.0))
+    qHist.add(new TransientHistRow(8082100L, hist2))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for incompatible schemes
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("IRateFunctionH should handle zero time interval correctly") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Create two samples with the same timestamp (zero time interval)
+    val sameTimestamp = 8072000L
+    val hist1 = bv.MutableHistogram(buckets, Array(100.0, 120.0, 140.0))
+    val hist2 = bv.MutableHistogram(buckets, Array(150.0, 180.0, 210.0))
+    
+    qHist.add(new TransientHistRow(sameTimestamp, hist1))
+    qHist.add(new TransientHistRow(sameTimestamp, hist2))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 3
+    
+    // Should return NaN for all buckets when time interval is zero
+    for (b <- 0 until result.numBuckets) {
+      result.bucketValue(b).isNaN shouldEqual true
+    }
+  }
+
+  it("IRatePeriodicFunctionH should work with single histogram sample using 60 second default") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Add only one sample 
+    val hist = bv.MutableHistogram(buckets, Array(120.0, 240.0, 360.0))
+    qHist.add(new TransientHistRow(8072000L, hist))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L  
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRatePeriodicFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 3
+    
+    // Should use 60 second default interval for rate calculation
+    val defaultInterval = 60.0 // seconds
+    for (b <- 0 until result.numBuckets) {
+      val expectedRate = hist.bucketValue(b) / defaultInterval
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("IRatePeriodicFunctionH should work with multiple histogram samples") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    
+    // Create histogram samples 
+    val histSamples = Seq(
+      8072000L -> Array(100.0, 120.0, 140.0, 160.0),
+      8082100L -> Array(200.0, 240.0, 280.0, 320.0),
+      8092196L -> Array(300.0, 360.0, 420.0, 480.0)
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val s = new TransientHistRow(t, hist)
+      qHist.add(s)
+    }
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8093070L
+    val toEmit = new TransientHistRow
+    
+    IRatePeriodicFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 4
+    
+    // Calculate expected rate using time between last two samples
+    val lastSample = histSamples.last._2
+    val prevTime = histSamples(histSamples.length - 2)._1
+    val lastTime = histSamples.last._1
+    val timeDiff = (lastTime - prevTime).toDouble / 1000.0  // Convert to seconds
+    
+    // Should use the last sample values divided by actual time interval
+    for (b <- 0 until result.numBuckets) {
+      val expectedRate = lastSample(b) / timeDiff
+      result.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("IRatePeriodicFunctionH should return empty histogram for empty window") {
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L  
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRatePeriodicFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for empty window
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("IRatePeriodicFunctionH should handle zero time interval") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Create two samples with the same timestamp (zero time interval)
+    val sameTimestamp = 8072000L
+    val hist1 = bv.MutableHistogram(buckets, Array(100.0, 120.0, 140.0))
+    val hist2 = bv.MutableHistogram(buckets, Array(150.0, 180.0, 210.0))
+    
+    qHist.add(new TransientHistRow(sameTimestamp, hist1))
+    qHist.add(new TransientHistRow(sameTimestamp, hist2))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRatePeriodicFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for zero time interval
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("IRatePeriodicFunctionH should handle empty histogram from LastSampleFunctionH") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Add empty histogram
+    val hist = bv.HistogramWithBuckets.empty
+    qHist.add(new TransientHistRow(8072000L, hist))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    IRatePeriodicFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for empty input histogram
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
 }
