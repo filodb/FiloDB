@@ -16,7 +16,7 @@ import org.apache.spark.sql.SparkSession
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.downsampler.chunk.DownsamplerSettings
 
-object LabelChurnFinderMain extends App {
+object LabelChurnFinderMain extends App with StrictLogging {
   private val dsSettings = new DownsamplerSettings()
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
   private val sparkConf = new SparkConf(loadDefaults = true)
@@ -25,9 +25,12 @@ object LabelChurnFinderMain extends App {
     .appName("LabelChurnFinder")
     .config(sparkConf)
     .getOrCreate()
-
   private val result = labelChurnFinder.run(spark)
-  result.show(truncate = false)
+  result.foreach { row =>
+    logger.info(s"Label Churn Results WsNsLabel=${row.getAs[List[String]]("WsNsLabel").mkString("/")} " +
+      s"ActiveCount=${row.getAs[Long]("ActiveCount")} TotalCount=${row.getAs[Long]("TotalCount")} " +
+      f"Churn=${row.getAs[Double]("Churn")}%.2f")
+  }
   spark.stop()
 }
 
@@ -96,6 +99,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     }
 
     val labels = splitShards.flatMap { case (split, shard) =>
+      logger.info(s"Fetching label values iterator for shard=$shard and split=$split")
       lcfTask.fetchLabelValues(split, shard)
     }
 

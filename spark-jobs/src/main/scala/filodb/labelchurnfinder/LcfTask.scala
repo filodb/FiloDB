@@ -47,7 +47,7 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
    */
   def fetchLabelValues(split: (String, String),
                        shard: Int): Iterator[Row] = {
-    val ret = colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
+    colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
     .flatMap { pk  =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
@@ -70,7 +70,6 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable with StrictL
         }
       } else Nil
     }
-    ret
   }
 
   /**
