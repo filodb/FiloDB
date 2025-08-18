@@ -228,6 +228,19 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
                                func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], querySession, row)
   }
 
+  def slidingWindowItH(data: Seq[Seq[Any]],
+                       rv: RawDataRangeVector,
+                       func: RangeFunction[TransientHistRow],
+                       windowSize: Int,
+                       step: Int): SlidingWindowIterator[TransientHistRow] = {
+    val windowTime = (windowSize.toLong - 1) * pubFreq
+    val windowStartTS = defaultStartTS + windowTime
+    val stepTimeMillis = step.toLong * pubFreq
+    val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
+    new SlidingWindowIterator(rv.rows(), windowStartTS, stepTimeMillis, windowEndTS, windowTime,
+      func, queryConfig, false, new TransientHistRow())
+  }
+
   def chunkedWindowItHist(data: Seq[Seq[Any]],
                           rv: RawDataRangeVector,
                           func: ChunkedRangeFunction[TransientHistRow],
@@ -863,4 +876,86 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated.foreach(x => x._2 shouldEqual(0))
   }
+  it("should correctly aggregate sum_over_time for histogram RVs using sliding window iterator") {
+    val (data, rv) = histogramRV(numSamples = 150)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(50) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      val slidingIt = slidingWindowItH(data, rv, new SumOverTimeFunctionH(), windowSize, step)
+      slidingIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
+        val aggHist = aggRow.getHistogram(1)
+        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
+          .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        aggHist shouldEqual sumRawHist
+      }
+      slidingIt.close()
+    }
+  }
+
+  it("should handle edge cases for SumOverTimeFunctionH") {
+    // Test with single histogram
+    val (singleData, singleRv) = histogramRV(numSamples = 1)
+    val singleIt = slidingWindowItH(singleData, singleRv, new SumOverTimeFunctionH(), 1, 1)
+    val singleResult = singleIt.next()
+    val expectedSingle = singleData.head(3).asInstanceOf[bv.LongHistogram]
+    singleResult.getHistogram(1) shouldEqual expectedSingle
+    singleIt.close()
+  }
+
+  it("should correctly handle window removal for SumOverTimeFunctionH") {
+    val (data, rv) = histogramRV(numSamples = 50)
+    val windowSize = 10
+    val step = 1
+
+    val slidingIt = slidingWindowItH(data, rv, new SumOverTimeFunctionH(), windowSize, step)
+
+    // Verify that each result matches the expected sum for that window
+    slidingIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
+      val aggHist = aggRow.getHistogram(1)
+      val expectedHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
+        .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+      aggHist shouldEqual expectedHist
+    }
+  }
+
+  it("should handle histograms with different bucket sizes for SumOverTimeFunctionH") {
+    // Test with different bucket configurations
+    val bucketSizes = Seq(4, 8, 16)
+    bucketSizes.foreach { numBuckets =>
+      val (data, rv) = histogramRV(numSamples = 30, numBuckets = numBuckets)
+      val windowSize = 5
+      val step = 2
+
+      val slidingIt = slidingWindowItH(data, rv, new SumOverTimeFunctionH(), windowSize, step)
+      slidingIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
+        val aggHist = aggRow.getHistogram(1)
+        val expectedHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
+          .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        aggHist shouldEqual expectedHist
+        aggHist.numBuckets shouldEqual numBuckets
+      }
+      slidingIt.close()
+    }
+  }
+
+  it("should produce same results as SumOverTimeChunkedFunctionH for identical data") {
+    val (data, rv1) = histogramRV(numSamples = 100)
+    val (_, rv2) = histogramRV(numSamples = 100) // Create second RV with same data
+
+    val windowSize = 20
+    val step = 10
+
+    // Test sliding window function
+    val slidingIt = slidingWindowItH(data, rv1, new SumOverTimeFunctionH(), windowSize, step)
+    // Test chunked function
+    val chunkedIt = chunkedWindowItHist(data, rv2, new SumOverTimeChunkedFunctionH(), windowSize, step)
+    val chunkedResults = chunkedIt.map(_.getHistogram(1)).toList
+    // Results should be identical
+    slidingIt.zip(chunkedResults.iterator).foreach { case (sliding, chunked) =>
+      sliding.getHistogram(1) shouldEqual chunked
+    }
+  }
+
 }

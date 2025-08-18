@@ -3,7 +3,7 @@ package filodb.core.query
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.{Histogram, HistogramWithBuckets}
+import filodb.memory.format.vectors.{Histogram, HistogramWithBuckets, LongHistogram, MutableHistogram}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -111,8 +111,13 @@ class TransientHistRow(var timestamp: Long = 0L,
   override def toString: String = s"TransientHistRow(t=$timestamp, v=$value)"
 
   override def copyFrom(r: RowReader): Unit = r match {
-    case h: TransientHistRow                                       => timestamp = h.timestamp
-                                                                      value = h.value
+    case h: TransientHistRow   if h.value.isInstanceOf[LongHistogram]
+                                                          => timestamp = h.timestamp
+                                                             val lh = h.value.asInstanceOf[LongHistogram]
+                                                             value = LongHistogram(lh.buckets, lh.values.clone())
+    case h: TransientHistRow   if h.value.isInstanceOf[MutableHistogram]
+                                                          => timestamp = h.timestamp
+                                                             value = h.value.asInstanceOf[MutableHistogram].copy()
     case b: BinaryRecordRowReader
         if b.schema.columnTypes(1) == ColumnType.HistogramColumn   =>
                                                            timestamp = b.getLong(0)

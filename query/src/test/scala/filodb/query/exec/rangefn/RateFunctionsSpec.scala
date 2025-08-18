@@ -4,7 +4,8 @@ import scala.util.Random
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.memstore.{TimeSeriesPartition, WriteBufferPool}
 import filodb.core.metadata.Dataset
-import filodb.core.query.TransientRow
+import filodb.core.query.{TransientHistRow, TransientRow}
+import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.{LongHistogram, MutableHistogram}
 import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow}
 import filodb.query.util.IndexedArrayQueue
@@ -489,6 +490,86 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val toEmit = new TransientRow
     IDeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
+  it("RateFunctionH should work with compatible histogram buckets") {
+    // Create histogram bucket scheme - matching the pattern from existing tests
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 8) 
+    
+    // Create histogram samples with increasing counter values
+    val histSamples = Seq(
+      8072000L -> Array(100L, 120L, 140L, 160L, 180L, 200L, 220L, 240L),
+      8082100L -> Array(150L, 180L, 210L, 240L, 270L, 300L, 330L, 360L),
+      8092196L -> Array(200L, 240L, 280L, 320L, 360L, 400L, 440L, 480L),
+      8102215L -> Array(250L, 300L, 350L, 400L, 450L, 500L, 550L, 600L)
+    )
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    histSamples.foreach { case (t, bucketValues) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues.map(_.toDouble))
+      val s = new TransientHistRow(t, hist)
+      qHist.add(s)
+    }
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    val startTs = 8071950L
+    val endTs = 8103070L
+    val toEmit = new TransientHistRow
+    
+    RateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    val result = toEmit.value
+    result.numBuckets shouldEqual 8
+    
+    // Verify each bucket has positive rate value (since counter values are increasing)
+    for (b <- 0 until result.numBuckets) {
+      result.bucketValue(b) should be > 0.0
+    }
+  }
+
+  it("RateFunctionH should return empty histogram for incompatible bucket schemes") {
+    // Create two different bucket schemes
+    val buckets1 = bv.GeometricBuckets(2.0, 2.0, 4)
+    val buckets2 = bv.GeometricBuckets(3.0, 3.0, 4)
+    
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // First sample with buckets1
+    val hist1 = bv.MutableHistogram(buckets1, Array(100.0, 120.0, 140.0, 160.0))
+    qHist.add(new TransientHistRow(8072000L, hist1))
+    
+    // Second sample with different bucket scheme (buckets2)
+    val hist2 = bv.MutableHistogram(buckets2, Array(150.0, 180.0, 210.0, 240.0))
+    qHist.add(new TransientHistRow(8082100L, hist2))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    RateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram for incompatible schemes
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
+  }
+
+  it("RateFunctionH should return empty histogram with insufficient samples") {
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 4)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    
+    // Add only one sample (need at least 2 for rate calculation)
+    val hist = bv.MutableHistogram(buckets, Array(100.0, 120.0, 140.0, 160.0))
+    qHist.add(new TransientHistRow(8072000L, hist))
+    
+    val histWindow = new QueueBasedWindow(qHist)
+    val startTs = 8071950L  
+    val endTs = 8083070L
+    val toEmit = new TransientHistRow
+    
+    RateFunctionH.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should return empty histogram when insufficient samples
+    toEmit.value shouldEqual bv.HistogramWithBuckets.empty
   }
 
 }

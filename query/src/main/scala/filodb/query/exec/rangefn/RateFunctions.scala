@@ -471,7 +471,7 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
 
 // Histogram Range Functions using extrapolatedRate
 
-object IncreaseHistogramFunction extends RangeFunction[TransientHistRow] {
+object IncreaseFunctionH extends RangeFunction[TransientHistRow] {
   override def needsCounterCorrection: Boolean = true
   def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
   def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
@@ -488,7 +488,7 @@ object IncreaseHistogramFunction extends RangeFunction[TransientHistRow] {
 }
 
 
-object DeltaHistogramFunction extends RangeFunction[TransientHistRow] {
+object DeltaFunctionH extends RangeFunction[TransientHistRow] {
   def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
   def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
 
