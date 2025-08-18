@@ -293,8 +293,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     resp match {
       case QueryError(_, _, ex: IllegalArgumentException)  =>
                                           ex.getMessage shouldEqual "requirement failed:" +
-                                            " The intermediate or final result is too big. For queries, please try to" +
-                                            " add more query filters or time range."
+                                            " The intermediate or final result is too big. containerSize=8192, " +
+                                            "numBytes=410, recordNumBytes=8114, ContainerHeaderLen=16, " +
+                                            "For queries, please try to add more query filters or time range."
       case _                                                   =>
                                             fail(s"Expected to see an exception for exceeding the default " +
                                               s"container limit of ${execPlan.maxRecordContainerSize(queryConfig)}")
