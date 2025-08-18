@@ -11,6 +11,7 @@ import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.ZeroCopyUTF8String._
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
+import org.apache.spark.sql.SparkSession
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -19,7 +20,6 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.io.File
 import java.time.Instant
-import scala.collection.mutable
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
@@ -50,7 +50,6 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   val shardInfo = TimeSeriesShardInfo(0, shardStats, offheapMem.bufferPools, offheapMem.nativeMemoryManager)
 
   val bulkSeriesTags = Map("_ws_".utf8 -> "bulk_ws".utf8, "_ns_".utf8 -> "bulk_ns".utf8)
-
 
   val settings = new DownsamplerSettings(jobConfig.withFallback(baseConf))
   val numShards = settings.numShards
@@ -107,17 +106,26 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
          |""".stripMargin)
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
-    val result = lcf.run(sparkConf)
-    result.size shouldEqual 6
-    val cards = result.mapValues { sketch => (sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
-    cards shouldEqual mutable.HashMap(
-      List("bulk_ws", "bulk_ns0", "container") -> ((10236, 10236)),
-      List("bulk_ws", "bulk_ns0", "instance") -> ((numInstances/2,numInstances/2)),
-      List("bulk_ws", "bulk_ns0", "_ns_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns0", "pod") -> ((numPods/2, numPods/2)),
-      List("bulk_ws", "bulk_ns0", "_ws_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns0", "_metric_") -> ((1,1))
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    val spark = SparkSession.builder()
+      .appName("LabelChurnFinder")
+      .config(sparkConf)
+      .getOrCreate()
+
+    val result = lcf.run(spark).collect()
+    result.length shouldEqual 6
+    val cards = result.map { row => (row.getAs[List[String]]("WsNsLabel"),
+                                     row.getAs[Long]("ActiveCount"),
+                                     row.getAs[Long]("TotalCount")) }
+    cards shouldEqual Array(
+      (List("bulk_ws", "bulk_ns0", "_ns_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "_ws_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2, numInstances/2),
+      (List("bulk_ws", "bulk_ns0", "container"), 10075, 10075),
+      (List("bulk_ws", "bulk_ns0", "_metric_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2, numPods/2),
     )
+    spark.stop()
   }
 
   it ("should run LCF job for multiple namespaces and workspaces") {
@@ -130,23 +138,31 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
          |""".stripMargin)
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
-    val result = lcf.run(sparkConf)
-    result.size shouldEqual 12
-    val cards = result.mapValues { sketch => (sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
-    cards shouldEqual mutable.HashMap(
-      List("bulk_ws", "bulk_ns1", "_metric_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns0", "pod") -> ((numPods/2,numPods/2)),
-      List("bulk_ws", "bulk_ns0", "_ns_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns1", "_ws_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns1", "_ns_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns1", "instance") -> ((0,numInstances/2)),
-      List("bulk_ws", "bulk_ns0", "container") -> ((10236,10236)),
-      List("bulk_ws", "bulk_ns0", "_ws_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns1", "pod") -> ((0,numPods/2)),
-      List("bulk_ws", "bulk_ns0", "instance") -> ((numInstances/2,numInstances/2)),
-      List("bulk_ws", "bulk_ns1", "container") -> ((0,9922)),
-      List("bulk_ws", "bulk_ns0", "_metric_") -> ((1,1))
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    val spark = SparkSession.builder()
+      .appName("LabelChurnFinder")
+      .config(sparkConf)
+      .getOrCreate()
+    val result = lcf.run(spark).collect()
+    result.length shouldEqual 12
+    val cards = result.map { row => (row.getAs[List[String]]("WsNsLabel"),
+                                     row.getAs[Long]("ActiveCount"),
+                                     row.getAs[Long]("TotalCount")) }
+    cards shouldEqual Array(
+      (List("bulk_ws", "bulk_ns0", "_ns_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "_ws_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "_ns_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2, numInstances/2),
+      (List("bulk_ws", "bulk_ns1", "_metric_"), 0, 1),
+      (List("bulk_ws", "bulk_ns1", "container"), 0, 10182),
+      (List("bulk_ws", "bulk_ns0", "container"), 10075, 10075),
+      (List("bulk_ws", "bulk_ns1", "_ws_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "_metric_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "instance"), 0, numInstances/2),
+      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2, numPods/2),
+      (List("bulk_ws", "bulk_ns1", "pod"), 0, numPods/2)
     )
+    spark.stop()
   }
 
   it ("should run LCF job for different time range") {
@@ -160,22 +176,29 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
          |""".stripMargin)
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
-    val result = lcf.run(sparkConf)
-    result.size shouldEqual 12
-    val cards = result.mapValues { sketch => (sketch.active.getEstimate.toInt, sketch.total.getEstimate.toInt) }
-    cards shouldEqual Map(
-      List("bulk_ws", "bulk_ns1", "_metric_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns0", "pod") -> ((numPods/2,numPods/2)),
-      List("bulk_ws", "bulk_ns0", "_ns_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns1", "_ws_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns1", "_ns_") -> ((0,1)),
-      List("bulk_ws", "bulk_ns1", "instance") -> ((0,numInstances/2)),
-      List("bulk_ws", "bulk_ns0", "container") -> ((10236,10236)),
-      List("bulk_ws", "bulk_ns0", "_ws_") -> ((1,1)),
-      List("bulk_ws", "bulk_ns1", "pod") -> ((0,15)),
-      List("bulk_ws", "bulk_ns0", "instance") -> ((numInstances/2,numInstances/2)),
-      List("bulk_ws", "bulk_ns1", "container") -> ((0,7747)), // reduced from 9922 above
-      List("bulk_ws", "bulk_ns0", "_metric_") -> ((1,1)))
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    val spark = SparkSession.builder()
+      .appName("LabelChurnFinder")
+      .config(sparkConf)
+      .getOrCreate()
+    val result = lcf.run(spark).collect()
+    result.length shouldEqual 12
+    val cards = result.map { row => (row.getAs[List[String]]("WsNsLabel"),
+                                     row.getAs[Long]("ActiveCount"),
+                                     row.getAs[Long]("TotalCount")) }
+    cards shouldEqual Array(
+      (List("bulk_ws", "bulk_ns0", "_ns_"), 1, 1),
+      (List("bulk_ws", "bulk_ns0", "_ws_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "_ns_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "instance"), numInstances/2, numInstances/2),
+      (List("bulk_ws", "bulk_ns1", "_metric_"), 0, 1),
+      (List("bulk_ws", "bulk_ns1", "container"), 0, 7901), // reduced from 9922 above
+      (List("bulk_ws", "bulk_ns0", "container"), 10075, 10075),
+      (List("bulk_ws", "bulk_ns1", "_ws_"), 0, 1),
+      (List("bulk_ws", "bulk_ns0", "_metric_"), 1, 1),
+      (List("bulk_ws", "bulk_ns1", "instance"), 0, numInstances/2),
+      (List("bulk_ws", "bulk_ns0", "pod"), numPods/2, numPods/2),
+      (List("bulk_ws", "bulk_ns1", "pod"), 0, 15))
+    spark.stop()
   }
-
 }
