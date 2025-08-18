@@ -685,13 +685,14 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     var index = 0
     var dropped = false
     // Step 1: build an iterator of (starting-index, section) for each section
-    val correctionData = iterateSections.map { case (s) => val o = (index, s); index += s.numElements(acc); o }.collect {
+    val correctionData = iterateSections.map { case (s) => val o = (index, s); index += s.numElements(acc); o }
+      .collect {
       case (i, s) if i > 0 && s.sectionType(acc) == Section.TypeDrop =>
         dropped = true
         (i, apply(i - 1).asInstanceOf[LongHistogram].copy)
     }.toBuffer
     if (dropped) {
-      logger.warn(s"detected counter reset in histogram correction=${corrections}\n" +
+      logger.debug(s"detected counter reset in histogram correction=${correctionData}\n" +
         s"allSections=${dumpAllSections}")
     }
     correctionData
