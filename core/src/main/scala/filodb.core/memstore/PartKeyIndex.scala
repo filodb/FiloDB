@@ -21,7 +21,7 @@ import filodb.core.memstore.PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset
 import filodb.core.memstore.PartKeyQueryBuilder.removeRegexAnchors
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.{PartitionSchema, Schemas}
-import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.metadata.Column.ColumnType.{IntColumn, MapColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
 import filodb.core.query.Filter.{And, Equals, EqualsRegex, In, NotEquals, NotEqualsRegex}
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
@@ -162,6 +162,14 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    */
   protected final val indexers = schema.columns.zipWithIndex.map { case (c, pos) =>
     c.columnType match {
+      case IntColumn => new Indexer {
+        val colName = UTF8Str(c.name)
+        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
+          val intValue = schema.binSchema.getInt(base, offset, pos)
+          addIndexedField(colName.toString, intValue.toString) // FIXME: perhaps use int field ?
+        }
+        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
+      }
       case StringColumn => new Indexer {
         val colName = UTF8Str(c.name)
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {

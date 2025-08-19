@@ -1,16 +1,14 @@
 package filodb.core.memstore
 
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
 import org.apache.lucene.util.BytesRef
-import org.scalatest.BeforeAndAfter
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
@@ -21,7 +19,7 @@ import filodb.memory.format.vectors.LongHistogram
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class TimeSeriesMemStoreSpec extends AnyFunSpec with BeforeAndAfterAll with Matchers with BeforeAndAfter with ScalaFutures {
   implicit val s = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._
@@ -38,6 +36,12 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                             .getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
+
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    memStore.shutdown()
+  }
 
   after {
     memStore.reset()
@@ -108,6 +112,63 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter))).map(_.getDouble(0)).sum
     agg1 shouldEqual (3 + 8 + 13 + 18)
+  }
+
+  it("should ingest ooo data map/tags column as partition key and aggregate") {
+    val config2 = ConfigFactory.parseString("""
+                                            |memstore.ooo-data-points-enabled = true
+                                            |""".stripMargin)
+                            .withFallback(config)
+
+    val memStore1 = new TimeSeriesMemStore(config2, new NullColumnStore, new InMemoryMetaStore())
+    memStore1.setup(datasetOoo2_1.ref, schemasOoo2_1, 0, TestData.storeConf, 1)
+    val series = withMap(linearOooMultiSeries(numSeries = 1).take(200), 1)
+    val data = records(datasetOoo2_1, series)
+    memStore1.ingest(datasetOoo2_1.ref, 0, data)
+
+    memStore1.refreshIndexForTesting(datasetOoo2_1.ref)
+
+    val shard = memStore1.getShard(datasetOoo2_1.ref, 0).get
+    val parts = shard.partitions
+    parts.size shouldEqual 3
+    parts.get(0).stringPartition shouldEqual "b2[schema=schemaID:61840  _o_=0,_metric_=Series 0,tags={n: 0}]"
+    parts.get(1).stringPartition shouldEqual "b2[schema=schemaID:61840  _o_=1,_metric_=Series 0,tags={n: 0}]"
+    parts.get(2).stringPartition shouldEqual "b2[schema=schemaID:61840  _o_=2,_metric_=Series 0,tags={n: 0}]"
+
+    val split = memStore1.getScanSplits(datasetOoo2_1.ref, 1).head
+
+    val filter1 = ColumnFilter("n", Filter.Equals("0".utf8))
+    val filter2 = ColumnFilter("_o_", Filter.Equals("0".utf8))
+    val agg1 = memStore1.scanRows(datasetOoo2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter2))).map(_.getDouble(0)).sum
+    agg1 shouldEqual 1783.0
+
+    val filter3 = ColumnFilter("_o_", Filter.Equals("1".utf8))
+    val agg2 = memStore1.scanRows(datasetOoo2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter3))).map(_.getDouble(0)).sum
+    agg2 shouldEqual 1650.0
+
+    val filter4 = ColumnFilter("_o_", Filter.Equals("2".utf8))
+    val agg3 = memStore1.scanRows(datasetOoo2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1, filter4))).map(_.getDouble(0)).sum
+    agg3 shouldEqual 1617.0
+
+    // Switch buffers, encode and release/return buffers for all partitions
+    val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
+    for { n <- 0 until parts.size() } {
+      val part = shard.partitions.get(n)
+      part.switchBuffers(blockFactory, encode = true)
+    }
+
+    // ingest same data again - it should be out of order, and should result in overlapping chunks
+    val series2 = withMap(linearOooMultiSeries(numSeries = 1).take(200), 1)
+    val data2 = records(datasetOoo2_1, series2)
+    memStore1.ingest(datasetOoo2_1.ref, 0, data2)
+
+    memStore1.refreshIndexForTesting(datasetOoo2_1.ref)
+    parts.size shouldEqual 6
+
+    val agg4 = memStore1.scanRows(datasetOoo2_1, Seq(1), FilteredPartitionScan(split, Seq(filter1))).map(_.getDouble(0)).sum
+    agg4 shouldEqual 10100.0 // (1783 + 1650 + 1617) * 2 since we ingested the same data again
+
+    memStore1.shutdown()
   }
 
   it("should ingest map/tags column as partition key and read using _type_ filter") {

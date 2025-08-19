@@ -130,24 +130,25 @@ extends ChunkMap(initMapSize) with ReadablePartition {
   def ingest(ingestionTime: Long, row: RowReader, overflowBlockHolder: BlockMemFactory,
              createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
              acceptDuplicateSamples: Boolean,
-             maxChunkTime: Long = Long.MaxValue): Unit = {
+             maxChunkTime: Long = Long.MaxValue): Boolean = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
     // accept duplicate sample when acceptDuplicateSamples = true, drop otherwise
-    if (ts > timestampOfLatestSample
-      ||  ts == timestampOfLatestSample && acceptDuplicateSamples) {
+    val lastTs = timestampOfLatestSample
+    if (ts > lastTs ||  ts == lastTs && acceptDuplicateSamples) {
       val newChunk = currentChunks == nullChunks
       if (newChunk) initNewChunk(ts, ingestionTime)
 
-      if(!newChunk && createChunkAtFlushBoundary
-        && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
+      if(!newChunk && createChunkAtFlushBoundary && ts/flushIntervalMillis.get != lastTs/flushIntervalMillis.get) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
         switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+        true
       } else if (ts - currentInfo.startTime > maxChunkTime) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
         switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+        true
       } else {
         cforRange { 0 until schema.numDataColumns } { col =>
           chunkmapWithExclusive { // acquire write lock to ensure readers don't read partial data
@@ -156,12 +157,12 @@ extends ChunkMap(initMapSize) with ReadablePartition {
             case r: VectorTooSmall =>
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-              return
+              return true
             // Different histogram bucket schema: need a new vector here
             case BucketSchemaMismatch =>
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-              return
+              return true
             case other: AddResponse =>
           }
         }
@@ -174,9 +175,10 @@ extends ChunkMap(initMapSize) with ReadablePartition {
           // Publish it now that it has something.
           infoPut(currentInfo)
         }
+        true
       }
     } else {
-      shardInfo.stats.outOfOrderDropped.increment()
+      false
     }
   }
 
@@ -508,7 +510,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shardInfo, initMapSize) {
   override def ingest(ingestionTime: Long, row: RowReader, overflowBlockHolder: BlockMemFactory,
                       createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
                       acceptDuplicateSamples: Boolean,
-                      maxChunkTime: Long = Long.MaxValue): Unit = {
+                      maxChunkTime: Long = Long.MaxValue): Boolean = {
     val ts = row.getLong(0)
     _log.info(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
                s"ingestionTime=$ingestionTime ts=$ts " +

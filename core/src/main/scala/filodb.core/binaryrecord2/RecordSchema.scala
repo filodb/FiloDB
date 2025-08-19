@@ -10,7 +10,7 @@ import org.agrona.concurrent.UnsafeBuffer
 import spire.syntax.cfor._
 
 import filodb.core.metadata.{Column, Schemas}
-import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
+import filodb.core.metadata.Column.ColumnType.{IntColumn, LongColumn, MapColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
@@ -49,7 +49,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
                          val brSchema: Map[Int, RecordSchema] = Map.empty,
-                         val schemaVersion: Int = 1) {
+                         val schemaVersion: Int = 1,
+                         val oooColIndex: Option[Int] = None) {
   import RecordSchema._
   import BinaryRegion.NativePointer
 
@@ -61,6 +62,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   require(predefinedKeys.length <= 64, "Too many predefined keys")
   require(partitionFieldStart.isEmpty ||
           partitionFieldStart.get < columnTypes.length, s"partitionFieldStart $partitionFieldStart is too high")
+  require(oooColIndex.forall(c => columns(c).colType == IntColumn &&
+            columns(c).name == oooColName), s"oooColIndex $oooColIndex must be an IntColumn with name $oooColName")
 
   // Offset to fixed area for each field.  Extra element at end is end of fixed size area / hash.
   // Note: these offsets start at 4, after the length header
@@ -146,6 +149,16 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def utf8StringPointer(address: NativePointer, index: Int): UTF8StringMedium = {
     val utf8Addr = address + UnsafeUtils.getInt(address + offsets(index))
     new UTF8StringMedium(utf8Addr)
+  }
+
+  def setOooCol(base: Any, offset: Long, value: Int): Unit = {
+    val colIdx = oooColIndex.getOrElse(throw new IllegalStateException("No oooColIndex defined"))
+    UnsafeUtils.setInt(base, offset + offsets(colIdx), value)
+    val oldPartitionHash = UnsafeUtils.getInt(base, offset + offsets.last)
+    // calculate new partition hash using rolling hash by including hash of new sequence number value
+    val newPartitionHash = (oldPartitionHash - (oooColIndex.get * 31)) * 31 + value
+    // TODO check if this is the best way to calculate new hash
+    UnsafeUtils.setInt(base, offset + offsets.last, newPartitionHash)
   }
 
   /**
@@ -517,6 +530,7 @@ class MapItemKeysConsumer extends MapItemConsumer {
 object RecordSchema {
   import Column.ColumnType._
 
+  val oooColName = "_o_"
   val colTypeToFieldSize = Map[Column.ColumnType, Int](IntColumn -> 4,
                                                        LongColumn -> 8,
                                                        DoubleColumn -> 8,

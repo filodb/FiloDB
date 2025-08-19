@@ -287,6 +287,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private val clusterType = filodbConfig.getString("cluster-type")
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
+  private val oooDataPointsEnabled = filodbConfig.getBoolean("memstore.ooo-data-points-enabled")
+  private val oooMaxSeq = filodbConfig.getInt("memstore.ooo-max-sequence-number")
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
@@ -310,6 +312,9 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /////// START MEMBER STATE FIELDS ///////////////////
 
+  private val cumulativeSchemas = schemas.schemas.values.filter(_.hasCumulativeTemporalityColumn)
+                                                        .map(_.schemaHash).toSet
+
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
   @volatile var isReadyForQuery = false
 
@@ -318,7 +323,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
     */
-  private[memstore] val partitions = new NonBlockingHashMapLong[TimeSeriesPartition](InitialNumPartitions, false)
+  private[filodb] val partitions = new NonBlockingHashMapLong[TimeSeriesPartition](InitialNumPartitions, false)
 
   /**
     * next partition ID number
@@ -437,7 +442,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock, evictionLock)
-  private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+  private[filodb] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
@@ -623,7 +628,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
           }
         } else {
-          getOrAddPartitionAndIngest(ingestionTime, recBase, recOffset, group, schema)
+          getOrAddPartitionAndIngest(ingestionTime, recBase, recOffset, group, schema, 0)
           numActuallyIngested += 1
         }
       } else {
@@ -1009,6 +1014,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.evictablePartKeysSize.increment()
   }
 
+  /**
+   * Looks up the partition for the given record, or adds a new one if not found.
+   * Does not ingest the record. Hence oooSeq number is not needed. oooSeq is only needed when ingesting
+   * a sample - it is passed through and incremented when ingestion fails.
+   *
+   * @return the partition, or OutOfMemPartition if memory allocation failed
+   */
   private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                             group: Int, schema: Schema) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
@@ -1112,7 +1124,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   def getOrAddPartitionAndIngest(ingestionTime: Long,
                                  recordBase: Any, recordOff: Long,
-                                 group: Int, schema: Schema): Unit = {
+                                 group: Int, schema: Schema, oooSeq: Int): Unit = {
     assertThreadName(IngestSchedName)
     try {
       val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, schema)
@@ -1123,26 +1135,39 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+        val inOrderAndIngested = tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
-        // time series was inactive and has just started re-ingesting
-        if (!tsp.ingesting) {
-          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
-          activelyIngesting.synchronized {
-            if (!tsp.ingesting) {
-              // This is coded to work concurrently with logic in updateIndexWithEndTime
-              // where we try to de-activate an active time series.
-              // Checking ts.ingesting second time needed since the time series may have ended
-              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
-              // DO NOT remove the second tsp.ingesting check without understanding this fully.
-              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              dirtyPartitionsForIndexFlush += part.partID
-              activelyIngesting += part.partID
-              tsp.ingesting = true
-              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
-                tsp.schema.options.shardKeyColumns)
-              if (storeConfig.meteringEnabled) {
-                modifyCardinalityCountNoThrow(shardKey, 0, 1)
+
+        if (!inOrderAndIngested) {
+          if (oooDataPointsEnabled && // ooo should be enabled, disabled by default
+              oooSeq < oooMaxSeq && // have a limit on number of ooo timeseries per main partKey
+              !cumulativeSchemas.contains(schema.schemaHash) ) { // cumulative schemas are not supported for ooo
+            // out of order sample; try to ingest again with higher oooSeq
+            schema.ingestionSchema.setOooCol(recordBase, recordOff, oooSeq + 1) // update seqNo & hash
+            getOrAddPartitionAndIngest(ingestionTime, recordBase, recordOff, group, schema, oooSeq + 1)
+          } else {
+            shardInfo.stats.outOfOrderDropped.increment()
+          }
+        } else {
+          // time series was inactive and has just started re-ingesting
+          if (!tsp.ingesting) {
+            // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
+            activelyIngesting.synchronized {
+              if (!tsp.ingesting) {
+                // This is coded to work concurrently with logic in updateIndexWithEndTime
+                // where we try to de-activate an active time series.
+                // Checking ts.ingesting second time needed since the time series may have ended
+                // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
+                // DO NOT remove the second tsp.ingesting check without understanding this fully.
+                updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+                dirtyPartitionsForIndexFlush += part.partID
+                activelyIngesting += part.partID
+                tsp.ingesting = true
+                val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                  tsp.schema.options.shardKeyColumns)
+                if (storeConfig.meteringEnabled) {
+                  modifyCardinalityCountNoThrow(shardKey, 0, 1)
+                }
               }
             }
           }
