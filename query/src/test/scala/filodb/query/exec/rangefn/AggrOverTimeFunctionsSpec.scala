@@ -1047,4 +1047,267 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("SumAndMaxOverTimeFunctionHD should correctly track sum and max with sliding window") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val sumMaxFunc = new SumAndMaxOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Create histogram samples with different max values
+    val histSamples = Seq(
+      (100000L, Array(10.0, 20.0, 30.0), 5.5),   // timestamp, histogram values, max value
+      (110000L, Array(15.0, 25.0, 35.0), 8.2),
+      (120000L, Array(5.0, 15.0, 25.0), 3.1),
+      (130000L, Array(20.0, 30.0, 40.0), 9.7)
+    )
+    
+    // Add samples to window
+    histSamples.foreach { case (ts, bucketValues, maxVal) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val row = new TransientHistMaxMinRow()
+      row.setValues(ts, hist)
+      row.setDouble(2, maxVal)  // Set max value at index 2
+      qHist.add(row)
+      sumMaxFunc.addedToWindow(row, histWindow)
+    }
+    
+    val toEmit = new TransientHistMaxMinRow
+    sumMaxFunc.apply(100000L, 130000L, histWindow, toEmit, queryConfig)
+    
+    // Check histogram sum
+    val resultHist = toEmit.value
+    resultHist.numBuckets shouldEqual 3
+    val expectedSum = Array(50.0, 90.0, 130.0)  // Sum of all bucket values
+    for (b <- 0 until resultHist.numBuckets) {
+      resultHist.bucketValue(b) shouldEqual expectedSum(b) +- errorOk
+    }
+    
+    // Check max value (should be 9.7, the highest among all max values)
+    toEmit.getDouble(2) shouldEqual 9.7 +- errorOk
+  }
+
+  it("SumAndMaxOverTimeFunctionHD should handle window removal correctly") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val sumMaxFunc = new SumAndMaxOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add first sample with highest max
+    val hist1 = bv.MutableHistogram(buckets, Array(10.0, 20.0, 30.0))
+    val row1 = new TransientHistMaxMinRow(10)
+    row1.setValues(100000L, hist1)
+    qHist.add(row1)
+    sumMaxFunc.addedToWindow(row1, histWindow)
+    
+    // Add second sample with lower max
+    val hist2 = bv.MutableHistogram(buckets, Array(5.0, 10.0, 15.0))
+    val row2 = new TransientHistMaxMinRow(7.5)
+    row2.setValues(110000L, hist2)
+    qHist.add(row2)
+    sumMaxFunc.addedToWindow(row2, histWindow)
+    
+    // Verify initial state
+    val toEmit1 = new TransientHistMaxMinRow()
+    sumMaxFunc.apply(100000L, 110000L, histWindow, toEmit1, queryConfig)
+    toEmit1.getDouble(2) shouldEqual 10.0 +- errorOk  // Should have highest max
+    
+    // Remove the first sample (with highest max)
+    qHist.remove()
+    sumMaxFunc.removedFromWindow(row1, histWindow)
+    
+    // Verify max is updated after removal
+    val toEmit2 = new TransientHistMaxMinRow
+    sumMaxFunc.apply(110000L, 110000L, histWindow, toEmit2, queryConfig)
+    toEmit2.getDouble(2) shouldEqual 7.5 +- errorOk  // Should now have the remaining max
+  }
+
+  it("SumAndMaxOverTimeFunctionHD should handle NaN max values") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val sumMaxFunc = new SumAndMaxOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add sample with NaN max value (should be ignored)
+    val hist1 = bv.MutableHistogram(buckets, Array(10.0, 20.0, 30.0))
+    val row1 = new TransientHistMaxMinRow(Double.NaN)
+    row1.setValues(100000L, hist1)
+    qHist.add(row1)
+    sumMaxFunc.addedToWindow(row1, histWindow)
+    
+    // Add sample with valid max value
+    val hist2 = bv.MutableHistogram(buckets, Array(5.0, 10.0, 15.0))
+    val row2 = new TransientHistMaxMinRow(6.5)
+    row2.setValues(110000L, hist2)
+    qHist.add(row2)
+    sumMaxFunc.addedToWindow(row2, histWindow)
+    
+    val toEmit = new TransientHistMaxMinRow
+    sumMaxFunc.apply(100000L, 110000L, histWindow, toEmit, queryConfig)
+    
+    // Should ignore NaN and return the valid max value
+    toEmit.getDouble(2) shouldEqual 6.5 +- errorOk
+    
+    // Histogram sum should still work correctly (NaN doesn't affect histogram aggregation)
+    val resultHist = toEmit.value
+    val expectedSum = Array(15.0, 30.0, 45.0)  // Sum of both histograms
+    for (b <- 0 until resultHist.numBuckets) {
+      resultHist.bucketValue(b) shouldEqual expectedSum(b) +- errorOk
+    }
+  }
+
+  it("RateAndMaxMinOverTimeFunctionHD should correctly calculate rate and track max/min") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateMaxMinFunc = new RateAndMaxMinOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Create delta histogram samples with min/max values
+    val histSamples = Seq(
+      (100000L, Array(10.0, 20.0, 30.0), 8.5, 2.1),   // timestamp, histogram values, max, min
+      (110000L, Array(15.0, 25.0, 35.0), 12.3, 1.8),
+      (120000L, Array(5.0, 15.0, 25.0), 6.7, 3.2),
+      (130000L, Array(20.0, 30.0, 40.0), 15.4, 1.5)
+    )
+    
+    // Add samples to window
+    histSamples.foreach { case (ts, bucketValues, maxVal, minVal) =>
+      val hist = bv.MutableHistogram(buckets, bucketValues)
+      val row = new TransientHistMaxMinRow(maxVal, minVal)
+      row.setValues(ts, hist)
+      qHist.add(row)
+      rateMaxMinFunc.addedToWindow(row, histWindow)
+    }
+    
+    val startTs = 99000L
+    val endTs = 131000L
+    val timeDelta = endTs - startTs  // 32000ms = 32 seconds
+    val toEmit = new TransientHistMaxMinRow
+    
+    rateMaxMinFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Check histogram rate calculation
+    val resultHist = toEmit.value
+    resultHist.numBuckets shouldEqual 3
+    val expectedSum = Array(50.0, 90.0, 130.0)  // Sum of all bucket values
+    for (b <- 0 until resultHist.numBuckets) {
+      val expectedRate = expectedSum(b) / (timeDelta / 1000.0)
+      resultHist.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+    
+    // Check max value (should be 15.4, the highest among all max values)
+    toEmit.getDouble(2) shouldEqual 15.4 +- errorOk
+    
+    // Check min value (should be 1.5, the lowest among all min values)
+    toEmit.getDouble(3) shouldEqual 1.5 +- errorOk
+  }
+
+  it("RateAndMaxMinOverTimeFunctionHD should handle window removal correctly") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateMaxMinFunc = new RateAndMaxMinOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add first sample with extreme max and min values
+    val hist1 = bv.MutableHistogram(buckets, Array(10.0, 20.0, 30.0))
+    val row1 = new TransientHistMaxMinRow(20.0, 1.0)  // highest max, lowest min
+    row1.setValues(100000L, hist1)
+    qHist.add(row1)
+    rateMaxMinFunc.addedToWindow(row1, histWindow)
+    
+    // Add second sample with moderate values
+    val hist2 = bv.MutableHistogram(buckets, Array(5.0, 10.0, 15.0))
+    val row2 = new TransientHistMaxMinRow(12.5, 5.5)
+    row2.setValues(110000L, hist2)
+    qHist.add(row2)
+    rateMaxMinFunc.addedToWindow(row2, histWindow)
+    
+    // Add third sample with different values
+    val hist3 = bv.MutableHistogram(buckets, Array(8.0, 12.0, 18.0))
+    val row3 = new TransientHistMaxMinRow(15.0, 3.0)
+    row3.setValues(120000L, hist3)
+    qHist.add(row3)
+    rateMaxMinFunc.addedToWindow(row3, histWindow)
+    
+    // Verify initial state (all three samples)
+    val toEmit1 = new TransientHistMaxMinRow
+    rateMaxMinFunc.apply(99000L, 121000L, histWindow, toEmit1, queryConfig)
+    toEmit1.getDouble(2) shouldEqual 20.0 +- errorOk  // Should have highest max
+    toEmit1.getDouble(3) shouldEqual 1.0 +- errorOk   // Should have lowest min
+    
+    // Remove the first sample (with extreme values)
+    qHist.remove()
+    rateMaxMinFunc.removedFromWindow(row1, histWindow)
+    
+    // Verify values are updated after removal
+    val toEmit2 = new TransientHistMaxMinRow
+    rateMaxMinFunc.apply(110000L, 121000L, histWindow, toEmit2, queryConfig)
+    toEmit2.getDouble(2) shouldEqual 15.0 +- errorOk  // Should now have second highest max
+    toEmit2.getDouble(3) shouldEqual 3.0 +- errorOk   // Should now have second lowest min
+  }
+
+  it("RateAndMaxMinOverTimeFunctionHD should handle NaN max/min values") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+    
+    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val qHist = new IndexedArrayQueue[TransientHistRow]()
+    val rateMaxMinFunc = new RateAndMaxMinOverTimeFunctionHD()
+    val histWindow = new QueueBasedWindow(qHist)
+    
+    // Add sample with NaN max/min values (should be ignored)
+    val hist1 = bv.MutableHistogram(buckets, Array(10.0, 20.0, 30.0))
+    val row1 = new TransientHistMaxMinRow(Double.NaN, Double.NaN)
+    row1.setValues(100000L, hist1)
+    qHist.add(row1)
+    rateMaxMinFunc.addedToWindow(row1, histWindow)
+    
+    // Add sample with valid max/min values
+    val hist2 = bv.MutableHistogram(buckets, Array(5.0, 10.0, 15.0))
+    val row2 = new TransientHistMaxMinRow(8.5, 2.3)
+    row2.setValues(110000L, hist2)
+    qHist.add(row2)
+    rateMaxMinFunc.addedToWindow(row2, histWindow)
+    
+    // Add another sample with valid values
+    val hist3 = bv.MutableHistogram(buckets, Array(8.0, 12.0, 18.0))
+    val row3 = new TransientHistMaxMinRow(6.2, 4.1)
+    row3.setValues(120000L, hist3)
+    qHist.add(row3)
+    rateMaxMinFunc.addedToWindow(row3, histWindow)
+    
+    val startTs = 99000L
+    val endTs = 121000L
+    val toEmit = new TransientHistMaxMinRow
+    
+    rateMaxMinFunc.apply(startTs, endTs, histWindow, toEmit, queryConfig)
+    
+    // Should ignore NaN and track valid max/min values
+    toEmit.getDouble(2) shouldEqual 8.5 +- errorOk  // Max of valid values
+    toEmit.getDouble(3) shouldEqual 2.3 +- errorOk  // Min of valid values
+    
+    // Histogram rate calculation should still work correctly
+    val resultHist = toEmit.value
+    val expectedSum = Array(23.0, 42.0, 63.0)  // Sum of all histograms
+    val timeDelta = endTs - startTs
+    for (b <- 0 until resultHist.numBuckets) {
+      val expectedRate = expectedSum(b) / (timeDelta / 1000.0)
+      resultHist.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
 }

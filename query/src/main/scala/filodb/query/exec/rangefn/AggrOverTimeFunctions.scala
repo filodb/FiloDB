@@ -112,6 +112,102 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
+private case class MaxMinTracker(ordering: Ordering[Double]) {
+  private val values: util.ArrayDeque[(Long, Double)] = new util.ArrayDeque[(Long, Double)]()
+
+  def offer(ts: Long, value: Double): Boolean = {
+    if (!value.isNaN) {
+      while(!values.isEmpty && ordering.compare(values.peekLast()._2, value) < 0) {
+        values.removeLast()
+      }
+      values.offerLast((ts, value))
+    } else {
+      false
+    }
+  }
+
+  def removeValuesOlderThan(ts: Long): Unit = {
+    while(!values.isEmpty && values.peekFirst()._1 <= ts) {
+      values.removeFirst()
+    }
+  }
+
+  def headValue(): Option[(Long, Double)] = if (values.isEmpty) None else Some(values.peekFirst())
+}
+
+class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
+  extends RangeFunction[TransientHistRow] {
+    private val sumOverTimeFunction: SumOverTimeFunctionH = new SumOverTimeFunctionH(sum, 0)
+    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+  /**
+   * Called when a sample is added to the sliding window
+   */
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    sumOverTimeFunction.addedToWindow(row, window)
+    maxTracker.offer(row.getLong(0), row.getDouble(2))
+  }
+
+  /**
+   * Called when a sample is removed from sliding window
+   */
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    sumOverTimeFunction.removedFromWindow(row, window)
+    val tsToRemove = row.getLong(0);
+    maxTracker removeValuesOlderThan tsToRemove
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long,
+                     window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sumOverTimeFunction.sum)
+    sampleToEmit.setDouble(
+        2, maxTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+  }
+}
+
+
+class RateAndMaxMinOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
+  extends RangeFunction[TransientHistRow] {
+  private val rateOverDeltaFunction: RateOverDeltaFunctionH = new RateOverDeltaFunctionH
+  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.reverse)
+  /**
+   * Called when a sample is added to the sliding window
+   */
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    rateOverDeltaFunction.addedToWindow(row, window)
+    val ts = row.getLong(0);
+    minTracker.offer(ts, row.getDouble(3))
+    maxTracker.offer(ts, row.getDouble(2))
+  }
+
+  /**
+   * Called when a sample is removed from sliding window
+   */
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    rateOverDeltaFunction.removedFromWindow(row, window)
+    val tsToRemove = row.getLong(0);
+    minTracker removeValuesOlderThan tsToRemove
+    maxTracker removeValuesOlderThan tsToRemove
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long,
+                     window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    val rateHist = rateOverDeltaFunction.computeRateHistogram(startTimestamp, endTimestamp)
+    sampleToEmit.setValues(endTimestamp, rateHist)
+    sampleToEmit.setDouble(
+      3, minTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+    sampleToEmit.setDouble(
+      2, maxTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+  }
+}
+
 class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, var count: Int = 0)
   extends RangeFunction[TransientHistRow] {
 

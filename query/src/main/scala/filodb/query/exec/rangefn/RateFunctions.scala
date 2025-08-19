@@ -204,10 +204,15 @@ class RateOverDeltaFunctionH extends RangeFunction[TransientHistRow] {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
                      sampleToEmit: TransientHistRow,
                      queryConfig: QueryConfig): Unit = {
+    val rateHist: MutableHistogram = computeRateHistogram(startTimestamp, endTimestamp)
+    // divide each value of the histogram bucket by time
+    sampleToEmit.setValues(endTimestamp, rateHist)
+  }
+
+  def computeRateHistogram(startTimestamp: BinaryVectorPtr, endTimestamp: BinaryVectorPtr): MutableHistogram = {
     val mh = sumOverTime.sum
     val timeDelta = (endTimestamp - startTimestamp) / 1000.0
-    // divide each value of the histogram bucket by time
-    sampleToEmit.setValues(endTimestamp, MutableHistogram(mh.buckets, mh.values.map(_/timeDelta)))
+    MutableHistogram(mh.buckets, mh.values.map(_ / timeDelta))
   }
 }
 

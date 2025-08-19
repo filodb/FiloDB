@@ -242,7 +242,7 @@ object IRatePeriodicFunction extends RangeFunction[TransientRow] {
 
 object IRatePeriodicFunctionH extends RangeFunction[TransientHistRow] {
 
-  var lastFunc = LastSampleFunctionH
+  private var lastFunc = new LastSampleFunctionH()
   def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
   def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
 

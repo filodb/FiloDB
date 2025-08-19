@@ -410,12 +410,12 @@ object RangeFunction {
    * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
    */
   // scalastyle:off cyclomatic.complexity
-  def iteratingFunctionH(func: Option[InternalRangeFunction],
-                        schema: ResultSchema,
-                        funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+  private def iteratingFunctionH(func: Option[InternalRangeFunction],
+                                 schema: ResultSchema,
+                                 funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
-    case None                                     => () => LastSampleFunctionH
-    case Some(Last)                               => () => LastSampleFunctionH
+    case None                                     => () => new LastSampleFunctionH()
+    case Some(Last)                               => () => new LastSampleFunctionH()
     case Some(Rate) if schema.columns(1).isCumulative
                                                   => () => RateFunctionH
     case Some(Increase) if schema.columns(1).isCumulative
@@ -424,11 +424,18 @@ object RangeFunction {
     case Some(Rate)                               => () => new RateOverDeltaFunctionH()
     case Some(Increase)                           => () => new SumOverTimeFunctionH() // Sum of deltas over time
     case Some(Delta)                              => () => DeltaFunctionH
-    case Some(Resets)                             => throw new NotImplementedError(notImplemented("Resets"))
     case Some(Irate) if schema.columns(1).isCumulative
                                                   => () => IRateFunctionH
     case Some(Idelta)                             => () => IDeltaFunctionH
     case Some(Irate)                              => () => IRatePeriodicFunctionH
+    case Some(LastSampleHistMaxMin) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
+      () => new LastSampleFunctionH(true)
+    case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
+      () => new SumAndMaxOverTimeFunctionHD()
+    case Some(RateAndMinMaxOverTime) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
+      () => new RateAndMaxMinOverTimeFunctionHD()
+    // All the following are not implemented
+    case Some(Resets)                             => throw new NotImplementedError(notImplemented("Resets"))
     case Some(Deriv)                              => throw new NotImplementedError(notImplemented("Deriv"))
     case Some(MaxOverTime)                        => throw new NotImplementedError(notImplemented("MaxOverTime"))
     case Some(MinOverTime)                        => throw new NotImplementedError(notImplemented("MinOverTime"))
@@ -486,7 +493,7 @@ object RangeFunction {
 }
 
 
-object LastSampleFunctionH extends RangeFunction[TransientHistRow] {
+class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeFunction[TransientHistRow] {
 
   def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
   def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
@@ -504,6 +511,10 @@ object LastSampleFunctionH extends RangeFunction[TransientHistRow] {
       val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
       if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN ) {
         sampleToEmit.setValues(endTimestamp, hist)
+        if (isMinMaxHistogram) {
+          sampleToEmit.setDouble(2, row.getDouble(2))
+          sampleToEmit.setDouble(3, row.getDouble(3))
+        }
         return
       }
     }
