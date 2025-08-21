@@ -49,7 +49,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, promDataset.schema.data.blockMetaSize,
-    MMD.dummyContext, true)
+                                                        MMD.dummyContext, true)
 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset.schema.data, storeConf)
@@ -199,7 +199,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
   val histDSDataset = modify(MMD.histDataset)(_.schema.data.downsamplers)
-    .setTo(Dataset.validateDownsamplers(histDSDownsamplers, Some("hist-ds")).get)
+                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers, Some("hist-ds")).get)
   val histDSSchema = histDSDataset.schema
 
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
@@ -232,7 +232,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
     val expectedSums = data.grouped(6).toSeq.map { dataRows =>
       dataRows.map(_(3).asInstanceOf[bv.LongHistogram])
-        .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+              .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
     }
 
     // Skip comparing the last sample because end of chunk=100 rows is not evenly divisible by 6
