@@ -51,6 +51,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val oldContainers = Kamon.counter("memstore-incompatible-containers").withTags(TagSet.from(tags))
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").withTags(TagSet.from(tags))
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").withTags(TagSet.from(tags))
+  val outOfOrderDroppedTenant = Kamon.counter("tenant-out-of-order-samples") //per tenant need not include shard/dataset
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").withTags(TagSet.from(tags))
   val rowsPerContainer = Kamon.histogram("num-samples-per-container").withoutTags()
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").withTags(TagSet.from(tags))

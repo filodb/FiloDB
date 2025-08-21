@@ -177,7 +177,9 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       }
     } else {
       val shardKey = schema.partKeySchema.colValues(partKeyBase, partKeyOffset, schema.options.shardKeyColumns)
-      shardInfo.stats.outOfOrderDropped.withTag("metric_ws", shardKey(0)).withTag("metric_ns", shardKey(1)).increment()
+      shardInfo.stats.outOfOrderDroppedTenant.withTag("metric_ws", shardKey(0))
+                                             .withTag("metric_ns", shardKey(1)).increment()
+      shardInfo.stats.outOfOrderDropped.increment()
     }
   }
 
