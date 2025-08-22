@@ -460,7 +460,7 @@ object MachineMetricsData {
       false, Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
   }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
@@ -477,7 +477,7 @@ object MachineMetricsData {
     part.switchBuffers(histMaxMinBH, encode = true)
     // Select timestamp, hist, max, min
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, Long.MaxValue, "query-id"))
+      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
   }
 }
 

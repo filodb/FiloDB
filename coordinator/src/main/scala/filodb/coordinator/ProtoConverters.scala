@@ -735,6 +735,7 @@ object ProtoConverters {
       plr.partIdsNotInMemory.foreach(i => builder.addPartIdsNotInMemory(i))
       plr.pkRecords.foreach(pklir => builder.addPkRecords(pklir.toProto))
       builder.setDataBytesScannedCtr(plr.dataBytesScannedCtr.longValue())
+      builder.setSamplesScannedCtr(plr.samplesScannedCtr.longValue())
       builder.build()
     }
   }
@@ -757,7 +758,8 @@ object ProtoConverters {
         partIdsMemTimeGap,
         partIdsNotInMemory,
         pkRecords,
-        new java.util.concurrent.atomic.AtomicLong(plr.getDataBytesScannedCtr)
+        new java.util.concurrent.atomic.AtomicLong(plr.getDataBytesScannedCtr),
+        new java.util.concurrent.atomic.AtomicLong(plr.getSamplesScannedCtr)
       )
     }
   }

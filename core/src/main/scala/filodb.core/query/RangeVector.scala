@@ -361,6 +361,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
                                     dataBytesScannedCtr: AtomicLong,
+                                    samplesScannedCtr: AtomicLong,
                                     maxBytesScanned: Long,
                                     queryId: String) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
@@ -370,13 +371,14 @@ final case class RawDataRangeVector(key: RangeVectorKey,
     chunkMethod,
     columnIDs,
     new CountingChunkInfoIterator(
-      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr, maxBytesScanned, queryId)
+      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId)
   )
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
     new CountingChunkInfoIterator(
-      partition.infos(windowStart, windowEnd), columnIDs, dataBytesScannedCtr, maxBytesScanned, queryId
+      partition.infos(
+        windowStart, windowEnd), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId
     )
   }
 

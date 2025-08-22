@@ -77,8 +77,8 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
-//    part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, Long.MaxValue, "query-id")
+    //    part.encodeAndReleaseBuffers(ingestBlockHolder)
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
   }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
