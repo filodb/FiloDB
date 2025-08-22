@@ -134,7 +134,7 @@ object PromCirceSupport {
         group             <- c.downField("group").as[Seq[String]]
         timeSeriesScanned <- c.downField("timeSeriesScanned").as[Long]
         dataBytesScanned  <- c.downField("dataBytesScanned").as[Long]
-        samplesScanned  <- c.downField("samplesScanned").as[Long]
+        samplesScanned    <- c.downField("samplesScanned").as[Long]
         resultBytes       <- c.downField("resultBytes").as[Long]
         cpuNanos          <- c.downField("cpuNanos").as[Option[Long]] // option to be backward compatible
       } yield {
