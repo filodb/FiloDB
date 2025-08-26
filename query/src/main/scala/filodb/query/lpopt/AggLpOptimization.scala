@@ -1,7 +1,7 @@
 package filodb.query.lpopt
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
@@ -13,7 +13,7 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  * This object contains the logic to optimize Aggregate logical plans to use pre-aggregated metrics
  * if available.
  */
-object AggLpOptimization {
+object AggLpOptimization extends StrictLogging{
 
   private val aggTimeWindow = 60000L // 1 minute in millis
   private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
@@ -33,6 +33,7 @@ object AggLpOptimization {
                                               canTranslateResult.get.rawSeriesFilters,
                                               canTranslateResult.get.timeInterval)
         .filter(_.active) // only active rules are relevant for now. We deal with gaps in pre-aggregated data later
+      logger.debug(s"Matching agg rules for optimizing query $agg were determined to be $rules")
       // grouping by suffix results in all rule and versions for given suffix
       val rulesBySuffix = rules.groupBy(r => r.metricSuffix)
       var chosenRule: Option[AggRule] = None
@@ -44,6 +45,7 @@ object AggLpOptimization {
         if (ruleIsEligible &&
           (chosenRule.isEmpty || firstRuleIsBetterThanSecond(rule._2.head, chosenRule.get))) {
           chosenRule = Some(rule._2.head)
+          logger.debug(s"Chose better rule for optimizing query $agg : $chosenRule")
         }
       }
 
