@@ -2,6 +2,7 @@ package filodb.query.lpopt
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.core.GlobalConfig
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
