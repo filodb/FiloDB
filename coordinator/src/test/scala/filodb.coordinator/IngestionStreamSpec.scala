@@ -36,6 +36,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
       |filodb.memstore.ingestion-buffer-mem-size = 50MB
       |""".stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
+                            .resolve()
                             .getConfig("filodb")
 
   private val within = 20.seconds.dilated

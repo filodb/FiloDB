@@ -32,7 +32,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   private val routingConfigString = "routing {\n  remote {\n    http {\n      timeout = 10000\n    }\n  }\n}"
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
-  private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").withFallback(routingConfig)
+  private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").withFallback(routingConfig).resolve()
   private val queryConfig = QueryConfig(config).copy(plannerSelector = Some("plannerSelector"))
 
   private val now = 1634777330000L
