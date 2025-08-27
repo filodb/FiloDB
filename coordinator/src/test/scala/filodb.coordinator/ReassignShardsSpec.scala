@@ -23,7 +23,7 @@ class ReassignShardsSpec extends AkkaSpec {
   protected val resources1 = ConfigFactory.parseString("""num-shards=8
                                                           min-num-nodes=3""")
 
-  val settings = new FilodbSettings(ConfigFactory.load("application_test.conf"))
+  val settings = new FilodbSettings(ConfigFactory.load("application_test.conf").resolve())
   protected val shardManager = new ShardManager(settings, DefaultShardAssignmentStrategy)
 
   private def makeTestProbe(name: String): TestProbe = {
