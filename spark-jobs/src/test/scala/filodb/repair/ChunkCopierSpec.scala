@@ -37,9 +37,9 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
   val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
   val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath))
-    .getConfig("filodb").withFallback(sysConfig)
+    .getConfig("filodb").withFallback(sysConfig).resolve()
   val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-    .getConfig("filodb").withFallback(sysConfig)
+    .getConfig("filodb").withFallback(sysConfig).resolve()
 
   lazy val sourceSession = new DefaultFiloSessionProvider(sourceConfig.getConfig("cassandra")).session
   lazy val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session

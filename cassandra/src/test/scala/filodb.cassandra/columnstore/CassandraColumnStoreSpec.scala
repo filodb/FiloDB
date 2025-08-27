@@ -109,7 +109,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
     val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb"))
+      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb")).resolve()
     val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
     val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
