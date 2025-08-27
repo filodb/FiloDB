@@ -2,15 +2,12 @@ package filodb.cassandra.columnstore
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import kamon.tag.TagSet
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -21,6 +18,7 @@ import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -108,8 +106,12 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.truncate(dataset.ref, 1).futureValue
 
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
-    val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb")).resolve()
+//    val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
+//      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb")).resolve()
+    val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath))
+      .withFallback(GlobalConfig.systemConfig)
+      .resolve()
+      .getConfig("filodb")
     val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
     val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
