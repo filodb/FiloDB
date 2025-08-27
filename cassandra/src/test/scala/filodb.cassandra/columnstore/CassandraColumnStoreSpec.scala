@@ -238,7 +238,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   }
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")
-                                             .withFallback(config)
+                                             .withFallback(config).resolve()
   val compressSession = new DefaultFiloSessionProvider(configWithChunkCompress.getConfig("cassandra")).session
   val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s, compressSession)
 
