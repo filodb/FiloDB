@@ -34,7 +34,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                                             |filodb.memstore.ensure-native-memory-headroom-percent = 10
                                             |filodb.memstore.index-updates-publishing-enabled = true
                                             |  """.stripMargin)
-                            .withFallback(ConfigFactory.load("application_test.conf"))
+                            .withFallback(ConfigFactory.load("application_test.conf")).resolve()
                             .getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))

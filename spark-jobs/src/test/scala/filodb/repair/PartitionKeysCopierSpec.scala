@@ -35,8 +35,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
 
   private val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
-  private val sourceConfig = ConfigFactory.parseFile(new File(sourceConfigPath)).getConfig("filodb").withFallback(sysConfig)
-  private val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath)).getConfig("filodb").withFallback(sysConfig)
+  private val sourceConfig = ConfigFactory.parseFile(new File(sourceConfigPath)).getConfig("filodb").withFallback(sysConfig).resolve()
+  private val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath)).getConfig("filodb").withFallback(sysConfig).resolve()
 
   lazy val sourceSession = new DefaultFiloSessionProvider(sourceConfig.getConfig("cassandra")).session
   val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
