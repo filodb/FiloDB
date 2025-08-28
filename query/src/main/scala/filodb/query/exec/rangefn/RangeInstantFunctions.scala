@@ -88,8 +88,8 @@ object RangeInstantFunctions {
 
       // Check if histograms have compatible bucket schemes
       if (prevSample.buckets == lastSample.buckets && lastSample.numBuckets > 0) {
-        val resultArray = new Array[Double](lastSample.numBuckets)
-        cforRange { 0 until resultArray.size } { b =>
+        val resultBucketValues = new Array[Double](lastSample.numBuckets)
+        cforRange { 0 until resultBucketValues.size } { b =>
           val lastValue = lastSample.bucketValue(b)
           val prevValue = prevSample.bucketValue(b)
           var bucketResult = lastValue - prevValue
@@ -107,9 +107,9 @@ object RangeInstantFunctions {
               bucketResult = bucketResult / sampledInterval * 1000
             }
           }
-          resultArray(b) = bucketResult
+          resultBucketValues(b) = bucketResult
         }
-        bv.MutableHistogram(lastSample.buckets, resultArray)
+        bv.MutableHistogram(lastSample.buckets, resultBucketValues)
       } else {
         // Return empty histogram for incompatible bucket schemes
         bv.HistogramWithBuckets.empty
@@ -156,7 +156,7 @@ object IRateFunction extends RangeFunction[TransientRow] {
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValue(startTimestamp,
       endTimestamp, window, true)
-    sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result)
   }
 }
 
@@ -172,7 +172,7 @@ object IRateFunctionH extends RangeFunction[TransientHistRow] {
             sampleToEmit: TransientHistRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValueH(startTimestamp,
-      endTimestamp, window, true)
+      endTimestamp, window, isRate = true)
     sampleToEmit.setValues(endTimestamp, result)
   }
 }

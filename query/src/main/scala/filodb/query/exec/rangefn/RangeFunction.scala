@@ -429,7 +429,7 @@ object RangeFunction {
 
     case Some(Irate)                              => () => IRatePeriodicFunctionH
     case Some(LastSampleHistMaxMin) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
-      () => new LastSampleFunctionH(true)
+      () => new LastSampleFunctionH(isMinMaxHistogram = true)
     case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
       () => new SumAndMaxOverTimeFunctionHD()
     case Some(RateAndMinMaxOverTime) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
@@ -452,7 +452,15 @@ object RangeFunction {
                                        throw new NotImplementedError(notImplemented("MedianAbsoluteDeviationOverTime"))
     case Some(LastOverTimeIsMadOutlier)        =>
                                        throw new NotImplementedError(notImplemented("LastOverTimeIsMadOutlier"))
-    case _                                      => ??? //TODO enumerate all possible cases
+    case Some(HoltWinters)                     => throw new NotImplementedError(notImplemented("HoltWinters"))
+    case Some(ZScore)                          => throw new NotImplementedError(notImplemented("ZScore"))
+    case Some(PredictLinear)                   => throw new NotImplementedError(notImplemented("PredictLinear"))
+    case Some(LastOverTime)                    => throw new NotImplementedError(notImplemented("LastOverTime"))
+    case Some(AvgWithSumAndCountOverTime)      => throw new NotImplementedError(
+                                                          notImplemented("AvgWithSumAndCountOverTime"))
+    case Some(Timestamp)                       => throw new NotImplementedError(notImplemented("Timestamp"))
+    case Some(AbsentOverTime)                  => throw new NotImplementedError(notImplemented("AbsentOverTime"))
+    case Some(PresentOverTime)                 => throw new NotImplementedError(notImplemented("PresentOverTime"))
   }
 
   /**
@@ -507,8 +515,6 @@ class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeF
 
     for (i <- (window.size - 1) to 0 by -1) {
       val row = window(i)
-      // TODO: Is this ok? The only implementation that's not HistogramWithBuckets is PromRateHistogram
-      //  That's private in HistogramQuantileMapper, also is one bucket not NaN a good check?
       val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
       if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN ) {
         sampleToEmit.setValues(endTimestamp, hist)
