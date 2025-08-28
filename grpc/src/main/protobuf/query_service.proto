@@ -154,6 +154,7 @@ message Stat {
   uint64 dataBytesScanned     = 2;
   uint64 resultBytes          = 3;
   uint64 cpuNanos             = 4;
+  uint64 samplesScanned       = 5;
 }
 
 message QueryResultStats {
@@ -350,6 +351,7 @@ message PartLookupResult {
   repeated int32 partIdsNotInMemory           = 6;
   repeated PartKeyLuceneIndexRecord pkRecords = 7;
   int64 dataBytesScannedCtr                   = 8;
+  int64 samplesScannedCtr                     = 9;
 }
 
 message DataSchema {

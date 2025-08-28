@@ -51,6 +51,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val oldContainers = Kamon.counter("memstore-incompatible-containers").withTags(TagSet.from(tags))
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").withTags(TagSet.from(tags))
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").withTags(TagSet.from(tags))
+  val outOfOrderDroppedTenant = Kamon.counter("tenant-out-of-order-samples") //per tenant need not include shard/dataset
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").withTags(TagSet.from(tags))
   val rowsPerContainer = Kamon.histogram("num-samples-per-container").withoutTags()
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").withTags(TagSet.from(tags))
@@ -233,7 +234,8 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            dataBytesScannedCtr: AtomicLong)
+                            dataBytesScannedCtr: AtomicLong,
+                            samplesScannedCtr: AtomicLong)
 
 final case class SchemaMismatch(expected: String, found: String, clazz: String) extends
   Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found in $clazz")
@@ -2060,16 +2062,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
+          samplesScannedCtr   = querySession.queryStats.getSamplesScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
+          samplesScannedCtr   = querySession.queryStats.getSamplesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
         val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
         val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
+        val samplesScannedCounter = querySession.queryStats.getSamplesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val startNs = Utils.currentThreadCpuTimeNanos
@@ -2104,7 +2109,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
         PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
-          Nil, chunksReadCounter)
+          Nil, chunksReadCounter, samplesScannedCounter)
     }
   }
   // scalastyle:on method.length

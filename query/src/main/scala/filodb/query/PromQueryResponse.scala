@@ -18,7 +18,7 @@ final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "s
                                      message: Option[String]= None) extends PromQueryResponse
 
 final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
-                                 dataBytesScanned: Long, resultBytes: Long, cpuNanos: Long)
+                                 dataBytesScanned: Long, samplesScanned: Long, resultBytes: Long, cpuNanos: Long)
 final case class QueryWarningsResponse(
   execPlanSamples: Int = 0,
   execPlanResultBytes: Long  = 0,

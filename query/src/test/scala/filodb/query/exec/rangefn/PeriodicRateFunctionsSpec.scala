@@ -196,7 +196,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
       val rawData = RawPartData(Array.empty, Seq.empty)
       // simulate downsampled partition with resolution set as publishInterval
       val p1 = new PagedReadablePartition(Schemas.promCounter, 0, -1, rawData, publishInterval)
-      val rv = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p1, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
+      val rv = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p1, InMemoryChunkScan, Array(), new AtomicLong(0), new AtomicLong(0), 0, "")
 
       // looback is extended to 2 * publishInterval when less than 2 * publishInterval
       val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
@@ -215,7 +215,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
 
       // lookback is not extended for delta schemas
       val p2 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, publishInterval)
-      val rv2 = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p2, InMemoryChunkScan, Array(), new AtomicLong(0), 0, "")
+      val rv2 = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p2, InMemoryChunkScan, Array(), new AtomicLong(0), new AtomicLong(0), 0, "")
       periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
     }
