@@ -106,8 +106,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.truncate(dataset.ref, 1).futureValue
 
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
-//    val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-//      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb")).resolve()
+  // resolve() replaces all substitutions (like ${...}) with actual values from env or fallback configs.
+  // getConfig("filodb") retrieves only the "filodb" subtree, preserving top-level definitions like `dataset-prometheus`.
     val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath))
       .withFallback(GlobalConfig.systemConfig)
       .resolve()

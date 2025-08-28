@@ -35,13 +35,9 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
   val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
   val datasetName = "prometheus"
 
-//  val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
-//  val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath))
-//    .getConfig("filodb").withFallback(sysConfig).resolve()
-//  val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-//    .getConfig("filodb").withFallback(sysConfig).resolve()
   val sysConfig = GlobalConfig.systemConfig
-
+// resolve() replaces all substitutions (like ${...}) with actual values from env or fallback configs.
+// getConfig("filodb") retrieves only the "filodb" subtree, preserving top-level definitions like `dataset-prometheus`.
   val sourceConfig = ConfigFactory.parseFile(new File(sourceConfigPath))
     .withFallback(sysConfig)
     .resolve()
