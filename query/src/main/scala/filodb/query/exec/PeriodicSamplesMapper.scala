@@ -9,7 +9,8 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
-import filodb.memory.format.vectors.LongBinaryVector
+import filodb.memory.format.vectors.{CustomBuckets, HistogramBuckets,
+                                      HistogramWithBuckets, LongBinaryVector, MutableHistogram}
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.InternalRangeFunction.AvgWithSumAndCountOverTime
@@ -56,7 +57,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length
+ //scalastyle:off
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -80,7 +81,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val windowLength = windowToUse.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
 
     val rvs = sampleRangeFunc match {
-      case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
+      case _: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
@@ -96,7 +97,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
                     extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
         }
-      case c: ChunkedRangeFunction[_] =>
+      case _: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
             s"windowLength=$windowLength")
@@ -115,20 +116,32 @@ final case class PeriodicSamplesMapper(startMs: Long,
                     extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
-      case f: RangeFunction if valColType == ColumnType.LongColumn =>
+      case _: RangeFunction[_] if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
-              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows()), startWithOffset, adjustedStep, endWithOffset,
+              windowPlusPubInt,
+              rangeFuncGen().asSlidingD, querySession.queryConfig, leftInclusiveWindow,
+              new TransientRow()), outputRvRange)
+        }
+      case _: RangeFunction[_]   if valColType == ColumnType.HistogramColumn =>
+        source.map { rv =>
+          val windowPlusPubInt = extendLookback(rv, windowLength)
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows(), startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+              rangeFuncGen().asSlidingH,
+              querySession.queryConfig, leftInclusiveWindow,
+              if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()), outputRvRange)
         }
       // Otherwise just feed in the double column
-      case f: RangeFunction =>
+      case _: RangeFunction[_] =>
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
-              rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
+            new SlidingWindowIterator(rv.rows(), startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+              rangeFuncGen().asSlidingD,
+              querySession.queryConfig, leftInclusiveWindow, new TransientRow()), outputRvRange)
         }
     }
 
@@ -162,7 +175,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
       }
     }).getOrElse(rvs)
   }
-  //scalastyle:on method.length
+  //scalastyle:on
 
   /**
    * If a rate function is used in the downsample dataset where publish interval is known,
@@ -320,57 +333,62 @@ class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
 ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, querySession)
 
-class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
+class QueueBasedWindow[T <: MutableRowReader](q: IndexedArrayQueue[T]) extends Window[T] {
   def size: Int = q.size
-  def apply(i: Int): TransientRow = q(i)
-  def head: TransientRow = q.head
-  def last: TransientRow = q.last
-  override def toString: String = q.toString
+
+  def apply(i: Int): T = q(i)
+  def head: T = q.head
+  def last: T = q.last
+  override def toString: String = q.toString()
 }
 
 /**
   * Decorates a raw series iterator to apply a range vector function
   * on periodic time windows
   */
-class SlidingWindowIterator(raw: RangeVectorCursor,
+class SlidingWindowIterator[T <: MutableRowReader](raw: RangeVectorCursor,
                             start: Long,
                             step: Long,
                             end: Long,
                             window: Long,
-                            rangeFunction: RangeFunction,
+                            rangeFunction: RangeFunction[T],
                             queryConfig: QueryConfig,
-                            leftWindowInclusive : Boolean = false
-) extends RangeVectorCursor {
+                            leftWindowInclusive : Boolean = false, rowReaderFactory: => T)
+  extends RangeVectorCursor {
   require(step > 0, s"Adjusted step $step not > 0")
-  private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
+  private val sampleToEmit: T = rowReaderFactory
+
   // sliding window queue
-  private val windowQueue = new IndexedArrayQueue[TransientRow]()
+  private val windowQueue = new IndexedArrayQueue[T]()
 
   // this is the object that will be exposed to the RangeFunction
-  private val windowSamples = new QueueBasedWindow(windowQueue)
+  private val windowSamples = new QueueBasedWindow[T](windowQueue)
 
   // NOTE: Ingestion now has a facility to drop out of order samples.  HOWEVER, there is one edge case that may happen
   // which is that the first sample ingested after recovery may not be in order w.r.t. previous persisted timestamp.
   // So this is retained for now while we consider a more permanent out of order solution.
-  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
+  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw, rowReaderFactory)
 
   // we need buffered iterator so we can use to peek at next element.
   // At same time, do counter correction if necessary
   private val rows = if (rangeFunction.needsCounterCorrection) {
-    new BufferableCounterCorrectionIterator(rawInOrder).buffered
+    sampleToEmit match {
+      case _: TransientRow      => new BufferableCounterCorrectionIterator(rawInOrder).buffered
+      case _: TransientHistRow  => new BufferableCounterCorrectionIteratorH(rawInOrder).buffered
+    }
   } else {
-    new BufferableIterator(rawInOrder).buffered
+    new BufferableIterator(rawInOrder, rowReaderFactory).buffered
   }
 
   // to avoid creation of object per sample, we use a pool
-  val windowSamplesPool = new TransientRowPool()
+  private val windowSamplesPool = new TransientRowPool[T](rowReaderFactory)
 
   override def close(): Unit = raw.close()
 
   override def hasNext: Boolean = curWindowEnd <= end
-  override def next(): TransientRow = {
+  override def next(): T = {
     val curWindowStart = curWindowEnd - window
     // current window is: [curWindowStart, curWindowEnd]. Includes start, end.
 
@@ -404,7 +422,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     * @param cur sample to check for eligibility
     * @param curWindowStart start time of the current window
     */
-  private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
+  private def shouldAddCurToWindow(curWindowStart: Long, cur: MutableRowReader): Boolean = {
     // cur is inside current window
     val windowStart = if (FiloQueryConfig.isInclusiveRange) curWindowStart else curWindowStart + 1
     cur.timestamp >= windowStart
@@ -444,21 +462,22 @@ class LongToDoubleIterator(iter: RangeVectorCursor) extends RangeVectorCursor {
   * Exists so that we can reuse TransientRow objects and reduce object creation per
   * raw sample. Beware: This is mutable, and not thread-safe.
   */
-class TransientRowPool {
-  val pool = new SpscUnboundedArrayQueue[TransientRow](16)
-  @inline final def get: TransientRow = if (pool.isEmpty) new TransientRow() else pool.remove()
-  @inline final def putBack(r: TransientRow): Unit = pool.add(r)
+class TransientRowPool[T <: MutableRowReader](inst: => T) {
+  val pool = new SpscUnboundedArrayQueue[T](16)
+  @inline final def get: T = if (pool.isEmpty) inst else pool.remove()
+  @inline final def putBack(r: T): Unit = pool.add(r)
 }
 
 /**
   * Iterator of mutable objects that allows look-ahead for ONE value.
   * Caller can do iterator.buffered safely
   */
-class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  private var prev = new TransientRow()
-  private var cur = new TransientRow()
+class BufferableIterator[R <: MutableRowReader](iter: Iterator[RowReader],
+                                                rowReaderFactory: => R) extends Iterator[R] {
+  private var prev = rowReaderFactory
+  private var cur = rowReaderFactory
   override def hasNext: Boolean = iter.hasNext
-  override def next(): TransientRow = {
+  override def next(): R = {
     // swap prev an cur
     val temp = prev
     prev = cur
@@ -468,6 +487,49 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
     cur
   }
 }
+
+class BufferableCounterCorrectionIteratorH(iter: Iterator[RowReader]) extends Iterator[TransientHistRow] {
+  private var corrections: Array[Double] = Array.empty
+  private var prevBuckets: Array[Double] = Array.empty
+  private var buckets: HistogramBuckets = CustomBuckets(Array.empty)
+  private var prev = new TransientHistRow()
+  private var cur = new TransientHistRow()
+
+  override def hasNext: Boolean = iter.hasNext
+
+  override def next(): TransientHistRow = {
+    val next = iter.next()
+    val nextHist = next.getHistogram(1)
+
+    if (corrections.isEmpty) {
+      corrections = Array.fill(nextHist.numBuckets)(0.0)
+      prevBuckets = Array.fill(nextHist.numBuckets)(0.0)
+      buckets = CustomBuckets((0 until nextHist.numBuckets).map(nextHist.bucketTop).toArray)
+    }
+
+    // Apply counter correction to each bucket
+    val correctedBuckets = Array.ofDim[Double](nextHist.numBuckets)
+    for (i <- 0 until nextHist.numBuckets) {
+      var bucketVal = nextHist.bucketValue(i)
+      if (bucketVal.isNaN) bucketVal = 0 // explicit counter reset
+      if (bucketVal < prevBuckets(i)) {
+        corrections(i) += prevBuckets(i)
+      }
+      prevBuckets(i) = bucketVal
+      correctedBuckets(i) = bucketVal + corrections(i)
+    }
+
+    // swap prev and cur
+    val temp = prev
+    prev = cur
+    cur = temp
+
+    // place values in cur and return
+    cur.setValues(next.getLong(0), MutableHistogram(buckets, correctedBuckets))
+    cur
+  }
+}
+
 
 /**
   * Used to create a monotonically increasing counter from raw reported counter values.
@@ -498,10 +560,14 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
   }
 }
 
-class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+class DropOutOfOrderSamplesIterator[R <: MutableRowReader](
+                                    iter: Iterator[RowReader],
+                                    rowReaderFactory: => R) extends Iterator[R] {
   // Initial -1 time since it will be less than any valid timestamp and will allow first sample to go through
-  private val cur = new TransientRow(-1, -1)
-  private val nextVal = new TransientRow(-1, -1)
+  private val cur = rowReaderFactory
+  cur.setLong(0, -1)
+  private val nextVal = rowReaderFactory
+  nextVal.setLong(0, -1)
   private var hasNextVal = false
   private var hasNextDefined = false
 
@@ -513,7 +579,7 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
     hasNextVal
   }
 
-  override def next(): TransientRow = {
+  override def next(): R = {
     if (!hasNextDefined) {
       setNext()
       hasNextDefined = true
@@ -528,9 +594,15 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
     while (!hasNextVal && iter.hasNext) {
       val nxt = iter.next()
       val t = nxt.getLong(0)
-      val v = nxt.getDouble(1)
       if (t > cur.timestamp) { // if next sample is later than current sample
-        nextVal.setValues(t, v)
+        nextVal match {
+          case tr: TransientRow         =>
+                                            val v = nxt.getDouble(1)
+                                            tr.setValues(t, v)
+          case thr: TransientHistRow    =>
+                                            val v = nxt.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+                                            thr.setValues(t, v)
+        }
         hasNextVal = true
       } else {
         Query.droppedSamples.increment()

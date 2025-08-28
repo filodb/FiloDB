@@ -129,7 +129,7 @@ class QuantileOverTimeSpec extends RawDataWindowingSpec {
 
 
 
-  def getWindow(samples : Seq[(Long,Double)]) : Window = {
+  def getWindow(samples : Seq[(Long,Double)]) : Window[TransientRow] = {
     val q = new IndexedArrayQueue[TransientRow]()
     samples.foreach { case (t, v) =>
       val s = new TransientRow(t, v)
