@@ -400,7 +400,8 @@ object RangeFunction {
                               => () => new HistIncreaseFunction
     case Some(Rate)           => () => new RateOverDeltaChunkedFunctionH
     case Some(Increase)       => () => new SumOverTimeChunkedFunctionH
-    case _                    => ??? //TODO enumerate all possible cases
+    case Some(x)              => throw new NotImplementedError(
+                                s"${x.toString} not implemented for histogram chunked functions")
   }
 
   private def notImplemented(function: String) =
@@ -423,10 +424,9 @@ object RangeFunction {
     // Since cumulative is already handled previously, this is for delta temporality
     case Some(Rate)                               => () => new RateOverDeltaFunctionH()
     case Some(Increase)                           => () => new SumOverTimeFunctionH() // Sum of deltas over time
-    case Some(Delta)                              => () => DeltaFunctionH
     case Some(Irate) if schema.columns(1).isCumulative
                                                   => () => IRateFunctionH
-    case Some(Idelta)                             => () => IDeltaFunctionH
+
     case Some(Irate)                              => () => IRatePeriodicFunctionH
     case Some(LastSampleHistMaxMin) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
       () => new LastSampleFunctionH(true)
@@ -434,14 +434,16 @@ object RangeFunction {
       () => new SumAndMaxOverTimeFunctionHD()
     case Some(RateAndMinMaxOverTime) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
       () => new RateAndMaxMinOverTimeFunctionHD()
+    case Some(SumOverTime)                        => () => new SumOverTimeFunctionH()
+    case Some(AvgOverTime)                        => () => new AvgOverDeltaFunctionH()
     // All the following are not implemented
+    case Some(Delta)                              => throw new NotImplementedError(notImplemented("Delta"))
+    case Some(Idelta)                             => throw new NotImplementedError(notImplemented("Idelta"))
     case Some(Resets)                             => throw new NotImplementedError(notImplemented("Resets"))
     case Some(Deriv)                              => throw new NotImplementedError(notImplemented("Deriv"))
     case Some(MaxOverTime)                        => throw new NotImplementedError(notImplemented("MaxOverTime"))
     case Some(MinOverTime)                        => throw new NotImplementedError(notImplemented("MinOverTime"))
     case Some(CountOverTime)                      => throw new NotImplementedError(notImplemented("CountOverTime"))
-    case Some(SumOverTime)                        => () => new SumOverTimeFunctionH()
-    case Some(AvgOverTime)                        => () => new AvgOverDeltaFunctionH()
     case Some(StdDevOverTime)                     => throw new NotImplementedError(notImplemented("StdDevOverTime"))
     case Some(StdVarOverTime)                     => throw new NotImplementedError(notImplemented("StdVarOverTime"))
     case Some(Changes)                            => throw new NotImplementedError(notImplemented("Changes"))
@@ -488,7 +490,6 @@ object RangeFunction {
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
-    case _                                      => ??? //TODO enumerate all possible cases
   }
 }
 

@@ -177,23 +177,6 @@ object IRateFunctionH extends RangeFunction[TransientHistRow] {
   }
 }
 
-
-object IDeltaFunctionH extends RangeFunction[TransientHistRow] {
-
-  override def needsCounterCorrection: Boolean = true
-  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
-  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
-
-  def apply(startTimestamp: Long,
-            endTimestamp: Long,
-            window: Window[TransientHistRow],
-            sampleToEmit: TransientHistRow,
-            queryConfig: QueryConfig): Unit = {
-    val result = RangeInstantFunctions.instantValueH(startTimestamp,
-      endTimestamp, window, false)
-    sampleToEmit.setValues(endTimestamp, result)
-  }
-}
 object IDeltaFunction extends RangeFunction[TransientRow] {
 
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}

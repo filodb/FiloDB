@@ -509,19 +509,3 @@ object IncreaseFunctionH extends RangeFunction[TransientHistRow] {
     sampleToEmit.setValues(endTimestamp, result)
   }
 }
-
-
-object DeltaFunctionH extends RangeFunction[TransientHistRow] {
-  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
-  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
-
-  def apply(startTimestamp: Long,
-            endTimestamp: Long,
-            window: Window[TransientHistRow],
-            sampleToEmit: TransientHistRow,
-            queryConfig: QueryConfig): Unit = {
-    val result = RateFunctions.extrapolatedRateH(startTimestamp,
-      endTimestamp, window, false, false)
-    sampleToEmit.setValues(endTimestamp, result)
-  }
-}
