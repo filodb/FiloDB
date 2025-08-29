@@ -32,7 +32,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
-    withFallback(routingConfig)
+    withFallback(routingConfig).resolve()
   private val queryConfig = QueryConfig(config)
 
   private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)

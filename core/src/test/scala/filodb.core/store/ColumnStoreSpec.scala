@@ -27,7 +27,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   def colStore: ColumnStore
   def metaStore: MetaStore
   val policy = new FixedMaxPartitionsEvictionPolicy(100)

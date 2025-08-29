@@ -61,7 +61,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
   import monix.execution.Scheduler.Implicits.global
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   // implemented by concrete test sub class
   val colStore: ColumnStore = new NullColumnStore()
 

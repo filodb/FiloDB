@@ -15,7 +15,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
 
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val chunkRetentionHours = 72
 
   var part: TimeSeriesPartition = null

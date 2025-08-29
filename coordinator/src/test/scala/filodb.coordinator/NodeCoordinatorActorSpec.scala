@@ -43,6 +43,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                          filodb.memtable.noactivity.flush.interval = 2 s
                          filodb.memtable.write.interval = 500 ms""")
                             .withFallback(ConfigFactory.load("application_test.conf"))
+                            .resolve()
                             .getConfig("filodb")
 
   private val host = InetAddress.getLocalHost.getHostAddress

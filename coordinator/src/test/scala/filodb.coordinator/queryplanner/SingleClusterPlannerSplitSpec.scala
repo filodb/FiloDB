@@ -33,7 +33,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val config = ConfigFactory.load("application_test.conf")
+  private val config = ConfigFactory.load("application_test.conf").resolve()
   private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private val splitThresholdMs = 20000

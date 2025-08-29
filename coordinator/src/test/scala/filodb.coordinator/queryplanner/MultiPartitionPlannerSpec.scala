@@ -35,7 +35,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
   private val config = ConfigFactory.load("application_test.conf")
-    .getConfig("filodb.query").withFallback(routingConfig)
+    .getConfig("filodb.query").withFallback(routingConfig).resolve()
   private val queryConfig = QueryConfig(config)
                             .copy(plannerSelector = Some("plannerSelector"),
                               routingConfig = RoutingConfig(supportRemoteRawExport = true))
