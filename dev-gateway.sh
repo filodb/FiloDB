@@ -6,3 +6,6 @@ args=${@:-"conf/timeseries-dev-source.conf"}
 java -Dconfig.file=conf/timeseries-filodb-server.conf  \
      -Dkamon.prometheus.embedded-server.port=9097  \
      -cp gateway/target/scala-2.12/gateway-* filodb.gateway.GatewayServer $args &
+
+# Starts a Prometheus Kafka Consumer for timeseries data
+java -cp gateway/target/scala-2.12/gateway-* filodb.timeseries.TestTimeseriesPrometheusConsumer $args &
