@@ -63,11 +63,11 @@ class HealthRouteSpec extends AnyFunSpec with AsyncTest {
 
   val singleDatasetConfig = ConfigFactory.parseString(singleDatasetSourceConfigString)
     .withFallback(ConfigFactory.parseResources("application_test.conf"))
-    .withFallback(ConfigFactory.load("filodb-defaults.conf"))
+    .withFallback(ConfigFactory.load("filodb-defaults.conf")).resolve()
 
   val multipleDatasetConfig = ConfigFactory.parseString(multipleDatasetSourceConfigString)
     .withFallback(ConfigFactory.parseResources("application_test.conf"))
-    .withFallback(ConfigFactory.load("filodb-defaults.conf"))
+    .withFallback(ConfigFactory.load("filodb-defaults.conf")).resolve()
 
   val singleDatasetSettings = new HttpSettings(PrometheusApiRouteSpec.config, new FilodbSettings(singleDatasetConfig))
   val multipleDatasetSettings = new HttpSettings(PrometheusApiRouteSpec.config,

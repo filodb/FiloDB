@@ -198,7 +198,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           |      enabled = true
           |    }
           |""".stripMargin
-      ))
+      )).resolve()
 
     val onlyKeyConf = ConfigFactory.parseString(
       """
