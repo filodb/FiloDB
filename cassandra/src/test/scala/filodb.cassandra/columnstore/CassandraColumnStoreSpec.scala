@@ -18,7 +18,7 @@ import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
-import java.io.File
+//import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
