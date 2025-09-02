@@ -112,6 +112,31 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
+/**
+ * Sliding window tracker for finding maximum or minimum values efficiently over time windows.
+ * Uses a monotonic deque approach to maintain O(1) amortized insertion/removal operations.
+ *
+ * The tracker maintains a deque where values are stored in monotonic order according to the
+ * provided ordering. When a new value is added, all values that are "worse" (smaller for max,
+ * larger for min) are removed from the tail, ensuring the head always contains the optimal value.
+ *
+ * Examples:
+ * - For max tracking with values [10, 5, 15, 3, 12] over time:
+ *   * Add (t1, 10): deque = [(t1, 10)]
+ *   * Add (t2, 5): deque = [(t1, 10), (t2, 5)] (5 < 10, so keep both)
+ *   * Add (t3, 15): deque = [(t3, 15)] (15 > 10 and 5, remove both)
+ *   * Add (t4, 3): deque = [(t3, 15), (t4, 3)] (3 < 15, so keep both)
+ *   * Add (t5, 12): deque = [(t3, 15), (t5, 12)] (12 > 3, remove 3; 12 < 15, keep 15)
+ *   * Head value is always maximum: 15
+ * 
+ * - For min tracking with same values:
+ *   * The deque would maintain smallest values, with head containing minimum
+ * 
+ * Time complexity: O(1) amortized for offer(), O(log n) worst case for individual operations
+ * Space complexity: O(k) where k is the effective window size (typically much smaller than total values)
+ * 
+ * @param ordering Determines whether to track max (Ordering.Double) or min (Ordering.Double.reverse)
+ */
 private case class MaxMinTracker(ordering: Ordering[Double]) {
   private val values: util.ArrayDeque[(Long, Double)] = new util.ArrayDeque[(Long, Double)]()
 
@@ -126,6 +151,31 @@ private case class MaxMinTracker(ordering: Ordering[Double]) {
     }
   }
 
+  /**
+   * Removes all values from the deque that have timestamps older than or equal to the given timestamp.
+   * This maintains the sliding window property by evicting expired values from the head of the deque.
+   *
+   * The method removes values from the front (head) of the deque since the deque maintains values
+   * in chronological order, with older values at the head and newer values at the tail.
+   *
+   * IMPORTANT: This method works identically for both max and min tracking orderings because it only
+   * examines timestamps (._1), not the actual values (._2). The ordering parameter affects only
+   * the offer() method's value-based filtering, not the time-based cleanup performed here.
+   *
+   * Examples (same behavior regardless of max/min tracking):
+   * - Max tracking deque: [(t1=100, 15), (t3=300, 10), (t5=500, 20)]
+   * - Min tracking deque: [(t1=100, 10), (t3=300, 15), (t5=500, 20)]
+   * - removeValuesOlderThan(250): removes (t1=100, value) in both cases
+   * - removeValuesOlderThan(300): removes (t3=300, value) in both cases
+   * - removeValuesOlderThan(600): removes all values in both cases
+   *
+   * This is typically called when a sliding time window moves forward and old values
+   * are no longer within the window bounds.
+   *
+   * Time complexity: O(k) where k is the number of expired values (amortized O(1) per value)
+   *
+   * @param ts The cutoff timestamp - values with timestamp <= ts will be removed
+   */
   def removeValuesOlderThan(ts: Long): Unit = {
     while(!values.isEmpty && values.peekFirst()._1 <= ts) {
       values.removeFirst()

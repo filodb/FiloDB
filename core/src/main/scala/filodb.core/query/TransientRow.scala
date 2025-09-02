@@ -138,12 +138,18 @@ final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0)
   override def toString: String = s"TransientHistMaxMinRow(t=$timestamp, h=$value, max=$max, min=$min)"
 
   override def copyFrom(r: RowReader): Unit = r match {
-    // TODO: Change the copy for this to handle BinaryRowReader
     case k: TransientHistMaxMinRow =>
                                           super.copyFrom(r)
                                           max = k.max
                                           min = k.min
-    case _                           => throw new IllegalArgumentException("Unknown Row reader")
+    case b: BinaryRecordRowReader
+        if b.schema.columnTypes(1) == ColumnType.HistogramColumn &&
+           b.schema.columnTypes(2) == ColumnType.DoubleColumn &&
+           b.schema.columnTypes(3) == ColumnType.DoubleColumn     =>
+                                                           super.copyFrom(r)
+                                                           max = b.getDouble(2)
+                                                           min = b.getDouble(3)
+    case x                           => throw new IllegalArgumentException(s"Unknown Row reader ${x.getClass}")
   }
 }
 
