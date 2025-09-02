@@ -138,7 +138,8 @@ object PromCirceSupport {
         resultBytes       <- c.downField("resultBytes").as[Long]
         cpuNanos          <- c.downField("cpuNanos").as[Option[Long]] // option to be backward compatible
       } yield {
-        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, samplesScanned, resultBytes, cpuNanos.getOrElse(0))
+        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, samplesScanned.getOrElse(0), resultBytes,
+          cpuNanos.getOrElse(0))
       }
     }
   }
