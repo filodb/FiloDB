@@ -18,7 +18,7 @@ import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
-//import java.io.File
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -108,12 +108,10 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
   // resolve() replaces all substitutions (like ${...}) with actual values from env or fallback configs.
   // getConfig("filodb") retrieves only the "filodb" subtree, preserving top-level definitions like `dataset-prometheus`.
-//    val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath))
-//      .withFallback(GlobalConfig.systemConfig)
-//      .resolve()
-//      .getConfig("filodb")
-  val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-    .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb"))
+    val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath))
+      .withFallback(GlobalConfig.systemConfig)
+      .resolve()
+      .getConfig("filodb")
     val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
     val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
