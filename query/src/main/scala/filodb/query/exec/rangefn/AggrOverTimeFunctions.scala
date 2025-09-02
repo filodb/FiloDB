@@ -128,13 +128,13 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
  *   * Add (t4, 3): deque = [(t3, 15), (t4, 3)] (3 < 15, so keep both)
  *   * Add (t5, 12): deque = [(t3, 15), (t5, 12)] (12 > 3, remove 3; 12 < 15, keep 15)
  *   * Head value is always maximum: 15
- * 
+ *
  * - For min tracking with same values:
  *   * The deque would maintain smallest values, with head containing minimum
- * 
+ *
  * Time complexity: O(1) amortized for offer(), O(log n) worst case for individual operations
  * Space complexity: O(k) where k is the effective window size (typically much smaller than total values)
- * 
+ *
  * @param ordering Determines whether to track max (Ordering.Double) or min (Ordering.Double.reverse)
  */
 private case class MaxMinTracker(ordering: Ordering[Double]) {
