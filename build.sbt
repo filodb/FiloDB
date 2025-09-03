@@ -16,22 +16,22 @@ ThisBuild / pomIncludeRepository := { x => false }
 
 enablePlugins(ProtobufPlugin)
 
-lazy val memory = Submodules.memory
-lazy val core = Submodules.core
-lazy val query = Submodules.query
-lazy val prometheus = Submodules.prometheus
-lazy val coordinator = Submodules.coordinator
-lazy val cassandra = Submodules.cassandra
-lazy val kafka = Submodules.kafka
-lazy val cli = Submodules.cli
-lazy val http = Submodules.http
-lazy val gateway = Submodules.gateway
-lazy val standalone = Submodules.standalone
-lazy val bootstrapper = Submodules.bootstrapper
-lazy val sparkJobs = Submodules.sparkJobs
-lazy val jmh = Submodules.jmh
-lazy val gatling = Submodules.gatling
-lazy val grpc = Submodules.grpc
+lazy val memory = Submodules.memory.disablePlugins(SonarPlugin)
+lazy val core = Submodules.core.disablePlugins(SonarPlugin)
+lazy val query = Submodules.query.disablePlugins(SonarPlugin)
+lazy val prometheus = Submodules.prometheus.disablePlugins(SonarPlugin)
+lazy val coordinator = Submodules.coordinator.disablePlugins(SonarPlugin)
+lazy val cassandra = Submodules.cassandra.disablePlugins(SonarPlugin)
+lazy val kafka = Submodules.kafka.disablePlugins(SonarPlugin)
+lazy val cli = Submodules.cli.disablePlugins(SonarPlugin)
+lazy val http = Submodules.http.disablePlugins(SonarPlugin)
+lazy val gateway = Submodules.gateway.disablePlugins(SonarPlugin)
+lazy val standalone = Submodules.standalone.disablePlugins(SonarPlugin)
+lazy val bootstrapper = Submodules.bootstrapper.disablePlugins(SonarPlugin)
+lazy val sparkJobs = Submodules.sparkJobs.disablePlugins(SonarPlugin)
+lazy val jmh = Submodules.jmh.disablePlugins(SonarPlugin)
+lazy val gatling = Submodules.gatling.disablePlugins(SonarPlugin)
+lazy val grpc = Submodules.grpc.disablePlugins(SonarPlugin)
 
 
 lazy val root = (project in file("."))
