@@ -34,4 +34,22 @@ lazy val gatling = Submodules.gatling
 lazy val grpc = Submodules.grpc
 
 
-
+lazy val root = (project in file("."))
+  .aggregate(
+    memory,
+    core,
+    query,
+    prometheus,
+    coordinator,
+    cassandra,
+    kafka,
+    cli,
+    http,
+    gateway,
+    standalone,
+    sparkJobs,
+    grpc,
+    bootstrapper,
+    gatling,
+    jmh
+  )
