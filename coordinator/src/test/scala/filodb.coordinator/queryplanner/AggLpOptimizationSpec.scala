@@ -9,13 +9,15 @@ import filodb.query.util.{AggRule, ExcludeAggRule, IncludeAggRule}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.prometheus.ast.TimeStepParams
+
 class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   // these time values don't matter much. We assume AggRuleProvider (mocked in these tests)
   // will return the right rules and versions for the query time range
-  private val now = 1634777330000L
-  private val endSeconds = now / 1000
-  private val step = 300
+  private val endSeconds = 30000L
+  private val startSeconds = 15000L
+  private val step = 2
 
   def newProvider(aggRules: List[AggRule], enabled: Boolean = true): AggRuleProvider = new AggRuleProvider {
     override def getAggRuleVersions(filters: Seq[ColumnFilter], rs: IntervalSelector): List[AggRule] = aggRules
@@ -24,12 +26,12 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   private val excludeRules1 = List(
     // Rule1 Level1
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10, active = true, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod"), 10000000L, active = true, level="1"),
 
     // Rule1 Level2 and its versions
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10, active = true, level="2"),
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 12, active = true, level="2"),
-    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "port"), 13, active = true, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container"), 10000000L, active = true, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "guid"), 16000000L, active = true, level="2"),
+    ExcludeAggRule("1", "agg1_2", Set("instance", "pod", "container", "port"), 17000000L, active = true, level="2"),
   )
 
   it ("[exclude rules] should pick rule that has necessary labels") {
@@ -174,7 +176,8 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
       """sum_over_time(min(min_over_time(foo:::agg1_1::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
       -> """sum_over_time(min(min_over_time(foo:::agg1_2::min{_ws_="demo",_ns_="localNs"}[300s]))[600s:300s])"""
     )
-    testOptimization(excludeRules1, testCases)
+    testOptimizationInstant(excludeRules1, testCases.take(1)) // top level subquery should be an instant query
+    testOptimization(excludeRules1, testCases.drop(1))
   }
 
   it("[exclude rules] should not optimize wierd cases where query already has a column that is not the right aggregation column") {
@@ -202,30 +205,26 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   private val excludeRules2WithInactive = List(
     // Rule1 Level1 and its versions
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container"), 10, active = true, level="1"),
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 12, active = true, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container"), 10000000L, active = true, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 12000000L, active = true, level="1"),
     // this rule1 for multiple namespaces (queried namespace included) is inactive at 13, rule2 is active at 13
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 13, active = false, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 13000000L, active = false, level="1"),
     // a rule for multiple namespaces (queried namespace included) is active enabled again at 14, rule2 is disabled
-    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 14, active = true, level="1"),
+    ExcludeAggRule("1", "agg1_1", Set("instance", "pod", "container", "guid"), 14000000L, active = true, level="1"),
 
     // Rule2 Level1 and its versions
     // a different rule (with same suffix) for queried namespaces is added and is active at 13
-    ExcludeAggRule("2", "agg1_1", Set("instance", "pod", "container", "port"), 13, active = true, level="1"),
+    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "port"), 13000000L, active = true, level="1"),
     // this rule (with same suffix) for queried namespaces is disabled at 14, and rule1 is active again at 14
-    ExcludeAggRule("2", "agg1_1", Set("instance", "pod", "container", "port"), 14, active = false, level="1"),
+    ExcludeAggRule("2", "agg2_1", Set("instance", "pod", "container", "port"), 14000000L, active = false, level="1"),
   )
 
   it("[exclude rules] should handle when some rules are inactive and there is a different rule from that timestamp") {
     val testCases = Seq(
       """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (dc)"""
-        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (dc)""",
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (dc)""", // not optimized: the rule is inactive at 13
     )
     testOptimization(excludeRules2WithInactive, testCases)
-
-    // TODO test cases with gaps in pre-aggregated data due to rule version changes.
-    // We assume for now that user can use `no_optimize` function if they see gaps and want to query raw data
-    // Improve in later iterations if prioritized
   }
 
   private val includeRules1 = List(
@@ -280,7 +279,17 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     val arp = newProvider(rules)
     for {(query, optimizedExpected) <- testCases} {
       println(s"Testing query $query")
-      val lp = Parser.queryToLogicalPlan(query, endSeconds, step, Antlr)
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+      val optimized = lp.useHigherLevelAggregatedMetric(arp)
+      LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
+    }
+  }
+
+  private def testOptimizationInstant(rules: List[AggRule], testCases: Seq[(String, String)]): Unit = {
+    val arp = newProvider(rules)
+    for {(query, optimizedExpected) <- testCases} {
+      println(s"Testing query $query")
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(endSeconds, step, endSeconds), Antlr)
       val optimized = lp.useHigherLevelAggregatedMetric(arp)
       LogicalPlanParser.convertToQuery(optimized) shouldEqual optimizedExpected
     }
