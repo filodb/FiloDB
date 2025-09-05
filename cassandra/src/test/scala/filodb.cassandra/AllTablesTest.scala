@@ -11,7 +11,7 @@ trait AllTablesTest extends AnyFunSpec with AsyncTest {
 
   implicit val scheduler = monix.execution.Scheduler.Implicits.global
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
 
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val columnStore = new CassandraColumnStore(config, scheduler, session)
