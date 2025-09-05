@@ -209,7 +209,7 @@ object Submodules {
   //    )
 
   lazy val gateway = (project in file("gateway"))
-    .dependsOn(coordinator % "compile->compile; test->test", prometheus, cassandra)
+    .dependsOn(coordinator % "compile->compile; test->test", prometheus, cassandra, kafka)
     .settings(
       commonSettings,
       name := "filodb-gateway",
