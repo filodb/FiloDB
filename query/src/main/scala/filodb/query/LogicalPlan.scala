@@ -642,11 +642,17 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    // No special handling for BinaryJoin. Just pass the call to lhs and rhs recursively
-    this.copy(
-      lhs = lhs.useAggregatedMetricIfApplicable(aggRuleProvider),
-      rhs = rhs.useAggregatedMetricIfApplicable(aggRuleProvider)
-    )
+    // Optimize lhs and rhs separately. If both are optimized, create a new BinaryJoin plan with optimized
+    // We do this because raw and aggregated metrics could have different retention periods, if only one of them
+    // is optimized, this could lead to inconsistent results that are not explainable easily to the user
+    val lhsOpt = lhs.useAggregatedMetricIfApplicable(aggRuleProvider)
+    val rhsOpt = rhs.useAggregatedMetricIfApplicable(aggRuleProvider)
+    if (lhsOpt != lhs && rhsOpt != rhs) // both lhs and rhs are optimized
+      this.copy(
+        lhs = lhsOpt,
+        rhs = rhsOpt
+      )
+    else this
   }
 }
 
