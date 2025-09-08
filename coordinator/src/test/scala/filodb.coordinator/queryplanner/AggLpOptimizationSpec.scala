@@ -19,7 +19,7 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
 
   def newProvider(aggRules: List[AggRule], enabled: Boolean = true): AggRuleProvider = new AggRuleProvider {
     override def getAggRuleVersions(filters: Seq[ColumnFilter], rs: IntervalSelector): List[AggRule] = aggRules
-    override def aggRuleOptimizationEnabled: Boolean = enabled
+    override def aggRuleOptimizationEnabled(filters: Seq[ColumnFilter]): Boolean = enabled
   }
 
   private val excludeRules1 = List(

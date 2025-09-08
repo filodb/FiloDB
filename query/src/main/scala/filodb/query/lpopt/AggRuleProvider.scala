@@ -26,7 +26,7 @@ trait AggRuleProvider {
    * If this is enabled, users use `no_optimize` function to disable aggregation rule optimization for a query.
    * If this is disabled, users use `optimizer_with_agg` function to enable aggregation rule optimization for a query.
    */
-  def aggRuleOptimizationEnabled: Boolean
+  def aggRuleOptimizationEnabled(filters: Seq[ColumnFilter]): Boolean
 }
 
 

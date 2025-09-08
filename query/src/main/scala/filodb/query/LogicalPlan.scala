@@ -71,9 +71,10 @@ sealed trait LogicalPlan {
    * @return Updated LogicalPlan if Applicable. Else return the same LogicalPlan
    */
   def useHigherLevelAggregatedMetric(aggRuleProvider: AggRuleProvider): LogicalPlan = {
+    val filters = planColumnFilters()
+    val enabledForFilters = aggRuleProvider.aggRuleOptimizationEnabled(filters)
     // invoke if aggRuleProvider.aggRuleOptimizationEnabled is true, or if the query has optimize_with_agg function
-    if (aggRuleProvider.aggRuleOptimizationEnabled ||
-      hasOptimizeWithAgg(this) && !aggRuleProvider.aggRuleOptimizationEnabled) {
+    if (enabledForFilters || hasOptimizeWithAgg(this) && !enabledForFilters) {
       // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
       this match {
         // We start with no parent plans from the root
@@ -743,8 +744,10 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
     vectors.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    if ( (function != NoOptimize && aggRuleProvider.aggRuleOptimizationEnabled) ||
-         (function == OptimizeWithAgg && !aggRuleProvider.aggRuleOptimizationEnabled) ) {
+    val filters = planColumnFilters()
+    val enabledForFilters = aggRuleProvider.aggRuleOptimizationEnabled(filters)
+    if ( (function != NoOptimize && enabledForFilters) ||
+         (function == OptimizeWithAgg && !enabledForFilters) ) {
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
     } else
       this
