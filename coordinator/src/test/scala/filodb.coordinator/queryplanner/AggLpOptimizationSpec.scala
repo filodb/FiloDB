@@ -299,6 +299,15 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  it("should not optimize instant queries within latest minute") {
+    val query = """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
+    val now = System.currentTimeMillis() / 1000
+    val lp = Parser.queryToLogicalPlan(query, now, step, Antlr)
+    val arp = newProvider(excludeRules1)
+    val optimized = lp.useHigherLevelAggregatedMetric(arp)
+    LogicalPlanParser.convertToQuery(optimized) shouldEqual query
+  }
+
   it("should not optimize when no_optimize function is set") {
     val testCases = Seq(
       // same
@@ -362,4 +371,5 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     val optimized = lp.useHigherLevelAggregatedMetric(arp)
     LogicalPlanParser.convertToQuery(optimized) shouldEqual query
   }
+
 }
