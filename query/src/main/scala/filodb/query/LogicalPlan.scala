@@ -71,9 +71,10 @@ sealed trait LogicalPlan {
    * @return Updated LogicalPlan if Applicable. Else return the same LogicalPlan
    */
   def useHigherLevelAggregatedMetric(aggRuleProvider: AggRuleProvider): LogicalPlan = {
+    val filters = planColumnFilters()
+    val enabledForFilters = aggRuleProvider.aggRuleOptimizationEnabled(filters)
     // invoke if aggRuleProvider.aggRuleOptimizationEnabled is true, or if the query has optimize_with_agg function
-    if (aggRuleProvider.aggRuleOptimizationEnabled ||
-      hasOptimizeWithAgg(this) && !aggRuleProvider.aggRuleOptimizationEnabled) {
+    if (enabledForFilters || hasOptimizeWithAgg(this) && !enabledForFilters) {
       // For now, only PeriodicSeriesPlan and RawSeriesLikePlan are optimized for higher level aggregation
       this match {
         // We start with no parent plans from the root
@@ -642,11 +643,17 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    // No special handling for BinaryJoin. Just pass the call to lhs and rhs recursively
-    this.copy(
-      lhs = lhs.useAggregatedMetricIfApplicable(aggRuleProvider),
-      rhs = rhs.useAggregatedMetricIfApplicable(aggRuleProvider)
-    )
+    // Optimize lhs and rhs separately. If both are optimized, create a new BinaryJoin plan with optimized
+    // We do this because raw and aggregated metrics could have different retention periods, if only one of them
+    // is optimized, this could lead to inconsistent results that are not explainable easily to the user
+    val lhsOpt = lhs.useAggregatedMetricIfApplicable(aggRuleProvider)
+    val rhsOpt = rhs.useAggregatedMetricIfApplicable(aggRuleProvider)
+    if (lhsOpt != lhs && rhsOpt != rhs) // both lhs and rhs are optimized
+      this.copy(
+        lhs = lhsOpt,
+        rhs = rhsOpt
+      )
+    else this
   }
 }
 
@@ -743,8 +750,10 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
     vectors.replacePeriodicSeriesFilters(filters))
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
-    if ( (function != NoOptimize && aggRuleProvider.aggRuleOptimizationEnabled) ||
-         (function == OptimizeWithAgg && !aggRuleProvider.aggRuleOptimizationEnabled) ) {
+    val filters = planColumnFilters()
+    val enabledForFilters = aggRuleProvider.aggRuleOptimizationEnabled(filters)
+    if ( (function != NoOptimize && enabledForFilters) ||
+         (function == OptimizeWithAgg && !enabledForFilters) ) {
       this.copy(vectors = vectors.useAggregatedMetricIfApplicable(aggRuleProvider))
     } else
       this
