@@ -1,5 +1,7 @@
 package filodb.query.lpopt
 
+import scala.concurrent.duration.DurationInt
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
@@ -16,7 +18,10 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  */
 object AggLpOptimization extends StrictLogging{
 
-  private val aggTimeWindow = 60000L // 1 minute in millis
+  // configure if needed later
+  private val aggTimeWindow = 1.minutes.toMillis // pre-aggregated data is at 1m resolution
+  private val aggDelay  = 1.minutes.toMillis // pre-aggregated data is delayed by 1m
+
   private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
   private val numAggLpNotOptimized = Kamon.counter(s"num_agg_lps_not_optimized")
 
@@ -108,6 +113,12 @@ object AggLpOptimization extends StrictLogging{
    */
   // scalastyle:off method.length cyclomatic.complexity
   private def canTranslateQueryToPreagg(agg: Aggregate): Option[CanTranslateResult] = {
+
+    // If this is an instant query for latest minute, do not optimize since pre-aggregated data may not be ready yet
+    val nowMinus1m = System.currentTimeMillis() - aggDelay
+    if (agg.endMs > nowMinus1m && agg.startMs > nowMinus1m) {
+      return None
+    }
 
     def makeResult(rs: RawSeriesLikePlan, colOpt: Option[String],
                    rangeFunctionId: Option[RangeFunctionId]): Option[CanTranslateResult] = {
