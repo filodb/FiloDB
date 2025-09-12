@@ -129,7 +129,9 @@ object TestTimeseriesProducer extends StrictLogging {
                      numTimeSeries: Int,
                      numMetricNames: Int,
                      publishIntervalSec: Int,
-                     schema: Schema): Stream[InputRecord] = {
+                     schema: Schema,
+                     namespace: String = "App-0",
+                     workspace: String = "demo"): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     Stream.from(0).flatMap { n =>
@@ -142,8 +144,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"         -> s"DC$dc",
-                     "_ws_"       -> "demo",
-                     "_ns_"       -> s"App-$app",
+                     "_ws_" -> workspace,
+                     "_ns_" -> namespace,
                      "partition"  -> s"partition-$partition",
                      "partitionAl"-> s"partition-$partition",
                      "longTag"    -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",
@@ -163,7 +165,9 @@ object TestTimeseriesProducer extends StrictLogging {
   def timeSeriesCounterData(startTime: Long,
                      numTimeSeries: Int,
                      numMetricNames: Int,
-                     publishIntervalSec: Int): Stream[InputRecord] = {
+                     publishIntervalSec: Int,
+                     namespace: String = "App-0",
+                     workspace: String = "demo"): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     val valMap: mutable.HashMap[Map[String, String], Double] = mutable.HashMap.empty[Map[String, String], Double]
@@ -176,8 +180,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
 
       val tags = Map("dc" -> s"DC$dc",
-        "_ws_" -> "demo",
-        "_ns_" -> s"App-$app",
+        "_ws_" -> workspace,
+        "_ns_" -> namespace,
         "partition" -> s"partition-$partition",
         "partitionAl" -> s"partition-$partition",
         "longTag" -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",

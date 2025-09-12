@@ -8,6 +8,8 @@ import scala.concurrent.duration.DurationInt
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.headers.RawHeader
+import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task.deferFuture
@@ -20,10 +22,12 @@ import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.serialization.{Deserializer, LongDeserializer}
 import org.rogach.scallop._
 import org.rogach.scallop.exceptions.ScallopException
+import org.xerial.snappy.Snappy
 
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.metadata.Schema
 import filodb.core.metadata.Schemas.{gauge, promCounter}
+import filodb.gateway.remote.remote_storage.{LabelPair, Sample, TimeSeries, WriteRequest}
 import filodb.kafka.RecordContainerDeserializer
 import filodb.memory.format.RowReader
 
@@ -44,7 +48,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
     verify()
   }
 
-  private case class PrometheusMetric(metric: String, labels: Map[String, String], value: Double)
+  private case class PrometheusMetric(metric: String, labels: Map[String, String], value: Double, timestamp: Long)
 
   implicit val system: ActorSystem = ActorSystem("KafkaToPrometheus")
   implicit val io: Scheduler = Scheduler.io("kafka-consumer")
@@ -85,7 +89,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
         Observable.fromIterable(promMetrics)
       }
       .bufferTumbling(1000)
-      .map(mapPrometheusMetricsToStrings)
+      .map(prometheusMetricToTimeSeries)
       .mapEval(batch => deferFuture(pushToPrometheus(batch)))
       .timeoutOnSlowUpstream(10.seconds)
       .foreachL(res => logger.info(s"Batch processing completed with result : $res"))
@@ -102,14 +106,16 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       }
   }
 
-  private def mapPrometheusMetricsToStrings(metrics: Seq[PrometheusMetric]) = {
-    val deduplicated = metrics
-      .groupBy(metric => (metric.metric, metric.labels))
-      .map { case (_, metrics) => metrics.last }
-    deduplicated.map { metric =>
-      val labelsStr = metric.labels.map { case (k, v) => s"""$k="$v"""" }.mkString(",")
-      s"""${metric.metric}{$labelsStr} ${metric.value}"""
-    }.toSeq
+
+  private def prometheusMetricToTimeSeries(metrics: Seq[PrometheusMetric]): Seq[TimeSeries] = {
+    metrics.groupBy(m => (m.metric, m.labels))
+      .map { case ((metricName, tags), groupedMetrics) =>
+        val labels = (tags + ("__name__" -> metricName))
+          .map { case (k, v) => LabelPair(Some(k), Some(v)) }
+          .toVector
+        val samples = groupedMetrics.map(m => Sample(Some(m.value), Some(m.timestamp)))
+        TimeSeries(labels, samples)
+      }.toSeq
   }
 
   // supports only for gauge/counter
@@ -118,18 +124,36 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
     val valueColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "value")
     val metricNameIdx = schema.ingestionSchema.columns.indexWhere(_.name == "_metric_")
     val tagsIdx = schema.ingestionSchema.columns.indexWhere(_.name == "tags")
+    val tsColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "timestamp")
     iterator.map { row: RowReader =>
+      val timestamp = row.getLong(tsColIdx)
       val value = row.getDouble(valueColIdx)
       val metricName = row.getString(metricNameIdx)
       val tagsMap = row.getAny(tagsIdx).asInstanceOf[Map[String, String]]
-      PrometheusMetric(metricName, tagsMap, value)
+      tagsMap.foreach(tag => logger.info("tagsMap : key " + tag._1 + " value " + tag._2))
+      PrometheusMetric(metricName, tagsMap, value, timestamp)
     }.toSeq
   }
 
-  private def pushToPrometheus(batch: Seq[String]): Future[HttpResponse] = {
-    val entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, batch.mkString("", "\n", "\n"))
-    val request = HttpRequest(method = HttpMethods.POST, uri = "http://localhost:31094/metrics/job/prometheus",
-      entity = entity)
+
+  private def pushToPrometheus(batch: Seq[TimeSeries]): Future[HttpResponse] = {
+    val writeRequest = WriteRequest(batch)
+    val serialized = writeRequest.toByteArray
+    val compressed = Snappy.compress(serialized)
+
+    val entity = HttpEntity(ContentType.parse("application/x-protobuf").right.get, ByteString(compressed))
+
+    val request = HttpRequest(
+      method = HttpMethods.POST,
+      uri = "http://localhost:31093/api/v1/write",
+      entity = entity,
+      headers = List(
+        RawHeader("Content-Encoding", "snappy"),
+        RawHeader("X-Prometheus-Remote-Write-Version", "0.1.0")
+      )
+    )
+
+    logger.info(s"Sending batch of ${batch.size} metrics to Prometheus remote write...")
     Http().singleRequest(request)
   }
 }

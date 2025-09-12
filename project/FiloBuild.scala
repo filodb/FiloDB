@@ -214,7 +214,11 @@ object Submodules {
       commonSettings,
       name := "filodb-gateway",
       libraryDependencies ++= gatewayDeps,
-      gatewayAssemblySettings
+      gatewayAssemblySettings,
+      PB.protoSources in Compile += baseDirectory.value / "src" / "main" / "protobuf",
+      PB.targets in Compile := Seq(
+        scalapb.gen() -> (sourceManaged in Compile).value
+      )
     )
 
   lazy val gatling = (project in file("gatling"))
