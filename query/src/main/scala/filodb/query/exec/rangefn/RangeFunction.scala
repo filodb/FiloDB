@@ -6,6 +6,7 @@ import filodb.core.query._
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
 //import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
@@ -14,16 +15,17 @@ import filodb.query.exec._
   * Container for samples within a window of samples
   * over which a range function can be applied
   */
-trait Window {
-  def apply(i: Int): TransientRow
+trait Window[T <: MutableRowReader] {
+  def apply(i: Int): T
   def size: Int
-  def head: TransientRow
-  def last: TransientRow
+  def head: T
+  def last: T
 }
 
 // Just a marker trait for all RangeFunction implementations, sliding and chunked
 sealed trait BaseRangeFunction {
-  def asSliding: RangeFunction = this.asInstanceOf[RangeFunction]
+  def asSlidingH: RangeFunction[TransientHistRow] = this.asInstanceOf[RangeFunction[TransientHistRow]]
+  def asSlidingD: RangeFunction[TransientRow] = this.asInstanceOf[RangeFunction[TransientRow]]
   def asChunkedD: ChunkedRangeFunction[TransientRow] = this.asInstanceOf[ChunkedRangeFunction[TransientRow]]
   def asChunkedH: ChunkedRangeFunction[TransientHistRow] = this.asInstanceOf[ChunkedRangeFunction[TransientHistRow]]
 }
@@ -36,7 +38,7 @@ sealed trait BaseRangeFunction {
   * 2. Use the entire window content in `apply` to emit the next value. Depending on whether the
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
   */
-trait RangeFunction extends BaseRangeFunction {
+trait RangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
   /**
     * Values added to window will be converted to monotonically increasing. Mark
     * as true only if the function will always operate on counters.
@@ -46,12 +48,12 @@ trait RangeFunction extends BaseRangeFunction {
   /**
     * Called when a sample is added to the sliding window
     */
-  def addedToWindow(row: TransientRow, window: Window): Unit
+  def addedToWindow(row: R, window: Window[R]): Unit
 
   /**
     * Called when a sample is removed from sliding window
     */
-  def removedFromWindow(row: TransientRow, window: Window): Unit
+  def removedFromWindow(row: R, window: Window[R]): Unit
 
   /**
     * Called when wrapping iterator needs to emit a sample using the window.
@@ -70,8 +72,8 @@ trait RangeFunction extends BaseRangeFunction {
     */
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
-            sampleToEmit: TransientRow,
+            window: Window[R],
+            sampleToEmit: R,
             queryConfig: QueryConfig): Unit
 }
 
@@ -295,7 +297,11 @@ object RangeFunction {
       case ColumnType.HistogramColumn => histChunkedFunction(schema, func, funcParams)
       case other: ColumnType => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
-      iteratingFunction(func, schema, funcParams)
+      if (columnType == ColumnType.HistogramColumn) {
+        iteratingFunctionH(func, schema, funcParams)
+      } else {
+        iteratingFunction(func, schema, funcParams)
+      }
     }
   }
 
@@ -394,7 +400,67 @@ object RangeFunction {
                               => () => new HistIncreaseFunction
     case Some(Rate)           => () => new RateOverDeltaChunkedFunctionH
     case Some(Increase)       => () => new SumOverTimeChunkedFunctionH
-    case _                    => ??? //TODO enumerate all possible cases
+    case Some(x)              => throw new NotImplementedError(
+                                s"${x.toString} not implemented for histogram chunked functions")
+  }
+
+  private def notImplemented(function: String) =
+                      s"$function not implemented for RangeFunction[TransientHistRow]"
+  /**
+   * Returns a function to generate the RangeFunction for SlidingWindowIterator.
+   * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
+   */
+  // scalastyle:off cyclomatic.complexity
+  private def iteratingFunctionH(func: Option[InternalRangeFunction],
+                                 schema: ResultSchema,
+                                 funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    // when no window function is asked, use last sample for instant
+    case None                                     => () => new LastSampleFunctionH()
+    case Some(Last)                               => () => new LastSampleFunctionH()
+    case Some(Rate) if schema.columns(1).isCumulative
+                                                  => () => RateFunctionH
+    case Some(Increase) if schema.columns(1).isCumulative
+                                                  => () => IncreaseFunctionH
+    // Since cumulative is already handled previously, this is for delta temporality
+    case Some(Rate)                               => () => new RateOverDeltaFunctionH()
+    case Some(Increase)                           => () => new SumOverTimeFunctionH() // Sum of deltas over time
+    case Some(Irate) if schema.columns(1).isCumulative
+                                                  => () => IRateFunctionH
+
+    case Some(Irate)                              => () => IRatePeriodicFunctionH
+    case Some(LastSampleHistMaxMin) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
+      () => new LastSampleFunctionH(isMinMaxHistogram = true)
+    case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
+      () => new SumAndMaxOverTimeFunctionHD()
+    case Some(RateAndMinMaxOverTime) => require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
+      () => new RateAndMaxMinOverTimeFunctionHD()
+    case Some(SumOverTime)                        => () => new SumOverTimeFunctionH()
+    case Some(AvgOverTime)                        => () => new AvgOverDeltaFunctionH()
+    // All the following are not implemented
+    case Some(Delta)                              => throw new NotImplementedError(notImplemented("Delta"))
+    case Some(Idelta)                             => throw new NotImplementedError(notImplemented("Idelta"))
+    case Some(Resets)                             => throw new NotImplementedError(notImplemented("Resets"))
+    case Some(Deriv)                              => throw new NotImplementedError(notImplemented("Deriv"))
+    case Some(MaxOverTime)                        => throw new NotImplementedError(notImplemented("MaxOverTime"))
+    case Some(MinOverTime)                        => throw new NotImplementedError(notImplemented("MinOverTime"))
+    case Some(CountOverTime)                      => throw new NotImplementedError(notImplemented("CountOverTime"))
+    case Some(StdDevOverTime)                     => throw new NotImplementedError(notImplemented("StdDevOverTime"))
+    case Some(StdVarOverTime)                     => throw new NotImplementedError(notImplemented("StdVarOverTime"))
+    case Some(Changes)                            => throw new NotImplementedError(notImplemented("Changes"))
+    case Some(QuantileOverTime)                   => throw new NotImplementedError(notImplemented("QuantileOverTime"))
+    case Some(MedianAbsoluteDeviationOverTime)    =>
+                                       throw new NotImplementedError(notImplemented("MedianAbsoluteDeviationOverTime"))
+    case Some(LastOverTimeIsMadOutlier)        =>
+                                       throw new NotImplementedError(notImplemented("LastOverTimeIsMadOutlier"))
+    case Some(HoltWinters)                     => throw new NotImplementedError(notImplemented("HoltWinters"))
+    case Some(ZScore)                          => throw new NotImplementedError(notImplemented("ZScore"))
+    case Some(PredictLinear)                   => throw new NotImplementedError(notImplemented("PredictLinear"))
+    case Some(LastOverTime)                    => throw new NotImplementedError(notImplemented("LastOverTime"))
+    case Some(AvgWithSumAndCountOverTime)      => throw new NotImplementedError(
+                                                          notImplemented("AvgWithSumAndCountOverTime"))
+    case Some(Timestamp)                       => throw new NotImplementedError(notImplemented("Timestamp"))
+    case Some(AbsentOverTime)                  => throw new NotImplementedError(notImplemented("AbsentOverTime"))
+    case Some(PresentOverTime)                 => throw new NotImplementedError(notImplemented("PresentOverTime"))
   }
 
   /**
@@ -432,16 +498,43 @@ object RangeFunction {
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
-    case _                                      => ??? //TODO enumerate all possible cases
   }
 }
 
-object LastSampleFunction extends RangeFunction {
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeFunction[TransientHistRow] {
+
+  def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+  def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
+
   def apply(startTimestamp: Long,
             endTimestamp: Long,
-            window: Window,
+            window: Window[TransientHistRow],
+            sampleToEmit: TransientHistRow,
+            queryConfig: QueryConfig): Unit = {
+
+    for (i <- (window.size - 1) to 0 by -1) {
+      val row = window(i)
+      val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+      if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN ) {
+        sampleToEmit.setValues(endTimestamp, hist)
+        if (isMinMaxHistogram) {
+          sampleToEmit.setDouble(2, row.getDouble(2))
+          sampleToEmit.setDouble(3, row.getDouble(3))
+        }
+        return
+      }
+    }
+    sampleToEmit.setValues(endTimestamp, HistogramWithBuckets.empty)
+  }
+}
+
+object LastSampleFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     for (i <- (window.size - 1) to 0 by -1) {
