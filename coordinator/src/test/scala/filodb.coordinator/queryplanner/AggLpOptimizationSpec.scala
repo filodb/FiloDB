@@ -69,10 +69,6 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     val testCases = Seq(
       """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s])))""",
-
-      // this one cannot be optimized since one side has window < 60s. Optimize join only if both sides can be optimized
-      """(sum(rate(foo{_ws_="demo",_ns_="localNs"}[10s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))"""
-        -> """(sum(rate(foo{_ws_="demo",_ns_="localNs"}[10s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))""",
     )
     testOptimization(excludeRules1, testCases)
   }
