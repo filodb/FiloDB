@@ -147,8 +147,7 @@ object Dependencies {
   lazy val gatewayDeps = commonDeps ++ Seq(
     logbackDep,
     "io.monix"   %% "monix-kafka-1x" % monixKafkaVersion,
-    "org.rogach" %% "scallop"        % "3.1.1",
-    akkaHttp
+    "org.rogach" %% "scallop"        % "3.1.1"
   )
 
   lazy val httpDeps = Seq(
