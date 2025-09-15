@@ -86,8 +86,10 @@ object GatewayServer extends StrictLogging {
               descrYes = "Generate otel-delta-histogram schema test data and exit")
     val genOtelExpDeltaHistData = toggle(noshort = true,
       descrYes = "Generate otel-exponential-delta-histogram schema test data and exit")
-    val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
-    val genCounterData = toggle(noshort = true, descrYes = "Generate Prometheus counter-schema test data and exit")
+    val genGaugeData = opt[String](name = "gen-gauge-data", default = Some("heap_usage0"),
+      descr = "Generate Prometheus gauge-schema test data with a specific metric name base and exit")
+    val genCounterData = opt[String](name = "gen-counter-data", default = Some("heap_usage_counter"),
+      descr = "Generate Prometheus counter-schema test data with a specific metric name base and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
@@ -143,9 +145,9 @@ object GatewayServer extends StrictLogging {
                                generator: () => Stream[InputRecord])
 
     val genHist = userOpts.genHistData.getOrElse(false)
-    val genGaugeData = userOpts.genGaugeData.getOrElse(false)
+    val genGaugeData = userOpts.genGaugeData.isDefined
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    val genCounterData = userOpts.genCounterData.getOrElse(false)
+    val genCounterData = userOpts.genCounterData.isDefined
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
@@ -167,10 +169,11 @@ object GatewayServer extends StrictLogging {
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)),
       GeneratorConfig(genGaugeData, "gauge",
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
-          userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace())),
+          userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace(),
+          metricName = userOpts.genGaugeData())),
       GeneratorConfig(genCounterData, "counter",
         () => TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries, userOpts.numMetrics(),
-          userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace())),
+          userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(), userOpts.genCounterData())),
       GeneratorConfig(genDeltaCounterData, "delta-counter",
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), deltaCounter))
@@ -211,11 +214,14 @@ object GatewayServer extends StrictLogging {
         genHist,
         genDeltaHist,
         genGaugeData,
+        userOpts.genGaugeData(),
         genCounterData,
+        userOpts.genCounterData(),
         genOtelCumulativeHistData,
         genOtelDeltaHistData,
         genOtelExpDeltaHistData,
-        userOpts.publishIntervalSecs())
+        userOpts.publishIntervalSecs(),
+        userOpts.nameSpace(), userOpts.workSpace())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {
