@@ -272,6 +272,11 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
   def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit
 
   /**
+   * Start background thread for collecting and publishing index statistics
+   */
+  def startStatsThread(): Unit
+
+  /**
    * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
    * @return matching partIds
    */

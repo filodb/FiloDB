@@ -5,6 +5,7 @@ import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
+import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -75,6 +76,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          lifecycleManager: Option[IndexMetadataStore] = None,
                          useMemoryMappedImpl: Boolean = true,
                          disableIndexCaching: Boolean = false,
+                         ramBufferSizeMB: Double = 16.0, // Lucene default
+                         maxBufferedDocs: Int = -1, // Lucene default
+                         useCompoundFile: Boolean = true, // Lucene default
                          addMetricTypeField: Boolean = true
                         ) extends PartKeyIndexDownsampled(ref, shardNum, schema, diskLocation, lifecycleManager,
                             addMetricTypeField = addMetricTypeField) {
@@ -83,6 +87,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   import PartKeyIndexRaw._
 
   val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  val luceneQueryCacheHitRate = Kamon.gauge("index-lucene-query-cache-hit-rate")
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
@@ -100,9 +108,16 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val config = new IndexWriterConfig(analyzer)
     config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
     config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND)
+
+    // Configuration-driven performance settings
+    config.setRAMBufferSizeMB(ramBufferSizeMB)
+    config.setMaxBufferedDocs(maxBufferedDocs)
+    config.setUseCompoundFile(useCompoundFile)
+
     val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
       new SortField(START_TIME, SortField.Type.LONG))
     config.setIndexSort(endTimeSort)
+    config
   }
 
   private val indexWriter =
@@ -133,6 +148,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   //start this thread to flush the segments and refresh the searcher every specific time period
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
+
+  //background thread pool to collect and publish query cache statistics
+  private var statsThreadPool: ScheduledThreadPoolExecutor = _
 
   private def facetEnabledForLabel(label: String) = {
     facetEnabledAllLabels || (facetEnabledShardKeyLabels && schema.options.shardKeyColumns.contains(label))
@@ -241,6 +259,27 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Started flush thread for lucene index on dataset=$ref shard=$shardNum")
   }
 
+  def startStatsThread(): Unit = {
+    if (statsThreadPool != UnsafeUtils.ZeroPointer) {
+      // Already running
+      logger.warn(s"startStatsThread called when already running for dataset=$ref shard=$shardNum, ignoring")
+      return
+    }
+
+    statsThreadPool = new ScheduledThreadPoolExecutor(1)
+
+    statsThreadPool.scheduleAtFixedRate(() => {
+      try {
+        updateLuceneQueryCacheStats()
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Exception in stats collection for dataset=$ref shard=$shardNum", e)
+      }
+    }, 10, 10, TimeUnit.SECONDS) // Start after 10 seconds, then every 10 seconds
+
+    logger.info(s"Started stats thread pool for lucene index on dataset=$ref shard=$shardNum")
+  }
+
   def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
     val collector = new PartIdCollector(Int.MaxValue)
     val deleteQuery = LongPoint.newRangeQuery(END_TIME, 0, endedBefore)
@@ -297,6 +336,18 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
+
+    // Stop stats thread pool
+    if (statsThreadPool != UnsafeUtils.ZeroPointer) {
+      statsThreadPool.shutdown()
+      try {
+        statsThreadPool.awaitTermination(10, TimeUnit.SECONDS)
+      } catch {
+        case _: InterruptedException =>
+          logger.warn(s"Interrupted while waiting for stats thread pool to stop for dataset=$ref shard=$shardNum")
+      }
+    }
+
     if (flushThread != UnsafeUtils.ZeroPointer) flushThread.close()
     indexWriter.close()
   }
@@ -318,6 +369,31 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .build((key: (IndexReader, String)) => {
         new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2, new FacetsConfig())
       })
+
+  /**
+   * Collect and publish Lucene query cache statistics if caching is enabled
+   */
+  private def updateLuceneQueryCacheStats(): Unit = {
+    if (!disableIndexCaching) {
+      withNewSearcher { searcher =>
+        val queryCache = searcher.getQueryCache
+        queryCache match {
+          case lruCache: org.apache.lucene.search.LRUQueryCache =>
+            // LRUQueryCache provides these statistics
+            val hitCount = lruCache.getHitCount
+            val missCount = lruCache.getMissCount
+            val totalQueries = hitCount + missCount
+
+            if (totalQueries > 0) {
+              val hitRate = hitCount.toDouble / totalQueries.toDouble
+              luceneQueryCacheHitRate.update(hitRate)
+            }
+          case _ =>
+            // Non-LRU cache or null - no stats available
+        }
+      }
+    }
+  }
 
   def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
     val labelSets = labelValuesEfficient(colFilters, startTime, endTime, LABEL_LIST)
@@ -679,7 +755,7 @@ protected class LuceneQueryBuilder extends PartKeyQueryBuilder {
 
   private def toLuceneOccur(occur: PartKeyQueryOccur): Occur = {
     occur match {
-      case OccurMust => Occur.MUST
+      case OccurMust => Occur.FILTER  // Use FILTER instead of MUST for better performance
       case OccurMustNot => Occur.MUST_NOT
     }
   }

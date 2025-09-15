@@ -111,6 +111,11 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       flushDelayMinSeconds, TimeUnit.SECONDS)
   }
 
+  override def startStatsThread(): Unit = {
+    // Tantivy already publishes stats in the flush thread, no separate stats thread needed
+    logger.debug(s"Tantivy index stats are published via flush thread for dataset=${ref.dataset} shard=$shardNum")
+  }
+
   override def partIdsEndedBefore(endedBefore: Long): Buffer[Int] = {
     val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
     val partIds = TantivyNativeMethods.partIdsEndedBefore(indexHandle, endedBefore)
