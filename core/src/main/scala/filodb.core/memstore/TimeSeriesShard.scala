@@ -26,9 +26,10 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import spire.syntax.cfor._
 
-import filodb.core.{ErrorResponse, _}
+import filodb.core.{ErrorResponse, Success, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
+import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
@@ -50,6 +51,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val oldContainers = Kamon.counter("memstore-incompatible-containers").withTags(TagSet.from(tags))
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").withTags(TagSet.from(tags))
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").withTags(TagSet.from(tags))
+  val outOfOrderDroppedTenant = Kamon.counter("tenant-out-of-order-samples") //per tenant need not include shard/dataset
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").withTags(TagSet.from(tags))
   val rowsPerContainer = Kamon.histogram("num-samples-per-container").withoutTags()
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").withTags(TagSet.from(tags))
@@ -232,7 +234,8 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            dataBytesScannedCtr: AtomicLong)
+                            dataBytesScannedCtr: AtomicLong,
+                            samplesScannedCtr: AtomicLong)
 
 final case class SchemaMismatch(expected: String, found: String, clazz: String) extends
   Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found in $clazz")
@@ -302,6 +305,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val tantivyQueryCacheEstimatedItemSize =
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
   private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
+  // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
+  private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -475,8 +480,22 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
 
   /**
+   * This data structure is used for real time tracking and publishing updated partIds within a shard. This is published
+   * at every flush interval irrespective of the num-group.
+   *
+   * IMPORTANT. Only operate on this object in the IngestScheduler ( which gurantees ordering of reads, writes
+   * and publishing since the ingestion scheduler is single-threaded )
+   * */
+  private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
+    if (partKeyUpdatesPublishingEnabled) {
+      logger.info(s"[PKUpdatePublisher] Initializing partKey updates publisher for shard=${shardNum}")
+      Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore, TagSet.from(shardStats.tags)))
+    }
+    else None
+
+  /**
     * This is the group during which this shard will flush dirty part keys. Randomized to
-    * ensure we dont flush time buckets across shards at same time
+    * ensure we don't flush time buckets across shards at same time
     */
   private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
   logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
@@ -948,6 +967,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit = {
     partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+    // Tracking updated partIds for real time publishing
+    updatedPartIdsForPublishing.foreach( publisher => publisher.store(p.partID))
     shardStats.partKeyIndexUpdated.increment()
   }
 
@@ -1050,6 +1071,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         // Track new partkeys which are added to index.
+        // Tracking updated partIds for real time publishing
+        updatedPartIdsForPublishing.foreach(publisher => publisher.store(partId))
         shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
           modifyCardinalityCountNoThrow(shardKey, 1, 1)
@@ -1423,16 +1446,33 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
 
-    /* Step 1: Kick off partition iteration to persist chunks to column store */
+    /* Step 5.1: Kick off partition iteration to persist chunks to column store */
     val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
 
-    /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
+    // Step 5.2: Get the updated partIds for publishing.
+    // NOTE: We need to make sure that the store/fetch operation to fetch has to happen in Ingestion thread.
+    val updatedPartIds = updatedPartIdsForPublishing match {
+      case Some(publisher) => publisher.fetchAll()
+      case None => debox.Buffer.empty[Int]
+    }
+
+    /* Step 5.3: We flush dirty part keys in the one designated group for each shard.
      * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
      * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
      * be added during iteration due to endTime detection
      */
     val writeDirtyPartKeysFuture = writeChunksFuture.recover {case _ => Success}
-      .flatMap( _=> writeDirtyPartKeys(flushGroup))
+      .flatMap( _=> {
+        // Publish the real-time partKey updates for downstream applications to consume.
+        // NOTE: This is different from the partKey persist task that happens in Step 5.3. The overall
+        // in both the task is, but this task tracks changes more real-time for the given shard irrespective of
+        // the given num-group.
+        // IMPORTANT: We need to make sure that the following publish task is NOT executed in the ingestion thread.
+        // We also need to make sure that the ingestion thread is not blocked or waiting on it.
+        // to make sure publish task doesn't cause any issue, we handle any exception raised by the task.
+        publishDirtyPartKeys(updatedPartIds).recover {case _ => Success}
+        writeDirtyPartKeys(flushGroup)
+      })
 
     /* Step 6: Checkpoint after dirty part keys and chunks are flushed */
     val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture)).map {
@@ -1503,10 +1543,37 @@ class TimeSeriesShard(val ref: DatasetRef,
     updateGauges()
   }
 
+  /**
+   * Publishing partKey updates for downstream consumers.
+   * @return filodb.core.Response status
+   */
+  private def publishDirtyPartKeys(updatedPartIds: Buffer[Int]): Future[Response] = {
+    // Early exit if nothing is present to publish
+    if (updatedPartIds.isEmpty) {
+      return Future.successful(Success)
+    }
+    updatedPartIdsForPublishing match {
+      case Some(publisher) => {
+        assertThreadName(IOSchedName)
+        val totalUpdates = updatedPartIds.length
+        val partKeyRecords = InMemPartitionIterator2(updatedPartIds).map(toPartKeyRecord)
+        val fut = publisher.publish(ingestConsumer.ingestOffset, partKeyRecords)
+        fut.onComplete {
+          case scala.util.Success(resp) => logger.info(s"[PKUpdatePublisher] shard=${shardNum} ${totalUpdates}" +
+            s" pk updates published with resp: $resp")
+          case scala.util.Failure(ex) => logger.error(s"[PKUpdatePublisher] shard=${shardNum} at-most ${totalUpdates}" +
+            s" pk updates failed with exception", ex)
+        }
+        fut
+      }
+      case None => Future.successful(Success) // No publishing in this case
+    }
+  }
+
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
-    assertThreadName(IOSchedName)
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
+    assertThreadName(IOSchedName)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
       Observable.fromIteratorUnsafe(partKeyRecords),
@@ -1995,16 +2062,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
+          samplesScannedCtr   = querySession.queryStats.getSamplesScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
+          samplesScannedCtr   = querySession.queryStats.getSamplesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
         val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
         val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
+        val samplesScannedCounter = querySession.queryStats.getSamplesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val startNs = Utils.currentThreadCpuTimeNanos
@@ -2039,7 +2109,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
         PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
-          Nil, chunksReadCounter)
+          Nil, chunksReadCounter, samplesScannedCounter)
     }
   }
   // scalastyle:on method.length

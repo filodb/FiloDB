@@ -82,6 +82,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val sparkSessionFactoryClass = downsamplerConfig.getString("spark-session-factory")
 
+  @transient lazy val dsIndexReader = downsamplerConfig.getString("ds-index-reader")
+
+  @transient lazy val shouldUseChunksPersistor = downsamplerConfig.getBoolean("use-chunks-persistor")
+  @transient lazy val chunksPersistor = downsamplerConfig.getString("chunks-persistor")
+
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 
   @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
@@ -155,6 +160,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
   @transient lazy val exportDatabase = downsamplerConfig.getString("data-export.database")
 
   @transient lazy val logAllRowErrors = downsamplerConfig.getBoolean("data-export.log-all-row-errors")
+
+  @transient lazy val numShards = filodbSettings.streamConfigs
+    .find(_.getString("dataset") == rawDatasetName)
+    .getOrElse(ConfigFactory.empty())
+    .as[Option[Int]]("num-shards").get
 
   /**
    * Two conditions should satisfy for eligibility:
