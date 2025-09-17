@@ -28,8 +28,8 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, otelCumulativeHistogram,
-           otelDeltaHistogram, otelExpDeltaHistogram, promHistogram}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram,
+  gauge, otelCumulativeHistogram, otelDeltaHistogram, otelExpDeltaHistogram, promCounter, promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -157,24 +157,24 @@ object GatewayServer extends StrictLogging {
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
     val allGenerators = Seq(
-      GeneratorConfig(genHist, "prom-histogram",
+      GeneratorConfig(genHist, promHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)),
-      GeneratorConfig(genOtelCumulativeHistData, "otel-cumulative-histogram",
+      GeneratorConfig(genOtelCumulativeHistData, otelCumulativeHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelCumulativeHistogram)),
-      GeneratorConfig(genOtelDeltaHistData, "otel-delta-histogram",
+      GeneratorConfig(genOtelDeltaHistData, otelDeltaHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelDeltaHistogram)),
-      GeneratorConfig(genOtelExpDeltaHistData, "otel-exponential-delta-histogram",
+      GeneratorConfig(genOtelExpDeltaHistData, otelExpDeltaHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelExpDeltaHistogram)),
-      GeneratorConfig(genDeltaHist, "delta-histogram",
+      GeneratorConfig(genDeltaHist, deltaHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)),
-      GeneratorConfig(genGaugeData, "gauge",
+      GeneratorConfig(genGaugeData, gauge.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace(),
           metricName = userOpts.genGaugeData())),
-      GeneratorConfig(genCounterData, "counter",
+      GeneratorConfig(genCounterData, promCounter.name,
         () => TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(), userOpts.genCounterData())),
-      GeneratorConfig(genDeltaCounterData, "delta-counter",
+      GeneratorConfig(genDeltaCounterData, deltaCounter.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), deltaCounter))
     )

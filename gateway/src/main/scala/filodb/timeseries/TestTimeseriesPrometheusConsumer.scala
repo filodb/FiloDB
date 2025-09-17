@@ -130,7 +130,6 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       val value = row.getDouble(valueColIdx)
       val metricName = row.getString(metricNameIdx)
       val tagsMap = row.getAny(tagsIdx).asInstanceOf[Map[String, String]]
-      tagsMap.foreach(tag => logger.info("tagsMap : key " + tag._1 + " value " + tag._2))
       PrometheusMetric(metricName, tagsMap, value, timestamp)
     }.toSeq
   }
