@@ -20,33 +20,15 @@ import monix.kafka.config.AutoOffsetReset
 import monix.reactive.Observable
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.serialization.{Deserializer, LongDeserializer}
-import org.rogach.scallop._
-import org.rogach.scallop.exceptions.ScallopException
 import org.xerial.snappy.Snappy
 
 import filodb.core.binaryrecord2.RecordContainer
-import filodb.core.metadata.Schema
-import filodb.core.metadata.Schemas.{gauge, promCounter}
+import filodb.core.metadata.Schemas.gauge
 import filodb.gateway.remote.remote_storage.{LabelPair, Sample, TimeSeries, WriteRequest}
 import filodb.kafka.RecordContainerDeserializer
 import filodb.memory.format.RowReader
 
 object TestTimeseriesPrometheusConsumer extends StrictLogging {
-
-  private class ConsumerOptions(args: Seq[String]) extends ScallopConf(args) {
-    val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
-    val genGaugeData = toggle(noshort = true, descrYes = "Consume Prometheus gauge-schema test data")
-    val genCounterData = toggle(noshort = true, descrYes = "Consume Prometheus counter-schema test data")
-
-    override def onError(e: Throwable): Unit = e match {
-      // Intercept and ignore only the "Unknown option" error
-      case ScallopException(message) if message.startsWith("Unknown option") =>
-      // For all other errors, fall back to the default behavior
-      case other => super.onError(other)
-    }
-
-    verify()
-  }
 
   private case class PrometheusMetric(metric: String, labels: Map[String, String], value: Double, timestamp: Long)
 
@@ -56,17 +38,15 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
   implicit val valueDeserializer: Deserializer[RecordContainer] = new RecordContainerDeserializer
 
   def main(args: Array[String]): Unit = {
-    val opts = new ConsumerOptions(args)
-
-    val schema = opts match {
-      case o if o.genCounterData.getOrElse(false) => promCounter
-      case o if o.genGaugeData.getOrElse(false) => gauge
-      case _ => gauge // Default to gauge
+    if (args.isEmpty) {
+      logger.error("A path to a source config file must be provided as an argument.")
+      sys.exit(1)
     }
+    val sourceConfigPath = args(0)
+    logger.info(s"Using source config file: $sourceConfigPath")
 
-    logger.info(s"Configured to use schema: '$schema'")
 
-    val sourceConfig = ConfigFactory.parseFile(new java.io.File(opts.sourceConfigPath()))
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath))
     val topicName = sourceConfig.getString("sourceconfig.filo-topic-name")
 
     val consumerCfg = KafkaConsumerConfig.default.copy(
@@ -85,7 +65,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
 
     consumer.concatMap { record =>
         val container = record.value()
-        val promMetrics = recordContainerToPrometheusMetric(container, schema)
+        val promMetrics = recordContainerToPrometheusMetric(container)
         Observable.fromIterable(promMetrics)
       }
       .bufferTumbling(1000)
@@ -119,12 +99,12 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
   }
 
   // supports only for gauge/counter
-  private def recordContainerToPrometheusMetric(container: RecordContainer, schema: Schema): Seq[PrometheusMetric] = {
-    val iterator = container.iterate(schema.ingestionSchema)
-    val valueColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "value")
-    val metricNameIdx = schema.ingestionSchema.columns.indexWhere(_.name == "_metric_")
-    val tagsIdx = schema.ingestionSchema.columns.indexWhere(_.name == "tags")
-    val tsColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "timestamp")
+  private def recordContainerToPrometheusMetric(container: RecordContainer): Seq[PrometheusMetric] = {
+    val iterator = container.iterate(gauge.ingestionSchema)
+    val valueColIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "value")
+    val metricNameIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "_metric_")
+    val tagsIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "tags")
+    val tsColIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "timestamp")
     iterator.map { row: RowReader =>
       val timestamp = row.getLong(tsColIdx)
       val value = row.getDouble(valueColIdx)
