@@ -28,8 +28,8 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, otelCumulativeHistogram,
-           otelDeltaHistogram, otelExpDeltaHistogram, promHistogram}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram,
+  gauge, otelCumulativeHistogram, otelDeltaHistogram, otelExpDeltaHistogram, promCounter, promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -86,11 +86,16 @@ object GatewayServer extends StrictLogging {
               descrYes = "Generate otel-delta-histogram schema test data and exit")
     val genOtelExpDeltaHistData = toggle(noshort = true,
       descrYes = "Generate otel-exponential-delta-histogram schema test data and exit")
-    val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
-    val genCounterData = toggle(noshort = true, descrYes = "Generate Prometheus counter-schema test data and exit")
+    val genGaugeData = opt[String](name = "gen-gauge-data", default = Some("heap_usage0"),
+      descr = "Generate Prometheus gauge-schema test data with a specific metric name base and exit")
+    val genCounterData = opt[String](name = "gen-counter-data", default = Some("heap_usage_counter"),
+      descr = "Generate Prometheus counter-schema test data with a specific metric name base and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
+    val nameSpace = opt[String](name = "ns", default = Some("Test-data_dev1_0"), descr = "FiloDB ingestion namespace")
+    val workSpace = opt[String](name = "ws", default = Some("aci-telemetry"), descr = "FiloDB ingestion workspace")
+
     verify()
   }
 
@@ -135,50 +140,88 @@ object GatewayServer extends StrictLogging {
     // TODO: allow configurable sinks, maybe multiple sinks for say writing to multiple Kafka clusters/DCs
     setupKafkaProducer(sourceConfig, containerStream)
 
+    case class GeneratorConfig(metricType: Boolean,
+                               name: String,
+                               generator: () => Stream[InputRecord])
+
     val genHist = userOpts.genHistData.getOrElse(false)
-    val genGaugeData = userOpts.genGaugeData.getOrElse(false)
+    val genGaugeData = userOpts.genGaugeData.isDefined
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    val genCounterData = userOpts.genCounterData.getOrElse(false)
+    val genCounterData = userOpts.genCounterData.isDefined
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
     val genOtelExpDeltaHistData = userOpts.genOtelExpDeltaHistData.getOrElse(false)
 
-    if (genHist || genGaugeData || genDeltaHist
-          || genCounterData || genDeltaCounterData || genOtelDeltaHistData ||
-          genOtelExpDeltaHistData || genOtelCumulativeHistData) {
-      val startTime = System.currentTimeMillis
+    val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
-      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
-                   else if (genOtelCumulativeHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
-                                                  otelCumulativeHistogram)
-                   else if (genOtelDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
-                                                  otelDeltaHistogram)
-                   else if (genOtelExpDeltaHistData) TestTimeseriesProducer.genHistogramData(startTime, numSeries,
-                                                  otelExpDeltaHistogram)
-                   else if (genDeltaHist)
-                     TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
-                   else if (genGaugeData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
-                                        userOpts.numMetrics(), userOpts.publishIntervalSecs(), gauge)
-                   else if (genDeltaCounterData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
-                                        userOpts.numMetrics(), userOpts.publishIntervalSecs(), deltaCounter)
-                   else
-                        TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries,
-                                        userOpts.numMetrics(), userOpts.publishIntervalSecs())
+    val allGenerators = Seq(
+      GeneratorConfig(genHist, promHistogram.name,
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)),
+      GeneratorConfig(genOtelCumulativeHistData, otelCumulativeHistogram.name,
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelCumulativeHistogram)),
+      GeneratorConfig(genOtelDeltaHistData, otelDeltaHistogram.name,
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelDeltaHistogram)),
+      GeneratorConfig(genOtelExpDeltaHistData, otelExpDeltaHistogram.name,
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelExpDeltaHistogram)),
+      GeneratorConfig(genDeltaHist, deltaHistogram.name,
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)),
+      GeneratorConfig(genGaugeData, gauge.name,
+        () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
+          userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace(),
+          metricName = userOpts.genGaugeData())),
+      GeneratorConfig(genCounterData, promCounter.name,
+        () => TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries, userOpts.numMetrics(),
+          userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(), userOpts.genCounterData())),
+      GeneratorConfig(genDeltaCounterData, deltaCounter.name,
+        () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
+          userOpts.publishIntervalSecs(), deltaCounter))
+    )
 
-      stream.take(numSamples).foreach { rec =>
+    val streamsToGen = allGenerators.flatMap { config =>
+      if (config.metricType) {
+        logger.info(s"Adding ${config.name} data generator for $numSamples samples")
+        Some(config.generator().take(numSamples))
+      } else {
+        None
+      }
+    }
+
+    if (streamsToGen.nonEmpty) {
+      val totalSamples = numSamples * streamsToGen.size
+      logger.info(s"Generating a total of $totalSamples " +
+        s"samples from ${streamsToGen.size} generator(s) starting at $startTime....")
+
+      val finalObservable = Observable.fromIterable(streamsToGen.reduce(_ ++ _))
+
+      // Use a blocking call to ensure the main thread waits for all samples to be generated and queued.
+      implicit val scheduler = Scheduler.global // A scheduler is needed for runSyncUnsafe
+      finalObservable.foreachL { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(rec)) {
-          // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
           logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
           numDroppedMessages.increment()
         }
-      }
-      Thread sleep 10000
-      TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
-        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, genOtelCumulativeHistData,
-        genOtelDeltaHistData, genOtelExpDeltaHistData, userOpts.publishIntervalSecs())
+      }.runSyncUnsafe()
+
+      logger.info("All samples have been generated and queued.")
+      // Wait for the async Kafka producer to flush the records
+      Thread.sleep(10000)
+
+      TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), totalSamples, numSeries,
+        startTime,
+        genHist,
+        genDeltaHist,
+        genGaugeData,
+        userOpts.genGaugeData(),
+        genCounterData,
+        userOpts.genCounterData(),
+        genOtelCumulativeHistData,
+        genOtelDeltaHistData,
+        genOtelExpDeltaHistData,
+        userOpts.publishIntervalSecs(),
+        userOpts.nameSpace(), userOpts.workSpace())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {

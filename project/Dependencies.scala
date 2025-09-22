@@ -148,6 +148,8 @@ object Dependencies {
     logbackDep,
     "io.monix"   %% "monix-kafka-1x" % monixKafkaVersion,
     "org.rogach" %% "scallop"        % "3.1.1",
+    "com.google.protobuf" % "protobuf-java" % "2.5.0",
+    "org.xerial.snappy" % "snappy-java" % "1.1.8.4",
     akkaHttp
   )
 
