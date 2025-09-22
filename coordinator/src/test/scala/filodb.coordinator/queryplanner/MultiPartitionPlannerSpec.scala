@@ -18,6 +18,7 @@ import filodb.query.InstantFunctionId.Ln
 import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
+
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -125,12 +126,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
       PlannerParams(processMultiPartition = true)))
     val expectedPlanTree = s"""E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-                              |-E~PromQlRemoteExec(PromQlQueryParams(test{job = "app"},1000,100,2999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+                              |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,2999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                               |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=3599000, window=None, functionId=None, rawSource=false, offsetMs=None)
                               |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                               |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],3599,1,3599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                               |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],3599,1,3599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-                              |-E~PromQlRemoteExec(PromQlQueryParams(test{job = "app"},3600,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
+                              |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3600,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
 
     validatePlan(execPlan, expectedPlanTree)
   }
@@ -409,7 +410,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, localPlanner, "local", dataset, queryConfig
     )
-    val query = """sum(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
+    val query = """sum((test{job = "app1"} + test{job = "app2"}))[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
       query,
       TimeStepParams(queryStartSecs, step, queryStartSecs),
@@ -435,7 +436,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#887456173],raw)
         |-----T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#887456173],raw)
-        |--E~PromQlRemoteExec(PromQlQueryParams(sum(test{job = "app1"} + test{job = "app2"})[9000s:100s],12000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
+        |--E~PromQlRemoteExec(PromQlQueryParams(sum((test{job="app1"} + test{job="app2"})),12000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -465,7 +466,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
     )
     val expectedPlan =
-      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job = "app"}[10m:1m]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
+      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job="app"}[600s:60s]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -686,7 +687,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     execPlan.children.forall(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual (true)
   }
 
-  it("multi-partition namespace with V2 assignment with partition assignment changes should work well") {
+  it("multi-partition namespace with V2 assignment with partition assignment changes should work well BinaryJoin") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
         partitionsV2MultiPartitionAssignments(timeRange)
@@ -710,10 +711,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     println(execPlan.printTree())
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+    // Should have 3 BinaryJoinExec for before and after assignment change.
+    execPlan.children.count(plan => plan.isInstanceOf[BinaryJoinExec]) shouldEqual 3
+  }
+
+  it("multi-partition namespace with V2 assignment with partition assignment changes should work well") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} ",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+
     // Should have two MultiPartitionDistConcatExec for before and after assignment change.
     execPlan.children.count(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual 2
-    // Should have one BinaryJoinExec stitch the period when assignment change happens.
-    execPlan.children.count(plan => plan.isInstanceOf[BinaryJoinExec]) shouldEqual 1
+    // Should have 1 PromQlRemoteExec and 1 LocalPartitionDistConcatExec.
+    execPlan.children.head.children.count(plan => plan.isInstanceOf[PromQlRemoteExec]) shouldEqual 1
+    execPlan.children.head.children.count(plan => plan.isInstanceOf[LocalPartitionDistConcatExec]) shouldEqual 1
   }
 
   it("multi-partition namespace with V2 assignment with partition assignment weight changes should work well") {
@@ -730,10 +759,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"}", 1000, 100, 2000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
       PlannerParams(processMultiPartition = true)))
@@ -741,8 +770,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
     // Should have two MultiPartitionDistConcatExec for before and after assignment change.
     execPlan.children.count(plan => plan.isInstanceOf[MultiPartitionDistConcatExec]) shouldEqual 2
-    // Should have one BinaryJoinExec stitch the period when assignment change happens.
-    execPlan.children.count(plan => plan.isInstanceOf[BinaryJoinExec]) shouldEqual 1
+    // Should have 1 PromQlRemoteExec and 1 LocalPartitionDistConcatExec.
+    execPlan.children.head.children.count(plan => plan.isInstanceOf[PromQlRemoteExec]) shouldEqual 1
+    execPlan.children.head.children.count(plan => plan.isInstanceOf[LocalPartitionDistConcatExec]) shouldEqual 1
   }
 
   it ("should have equal hashcode for identical getColumnFilterGroup") {
@@ -978,19 +1008,19 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       PlannerParams(processMultiPartition = true)))
     // Even a three partition span works with stitch filling in the missing gaps
     val expectedRawPlan = s"""E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job = "app"},1000,100,3999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,3999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |-T~PeriodicSamplesMapper(start=4000000, step=100000, end=4599000, window=None, functionId=None, rawSource=false, offsetMs=None)
                              |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],4599,1,4599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],4599,1,4599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],4599,1,4599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url3, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job = "app"},4600,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},4600,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |-T~PeriodicSamplesMapper(start=7000000, step=100000, end=7599000, window=None, functionId=None, rawSource=false, offsetMs=None)
                              |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],7599,1,7599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],7599,1,7599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
                              |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[900s],7599,1,7599,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url3, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job = "app"},7600,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url3, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
+                             |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},7600,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url3, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
     validatePlan(execPlan, expectedRawPlan)
   }
 
@@ -1681,7 +1711,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // Above Binary join should push the entire query to remote partition
 
     val expectedPlan =
-      """E~PromQlRemoteExec(PromQlQueryParams(sum(test1{job = "app2"}) * sum(test2{job = "app2"}) +ln(sum(test3{job = "app2"}) + sum(test4{job = "app2"})),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
+      """E~PromQlRemoteExec(PromQlQueryParams(((sum(test1{job="app2"}) * sum(test2{job="app2"})) + ln((sum(test3{job="app2"}) + sum(test4{job="app2"})))),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -1730,7 +1760,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         PlannerParams(processMultiPartition = true)))
 
 
-    val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams(test{job="app2"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
+    val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams({job="app2",__name__="test"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))"""
     validatePlan(remoteExecPlan, expectedRemotePlan)
   }
 
@@ -1767,7 +1797,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val expectedPlanWithRemoteExport =
       s"""E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-         |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job = "app"}[10m])),1000,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+         |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[600s])),1000,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(7000,100,7899))
          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
@@ -1798,7 +1828,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val expectedPlanWithRemoteExec1 =
       """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-        |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job = "app"}[10m])) + sum(rate(bar{job = "app"}[5m])),1000,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |-E~PromQlRemoteExec(PromQlQueryParams((sum(rate(test{job="app"}[600s])) + sum(rate(bar{job="app"}[300s]))),1000,100,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
         |-E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
         |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(7000,100,7899))
         |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
@@ -1852,7 +1882,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val expectedPlanWithRemoteExportAndUncertainty =
       s"""E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,3000)))
-         |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job = "app"}[10m])),1000,400,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,3000)))
+         |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[600s])),1000,400,6999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,3000)))
          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(7000,400,7799))
          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,3000)))
          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
@@ -1895,4 +1925,93 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val expected = Set(Map("job" -> "abc"), Map("job" -> "def"), Map("job" -> "ghi"))
     mpp.getRoutingKeys(lp) shouldEqual expected
   }
+
+  describe("supportRemoteRawExport") {
+
+    // Helper to create a planner with a specific routing config for testing this method
+    def makePlanner(routingConfig: RoutingConfig): MultiPartitionPlanner = {
+      val qc = queryConfig.copy(routingConfig = routingConfig)
+      new MultiPartitionPlanner(
+        new PartitionLocationProvider {
+          override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+          override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = Nil
+        },
+        localPlanner,
+        "local",
+        dataset,
+        qc
+      )
+    }
+
+    val tenantColumn = "tenant"
+    val disabledTenants = Set("t-disabled-1", "t-disabled-2")
+
+    it("should return false if global flag is false") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = false, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"}""", TimeStepParams(1000, 100, 2000))
+      // Should be false even for an enabled tenant because the global flag is off
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return true if global flag is true and no tenant filter is present") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{job="some-job"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return true if global flag is true and tenant is not in the disabled list") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return false if global flag is true and tenant IS in the disabled list") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return false for a binary join where one side has a disabled tenant") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric_a{tenant="t-enabled-1"} + metric_b{tenant="t-disabled-2"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe false
+    }
+
+    it("should return true for a binary join where both tenants are enabled") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lp = Parser.queryRangeToLogicalPlan("""metric_a{tenant="t-enabled-1"} + metric_b{tenant="t-enabled-2"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should ignore non-Equals filters on the tenant column") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      // Regex filter on a disabled tenant should be ignored, so export should be enabled.
+      val lp = Parser.queryRangeToLogicalPlan("""metric{tenant=~"t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should ignore filters on other columns") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      // A filter on 'job' with a value that matches a disabled tenant should be ignored.
+      val lp = Parser.queryRangeToLogicalPlan("""metric{job="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lp) shouldBe true
+    }
+
+    it("should return false if any of multiple tenant filters is disabled") {
+      val routingConfig = RoutingConfig(supportRemoteRawExport = true, stitchDisabledTenantColumn = tenantColumn, tenantsWithDisabledRemoteStitch = disabledTenants)
+      val planner = makePlanner(routingConfig)
+      val lpWithMultipleFilters = Parser.queryRangeToLogicalPlan("""metric{tenant="t-enabled-1"} + metric{tenant="t-disabled-1"}""", TimeStepParams(1000, 100, 2000))
+      planner.supportRemoteRawExport(lpWithMultipleFilters) shouldBe false
+    }
+  }
+
+
 }

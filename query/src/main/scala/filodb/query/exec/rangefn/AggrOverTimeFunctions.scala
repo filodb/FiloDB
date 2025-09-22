@@ -12,21 +12,21 @@ import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
-class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
+class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       while (!minMaxDeque.isEmpty && ord.compare(minMaxDeque.peekLast().value, row.value) < 0) minMaxDeque.removeLast()
       minMaxDeque.addLast(row)
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     while (!minMaxDeque.isEmpty && minMaxDeque.peekFirst().timestamp <= row.timestamp) minMaxDeque.removeFirst()
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     if (minMaxDeque.isEmpty) sampleToEmit.setValues(endTimestamp, Double.NaN)
@@ -112,8 +112,217 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
-class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+/**
+ * Sliding window tracker for finding maximum or minimum values efficiently over time windows.
+ * Uses a monotonic deque approach to maintain O(1) amortized insertion/removal operations.
+ *
+ * The tracker maintains a deque where values are stored in monotonic order according to the
+ * provided ordering. When a new value is added, all values that are "worse" (smaller for max,
+ * larger for min) are removed from the tail, ensuring the head always contains the optimal value.
+ *
+ * Examples:
+ * - For max tracking with values [10, 5, 15, 3, 12] over time:
+ *   * Add (t1, 10): deque = [(t1, 10)]
+ *   * Add (t2, 5): deque = [(t1, 10), (t2, 5)] (5 < 10, so keep both)
+ *   * Add (t3, 15): deque = [(t3, 15)] (15 > 10 and 5, remove both)
+ *   * Add (t4, 3): deque = [(t3, 15), (t4, 3)] (3 < 15, so keep both)
+ *   * Add (t5, 12): deque = [(t3, 15), (t5, 12)] (12 > 3, remove 3; 12 < 15, keep 15)
+ *   * Head value is always maximum: 15
+ *
+ * - For min tracking with same values:
+ *   * The deque would maintain smallest values, with head containing minimum
+ *
+ * Time complexity: O(1) amortized for offer(), O(log n) worst case for individual operations
+ * Space complexity: O(k) where k is the effective window size (typically much smaller than total values)
+ *
+ * @param ordering Determines whether to track max (Ordering.Double) or min (Ordering.Double.reverse)
+ */
+private case class MaxMinTracker(ordering: Ordering[Double]) {
+  private val values: util.ArrayDeque[(Long, Double)] = new util.ArrayDeque[(Long, Double)]()
+
+  def offer(ts: Long, value: Double): Boolean = {
+    if (!value.isNaN) {
+      while(!values.isEmpty && ordering.compare(values.peekLast()._2, value) < 0) {
+        values.removeLast()
+      }
+      values.offerLast((ts, value))
+    } else {
+      false
+    }
+  }
+
+  /**
+   * Removes all values from the deque that have timestamps older than or equal to the given timestamp.
+   * This maintains the sliding window property by evicting expired values from the head of the deque.
+   *
+   * The method removes values from the front (head) of the deque since the deque maintains values
+   * in chronological order, with older values at the head and newer values at the tail.
+   *
+   * IMPORTANT: This method works identically for both max and min tracking orderings because it only
+   * examines timestamps (._1), not the actual values (._2). The ordering parameter affects only
+   * the offer() method's value-based filtering, not the time-based cleanup performed here.
+   *
+   * Examples (same behavior regardless of max/min tracking):
+   * - Max tracking deque: [(t1=100, 15), (t3=300, 10), (t5=500, 20)]
+   * - Min tracking deque: [(t1=100, 10), (t3=300, 15), (t5=500, 20)]
+   * - removeValuesOlderThan(250): removes (t1=100, value) in both cases
+   * - removeValuesOlderThan(300): removes (t3=300, value) in both cases
+   * - removeValuesOlderThan(600): removes all values in both cases
+   *
+   * This is typically called when a sliding time window moves forward and old values
+   * are no longer within the window bounds.
+   *
+   * Time complexity: O(k) where k is the number of expired values (amortized O(1) per value)
+   *
+   * @param ts The cutoff timestamp - values with timestamp <= ts will be removed
+   */
+  def removeValuesOlderThan(ts: Long): Unit = {
+    while(!values.isEmpty && values.peekFirst()._1 <= ts) {
+      values.removeFirst()
+    }
+  }
+
+  def headValue(): Option[(Long, Double)] = if (values.isEmpty) None else Some(values.peekFirst())
+}
+
+class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
+  extends RangeFunction[TransientHistRow] {
+    private val sumOverTimeFunction: SumOverTimeFunctionH = new SumOverTimeFunctionH(sum, 0)
+    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+  /**
+   * Called when a sample is added to the sliding window
+   */
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    sumOverTimeFunction.addedToWindow(row, window)
+    maxTracker.offer(row.getLong(0), row.getDouble(2))
+  }
+
+  /**
+   * Called when a sample is removed from sliding window
+   */
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    sumOverTimeFunction.removedFromWindow(row, window)
+    val tsToRemove = row.getLong(0);
+    maxTracker removeValuesOlderThan tsToRemove
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long,
+                     window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sumOverTimeFunction.sum)
+    sampleToEmit.setDouble(
+        2, maxTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+  }
+}
+
+
+class RateAndMaxMinOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
+  extends RangeFunction[TransientHistRow] {
+  private val rateOverDeltaFunction: RateOverDeltaFunctionH = new RateOverDeltaFunctionH
+  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.reverse)
+  /**
+   * Called when a sample is added to the sliding window
+   */
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    rateOverDeltaFunction.addedToWindow(row, window)
+    val ts = row.getLong(0);
+    minTracker.offer(ts, row.getDouble(3))
+    maxTracker.offer(ts, row.getDouble(2))
+  }
+
+  /**
+   * Called when a sample is removed from sliding window
+   */
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    rateOverDeltaFunction.removedFromWindow(row, window)
+    val tsToRemove = row.getLong(0);
+    minTracker removeValuesOlderThan tsToRemove
+    maxTracker removeValuesOlderThan tsToRemove
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long,
+                     window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    val rateHist = rateOverDeltaFunction.computeRateHistogram(startTimestamp, endTimestamp)
+    sampleToEmit.setValues(endTimestamp, rateHist)
+    sampleToEmit.setDouble(
+      3, minTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+    sampleToEmit.setDouble(
+      2, maxTracker.headValue().map { case (_, value) => value }.getOrElse(Double.NaN)
+    )
+  }
+}
+
+class SumOverTimeFunctionH(var sum: bv.MutableHistogram = bv.Histogram.empty, var count: Int = 0)
+  extends RangeFunction[TransientHistRow] {
+
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    val histValue = row.value
+
+    if (histValue.numBuckets > 0) {
+      sum match {
+        // First histogram - copy it to ensure we have our own mutable copy
+        case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(histValue)
+        // Add to existing sum
+        case hist: bv.MutableHistogram    => hist.add(histValue)
+      }
+      count += 1
+    }
+  }
+
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {
+    // TODO: Very expensive, is there a better way? Can we subtract assuming the counter correction is already done?
+    val histValue = row.value
+    if (histValue.numBuckets > 0) {
+      // Since histogram subtraction is complex and not typically supported,
+      // we recalculate the sum from scratch using all remaining items in the window
+      sum = bv.Histogram.empty
+      count = 0
+
+      // Recalculate sum from all remaining items in window
+      for (i <- 0 until window.size) {
+        val windowHist = window(i).value
+        if (windowHist.numBuckets > 0) {
+          sum match {
+            case hist if hist.numBuckets == 0 => sum = bv.MutableHistogram(windowHist)
+            case hist: bv.MutableHistogram    => hist.add(windowHist)
+          }
+          count += 1
+        }
+      }
+    }
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow, queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sum)
+  }
+}
+
+class AvgOverDeltaFunctionH extends RangeFunction[TransientHistRow] {
+  private val sumOverTime = new SumOverTimeFunctionH
+  override def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.addedToWindow(row, window)
+
+  override def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit =
+    sumOverTime.removedFromWindow(row, window)
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientHistRow],
+                     sampleToEmit: TransientHistRow,
+                     queryConfig: QueryConfig): Unit = {
+    val mh = sumOverTime.sum
+    sampleToEmit.setValues(endTimestamp, bv.MutableHistogram(mh.buckets, mh.values.map(_ / sumOverTime.count)))
+  }
+}
+
+
+class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d
@@ -123,7 +332,7 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d
@@ -136,22 +345,22 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
 }
 
-object ChangesOverTimeFunction extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+object ChangesOverTimeFunction extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-    startTimestamp: Long, endTimestamp: Long, window: Window,
+    startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
     sampleToEmit: TransientRow,
     queryConfig: QueryConfig
   ): Unit = {
@@ -192,15 +401,15 @@ object QuantileOverTimeFunction {
   }
 }
 
-class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-    startTimestamp: Long, endTimestamp: Long, window: Window,
+    startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
     sampleToEmit: TransientRow,
     queryConfig: QueryConfig
   ): Unit = {
@@ -228,15 +437,15 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
   }
 }
 
-class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
   override def apply(
-                      startTimestamp: Long, endTimestamp: Long, window: Window,
+                      startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                       sampleToEmit: TransientRow,
                       queryConfig: QueryConfig
                     ): Unit = {
@@ -271,7 +480,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
   }
 }
 
-class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFunction {
+class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
   require(funcParams.size == 2, "last_over_time_is_mad_outlier function needs a two scalar arguments" +
                   " (tolerance, bounds)")
   require(funcParams(0).isInstanceOf[StaticFuncArgs], "first tolerance parameter must be a number; " +
@@ -285,13 +494,13 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
   private val tolerance = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
   require(tolerance > 0, "tolerance must be a positive number")
 
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                       sampleToEmit: TransientRow,
                       queryConfig: QueryConfig
                     ): Unit = {
@@ -555,8 +764,8 @@ class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunct
   }
 }
 
-class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (count.isNaN) {
         count = 0d
@@ -565,7 +774,7 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (count.isNaN) {
         count = 0d
@@ -577,7 +786,7 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, count)
@@ -620,8 +829,8 @@ class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends Chun
   }
 }
 
-class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d;
@@ -631,7 +840,7 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!JLDouble.isNaN(row.value)) {
       if (sum.isNaN) {
         sum = 0d;
@@ -641,7 +850,7 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     if (count == 0) {
@@ -692,8 +901,8 @@ class AvgOverTimeChunkedFunctionL extends AvgOverTimeChunkedFunction() with Chun
 
 class StdDevOverTimeFunction(var sum: Double = 0d,
                              var count: Int = 0,
-                             var squaredSum: Double = 0d) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+                             var squaredSum: Double = 0d) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       sum += row.value
       squaredSum += row.value * row.value
@@ -701,7 +910,7 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
     }
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     if (!row.value.isNaN) {
       sum -= row.value
       squaredSum -= row.value * row.value
@@ -709,7 +918,7 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
     }
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count
@@ -720,20 +929,20 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
 
 class StdVarOverTimeFunction(var sum: Double = 0d,
                              var count: Int = 0,
-                             var squaredSum: Double = 0d) extends RangeFunction {
-  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+                             var squaredSum: Double = 0d) extends RangeFunction[TransientRow] {
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
     count += 1
   }
 
-  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     sum -= row.value
     squaredSum -= row.value * row.value
     count -= 1
   }
 
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count

@@ -251,6 +251,8 @@ trait HistogramWithBuckets extends Histogram {
       (0 until numBuckets).map { b => s"${bucketTop(b)}=${bucketValue(b)}" }.mkString("{", ", ", "}")
   }
 
+  def copy(): HistogramWithBuckets
+
 }
 
 object HistogramWithBuckets {
@@ -292,7 +294,7 @@ final case class LongHistogram(var buckets: HistogramBuckets, var values: Array[
     System.arraycopy(other.values, 0, values, 0, values.size)
   }
 
-  final def copy: LongHistogram = {
+  def copy(): LongHistogram = {
     val newHist = LongHistogram.empty(buckets)
     newHist.populateFrom(this)
     newHist
@@ -336,7 +338,7 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
   /**
    * Copies this histogram as a new copy so it can be used for aggregation or mutation. Allocates new storage.
    */
-  final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
+  def copy(): MutableHistogram = MutableHistogram(buckets, values.clone)
 
   /**
    * Copies the values of this histogram from another histogram.  Other histogram must have same bucket scheme.
@@ -695,11 +697,17 @@ final case class Base2ExpHistogramBuckets(var scale: Int,
   def setScheme(scale: Int,
                 startIndexPositiveBuckets: Int,
                 numPositiveBuckets: Int): Unit = {
-    this.scale = scale
-    this.startIndexPositiveBuckets = startIndexPositiveBuckets
-    this.numPositiveBuckets = numPositiveBuckets
-    startBucketTop = bucketTop(1)
-    endBucketTop = bucketTop(numBuckets - 1)
+    if (scale != this.scale ||
+        startIndexPositiveBuckets != this.startIndexPositiveBuckets ||
+        numPositiveBuckets != this.numPositiveBuckets) {
+      // Don't pay the cost of recalculating bucket tops if nothing changed.
+      // This method gets invoked for each and every sample queried, so it is important to keep it performant.
+      this.scale = scale
+      this.startIndexPositiveBuckets = startIndexPositiveBuckets
+      this.numPositiveBuckets = numPositiveBuckets
+      startBucketTop = bucketTop(1)
+      endBucketTop = bucketTop(numBuckets - 1)
+    }
   }
 
   override def numBuckets: Int = numPositiveBuckets + 1 // add one for zero count

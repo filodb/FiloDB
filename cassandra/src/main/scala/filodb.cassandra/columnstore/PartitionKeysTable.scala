@@ -210,4 +210,9 @@ object PartitionKeysTable {
     PartKeyRecord(row.getBytes("partKey").array(),
       row.getLong("startTime"), row.getLong("endTime"), shard)
   }
+
+  private[columnstore] def updatesRowToPartKeyRecord(row: Row, shard: Int) = {
+    PartKeyRecord(row.getBytes("partKey").array(),
+      row.getLong("startTimeMs"), row.getLong("endTimeMs"), shard)
+  }
 }

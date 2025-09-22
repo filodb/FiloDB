@@ -735,6 +735,7 @@ object ProtoConverters {
       plr.partIdsNotInMemory.foreach(i => builder.addPartIdsNotInMemory(i))
       plr.pkRecords.foreach(pklir => builder.addPkRecords(pklir.toProto))
       builder.setDataBytesScannedCtr(plr.dataBytesScannedCtr.longValue())
+      builder.setSamplesScannedCtr(plr.samplesScannedCtr.longValue())
       builder.build()
     }
   }
@@ -757,7 +758,8 @@ object ProtoConverters {
         partIdsMemTimeGap,
         partIdsNotInMemory,
         pkRecords,
-        new java.util.concurrent.atomic.AtomicLong(plr.getDataBytesScannedCtr)
+        new java.util.concurrent.atomic.AtomicLong(plr.getDataBytesScannedCtr),
+        new java.util.concurrent.atomic.AtomicLong(plr.getSamplesScannedCtr)
       )
     }
   }
@@ -1079,6 +1081,8 @@ object ProtoConverters {
           GrpcMultiPartitionQueryService.MiscellaneousFunctionId.HIST_TO_PROM_VECTORS
         case filodb.query.MiscellaneousFunctionId.OptimizeWithAgg =>
           GrpcMultiPartitionQueryService.MiscellaneousFunctionId.OPTIMIZE_WITH_AGG
+        case filodb.query.MiscellaneousFunctionId.NoOptimize =>
+          GrpcMultiPartitionQueryService.MiscellaneousFunctionId.NO_OPTIMIZE
       }
       function
     }
@@ -1093,6 +1097,8 @@ object ProtoConverters {
           filodb.query.MiscellaneousFunctionId.HistToPromVectors
         case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.OPTIMIZE_WITH_AGG =>
           filodb.query.MiscellaneousFunctionId.OptimizeWithAgg
+        case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.NO_OPTIMIZE =>
+          filodb.query.MiscellaneousFunctionId.NoOptimize
         case GrpcMultiPartitionQueryService.MiscellaneousFunctionId.UNRECOGNIZED =>
           throw new IllegalArgumentException(s"Unrecognized MiscellaneousFunctionId ${f}")
       }

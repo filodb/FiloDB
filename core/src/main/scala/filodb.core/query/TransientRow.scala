@@ -1,13 +1,17 @@
 package filodb.core.query
 
+import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.metadata.Column.ColumnType
 import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.Histogram
+import filodb.memory.format.vectors.{Histogram, HistogramWithBuckets, LongHistogram, MutableHistogram}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
   def setDouble(columnNo: Int, value: Double): Unit
   def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit
   def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
+  def copyFrom(r: RowReader): Unit
+  def timestamp: Long
 }
 
 final class NaNRowReader(var timestamp: Long) extends RowReader {
@@ -105,10 +109,26 @@ class TransientHistRow(var timestamp: Long = 0L,
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 
   override def toString: String = s"TransientHistRow(t=$timestamp, v=$value)"
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case h: TransientHistRow   if h.value.isInstanceOf[LongHistogram]
+                                                          => timestamp = h.timestamp
+                                                             val lh = h.value.asInstanceOf[LongHistogram]
+                                                             value = LongHistogram(lh.buckets, lh.values.clone())
+    case h: TransientHistRow   if h.value.isInstanceOf[MutableHistogram]
+                                                          => timestamp = h.timestamp
+                                                             value = h.value.asInstanceOf[MutableHistogram].copy()
+    case b: BinaryRecordRowReader
+        if b.schema.columnTypes(1) == ColumnType.HistogramColumn   =>
+                                                           timestamp = b.getLong(0)
+                                                           value = b.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+    case _                                                         =>
+                                                           throw new IllegalArgumentException("Unknown Row reader")
+  }
 }
 
 // 0: Timestamp, 1: Histogram, 2: Max/Double, 3: Min/Double
-final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0) extends TransientHistRow() {
+final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0) extends TransientHistRow {
   override def setDouble(columnNo: Int, valu: Double): Unit =
     if (columnNo == 2) max = valu else if (columnNo == 3) min = valu
     else throw new IllegalArgumentException(s"ColumnId: ${columnNo} is invalid")
@@ -116,6 +136,21 @@ final class TransientHistMaxMinRow(var max: Double = 0.0, var min: Double = 0.0)
     if (columnNo == 2) max else if (columnNo == 3) min else throw new IllegalArgumentException()
 
   override def toString: String = s"TransientHistMaxMinRow(t=$timestamp, h=$value, max=$max, min=$min)"
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case k: TransientHistMaxMinRow =>
+                                          super.copyFrom(r)
+                                          max = k.max
+                                          min = k.min
+    case b: BinaryRecordRowReader
+        if b.schema.columnTypes(1) == ColumnType.HistogramColumn &&
+           b.schema.columnTypes(2) == ColumnType.DoubleColumn &&
+           b.schema.columnTypes(3) == ColumnType.DoubleColumn     =>
+                                                           super.copyFrom(r)
+                                                           max = b.getDouble(2)
+                                                           min = b.getDouble(3)
+    case x                           => throw new IllegalArgumentException(s"Unknown Row reader ${x.getClass}")
+  }
 }
 
 final class AvgAggTransientRow extends MutableRowReader {
@@ -149,6 +184,14 @@ final class AvgAggTransientRow extends MutableRowReader {
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case k: AvgAggTransientRow       =>
+                                          timestamp = k.timestamp
+                                          avg = k.avg
+                                          count = k.count
+    case _                           => throw new IllegalArgumentException("Unknown Row reader")
+  }
 }
 
 /**
@@ -189,6 +232,15 @@ final class StdValAggTransientRow extends MutableRowReader {
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case k: StdValAggTransientRow     =>
+                                          timestamp = k.timestamp
+                                          stdVal = k.stdVal
+                                          avg = k.avg
+                                          count = k.count
+    case _                           => throw new IllegalArgumentException("Unknown Row reader")
+  }
 }
 
 final class QuantileAggTransientRow() extends MutableRowReader {
@@ -231,43 +283,73 @@ final class QuantileAggTransientRow() extends MutableRowReader {
     if (columnNo == 1) new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
     else throw new IllegalArgumentException()
   }
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case k: QuantileAggTransientRow =>
+      timestamp = k.timestamp
+      blobBase = k.blobBase
+      blobOffset = k.blobOffset
+      blobLength = k.blobLength
+    case _ => throw new IllegalArgumentException("Unknown Row reader")
+  }
 }
 
 final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   var timestamp: Long = _
-  val partKeys: Array[ZeroCopyUTF8String] = new Array[ZeroCopyUTF8String](k)
-  val values: Array[Double] = new Array[Double](k)
+  var partKeys: Array[ZeroCopyUTF8String] = new Array[ZeroCopyUTF8String](k)
+  var values: Array[Double] = new Array[Double](k)
 
   def setLong(columnNo: Int, valu: Long): Unit =
     if (columnNo == 0) timestamp = valu
     else throw new IllegalArgumentException()
 
   def setDouble(columnNo: Int, valu: Double): Unit =
-    values((columnNo-1)/2) = valu
+    values((columnNo - 1) / 2) = valu
 
   def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit =
-    partKeys((columnNo-1)/2) = valu
+    partKeys((columnNo - 1) / 2) = valu
 
   def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
 
-  def notNull(columnNo: Int): Boolean = columnNo < 2*k + 1
+  def notNull(columnNo: Int): Boolean = columnNo < 2 * k + 1
+
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
-  def getDouble(columnNo: Int): Double = values((columnNo-1)/2)
+
+  def getDouble(columnNo: Int): Double = values((columnNo - 1) / 2)
+
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
-  def getString(columnNo: Int): String = partKeys((columnNo-1)/2).toString
+
+  def getString(columnNo: Int): String = partKeys((columnNo - 1) / 2).toString
+
   def getAny(columnNo: Int): Any = {
     if (columnNo == 0) timestamp
-    else if (columnNo % 2 == 1) partKeys((columnNo-1)/2)
-    else values((columnNo-1)/2)
+    else if (columnNo % 2 == 1) partKeys((columnNo - 1) / 2)
+    else values((columnNo - 1) / 2)
   }
+
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  override def copyFrom(r: RowReader): Unit =
+    r match {
+      case k: TopBottomKAggTransientRow =>
+        partKeys = k.partKeys
+        values = k.values
+        timestamp = k.timestamp
+
+      case _ => throw new IllegalArgumentException("Unknown Row reader")
+    }
 }
 
-final class CountValuesTransientRow() extends MutableRowReader {
+
+final class CountValuesTransientRow extends MutableRowReader {
   var timestamp: Long = _
   var blobBase: Array[Byte] = _
   var blobLength: Int = _
@@ -321,6 +403,15 @@ final class CountValuesTransientRow() extends MutableRowReader {
     if (columnNo == 1) new ZeroCopyUTF8String(blobBase, UnsafeUtils.arayOffset, blobLength)
     else throw new IllegalArgumentException()
   }
+
+  override def copyFrom(r: RowReader): Unit =
+    r match {
+      case c: CountValuesTransientRow =>
+                                            blobBase = c.blobBase
+                                            blobLength = c.blobLength
+                                            timestamp = c.timestamp
+      case _                          => throw new IllegalArgumentException("Unknown Row reader")
+    }
 }
 
 object CountValuesSerDeser {
