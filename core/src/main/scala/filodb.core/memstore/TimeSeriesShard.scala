@@ -305,6 +305,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val tantivyQueryCacheEstimatedItemSize =
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
   private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
+
+  // Lucene configuration
+  private val luceneRamBufferSizeMB = filodbConfig.getDouble("memstore.lucene.ram-buffer-size-mb")
+  private val luceneMaxBufferedDocs = filodbConfig.getInt("memstore.lucene.max-buffered-docs")
+  private val luceneUseCompoundFile = filodbConfig.getBoolean("memstore.lucene.use-compound-file")
+
   // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
   private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
@@ -341,7 +347,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     case "lucene" => new PartKeyLuceneIndex(ref, schemas.part,
       indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
       storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching,
-      addMetricTypeField = typeFieldIndexingEnabled)
+      ramBufferSizeMB = luceneRamBufferSizeMB, maxBufferedDocs = luceneMaxBufferedDocs,
+      useCompoundFile = luceneUseCompoundFile, addMetricTypeField = typeFieldIndexingEnabled)
     case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
       shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
       queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
@@ -766,8 +773,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       }.runToFuture(ingestSched)
   }
 
-  def startFlushingIndex(): Unit =
+  def startFlushingIndex(): Unit = {
     partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
+    partKeyIndex.startStatsThread()
+  }
 
   /**
    * Handles actions to be performed for the shard upon bootstrapping
