@@ -29,7 +29,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
   val dsRef = dataset.ref
   val schemas = Schemas(dataset.schema)
 
-  val config = ConfigFactory.load("application_test.conf")
+  val config = ConfigFactory.load("application_test.conf").resolve()
   val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
