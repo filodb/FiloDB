@@ -22,8 +22,9 @@ import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.serialization.{Deserializer, LongDeserializer}
 import org.xerial.snappy.Snappy
 
-import filodb.core.binaryrecord2.RecordContainer
-import filodb.core.metadata.Schemas.gauge
+import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
+import filodb.core.metadata.Schemas
+import filodb.core.metadata.Schemas.global
 import filodb.gateway.remote.remote_storage.{LabelPair, Sample, TimeSeries, WriteRequest}
 import filodb.kafka.RecordContainerDeserializer
 import filodb.memory.format.RowReader
@@ -98,13 +99,25 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       }.toSeq
   }
 
-  // supports only for gauge/counter
+  // TODO: add support for additional metric types in addition to counter and gauge
   private def recordContainerToPrometheusMetric(container: RecordContainer): Seq[PrometheusMetric] = {
-    val iterator = container.iterate(gauge.ingestionSchema)
-    val valueColIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "value")
-    val metricNameIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "_metric_")
-    val tagsIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "tags")
-    val tsColIdx = gauge.ingestionSchema.columns.indexWhere(_.name == "timestamp")
+    val firstRecordWordOffset = container.offset + 16
+    val schemaId = RecordSchema.schemaID(container.base, firstRecordWordOffset)
+    val schemaName = Schemas.global.schemaName(schemaId)
+    val schema = global.schemas(schemaName)
+
+    val iterator = container.iterate(schema.ingestionSchema)
+    val valueColIdx = schema match {
+      case Schemas.gauge => schema.ingestionSchema.columns.indexWhere(_.name == "value")
+      case Schemas.promCounter => schema.ingestionSchema.columns.indexWhere(_.name == "count")
+      case _ =>
+        throw new IllegalArgumentException(s"Unsupported schema type: $schema")
+    }
+
+      schema.ingestionSchema.columns.indexWhere(_.name == "value")
+    val metricNameIdx = schema.ingestionSchema.columns.indexWhere(_.name == "_metric_")
+    val tagsIdx = schema.ingestionSchema.columns.indexWhere(_.name == "tags")
+    val tsColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "timestamp")
     iterator.map { row: RowReader =>
       val timestamp = row.getLong(tsColIdx)
       val value = row.getDouble(valueColIdx)
@@ -113,7 +126,6 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       PrometheusMetric(metricName, tagsMap, value, timestamp)
     }.toSeq
   }
-
 
   private def pushToPrometheus(batch: Seq[TimeSeries]): Future[HttpResponse] = {
     val writeRequest = WriteRequest(batch)
