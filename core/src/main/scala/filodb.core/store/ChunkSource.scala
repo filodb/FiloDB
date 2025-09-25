@@ -3,7 +3,6 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -11,6 +10,7 @@ import filodb.core._
 import filodb.core.memstore.{PartLookupResult, SchemaMismatch, TimeSeriesShard}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 
 
@@ -237,9 +237,9 @@ trait RawToPartitionMaker {
  * Statistics for a ChunkSource.  Some of this is used by unit tests.
  */
 class ChunkSourceStats {
-  private val readPartitionsCtr  = Kamon.counter("read-partitions").withoutTags
-  private val readChunksetsCtr   = Kamon.counter("read-chunksets").withoutTags
-  private val chunkNoInfoCtr     = Kamon.counter("read-chunks-with-no-info").withoutTags
+  private val readPartitionsCtr  = FilodbMetrics.counter("read-partitions")
+  private val readChunksetsCtr   = FilodbMetrics.counter("read-chunksets")
+  private val chunkNoInfoCtr     = FilodbMetrics.counter("read-chunks-with-no-info")
   var readChunkSets: Int = 0
   var readPartitions: Int = 0
 

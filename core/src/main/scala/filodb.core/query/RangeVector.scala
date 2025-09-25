@@ -1,25 +1,23 @@
 package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.joda.time.DateTime
 import scala.util.Using
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store._
 import filodb.memory.{BinaryRegionLarge, MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.Histogram
-
-
 
 /**
   * Identifier for a single RangeVector.
@@ -231,8 +229,8 @@ final case class RepeatValueVector(rv: RangeVector,
                                                 mr
 
                   case _                    =>
-                    Kamon.counter("non-mutable-row-reader-in-repeat-value-vector")
-                      .withoutTags().increment()
+                    FilodbMetrics.counter("non-mutable-row-reader-in-repeat-value-vector")
+                      .increment()
                     new RowReader {
                       override def notNull(columnNo: Int): Boolean = rr.notNull(columnNo)
                       override def getBoolean(columnNo: Int): Boolean = rr.getBoolean(columnNo)
@@ -496,8 +494,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
-  val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
-  val queryCpuTime = Kamon.counter("query-engine-cpu-time", MeasurementUnit.time.nanoseconds).withoutTags
+  val queryResultBytes = FilodbMetrics.histogram("query-engine-result-bytes")
+  val queryCpuTime = FilodbMetrics.timeCounter("query-engine-cpu-time", TimeUnit.NANOSECONDS, Map.empty)
 
   def canRemoveEmptyRows(outputRange: Option[RvRange], sch: RecordSchema) : Boolean = {
     outputRange.isDefined && // metadata queries

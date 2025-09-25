@@ -7,8 +7,6 @@ import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
@@ -19,6 +17,7 @@ import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
@@ -45,16 +44,18 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  */
 trait TimeSeriesStore extends ChunkSource {
 
+  val jvmPoolCount = FilodbMetrics.gauge("filodb_jvm_memory_buffer_pool_count")
+  val jvmPoolUsed = FilodbMetrics.bytesGauge("filodb_jvm_memory_buffer_pool_used")
+  val jvmPoolCapacity = FilodbMetrics.bytesGauge("filodb_jvm_memory_buffer_pool_capacity")
+
   // this is added since Kamon does not report stats on direct and mapped memory pools which lucene uses
   Observable.interval(FiniteDuration.apply(1, TimeUnit.MINUTES))
     .foreach { _ =>
       val pools = ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean])
       for (pool <- pools.asScala) {
-        Kamon.gauge("filodb_jvm_memory_buffer_pool_count").withTag("poolName", pool.getName).update(pool.getCount)
-        Kamon.gauge("filodb_jvm_memory_buffer_pool_used", MeasurementUnit.information.bytes)
-          .withTag("poolName", pool.getName).update(pool.getMemoryUsed)
-        Kamon.gauge("filodb_jvm_memory_buffer_pool_capacity", MeasurementUnit.information.bytes)
-          .withTag("poolName", pool.getName).update(pool.getTotalCapacity)
+        jvmPoolCount.update(pool.getCount, Map("poolName" -> pool.getName))
+        jvmPoolUsed.update(pool.getMemoryUsed, Map("poolName" -> pool.getName))
+        jvmPoolCapacity.update(pool.getTotalCapacity, Map("poolName" -> pool.getName))
       }
     }(GlobalScheduler.globalImplicitScheduler)
 

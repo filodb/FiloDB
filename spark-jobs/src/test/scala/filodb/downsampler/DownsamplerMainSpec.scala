@@ -8,6 +8,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.memstore._
 import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.metrics.MetricsHistogram
 import filodb.core.query.Filter.Equals
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
@@ -15,14 +16,11 @@ import filodb.core.{DatasetRef, MachineMetricsData}
 import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram, Base2ExpHistogramBuckets}
+import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, CustomBuckets, DoubleVector, LongHistogram}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.query.exec._
 import filodb.query.{QueryError, QueryResult}
-import kamon.metric
-import kamon.metric.Metric.Settings
-import kamon.metric.{Histogram, Metric}
-import kamon.tag.TagSet
+import io.opentelemetry.api.common.Attributes
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.commons.io.FileUtils
@@ -35,7 +33,6 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import org.apache.spark.sql.types._
 
 import java.io.File
-import java.time
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
@@ -2585,19 +2582,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     )
 
     // Adds all recorded values to a list (for later validation).
-    class MockHistogram extends metric.Histogram {
+    class MockHistogram extends MetricsHistogram(None, None, None, Attributes.empty()) {
       val values = new mutable.ArrayBuffer[Long]()
-      override def record(value: Long): Histogram = {
+      override def record(value: Long, additionalAttributes: Map[String, String] = Map.empty) = {
         values.synchronized {
           values.append(value)
         }
-        this
       }
-      override def withTags(tags: TagSet): Histogram = this
-      override def record(value: Long, times: Long): Histogram = ???
-      override def metric: Metric[Histogram, Settings.ForDistributionInstrument] = ???
-      override def tags: TagSet = ???
-      override def autoUpdate(consumer: Histogram => Unit, interval: time.Duration): Histogram = ???
     }
 
     // All mock histograms will effectively "log" each record() argument.
