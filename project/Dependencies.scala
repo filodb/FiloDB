@@ -22,6 +22,8 @@ object Dependencies {
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.3.4"
   val kamonBundleVersion = "2.7.3"
+  val otelVersion       = "1.54.1"
+  val otelInstVersion   = "2.20.1-alpha"
   val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "2.4.8"
   val sttpVersion       = "1.3.3"
@@ -64,7 +66,12 @@ object Dependencies {
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
     "io.kamon"                     %% "kamon-zipkin"      % kamonBundleVersion,
-    "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion excludeAll(excludegrpc),
+    "io.opentelemetry"             % "opentelemetry-api"                    % otelVersion,
+    "io.opentelemetry"             % "opentelemetry-sdk-metrics"            % otelVersion,
+    "io.opentelemetry"             % "opentelemetry-exporter-otlp"          % otelVersion,
+    "io.opentelemetry"             % "opentelemetry-exporter-logging-otlp"  % otelVersion,
+    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry-java8" % otelInstVersion,
+    "io.opentelemetry.instrumentation" % "opentelemetry-oshi"                    % otelInstVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "3.4.0",
