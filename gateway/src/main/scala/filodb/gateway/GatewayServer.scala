@@ -4,6 +4,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
+import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
@@ -105,7 +106,7 @@ object GatewayServer extends StrictLogging {
     val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
     val numSeries = userOpts.numSeriesPerMetric()
 
-    val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath())).resolve()
     val numShards = sourceConfig.getInt("num-shards")
 
     val dataset = settings.datasetFromStream(sourceConfig)
@@ -349,7 +350,7 @@ object GatewayServer extends StrictLogging {
     // Now create Kafka config, sink
     // TODO: use the official KafkaIngestionStream stuff to parse the file.  This is just faster for now.
     val producerCfg = KafkaProducerConfig.default.copy(
-      bootstrapServers = sourceConf.getString("sourceconfig.bootstrap.servers").split(',').toList
+      bootstrapServers = sourceConf.getStringList("sourceconfig.bootstrap.servers").asScala.toList
     )
     val topicName = sourceConf.getString("sourceconfig.filo-topic-name")
 
