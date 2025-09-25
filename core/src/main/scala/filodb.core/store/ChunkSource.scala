@@ -175,17 +175,17 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
           scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
-            // short term fix to prevent segv which occurs when we access non-existent columns
-            // while querying histograms that have max and min columns
-            require(columnIDs.forall(id => id < p.schema.data.columns.size), "Internal error - " +
-              "seeking non-existent columns; For now, add filter such as _type_=\"otel-delta-histogram\"" +
-              " to the query while this issue is being fixed")
             if (!Utils.doesSchemaMatchOrBackCompatibleHistograms(
                   p.schema.name, p.schema.schemaHash, // current partition
                   Schemas.global.schemaName(reqSchemaId), reqSchemaId) // requested schema
             ) {
               throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
             }
+            // short term fix to prevent segv which occurs when we access non-existent columns
+            // while querying histograms that have max and min columns
+            require(columnIDs.forall(id => id < p.schema.data.columns.size), "Internal error - " +
+              "seeking non-existent columns; For now, add filter such as _type_=\"otel-delta-histogram\"" +
+              " to the query while this issue is being fixed")
             p.hasChunks(lookupRes.chunkMethod)
           }
         case None =>
