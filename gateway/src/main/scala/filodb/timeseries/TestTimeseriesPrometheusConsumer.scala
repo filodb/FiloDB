@@ -2,6 +2,7 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
+import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 
@@ -47,11 +48,11 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
     logger.info(s"Using source config file: $sourceConfigPath")
 
 
-    val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath))
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath)).resolve()
     val topicName = sourceConfig.getString("sourceconfig.filo-topic-name")
 
     val consumerCfg = KafkaConsumerConfig.default.copy(
-      bootstrapServers = sourceConfig.getString("sourceconfig.bootstrap.servers").split(',').toList,
+      bootstrapServers = sourceConfig.getStringList("sourceconfig.bootstrap.servers").asScala.toList,
       groupId = "timeseries-prometheus-consumer",
       autoOffsetReset = AutoOffsetReset.Latest,
       properties = Map(
