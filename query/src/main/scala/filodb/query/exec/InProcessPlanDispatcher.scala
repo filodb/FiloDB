@@ -19,6 +19,10 @@ import filodb.core.store._
 import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
 
+object InProcessPlanDispatcher {
+  val inProcessTimeoutCounter = Kamon.counter("in-process-plan-dispatcher-timeout")
+}
+
 /**
   * Executes an ExecPlan on the current thread.
   */
@@ -44,12 +48,21 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadlineMs.milliseconds)
         .guarantee(Task.eval(querySession.close()))
-        .onErrorRecover {
-        case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
-        =>
-          qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
-            s"since partial result was enabled: ${e.getMessage}")
-          emptyPartialResult
+        .onErrorRecoverWith {
+        case e: TimeoutException =>
+         qLogger.error(s"TimeoutException for query id: ${plan.execPlan.queryContext.queryId}: ${e.getMessage}")
+          InProcessPlanDispatcher.inProcessTimeoutCounter
+            .withTag("dataset", plan.execPlan.dataset.dataset)
+            .withTag("cluster", clusterName)
+            .withTag("query_type", plan.execPlan.getClass.getSimpleName)
+            .increment()
+         if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
+           qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
+             s"since partial result was enabled: ${e.getMessage}")
+           Task.now(emptyPartialResult)
+          } else {
+           Task.raiseError(e)
+         }
       }
     }
   }

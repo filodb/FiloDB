@@ -2,11 +2,13 @@ package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -15,9 +17,14 @@ import filodb.coordinator.client.QueryCommands.ProtoExecPlan
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryCommand, QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
+import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
+
+
+object ActorPlanDispatcher {
+  val askTimeoutCounter = Kamon.counter("actor-plan-dispatcher-ask-timeout")
+}
 
 /**
  * This implementation provides a way to distribute query execution
@@ -65,12 +72,21 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           case e => throw new IllegalStateException(s"Received bad response $e")
         }
           // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
-          .recover { // if partial results allowed, then return empty result
-            case e: AskTimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
-            =>
-              qLogger.warn(s"Swallowed AskTimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
-                s"since partial result was enabled: ${e.getMessage}")
-              emptyPartialResult
+          .recoverWith {
+            case e: AskTimeoutException =>
+              qLogger.error(s"AskTimeoutException for query id: " +
+                s"${plan.execPlan.queryContext.queryId} to target ${target.path}: ${e.getMessage}")
+              ActorPlanDispatcher.askTimeoutCounter
+                .withTag("dataset", plan.execPlan.dataset.dataset)
+                .withTag("cluster", clusterName)
+                .withTag("target", target.path.toString)
+                .increment()
+              if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
+                qLogger.warn(s"Swallowed AskTimeoutException since partial results are enabled.")
+                Future.successful(emptyPartialResult)
+              } else {
+                Future.failed(e) // re-throw exception
+              }
           }
 
         Task.fromFuture(fut)
