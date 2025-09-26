@@ -8,6 +8,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
+import filodb.core.metrics.FilodbMetrics
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 
@@ -112,8 +113,9 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
       }
     DownsamplerContext.dsLogger.info(s"Index Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr doFullMigration=$doFullMigration")
-    val jobCompleted = Kamon.counter("index-migration-completed").withTag("downsamplePeriod", downsamplePeriodStr)
-    val jobCompletedNoTags = Kamon.counter("index-migration-completed-success").withoutTags()
+    val jobCompleted = FilodbMetrics.counter("index-migration-completed",
+                                             Map("downsamplePeriod" -> downsamplePeriodStr))
+    val jobCompletedNoTags = FilodbMetrics.counter("index-migration-completed-success")
     jobCompleted.increment()
     jobCompletedNoTags.increment()
 

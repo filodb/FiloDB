@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import kamon.Kamon
 
 import filodb.core.DatasetRef
+import filodb.core.metrics.FilodbMetrics
 
 /**
  * A class to hold gauges and other metrics on shard health.
@@ -25,10 +26,9 @@ class ShardHealthStats(ref: DatasetRef,
   val numError = Kamon.gauge(s"num-error-shards").withTag("dataset", ref.toString)
   val numStopped = Kamon.gauge(s"num-stopped-shards").withTag("dataset", ref.toString)
   val numDown = Kamon.gauge(s"num-down-shards").withTag("dataset", ref.toString)
-  val numErrorReassignmentsDone = Kamon.counter(s"num-error-reassignments-done")
-                      .withTag("dataset", ref.toString)
-  val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped")
-                      .withTag("dataset", ref.toString)
+  val numErrorReassignmentsDone = FilodbMetrics.counter(s"num-error-reassignments-done", Map("dataset" -> ref.toString))
+  val numErrorReassignmentsSkipped = FilodbMetrics.counter(s"num-error-reassignments-skipped",
+                                                           Map("dataset" -> ref.toString))
 
   def update(mapper: ShardMapper, skipUnassigned: Boolean = false): Unit = {
     numActive.update(mapper.statuses.count(_ == ShardStatusActive))

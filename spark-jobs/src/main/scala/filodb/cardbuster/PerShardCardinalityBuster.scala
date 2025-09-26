@@ -17,6 +17,7 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
@@ -66,10 +67,11 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
 
   // scalastyle:off method.length
   def bustIndexRecords(shard: Int, split: (String, String), isSimulation: Boolean): Int = {
-    val numPartKeysDeleted = Kamon.counter("num-partkeys-deleted").withTag("dataset", dataset.toString)
-        .withTag("shard", shard).withTag("simulation", isSimulation)
-    val numPartKeysCouldNotDelete = Kamon.counter("num-partkeys-could-not-delete").withTag("dataset", dataset.toString)
-      .withTag("shard", shard).withTag("simulation", isSimulation)
+    val numPartKeysDeleted = FilodbMetrics.counter("num-partkeys-deleted", Map("dataset" -> dataset.toString,
+        "shard" -> shard.toString, "simulation" -> isSimulation.toString))
+    val numPartKeysCouldNotDelete = FilodbMetrics.counter("num-partkeys-could-not-delete",
+                      Map("dataset" -> dataset.toString,
+      "shard" -> shard.toString, "simulation" -> isSimulation.toString))
     val cassDeleteLatency = Kamon.histogram("pk-delete-latency", MeasurementUnit.time.nanoseconds)
       .withTag("dataset", dataset.toString)
       .withTag("shard", shard).withTag("simulation", isSimulation)

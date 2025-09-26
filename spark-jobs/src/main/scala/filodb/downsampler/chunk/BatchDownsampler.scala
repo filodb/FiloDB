@@ -20,6 +20,7 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.downsample._
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.{ChunkSet, ChunkSetInfo, ReadablePartition}
 import filodb.downsampler.{DownsamplerContext, Utils}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
@@ -45,18 +46,17 @@ class BatchDownsampler(val settings: DownsamplerSettings,
                        userTimeStart: Long,
                        userTimeEndExclusive: Long) extends Instance with Serializable {
 
-  @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
-  @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
-  @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
-  @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  @transient lazy val numPartitionsBlocked = Kamon.counter("num-partitions-blocked").withoutTags()
-  @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
-  @transient lazy val numPartitionsNoDownsampleSchema = Kamon.counter("num-partitions-no-downsample-schema")
-                                                             .withoutTags()
-  @transient lazy val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
-  @transient lazy val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
-  @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
-  @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
+  @transient lazy val numBatchesStarted = FilodbMetrics.counter("num-batches-started")
+  @transient lazy val numBatchesCompleted = FilodbMetrics.counter("num-batches-completed")
+  @transient lazy val numBatchesFailed = FilodbMetrics.counter("num-batches-failed")
+  @transient lazy val numPartitionsEncountered = FilodbMetrics.counter("num-partitions-encountered")
+  @transient lazy val numPartitionsBlocked = FilodbMetrics.counter("num-partitions-blocked")
+  @transient lazy val numPartitionsCompleted = FilodbMetrics.counter("num-partitions-completed")
+  @transient lazy val numPartitionsNoDownsampleSchema = FilodbMetrics.counter("num-partitions-no-downsample-schema")
+  @transient lazy val numPartitionsFailed = FilodbMetrics.counter("num-partitions-failed")
+  @transient lazy val numPartitionsSkipped = FilodbMetrics.counter("num-partitions-skipped")
+  @transient lazy val numRawChunksDownsampled = FilodbMetrics.counter("num-raw-chunks-downsampled")
+  @transient lazy val numDownsampledChunksWritten = FilodbMetrics.counter("num-downsampled-chunks-written")
 
   @transient lazy val downsampleBatchLatency = Kamon.histogram("downsample-batch-latency",
                                               MeasurementUnit.time.milliseconds).withoutTags()

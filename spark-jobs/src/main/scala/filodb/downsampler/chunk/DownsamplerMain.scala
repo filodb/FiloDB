@@ -17,6 +17,7 @@ import org.apache.spark.sql.types._
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{RawPartData, ScanSplit}
 import filodb.downsampler.DownsamplerContext
@@ -132,7 +133,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   @transient lazy val exportLatency =
     Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
-  @transient lazy val numRowsExported = Kamon.counter("num-rows-exported").withoutTags()
+  @transient lazy val numRowsExported = FilodbMetrics.counter("num-rows-exported")
 
   /**
    * Exports an RDD for a specific export key.
@@ -321,9 +322,9 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr")
-    val jobCompleted = Kamon.counter("chunk-migration-completed")
-      .withTag("downsamplePeriod", downsamplePeriodStr)
-    val jobCompletedNoTags = Kamon.counter("chunk-migration-completed-success").withoutTags()
+    val jobCompleted = FilodbMetrics.counter("chunk-migration-completed",
+                                             Map("downsamplePeriod" -> downsamplePeriodStr))
+    val jobCompletedNoTags = FilodbMetrics.counter("chunk-migration-completed-success")
     jobCompleted.increment()
     jobCompletedNoTags.increment()
     val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
