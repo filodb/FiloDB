@@ -136,7 +136,6 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     (0 until 576).foreach { i =>
       val hist = LongHistogram(bucketScheme, counts)
       hist.serialize(Some(buffer))
-      println(i)
       if (i < 575) appender.addData(buffer) shouldEqual Ack
       // should fail for 206th histogram because it crosses the size of write buffer
       if (i >= 575) appender.addData(buffer) shouldEqual VectorTooSmall(26,6)

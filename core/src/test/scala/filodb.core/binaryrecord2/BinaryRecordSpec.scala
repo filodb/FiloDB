@@ -224,6 +224,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val origTimestamp = builder.allContainers.head.timestamp
       origTimestamp shouldEqual curTime +- 20000   // 20 seconds
 
+      Thread.sleep(1000L)  // make sure timestamp will be different during reset
       val byteArrays = builder.optimalContainerBytes(reset = true)
       byteArrays.size shouldEqual 1
 
