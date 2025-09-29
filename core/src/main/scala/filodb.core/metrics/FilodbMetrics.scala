@@ -378,15 +378,15 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
                                   isCounter: Boolean,
                                   timeUnit: Option[TimeUnit]): String = {
     def validNameChar(char: Char): Char = if (char.isLetterOrDigit || char == '_' || char == ':') char else '_'
-    val name1 = name.map(validNameChar)
-    val name2 = if (timeUnit.isDefined && !name1.endsWith("_seconds")) {
-      name1 + "_seconds"
-    } else if (isBytes && !name1.endsWith("_bytes")) {
-      name1 + "_bytes"
-    } else name1
-    if (isCounter && !name2.endsWith("_total")) {
-      name2 + "_total"
-    } else name1
+    val nameWithValidChars = name.map(validNameChar)
+    val nameWithUnit = if (timeUnit.isDefined && !nameWithValidChars.endsWith("_seconds")) {
+      nameWithValidChars + "_seconds"
+    } else if (isBytes && !nameWithValidChars.endsWith("_bytes")) {
+      nameWithValidChars + "_bytes"
+    } else nameWithValidChars
+    if (isCounter && !nameWithUnit.endsWith("_total") && !nameWithValidChars.endsWith("_total")) {
+      nameWithUnit + "_total"
+    } else nameWithUnit
   }
 
   private def createAttributes(attributeMap: Map[String, String]): Attributes = {
