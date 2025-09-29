@@ -6,11 +6,8 @@ import javax.naming.ServiceUnavailableException
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.Gauge
-import kamon.tag.TagSet
 
-import filodb.core.metrics.{FilodbMetrics, MetricsCounter}
+import filodb.core.metrics.{FilodbMetrics, MetricsCounter, MetricsGauge}
 
 /**
   * Allows requesting blocks.
@@ -91,10 +88,10 @@ trait BlockManager {
 }
 
 class MemoryStats(tags: Map[String, String]) {
-  val usedIngestionBlocksMetric = Kamon.gauge("blockstore-used-ingestion-blocks").withTags(TagSet.from(tags))
-  val freeBlocksMetric = Kamon.gauge("blockstore-free-blocks").withTags(TagSet.from(tags))
+  val usedIngestionBlocksMetric = FilodbMetrics.gauge("blockstore-used-ingestion-blocks", tags)
+  val freeBlocksMetric = FilodbMetrics.gauge("blockstore-free-blocks", tags)
   val requestedBlocksMetric = FilodbMetrics.counter("blockstore-blocks-requested", tags)
-  val usedOdpBlocksMetric = Kamon.gauge("blockstore-used-odp-blocks").withTags(TagSet.from(tags))
+  val usedOdpBlocksMetric = FilodbMetrics.gauge("blockstore-used-odp-blocks", tags)
   val odpBlocksReclaimedMetric = FilodbMetrics.counter("blockstore-odp-blocks-reclaimed", tags)
   val ingestionBlocksReclaimedMetric = FilodbMetrics.counter("blockstore-ingestion-blocks-reclaimed", tags)
 
@@ -325,7 +322,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
     def reclaimFrom(list: util.ArrayDeque[Block],
                     reclaimedCounter: MetricsCounter,
-                    usedBlocksStats: Gauge): Seq[Block] = {
+                    usedBlocksStats: MetricsGauge): Seq[Block] = {
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {

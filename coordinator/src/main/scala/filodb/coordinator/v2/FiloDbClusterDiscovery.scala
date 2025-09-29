@@ -7,7 +7,6 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import scala.collection.mutable
@@ -31,7 +30,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   // Metric to track cluster discovery runs
   val clusterDiscoveryCounter = FilodbMetrics.counter("filodb-cluster-discovery")
   // Metric to track if we have unassigned shards on a given pod
-  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards")
+  val unassignedShardsGauge = FilodbMetrics.gauge("v2-unassigned-shards")
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -157,7 +156,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
         logger.error(s"[ClusterV2] Unassigned Shards > 0 !! Dataset: ${dataset.dataset} " +
           s"Shards Mapping is: ${mapper.prettyPrint} ")
       }
-      unassignedShardsGauge.withTag("dataset", dataset.dataset).update(unassignedShardsCount)
+      unassignedShardsGauge.update(unassignedShardsCount, Map("dataset" -> dataset.dataset))
     }
     discoveryJobs += (dataset -> fut)
   }

@@ -90,9 +90,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   val readerStateCacheHitRate = FilodbMetrics.gauge("index-reader-state-cache-hit-rate",
     Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  val luceneQueryCacheHitRate = Kamon.gauge("index-lucene-query-cache-hit-rate")
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  val luceneQueryCacheHitRate = FilodbMetrics.gauge("index-lucene-query-cache-hit-rate",
+    Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
   val fsDirectory = if (useMemoryMappedImpl)
     new MMapDirectory(indexDiskLocation)

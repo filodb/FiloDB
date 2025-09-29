@@ -2,8 +2,6 @@ package filodb.coordinator
 
 import scala.concurrent.duration._
 
-import kamon.Kamon
-
 import filodb.core.DatasetRef
 import filodb.core.metrics.FilodbMetrics
 
@@ -19,13 +17,13 @@ import filodb.core.metrics.FilodbMetrics
 class ShardHealthStats(ref: DatasetRef,
                        reportingInterval: FiniteDuration = 5.seconds) {
 
-  val numActive = Kamon.gauge(s"num-active-shards").withTag("dataset", ref.toString)
-  val numRecovering = Kamon.gauge(s"num-recovering-shards").withTag("dataset", ref.toString)
-  val numUnassigned = Kamon.gauge(s"num-unassigned-shards").withTag("dataset", ref.toString)
-  val numAssigned = Kamon.gauge(s"num-assigned-shards").withTag("dataset", ref.toString)
-  val numError = Kamon.gauge(s"num-error-shards").withTag("dataset", ref.toString)
-  val numStopped = Kamon.gauge(s"num-stopped-shards").withTag("dataset", ref.toString)
-  val numDown = Kamon.gauge(s"num-down-shards").withTag("dataset", ref.toString)
+  val numActive = FilodbMetrics.gauge(s"num-active-shards", Map("dataset" -> ref.toString))
+  val numRecovering = FilodbMetrics.gauge(s"num-recovering-shards", Map("dataset" -> ref.toString))
+  val numUnassigned = FilodbMetrics.gauge(s"num-unassigned-shards", Map("dataset" -> ref.toString))
+  val numAssigned = FilodbMetrics.gauge(s"num-assigned-shards", Map("dataset" -> ref.toString))
+  val numError = FilodbMetrics.gauge(s"num-error-shards", Map("dataset" -> ref.toString))
+  val numStopped = FilodbMetrics.gauge(s"num-stopped-shards", Map("dataset" -> ref.toString))
+  val numDown = FilodbMetrics.gauge(s"num-down-shards", Map("dataset" -> ref.toString))
   val numErrorReassignmentsDone = FilodbMetrics.counter(s"num-error-reassignments-done", Map("dataset" -> ref.toString))
   val numErrorReassignmentsSkipped = FilodbMetrics.counter(s"num-error-reassignments-skipped",
                                                            Map("dataset" -> ref.toString))

@@ -120,8 +120,8 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     jobCompletedNoTags.increment()
 
     if (!doFullMigration) {
-      val downsampleHourStartGauge = Kamon.gauge("index-downsampler-period-start-hour")
-        .withTag("downsamplePeriod", downsamplePeriodStr)
+      val downsampleHourStartGauge = FilodbMetrics.gauge("index-downsampler-period-start-hour",
+        Map("downsamplePeriod" -> downsamplePeriodStr))
       downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
     }
     if (dsSettings.shouldSleepForMetricsFlush)

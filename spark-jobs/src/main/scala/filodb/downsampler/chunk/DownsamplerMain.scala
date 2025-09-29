@@ -327,8 +327,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     val jobCompletedNoTags = FilodbMetrics.counter("chunk-migration-completed-success")
     jobCompleted.increment()
     jobCompletedNoTags.increment()
-    val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
-      .withTag("downsamplePeriod", downsamplePeriodStr)
+    val downsampleHourStartGauge = FilodbMetrics.gauge("chunk-downsampler-period-start-hour",
+      Map("downsamplePeriod" -> downsamplePeriodStr))
     downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
     if (settings.shouldSleepForMetricsFlush)
       Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
