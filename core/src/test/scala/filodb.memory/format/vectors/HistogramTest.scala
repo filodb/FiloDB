@@ -453,7 +453,8 @@ class HistogramTest extends NativeVectorTest {
     }
 
     it("should serialize to and from an empty Histogram") {
-      val binEmptyHist = BinaryHistogram.BinHistogram(Histogram.empty.serialize())
+      // use new buffer since thread local from previous runs are interfering
+      val binEmptyHist = BinaryHistogram.BinHistogram(Histogram.empty.serialize(Some(new ExpandableArrayBuffer(4096))))
       binEmptyHist.numBuckets shouldEqual 0
       binEmptyHist.toHistogram shouldEqual Histogram.empty
       Histogram.empty.toString shouldEqual "buckets[]: {}"
