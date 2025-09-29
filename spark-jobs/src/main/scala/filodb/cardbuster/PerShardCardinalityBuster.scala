@@ -2,11 +2,10 @@ package filodb.cardbuster
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Await
 
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.atomic.AtomicInt
@@ -72,9 +71,8 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
     val numPartKeysCouldNotDelete = FilodbMetrics.counter("num-partkeys-could-not-delete",
                       Map("dataset" -> dataset.toString,
       "shard" -> shard.toString, "simulation" -> isSimulation.toString))
-    val cassDeleteLatency = Kamon.histogram("pk-delete-latency", MeasurementUnit.time.nanoseconds)
-      .withTag("dataset", dataset.toString)
-      .withTag("shard", shard).withTag("simulation", isSimulation)
+    val cassDeleteLatency = FilodbMetrics.timeHistogram("pk-delete-latency", TimeUnit.NANOSECONDS,
+      Map("dataset" -> dataset.toString, "shard" -> shard.toString, "simulation" -> isSimulation.toString))
     require(deleteFilter.nonEmpty, "cardbuster.delete-pk-filters should be non-empty")
     BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with isSimulation=$isSimulation " +
       s"filter=$deleteFilter inDownsampleTables=$inDownsampleTables startTimeGTE=$startTimeGTE " +

@@ -1,14 +1,13 @@
 package filodb.downsampler.chunk
 
 import java.nio.ByteBuffer
+import java.util.concurrent.TimeUnit
 
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 import com.datastax.driver.core.ConsistencyLevel
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 import org.apache.spark.sql.{DataFrame, Row}
 import spire.syntax.cfor._
@@ -58,12 +57,12 @@ class BatchDownsampler(val settings: DownsamplerSettings,
   @transient lazy val numRawChunksDownsampled = FilodbMetrics.counter("num-raw-chunks-downsampled")
   @transient lazy val numDownsampledChunksWritten = FilodbMetrics.counter("num-downsampled-chunks-written")
 
-  @transient lazy val downsampleBatchLatency = Kamon.histogram("downsample-batch-latency",
-                                              MeasurementUnit.time.milliseconds).withoutTags()
-  @transient lazy val downsampleSinglePartLatency = Kamon.histogram("downsample-single-partition-latency",
-    MeasurementUnit.time.milliseconds).withoutTags()
-  @transient lazy val downsampleBatchPersistLatency = Kamon.histogram("cassandra-downsample-batch-persist-latency",
-    MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy val downsampleBatchLatency = FilodbMetrics.timeHistogram("downsample-batch-latency",
+                                                                            TimeUnit.MILLISECONDS)
+  @transient lazy val downsampleSinglePartLatency = FilodbMetrics.timeHistogram("downsample-single-partition-latency",
+                                                                                TimeUnit.MILLISECONDS)
+  @transient lazy val downsampleBatchPersistLatency = FilodbMetrics.timeHistogram(
+                        "cassandra-downsample-batch-persist-latency", TimeUnit.MILLISECONDS)
 
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
 

@@ -2,13 +2,12 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.{ForkJoinPool, TimeUnit}
 
 import scala.collection.mutable.ListBuffer
 import scala.collection.parallel.ForkJoinTaskSupport
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
@@ -131,7 +130,7 @@ object DownsamplerMain extends App {
 class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
   @transient lazy val exportLatency =
-    Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
+    FilodbMetrics.timeHistogram("export-latency", TimeUnit.MILLISECONDS)
 
   @transient lazy val numRowsExported = FilodbMetrics.counter("num-rows-exported")
 

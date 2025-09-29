@@ -72,7 +72,6 @@ object GatewayServer extends StrictLogging {
   val numInfluxParseErrors = FilodbMetrics.counter("num-influx-parse-errors")
   val numDroppedMessages = FilodbMetrics.counter("num-dropped-messages")
   val numContainersSent = FilodbMetrics.counter("num-containers-sent")
-  val containersSize = Kamon.histogram("containers-size-bytes").withoutTags
 
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {

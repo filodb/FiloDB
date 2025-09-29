@@ -1,10 +1,11 @@
 package filodb.downsampler.index
 
+import java.util.concurrent.TimeUnit
+
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -27,8 +28,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val numPartKeysNoDownsampleSchema = FilodbMetrics.counter("num-partkeys-no-downsample")
   @transient lazy private val numPartKeysMigrated = FilodbMetrics.counter("num-partkeys-migrated")
   @transient lazy private val numPartKeysBlocked = FilodbMetrics.counter("num-partkeys-blocked")
-  @transient lazy val perShardIndexMigrationLatency = Kamon.histogram("per-shard-index-migration-latency",
-    MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy val perShardIndexMigrationLatency = FilodbMetrics.timeHistogram("per-shard-index-migration-latency",
+                                                                                  TimeUnit.MILLISECONDS)
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 

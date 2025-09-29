@@ -13,8 +13,6 @@ import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -22,6 +20,7 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 
@@ -79,12 +78,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   val sinkStats = new ChunkSinkStats
 
-  val writeChunksetLatency = Kamon.histogram("cass-write-chunkset-latency", MeasurementUnit.time.milliseconds)
-                                              .withoutTags()
-  val writePksLatency = Kamon.histogram("cass-write-part-keys-latency", MeasurementUnit.time.milliseconds)
-                                              .withoutTags()
-  val readChunksBatchLatency = Kamon.histogram("cassandra-per-batch-chunk-read-latency",
-                            MeasurementUnit.time.milliseconds).withoutTags()
+  val writeChunksetLatency = FilodbMetrics.timeHistogram("cass-write-chunkset-latency", TimeUnit.MILLISECONDS)
+  val writePksLatency = FilodbMetrics.timeHistogram("cass-write-part-keys-latency", TimeUnit.MILLISECONDS)
+  val readChunksBatchLatency = FilodbMetrics.timeHistogram("cassandra-per-batch-chunk-read-latency",
+                                                           TimeUnit.MILLISECONDS)
 
   def initialize(dataset: DatasetRef, numShards: Int, resources: Config): Future[Response] = {
     // Initialize clusterConnector with dataset specific keyspaces if provided
