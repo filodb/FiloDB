@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
@@ -89,6 +91,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val epRequests = FilodbMetrics.counter("queryactor-execplan-requests", tags)
   private val queryErrors = FilodbMetrics.counter("queryactor-query-errors", tags)
   private val numRejectedPlans = FilodbMetrics.counter("circuit-breaker-num-rejected-plans", tags)
+  private val execPlanLatency = FilodbMetrics.timeHistogram("queryactor-execplan-latency", TimeUnit.MILLISECONDS, tags)
 
   private val streamResultsEnabled = config.getBoolean("filodb.query.streaming-query-results-enabled")
   private val circuitBreakerEnabled = config.getBoolean("filodb.query.circuit-breaker.enabled")
@@ -112,6 +115,7 @@ final class QueryActor(memStore: TimeSeriesStore,
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
         .asChildOf(Kamon.currentSpan())
         .start()
+      val startTime = System.currentTimeMillis()
       // Dont finish span since we finish it asynchronously when response is received
       Kamon.runWithSpan(queryExecuteSpan, false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
@@ -146,6 +150,8 @@ final class QueryActor(memStore: TimeSeriesStore,
               SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               querySession.close()
               queryExecuteSpan.finish()
+              val timeTaken = System.currentTimeMillis() - startTime
+              execPlanLatency.record(timeTaken, Map("plan" -> q.getClass.getSimpleName))
             }).completedL
         } else { // TODO remove this block when query streaming is enabled and working well
           q.execute(memStore, querySession)(queryScheduler)
@@ -171,6 +177,8 @@ final class QueryActor(memStore: TimeSeriesStore,
               SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               queryExecuteSpan.finish()
               querySession.close()
+              val timeTaken = System.currentTimeMillis() - startTime
+              execPlanLatency.record(timeTaken, Map("plan" -> q.getClass.getSimpleName))
             })
         }
 
