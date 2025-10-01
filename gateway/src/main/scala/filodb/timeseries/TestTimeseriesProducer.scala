@@ -133,9 +133,10 @@ object TestTimeseriesProducer extends StrictLogging {
                      schema: Schema,
                      namespace: String = "App-0",
                      workspace: String = "demo",
-                     metricName: String = "heap_usage"): Stream[InputRecord] = {
+                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
+    val metricName = metricNameOverride.getOrElse("heap_usage")
     Stream.from(0).flatMap { n =>
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
@@ -170,9 +171,10 @@ object TestTimeseriesProducer extends StrictLogging {
                      publishIntervalSec: Int,
                      namespace: String = "App-0",
                      workspace: String = "demo",
-                     metricName: String = "heap_usage_counter"): Stream[InputRecord] = {
+                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
+    val metricName = metricNameOverride.getOrElse("heap_usage_counter")
     val valMap: mutable.HashMap[Map[String, String], Double] = mutable.HashMap.empty[Map[String, String], Double]
     Stream.from(0).flatMap { n =>
       val instance = n % numTimeSeries
@@ -217,7 +219,10 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
-                       numBuckets : Int = 20): Stream[InputRecord] = {
+                       numBuckets : Int = 20, metricNameOverride: Option[String] = None,
+                       namespace: String = "App-0", workspace: String = "demo"): Stream[InputRecord] = {
+
+    val metricName: String = metricNameOverride.getOrElse("http_request_latency")
     val histBucketScheme = if (Schemas.otelExpDeltaHistogram == histSchema)
                                 bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
                            else
@@ -225,9 +230,9 @@ object TestTimeseriesProducer extends StrictLogging {
     var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema
                      || Schemas.otelExpDeltaHistogram == histSchema) {
-                  "http_request_latency_delta"
+                  metricName + "_delta"
                  } else {
-                  "http_request_latency"
+                  metricName
                  }
 
     def updateBuckets(bucketNo: Int): Unit = {
@@ -258,8 +263,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val sum = buckets.sum.toDouble
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
-                     wsUTF8   -> "demo".utf8,
-                     nsUTF8   -> s"App-$app".utf8,
+                     wsUTF8   -> workspace.utf8,
+                     nsUTF8   -> namespace.utf8,
                      partUTF8 -> s"partition-$partition".utf8,
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)

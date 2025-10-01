@@ -25,6 +25,8 @@ import org.jboss.netty.handler.ssl.SslContext
 import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
+import org.rogach.scallop.ValueConverter
+import org.rogach.scallop.ArgType
 
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
@@ -73,24 +75,45 @@ object GatewayServer extends StrictLogging {
   val numContainersSent = Kamon.counter("num-containers-sent").withoutTags
   val containersSize = Kamon.histogram("containers-size-bytes").withoutTags
 
+  object GatewayOptions {
+    /**
+     * A custom Scallop ValueConverter for an option that can be present with or without a value.
+     * This allows a CLI syntax like `--my-option` or `--my-option value`.
+     */
+    implicit val optionalStringConverter: ValueConverter[Option[String]] = new ValueConverter[Option[String]] {
+      def parse(s: List[(String, List[String])]): Either[String, Option[Option[String]]] = {
+        s match {
+          case (_, Nil) :: Nil       => Right(Some(None)) // present, no value
+          case (_, v :: Nil) :: Nil  => Right(Some(Some(v))) // present, with value
+          case Nil                   => Right(None) // not present
+          case _                     => Left("Argument for this option can be supplied only once.")
+        }
+      }
+      override val argType: ArgType.V = ArgType.LIST
+    }
+  }
+
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
+    import GatewayOptions._
+
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
-                                    descr = "# of samples per time series")
+      descr = "# of samples per time series")
     val numSeriesPerMetric = opt[Int](short = 'p', default = Some(20), descr = "# of total time series per metric")
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
-    val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
+    val genHistData = opt[Option[String]](name = "gen-hist-data",
+      descr = "Generate Prometheus hist-schema test data. Can be passed with an optional metric name.")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
     val genOtelCumulativeHistData = toggle(noshort = true,
-              descrYes = "Generate otel-cumulative-histogram schema test data and exit")
+      descrYes = "Generate otel-cumulative-histogram schema test data and exit")
     val genOtelDeltaHistData = toggle(noshort = true,
-              descrYes = "Generate otel-delta-histogram schema test data and exit")
+      descrYes = "Generate otel-delta-histogram schema test data and exit")
     val genOtelExpDeltaHistData = toggle(noshort = true,
       descrYes = "Generate otel-exponential-delta-histogram schema test data and exit")
-    val genGaugeData = opt[String](name = "gen-gauge-data", default = Some("heap_usage0"),
-      descr = "Generate Prometheus gauge-schema test data with a specific metric name base and exit")
-    val genCounterData = opt[String](name = "gen-counter-data", default = Some("heap_usage_counter"),
-      descr = "Generate Prometheus counter-schema test data with a specific metric name base and exit")
+    val genGaugeData = opt[Option[String]](name = "gen-gauge-data",
+      descr = "Generate Prometheus gauge-schema test data. Can be passed with an optional metric name.")
+    val genCounterData = opt[Option[String]](name = "gen-counter-data",
+      descr = "Generate Prometheus counter-schema test data. Can be passed with an optional metric name.")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
@@ -145,21 +168,23 @@ object GatewayServer extends StrictLogging {
                                name: String,
                                generator: () => Stream[InputRecord])
 
-    val genHist = userOpts.genHistData.getOrElse(false)
-    val genGaugeData = userOpts.genGaugeData.isDefined
+    val genHist = userOpts.genHistData.isSupplied
+    val genGaugeData = userOpts.genGaugeData.isSupplied
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    val genCounterData = userOpts.genCounterData.isDefined
+    val genCounterData = userOpts.genCounterData.isSupplied
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
     val genOtelExpDeltaHistData = userOpts.genOtelExpDeltaHistData.getOrElse(false)
 
     val startTime = System.currentTimeMillis
-      logger.info(s"Generating $numSamples samples starting at $startTime....")
+    logger.info(s"Generating $numSamples samples starting at $startTime....")
 
     val allGenerators = Seq(
       GeneratorConfig(genHist, promHistogram.name,
-        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)),
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram,
+          metricNameOverride = userOpts.genHistData(), namespace = userOpts.nameSpace(),
+          workspace = userOpts.workSpace())),
       GeneratorConfig(genOtelCumulativeHistData, otelCumulativeHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelCumulativeHistogram)),
       GeneratorConfig(genOtelDeltaHistData, otelDeltaHistogram.name,
@@ -171,10 +196,11 @@ object GatewayServer extends StrictLogging {
       GeneratorConfig(genGaugeData, gauge.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace(),
-          metricName = userOpts.genGaugeData())),
+          metricNameOverride = userOpts.genGaugeData())),
       GeneratorConfig(genCounterData, promCounter.name,
         () => TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries, userOpts.numMetrics(),
-          userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(), userOpts.genCounterData())),
+          userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(),
+          metricNameOverride = userOpts.genCounterData())),
       GeneratorConfig(genDeltaCounterData, deltaCounter.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), deltaCounter))
@@ -215,9 +241,9 @@ object GatewayServer extends StrictLogging {
         genHist,
         genDeltaHist,
         genGaugeData,
-        userOpts.genGaugeData(),
+        userOpts.genGaugeData().getOrElse("heap_usage0"),
         genCounterData,
-        userOpts.genCounterData(),
+        userOpts.genCounterData().getOrElse("heap_usage_counter"),
         genOtelCumulativeHistData,
         genOtelDeltaHistData,
         genOtelExpDeltaHistData,
@@ -245,9 +271,9 @@ object GatewayServer extends StrictLogging {
 
     // Configure the bootstrap.
     val bootstrap = new ServerBootstrap(
-                      new NioServerSocketChannelFactory(
-                        Executors.newCachedThreadPool(),
-                        Executors.newCachedThreadPool()))
+      new NioServerSocketChannelFactory(
+        Executors.newCachedThreadPool(),
+        Executors.newCachedThreadPool()))
 
     bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
       def getPipeline(): ChannelPipeline = {
@@ -281,7 +307,7 @@ object GatewayServer extends StrictLogging {
       new MpscGrowableArrayQueue[InputRecord](minQueueSize, maxQueueSize) }.toArray
     val lastSendTime = Array.fill(numShards)(0L)
     val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory))
-                                      .toArray
+      .toArray
     val producing = Array.fill(numShards)(false)
     var curShard = 0
     // require(parallelism < numShards)
@@ -304,14 +330,14 @@ object GatewayServer extends StrictLogging {
       shardToWorkOn
     }
     val containerStream = Observable.fromIteratorUnsafe(shardIt)
-                                    .mapParallelUnordered(parallelism) { shard =>
-                                      buildShardContainers(shard, shardQueues(shard), builders(shard), lastSendTime)
-                                      .map { output =>
-                                        // Mark this shard as done producing for now to allow another go
-                                        producing(shard) = false
-                                        output
-                                      }
-                                    }.filter { case (_, j) => j.nonEmpty }
+      .mapParallelUnordered(parallelism) { shard =>
+        buildShardContainers(shard, shardQueues(shard), builders(shard), lastSendTime)
+          .map { output =>
+            // Mark this shard as done producing for now to allow another go
+            producing(shard) = false
+            output
+          }
+      }.filter { case (_, j) => j.nonEmpty }
     logger.info(s"Created $numShards container builder queues with $parallelism parallel workers...")
     (shardQueues, containerStream)
   }
@@ -329,8 +355,8 @@ object GatewayServer extends StrictLogging {
     // Send only full containers or if time has elapsed, send and reset current container
     val numContainers = builder.allContainers.length
     if (numContainers > 1 ||
-        (numContainers > 0 && !builder.allContainers.head.isEmpty &&
-         (System.currentTimeMillis - sendTime(shard)) > 1000)) {
+      (numContainers > 0 && !builder.allContainers.head.isEmpty &&
+        (System.currentTimeMillis - sendTime(shard)) > 1000)) {
       sendTime(shard) = System.currentTimeMillis
       val out = if (numContainers > 1) {   // First container probably full.  Send only the first container
         numContainersSent.increment(numContainers - 1)
@@ -357,9 +383,9 @@ object GatewayServer extends StrictLogging {
     implicit val io = Scheduler.io("kafka-producer")
     val sink = new KafkaContainerSink(producerCfg, topicName)
     sink.writeTask(containerStream)
-        .runToFuture
-        .map { _ => logger.info(s"Finished producing messages into topic $topicName") }
-        // TODO: restart stream in case of failure?
-        .recover { case NonFatal(e) => logger.error("Error occurred while producing messages to Kafka", e) }
+      .runToFuture
+      .map { _ => logger.info(s"Finished producing messages into topic $topicName") }
+      // TODO: restart stream in case of failure?
+      .recover { case NonFatal(e) => logger.error("Error occurred while producing messages to Kafka", e) }
   }
 }
