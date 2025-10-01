@@ -76,7 +76,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
             case e: AskTimeoutException =>
               qLogger.error(s"AskTimeoutException for query id: " +
                 s"${plan.execPlan.queryContext.queryId} to target ${target.path}: ${e.getMessage}")
-              ActorPlanDispatcher.askTimeoutCounter
+              Query.timeOutCounter
+                .withTag("dispatcher", "actor-plan")
                 .withTag("dataset", plan.execPlan.dataset.dataset)
                 .withTag("cluster", clusterName)
                 .withTag("target", target.path.toString)

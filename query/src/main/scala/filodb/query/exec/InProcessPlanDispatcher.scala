@@ -14,14 +14,10 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats, QueryWarnings, ResultSchema}
+import filodb.core.query._
 import filodb.core.store._
-import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
+import filodb.query.{Query, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
-
-object InProcessPlanDispatcher {
-  val inProcessTimeoutCounter = Kamon.counter("in-process-plan-dispatcher-timeout")
-}
 
 /**
   * Executes an ExecPlan on the current thread.
@@ -51,7 +47,8 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
         .onErrorRecoverWith {
         case e: TimeoutException =>
          qLogger.error(s"TimeoutException for query id: ${plan.execPlan.queryContext.queryId}: ${e.getMessage}")
-          InProcessPlanDispatcher.inProcessTimeoutCounter
+          Query.timeOutCounter
+            .withTag("dispatcher", "in-process")
             .withTag("dataset", plan.execPlan.dataset.dataset)
             .withTag("cluster", clusterName)
             .withTag("query_type", plan.execPlan.getClass.getSimpleName)
