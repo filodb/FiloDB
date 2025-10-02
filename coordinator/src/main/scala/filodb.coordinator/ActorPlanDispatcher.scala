@@ -21,11 +21,6 @@ import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 
-
-object ActorPlanDispatcher {
-  val askTimeoutCounter = Kamon.counter("actor-plan-dispatcher-ask-timeout")
-}
-
 /**
  * This implementation provides a way to distribute query execution
  * using Akka Actors.
