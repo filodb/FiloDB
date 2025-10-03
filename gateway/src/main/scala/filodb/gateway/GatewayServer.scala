@@ -25,8 +25,8 @@ import org.jboss.netty.handler.ssl.SslContext
 import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
-import org.rogach.scallop.ValueConverter
 import org.rogach.scallop.ArgType
+import org.rogach.scallop.ValueConverter
 
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
