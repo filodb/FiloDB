@@ -225,8 +225,14 @@ object TestTimeseriesProducer extends StrictLogging {
     val metricName: String = metricNameOverride.getOrElse("http_request_latency")
     val histBucketScheme = if (Schemas.otelExpDeltaHistogram == histSchema)
                                 bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
-                           else
-                                bv.GeometricBuckets(2.0, 3.0, numBuckets)
+                           else {
+                             // Create custom buckets that include +Inf as the last bucket
+                             val finiteBuckets = (0 until numBuckets-1).map { i =>
+                               2.0 * Math.pow(3.0, i)
+                             }.toArray
+                             val allBuckets = finiteBuckets :+ Double.PositiveInfinity
+                             bv.CustomBuckets(allBuckets)
+                           }
     var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema
                      || Schemas.otelExpDeltaHistogram == histSchema) {
