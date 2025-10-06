@@ -48,11 +48,11 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
         case e: TimeoutException =>
          qLogger.error(s"TimeoutException for query id: ${plan.execPlan.queryContext.queryId}: ${e.getMessage}")
           Query.timeOutCounter
-            .withTag("dispatcher", "in-process")
-            .withTag("dataset", plan.execPlan.dataset.dataset)
-            .withTag("cluster", clusterName)
-            .withTag("query_type", plan.execPlan.getClass.getSimpleName)
-            .increment()
+            .increment(1, Map(
+              "dispatcher" -> "in-process",
+              "dataset" -> plan.execPlan.dataset.dataset,
+              "cluster" -> clusterName,
+              "query_type" -> plan.execPlan.getClass.getSimpleName))
          if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
            qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
              s"since partial result was enabled: ${e.getMessage}")

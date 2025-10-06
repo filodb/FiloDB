@@ -71,11 +71,11 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
               qLogger.error(s"AskTimeoutException for query id: " +
                 s"${plan.execPlan.queryContext.queryId} to target ${target.path}: ${e.getMessage}")
               Query.timeOutCounter
-                .withTag("dispatcher", "actor-plan")
-                .withTag("dataset", plan.execPlan.dataset.dataset)
-                .withTag("cluster", clusterName)
-                .withTag("target", target.path.toString)
-                .increment()
+                .increment(1, Map(
+                  "dispatcher" -> "actor-plan",
+                  "dataset" -> plan.execPlan.dataset.dataset,
+                  "cluster" -> clusterName,
+                  "target" -> target.path.toString))
               if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
                 qLogger.warn(s"Swallowed AskTimeoutException since partial results are enabled.")
                 Future.successful(emptyPartialResult)
