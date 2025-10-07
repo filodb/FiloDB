@@ -214,7 +214,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         View.builder().setAggregation(Aggregation.explicitBucketHistogram(timeBuckets)).build())
       val buckets = otelConfig.customHistogramBuckets.map(Double.box).asJava
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder()
-        .setType(InstrumentType.HISTOGRAM)
+        .setType(InstrumentType.HISTOGRAM).setUnit("counts")
         .build(),
         View.builder().setAggregation(Aggregation.explicitBucketHistogram(buckets)).build())
     }
@@ -348,7 +348,8 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       val otelHistogram = if (!otelEnabled) None else {
         val n = normalizeMetricName(name, isBytes = false, isCounter = false, timeUnit)
         val hb = meter.histogramBuilder(n)
-        if (timeUnit.isDefined) hb.setUnit("seconds")
+        // we set unit as "counts" so that we can set the custom bucketing for the histogram correctly
+        if (timeUnit.isDefined) hb.setUnit("seconds") else hb.setUnit("counts")
         Some(hb.build())
       }
 
