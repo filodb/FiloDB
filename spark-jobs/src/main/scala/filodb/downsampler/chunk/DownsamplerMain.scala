@@ -3,24 +3,23 @@ package filodb.downsampler.chunk
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ForkJoinPool
-
 import scala.collection.mutable.ListBuffer
 import scala.collection.parallel.ForkJoinTaskSupport
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.query.ColumnFilter
-import filodb.core.store.{RawPartData, ScanSplit}
+import filodb.core.store.{RawChunkSetArrayBased, RawChunkSet, RawPartData, ScanSplit}
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
+
+import java.nio.ByteBuffer
 
 /**
  * Implement this trait and provide its fully-qualified name as the downsampler config:
@@ -29,6 +28,16 @@ import filodb.memory.format.UnsafeUtils
 trait SparkSessionFactory {
   def make(sparkConf: SparkConf): SparkSession
 }
+
+case class ByteArrayWrapper(bytes: Array[Byte]) extends Serializable {
+  override def equals(obj: Any): Boolean = obj match {
+    case other: ByteArrayWrapper => java.util.Arrays.equals(bytes, other.bytes)
+    case _ => false
+  }
+
+  override def hashCode(): Int = java.util.Arrays.hashCode(bytes)
+}
+
 
 class DefaultSparkSessionFactory extends SparkSessionFactory {
   override def make(sparkConf: SparkConf): SparkSession = {
@@ -210,7 +219,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     val downsamplePeriodStr = java.time.Instant.ofEpochMilli(userTimeStart).toString
 
     val batchDownsampler = new BatchDownsampler(settings, userTimeStart, userTimeEndExclusive)
-    val batchExporter = new BatchExporter(settings, userTimeStart, userTimeEndExclusive)
+
 
     DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=${settings.rawDatasetName} for " +
@@ -222,6 +231,43 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
       s""""spark.filodb.downsampler.userTimeOverride": "${java.time.Instant.ofEpochMilli(userTimeInPeriod)}"""")
 
+    if (settings.bulkDownsamplerIsEnabled) {
+      bulkRun(
+        sparkConf, spark, batchDownsampler,
+        userTimeStart, userTimeEndExclusive,
+        chunkPersistor
+      )
+    } else {
+      legacyRun(
+        sparkConf, spark,
+        batchDownsampler,
+        userTimeStart, userTimeEndExclusive, ingestionTimeStart, ingestionTimeEnd,
+        chunkPersistor
+      )
+    }
+    DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
+      s"$downsamplePeriodStr")
+    val jobCompleted = Kamon.counter("chunk-migration-completed")
+      .withTag("downsamplePeriod", downsamplePeriodStr)
+    val jobCompletedNoTags = Kamon.counter("chunk-migration-completed-success").withoutTags()
+    jobCompleted.increment()
+    jobCompletedNoTags.increment()
+    val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
+      .withTag("downsamplePeriod", downsamplePeriodStr)
+    downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
+    if (settings.shouldSleepForMetricsFlush)
+      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
+    spark
+
+  }
+
+  def legacyRun(
+    sparkConf: SparkConf, spark: SparkSession, batchDownsampler: BatchDownsampler,
+    userTimeStart: Long,
+    userTimeEndExclusive: Long, ingestionTimeStart: Long, ingestionTimeEnd: Long,
+    chunkPersistor: Option[ChunkPersistor]
+  ): SparkSession = {
+    val batchExporter = new BatchExporter(settings, userTimeStart, userTimeEndExclusive)
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef)
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
@@ -318,19 +364,116 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         downsampledRowsRdd.foreach(_ => {})
       }
     }
+    spark
+  }
 
-    DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
-      s"$downsamplePeriodStr")
-    val jobCompleted = Kamon.counter("chunk-migration-completed")
-      .withTag("downsamplePeriod", downsamplePeriodStr)
-    val jobCompletedNoTags = Kamon.counter("chunk-migration-completed-success").withoutTags()
-    jobCompleted.increment()
-    jobCompletedNoTags.increment()
-    val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
-      .withTag("downsamplePeriod", downsamplePeriodStr)
-    downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
-    if (settings.shouldSleepForMetricsFlush)
-      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
+  def chunkSetFromRow(row: Row): RawChunkSetArrayBased = {
+
+    //          val chunkSet = filodb.cassandra.columnstore.TimeSeriesChunksTable.chunkSetFromRow(row, 1)
+    val info = row.getAs[Array[Byte]](1)
+    //val chunks = row.getAs[Seq[Array[Byte]]]("chunks")
+    val chunks = row.getAs[Seq[Array[Byte]]](2)
+    val chunksArray : Array[Array[Byte]] = chunks.toArray
+    val decompressedChunks = chunksArray.map {
+      case b: Array[Byte] => filodb.core.store.decompressChunk(b)
+    }
+    val cs = RawChunkSetArrayBased(info.array, decompressedChunks)
+    cs
+  }
+
+  def bulkRun(
+    sparkConf: SparkConf, spark: SparkSession, batchDownsampler: BatchDownsampler,
+    userTimeStart: Long, userTimeEndExclusive: Long,
+    chunkPersistor: Option[ChunkPersistor]
+  ): SparkSession = {
+
+    val coresPerExecutor = sparkConf.getInt("spark.executor.cores", 1)
+    val numExecutors = sparkConf.getInt(
+      "spark.dynamicAllocation.maxExecutors",
+      sparkConf.getInt("spark.executor.instances", 1))
+    val numCores = coresPerExecutor * numExecutors
+
+    val settings = batchDownsampler.settings
+    val cassandraConfig = settings.cassandraConfig
+    val chunksTable = batchDownsampler.rawCassandraColStore.getOrCreateChunkTable(batchDownsampler.rawDatasetRef)
+
+    val keystorePassword = sys.env.getOrElse("IDENTITY_APP_P12_CERT_PASSWORD", "")
+    val format = batchDownsampler.settings.downsamplerConfig.getString("bulk-reader-format")
+
+    val maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis
+    val chunkIdStart = filodb.core.store.chunkID(userTimeStart - maxChunkTime, 0)
+    val chunkIdEnd = filodb.core.store.chunkID(userTimeEndExclusive, 0)
+
+    val rawDataDF = spark.read
+      //.format("com.apple.pie.sbr.sparksql.CassandraDataSource")
+      //.format("org.apache.spark.sql.cassandra") //enable to test with spark connector
+      .format(format)
+      .option("env", sys.env.getOrElse("SBR_ENV", "if-prod"))
+      .option("app", cassandraConfig.getString("application"))
+      .option("cluster", cassandraConfig.getString("clustername"))
+      .option("keyspace", chunksTable.keyspace)
+      .option("table", chunksTable.tableName)
+      .option("dc", cassandraConfig.getString("datacenter"))
+      .option("defaultParallelism", spark.sparkContext.defaultParallelism)
+      .option("numCores", numCores)
+      .option("keystore_path", sys.env.getOrElse("IDENTITY_APP_P12_CERT_PATH", "undefined_path"))
+      .option("keystore_password", keystorePassword)
+      .load()
+      .filter(s"chunkid >= $chunkIdStart")
+      .filter(s"chunkid < $chunkIdEnd")
+      .select("partition", "info", "chunks")
+      .cache()
+    val rawCount = rawDataDF.count()
+
+    val rawChunkSetsByPartKey: RDD[(ByteArrayWrapper, Iterable[RawChunkSetArrayBased])] = rawDataDF.rdd.map(row => {
+      val chunkset = chunkSetFromRow(row)
+      val partKey = row.getAs[Array[Byte]](0)
+      val partKeyWrapper = ByteArrayWrapper(partKey)
+      (partKeyWrapper, chunkset)
+    }).groupByKey()
+
+    val rawPartDataRdd : RDD[RawPartData] = rawChunkSetsByPartKey.map(tuple =>
+      RawPartData(
+        tuple._1.bytes,
+        tuple._2.map(rcsab => RawChunkSet(
+          rcsab.infoBytes,
+          rcsab.vectors.map(ab => ByteBuffer.wrap(ab))
+        )).toBuffer
+      )
+    )
+
+    val pagedReadablePartitionsRdd: RDD[PagedReadablePartition] = rawPartDataRdd.map { rawPartData : RawPartData  =>
+      Kamon.init()
+      KamonShutdownHook.registerShutdownHook()
+      val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
+        val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
+        new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPartData, minResolutionMs = 1)
+    }
+
+    val downsampledRowsRdd: RDD[ListBuffer[Row]] = pagedReadablePartitionsRdd.map { part : PagedReadablePartition =>
+        // Here we do NOT save any data to C*
+        val rows: ListBuffer[Row] = batchDownsampler.downsampleReadablePartition(part)
+        rows
+      }
+
+    val downsampledRowsRddFlattened: RDD[Row] = downsampledRowsRdd.flatMap(x => x).cache()
+
+    val downsampledRowsRddFlattenedCount = downsampledRowsRddFlattened.count()
+    val schema = StructType(Seq(
+      StructField("res", StringType, true),
+      StructField("partition", BinaryType, true),
+      StructField("chunkid", LongType, true),
+      StructField("info", BinaryType, true),
+      StructField("chunks", ArrayType(BinaryType), true),
+      StructField("ingestion_time", LongType, true),
+      StructField("start_time", LongType, true),
+      StructField("index_info", BinaryType, true)
+    ))
+    val downsampledDf = spark.createDataFrame(downsampledRowsRddFlattened, schema)
+    val cachedDownsampledDf = downsampledDf.cache()
+    val rows = cachedDownsampledDf.count()
+    DownsamplerContext.dsLogger.info(s"About to write C* downsample rows: $rows")
+    chunkPersistor.get.persist(cachedDownsampledDf, batchDownsampler)
     spark
   }
 

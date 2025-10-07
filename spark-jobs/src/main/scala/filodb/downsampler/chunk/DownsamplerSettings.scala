@@ -32,6 +32,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val chunkDownsamplerIsEnabled = downsamplerConfig.getBoolean("chunk-downsampler-enabled")
 
+  @transient lazy val bulkDownsamplerIsEnabled = downsamplerConfig.getBoolean("bulk-downsampler-enabled")
+
   @transient lazy val cassandraConfig = filodbConfig.getConfig("cassandra")
 
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")

@@ -93,6 +93,26 @@ package object store {
     }
   }
 
+  def decompress(compressedArray: Array[Byte]): Array[Byte] = {
+    val compressed : ByteBuffer = ByteBuffer.wrap(compressedArray)
+    compressed.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val origLength = compressed.getInt(compressed.position) & 0x7fffffff // strip off compression bit
+    val decompressedBytes = new Array[Byte](origLength + 4)
+    getDecompressor.decompress(compressed.array, compressed.position() + 4, decompressedBytes, 4, origLength)
+    UnsafeUtils.setInt(decompressedBytes, UnsafeUtils.arayOffset, origLength)
+    decompressedBytes
+  }
+
+  /**
+   * Decompresses IFF bit 31 of the 4-byte length header is set, otherwise returns original buffer
+   */
+  def decompressChunk(compressed : Array[Byte]): Array[Byte] = {
+    compressed(3) match {
+      case b if b < 0 => decompress(compressed)
+      case b => compressed
+    }
+  }
+
   /**
    * Formulation for chunkID based on a combo of the start time for a chunk and the ingestion
    * time in the lower bits to disambiguate two chunks which have the same start time, and to

@@ -58,6 +58,8 @@ trait RawChunkSource {
  */
 final case class RawChunkSet(infoBytes: Array[Byte], vectors: Array[ByteBuffer])
 
+final case class RawChunkSetArrayBased(infoBytes: Array[Byte], vectors: Array[Array[Byte]])
+
 /**
  * Raw data for a partition, with one RawChunkSet per ID read
  */

@@ -220,12 +220,13 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
                                         .setLong(1, chunkID(startTime, 0))
                                         .setLong(2, chunkID(endTimeExclusive, 0))
-    session.execute(query).iterator().asScala
+    val partKeyChunksTupleIterator : Iterator[(ByteBuffer, RawChunkSet)]  = session.execute(query).iterator().asScala
             .map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
-            .sortedGroupBy(_._1)
-            .map { case (partKeyBuffer, chunkSetIt) =>
-              RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
-            }.toSeq
+    val chunksGroupedByPartKeyIterator : Iterator[(ByteBuffer, Iterator[(ByteBuffer, RawChunkSet)])] =
+      partKeyChunksTupleIterator.sortedGroupBy(_._1)
+    chunksGroupedByPartKeyIterator.map { case (partKeyBuffer, chunkSetIt) =>
+      RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+    }.toSeq
   }
 
   def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
