@@ -313,7 +313,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
       val otelGauge = if (!otelEnabled) None else {
-        val n = normalizeMetricName(name, isBytes, isCounter = true, timeUnit)
+        val n = normalizeMetricName(name, isBytes, isCounter = false, timeUnit)
         Some(meter.gaugeBuilder(n).build())
       }
 
