@@ -14,7 +14,7 @@ object Dependencies {
   val excludeXBean = ExclusionRule(organization = "org.apache.xbean", name = "xbean-asm6-shaded")
   val excludegrpc = ExclusionRule(organization = "io.grpc")
   val excludeAkka = ExclusionRule(organization = "com.typesafe.akka")
-
+  val excludeOkHttp3 = ExclusionRule(organization = "com.squareup.okhttp3", name = "okhttp")
 
   /* Versions in various modules versus one area of build */
   val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
@@ -71,7 +71,6 @@ object Dependencies {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
-    "io.kamon"                     %% "kamon-zipkin"      % kamonBundleVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "3.4.0",
@@ -121,7 +120,7 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4,excludeAkka),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog,excludeAkka),
-    "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion,
+    "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion  excludeAll(excludeOkHttp3),
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
@@ -172,7 +171,6 @@ object Dependencies {
 
   lazy val standaloneDeps = Seq(
     logbackDep,
-    "io.kamon"              %% "kamon-zipkin"            % kamonBundleVersion,
     "com.iheart"            %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,
