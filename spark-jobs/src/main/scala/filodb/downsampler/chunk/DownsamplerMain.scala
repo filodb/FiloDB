@@ -420,8 +420,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       .filter(s"chunkid >= $chunkIdStart")
       .filter(s"chunkid < $chunkIdEnd")
       .select("partition", "info", "chunks")
-      .cache()
-    val rawCount = rawDataDF.count()
+
 
     val rawChunkSetsByPartKey: RDD[(ByteArrayWrapper, Iterable[RawChunkSetArrayBased])] = rawDataDF.rdd.map(row => {
       val chunkset = chunkSetFromRow(row)
@@ -454,9 +453,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         rows
       }
 
-    val downsampledRowsRddFlattened: RDD[Row] = downsampledRowsRdd.flatMap(x => x).cache()
+    val downsampledRowsRddFlattened: RDD[Row] = downsampledRowsRdd.flatMap(x => x)
 
-    val downsampledRowsRddFlattenedCount = downsampledRowsRddFlattened.count()
     val schema = StructType(Seq(
       StructField("res", StringType, true),
       StructField("partition", BinaryType, true),
