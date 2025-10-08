@@ -10,13 +10,13 @@ import com.datastax.driver.core._
 import com.datastax.driver.core.exceptions.{ConnectionException, NoHostAvailableException, QueryExecutionException}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 
 import filodb.core._
+import filodb.core.metrics.FilodbMetrics
 
 object FiloCassandraConnector {
-  val cassRetriesScheduledCount = Kamon.counter("cassandra-retries-scheduled").withoutTags
+  val cassRetriesScheduledCount = FilodbMetrics.counter("cassandra-retries-scheduled")
 }
 
 trait FiloCassandraConnector extends StrictLogging {

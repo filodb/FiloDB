@@ -31,6 +31,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram,
   gauge, otelCumulativeHistogram, otelDeltaHistogram, otelExpDeltaHistogram, promCounter, promHistogram}
+import filodb.core.metrics.FilodbMetrics
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -67,11 +68,10 @@ object GatewayServer extends StrictLogging {
   val storeFactory = StoreFactory(settings, Scheduler.io())
 
   // ==== Metrics ====
-  val numInfluxMessages = Kamon.counter("num-influx-messages").withoutTags
-  val numInfluxParseErrors = Kamon.counter("num-influx-parse-errors").withoutTags
-  val numDroppedMessages = Kamon.counter("num-dropped-messages").withoutTags
-  val numContainersSent = Kamon.counter("num-containers-sent").withoutTags
-  val containersSize = Kamon.histogram("containers-size-bytes").withoutTags
+  val numInfluxMessages = FilodbMetrics.counter("num-influx-messages")
+  val numInfluxParseErrors = FilodbMetrics.counter("num-influx-parse-errors")
+  val numDroppedMessages = FilodbMetrics.counter("num-dropped-messages")
+  val numContainersSent = FilodbMetrics.counter("num-containers-sent")
 
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {

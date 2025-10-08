@@ -6,11 +6,10 @@ import java.util.concurrent.atomic.AtomicLong
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{QueryContext, QueryLimitException, RawDataRangeVector}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
@@ -330,8 +329,8 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 }
 
 object CountingChunkInfoIterator {
-  val dataBytesScannedCtr = Kamon.counter("data-scanned-by-queries", MeasurementUnit.information.bytes).withoutTags()
-  val numSamplesScannedCtr = Kamon.counter("num-samples-scanned-by-queries").withoutTags()
+  val dataBytesScannedCtr = FilodbMetrics.bytesCounter("data-scanned-by-queries")
+  val numSamplesScannedCtr = FilodbMetrics.counter("num-samples-scanned-by-queries")
 }
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,

@@ -3,9 +3,9 @@ package filodb.query.lpopt
 import scala.concurrent.duration.DurationInt
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 
 import filodb.core.GlobalConfig
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query._
@@ -22,8 +22,8 @@ object AggLpOptimization extends StrictLogging{
   private val aggTimeWindow = 1.minutes.toMillis // pre-aggregated data is at 1m resolution
   private val aggDelay  = 1.minutes.toMillis // pre-aggregated data is delayed by 1m
 
-  private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
-  private val numAggLpNotOptimized = Kamon.counter(s"num_agg_lps_not_optimized")
+  private val numAggLpOptimized = FilodbMetrics.counter(s"num_agg_lps_optimized")
+  private val numAggLpNotOptimized = FilodbMetrics.counter(s"num_agg_lps_not_optimized")
 
   /**
    * Facade method for this utility. Optimizes the given Aggregate logical plan to use a pre-aggregated metric if
@@ -64,7 +64,7 @@ object AggLpOptimization extends StrictLogging{
       }
 
       if (chosenRule.isEmpty) {
-        numAggLpNotOptimized.withTag("reason", "noRules").increment()
+        numAggLpNotOptimized.increment(1, Map("reason" -> "noRules"))
         // no rule was chosen, return this plan as is
         None
       } else {
@@ -77,7 +77,7 @@ object AggLpOptimization extends StrictLogging{
                                       canTranslateResult.get.rangeFunctionToUse))
       }
     } else {
-      numAggLpNotOptimized.withTag("reason", "cannotOptimize").increment()
+      numAggLpNotOptimized.increment(1, Map("reason" -> "cannotOptimize"))
       None
     }
   }

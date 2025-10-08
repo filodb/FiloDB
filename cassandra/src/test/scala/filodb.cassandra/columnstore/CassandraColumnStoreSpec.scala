@@ -7,7 +7,6 @@ import scala.concurrent.duration._
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
-import kamon.tag.TagSet
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -78,7 +77,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val timeBucket = 20
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
-    colStore.writePartKeyUpdates(dataset, timeBucket, System.currentTimeMillis(), 1, TagSet.Empty,
+    colStore.writePartKeyUpdates(dataset, timeBucket, System.currentTimeMillis(), 1, Map.empty,
         Observable.fromIterable(pks)).futureValue shouldEqual Success
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8))

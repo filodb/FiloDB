@@ -7,9 +7,6 @@ import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -21,6 +18,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats
 import filodb.core.memstore.DownsampleIndexBootstrapper.{currentThreadScheduler, ShapeStats}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.HistogramColumn
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.{AllChunkScan, ColumnStore, PartKeyRecord, SinglePartitionScan, TimeRangeChunkScan}
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.vectors.HistogramVector
@@ -45,9 +43,8 @@ class RawIndexBootstrapper(colStore: ColumnStore) {
                         ref: DatasetRef)
                        (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
-    val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val recoverIndexLatency = FilodbMetrics.timeGauge("shard-recover-index-latency", TimeUnit.MILLISECONDS,
+      Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
     val start = System.currentTimeMillis()
     colStore.scanPartKeys(ref, shardNum)
       .map { pk =>
@@ -186,22 +183,18 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
   }
 
   private def updateStatsWithTags(shapeStats: ShapeStats): Unit = {
-    var builder = TagSet.builder()
-    for ((key, value) <- downsampleConfig.dataShapeKeyPublishLabels.zip(shapeStats.key)) {
-      builder = builder.add(key, value)
-    }
-    val tags = builder.build()
-    stats.dataShapeLabelCount.withTags(tags).record(shapeStats.labelCount)
+    val tagsMap = downsampleConfig.dataShapeKeyPublishLabels.zip(shapeStats.key).toMap
+    stats.dataShapeLabelCount.record(shapeStats.labelCount, tagsMap)
     for (keyLength <- shapeStats.keyLengths) {
-      stats.dataShapeKeyLength.withTags(tags).record(keyLength)
+      stats.dataShapeKeyLength.record(keyLength, tagsMap)
     }
     for (valueLength <- shapeStats.valueLengths) {
-      stats.dataShapeValueLength.withTags(tags).record(valueLength)
+      stats.dataShapeValueLength.record(valueLength, tagsMap)
     }
-    stats.dataShapeMetricLength.withTags(tags).record(shapeStats.metricLength)
-    stats.dataShapeTotalLength.withTags(tags).record(shapeStats.totalLength)
+    stats.dataShapeMetricLength.record(shapeStats.metricLength, tagsMap)
+    stats.dataShapeTotalLength.record(shapeStats.totalLength, tagsMap)
     if (shapeStats.bucketCount.isDefined) {
-      stats.dataShapeBucketCount.withTags(tags).record(shapeStats.bucketCount.get)
+      stats.dataShapeBucketCount.record(shapeStats.bucketCount.get, tagsMap)
     }
   }
 
@@ -290,9 +283,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
                                ttlMs: Long,
                                parallelism: Int = Runtime.getRuntime.availableProcessors()): Task[Long] = {
     val startCheckpoint = System.currentTimeMillis()
-    val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val recoverIndexLatency = FilodbMetrics.timeGauge("shard-recover-index-latency", TimeUnit.MILLISECONDS,
+      Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
     val start = System.currentTimeMillis() - ttlMs
     colStore.scanPartKeys(ref, shardNum)
       .filter(_.endTime > start)
@@ -346,10 +338,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
     // potentially exceed the limit requiring us to preiodically reclaim partIds, eliminate the notion of partIds or
     // comeup with alternate solutions to come up a partId which can either be a long value or some string
     // representation
-    val recoverIndexLatency = Kamon.gauge("downsample-store-refresh-index-latency",
-      MeasurementUnit.time.milliseconds)
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val recoverIndexLatency = FilodbMetrics.timeGauge("downsample-store-refresh-index-latency", TimeUnit.MILLISECONDS,
+      Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
     val start = System.currentTimeMillis()
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)

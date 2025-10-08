@@ -35,6 +35,7 @@ import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.{PartitionSchema, Schemas}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
@@ -86,13 +87,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   import PartKeyLuceneIndex._
   import PartKeyIndexRaw._
 
-  val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  val readerStateCacheHitRate = FilodbMetrics.gauge("index-reader-state-cache-hit-rate",
+    Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  val luceneQueryCacheHitRate = Kamon.gauge("index-lucene-query-cache-hit-rate")
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  val luceneQueryCacheHitRate = FilodbMetrics.gauge("index-lucene-query-cache-hit-rate",
+    Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
   val fsDirectory = if (useMemoryMappedImpl)
     new MMapDirectory(indexDiskLocation)
@@ -438,8 +437,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       }
     }
     labelValuesQueryLatency.record(System.nanoTime() - start)
-    readerStateCacheHitRate.withTag("label", "shardKey").update(readerStateCacheShardKeys.stats().hitRate())
-    readerStateCacheHitRate.withTag("label", "other").update(readerStateCacheNonShardKeys.stats().hitRate())
+    readerStateCacheHitRate.update(readerStateCacheShardKeys.stats().hitRate(), Map("label" -> "shardKey"))
+    readerStateCacheHitRate.update(readerStateCacheNonShardKeys.stats().hitRate(), Map("label" -> "other"))
     labelValues
   }
 

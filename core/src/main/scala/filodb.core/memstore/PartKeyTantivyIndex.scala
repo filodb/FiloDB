@@ -11,7 +11,6 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.commons.lang3.SystemUtils
 import org.apache.lucene.util.BytesRef
 import spire.implicits.cforRange
@@ -22,6 +21,7 @@ import filodb.core.memstore.PartKeyIndexRaw.{bytesRefToUnsafeOffset, ignoreIndex
   PART_ID_FIELD}
 import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -49,14 +49,11 @@ class PartKeyTantivyIndex(ref: DatasetRef,
                          ) extends PartKeyIndexRaw(ref, shardNum, schema, diskLocation, lifecycleManager,
                               addMetricTypeField = addMetricTypeField) {
 
-  private val cacheHitRate = Kamon.gauge("index-tantivy-cache-hit-rate")
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  private val cacheHitRate = FilodbMetrics.gauge("index-tantivy-cache-hit-rate",
+    Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  private val refreshLatency = Kamon.histogram("index-tantivy-commit-refresh-latency",
-      MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  private val refreshLatency = FilodbMetrics.timeHistogram("index-tantivy-commit-refresh-latency",
+      TimeUnit.NANOSECONDS, Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
   // Compute field names for native schema code
   private val schemaFields = schema.columns.filter { c =>
@@ -105,8 +102,8 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       // Emit cache stats
       val cache_stats = TantivyNativeMethods.getCacheHitRates(indexHandle)
 
-      cacheHitRate.withTag("label", "query").update(cache_stats(0))
-      cacheHitRate.withTag("label", "column").update(cache_stats(1))
+      cacheHitRate.update(cache_stats(0), Map("label" -> "query"))
+      cacheHitRate.update(cache_stats(1), Map("label" -> "column"))
     }, flushDelayMinSeconds,
       flushDelayMinSeconds, TimeUnit.SECONDS)
   }

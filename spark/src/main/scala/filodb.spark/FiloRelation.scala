@@ -2,7 +2,7 @@ package filodb.spark
 
 import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
+import filodb.core.metrics.FilodbMetrics
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
@@ -24,11 +24,11 @@ object FiloRelation extends StrictLogging {
   // *** Statistics **
   // For now they are global across all tables.
   // TODO(velvia): Make them per-table?
-  val totalQueries             = Kamon.counter("spark-queries-total").withoutTags
-  val singlePartQueries        = Kamon.counter("spark-queries-single-partition").withoutTags
-  val multiPartQueries         = Kamon.counter("spark-queries-multi-partition").withoutTags
-  val fullFilteredQueries      = Kamon.counter("spark-queries-full-filtered").withoutTags
-  val fullTableQueries         = Kamon.counter("spark-queries-full-table").withoutTags
+  val totalQueries             = FilodbMetrics.counter("spark-queries-total")
+  val singlePartQueries        = FilodbMetrics.counter("spark-queries-single-partition")
+  val multiPartQueries         = FilodbMetrics.counter("spark-queries-multi-partition")
+  val fullFilteredQueries      = FilodbMetrics.counter("spark-queries-full-filtered")
+  val fullTableQueries         = FilodbMetrics.counter("spark-queries-full-table")
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloDriver.metaStore.getDataset(dataset)) { ds => ds }

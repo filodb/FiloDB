@@ -1,16 +1,18 @@
 package filodb.downsampler.index
 
+import java.util.concurrent.TimeUnit
+
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.PartKeyRecord
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
@@ -19,16 +21,15 @@ import filodb.memory.format.UnsafeUtils
 class DSIndexJob(dsSettings: DownsamplerSettings,
                  dsJobsettings: DSIndexJobSettings) extends Instance with Serializable {
 
-  @transient lazy private val sparkTasksStarted = Kamon.counter("spark-tasks-started").withoutTags()
-  @transient lazy private val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
-                                                               .withoutTags()
-  @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
-  @transient lazy private val numPartKeysUnknownSchema = Kamon.counter("num-partkeys-unknown-schema").withoutTags()
-  @transient lazy private val numPartKeysNoDownsampleSchema = Kamon.counter("num-partkeys-no-downsample").withoutTags()
-  @transient lazy private val numPartKeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
-  @transient lazy private val numPartKeysBlocked = Kamon.counter("num-partkeys-blocked").withoutTags()
-  @transient lazy val perShardIndexMigrationLatency = Kamon.histogram("per-shard-index-migration-latency",
-    MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy private val sparkTasksStarted = FilodbMetrics.counter("spark-tasks-started")
+  @transient lazy private val sparkForeachTasksCompleted = FilodbMetrics.counter("spark-foreach-tasks-completed")
+  @transient lazy private val sparkTasksFailed = FilodbMetrics.counter("spark-tasks-failed")
+  @transient lazy private val numPartKeysUnknownSchema = FilodbMetrics.counter("num-partkeys-unknown-schema")
+  @transient lazy private val numPartKeysNoDownsampleSchema = FilodbMetrics.counter("num-partkeys-no-downsample")
+  @transient lazy private val numPartKeysMigrated = FilodbMetrics.counter("num-partkeys-migrated")
+  @transient lazy private val numPartKeysBlocked = FilodbMetrics.counter("num-partkeys-blocked")
+  @transient lazy val perShardIndexMigrationLatency = FilodbMetrics.timeHistogram("per-shard-index-migration-latency",
+                                                                                  TimeUnit.MILLISECONDS)
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
@@ -60,7 +61,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
-    sparkTasksStarted.increment
+    sparkTasksStarted.increment()
     val rawDataSource = rawCassandraColStore
     @volatile var count = 0
     try {
@@ -86,7 +87,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
         s"shard=$shard fromHour=$fromHour toHourExcl=$toHourExcl fullIndexMigration=$fullIndexMigration", e)
-      sparkTasksFailed.increment
+      sparkTasksFailed.increment()
       throw e
     }
 
