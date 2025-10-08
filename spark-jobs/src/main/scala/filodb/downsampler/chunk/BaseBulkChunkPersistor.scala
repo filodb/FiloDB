@@ -59,10 +59,12 @@ class BaseBulkChunkPersistor extends ChunkPersistor {
           .save()
     }
 
-    private def getWriterOptions(batchDownsampler: BatchDownsampler, ttl: Int ): Map[String, String] = {
+    protected def getWriterOptions(batchDownsampler: BatchDownsampler, ttl: Int ): Map[String, String] = {
         val emptyMap = Map[String, String]()
         emptyMap
     }
 
-    override def init(sparkConf: SparkConf): Unit = {}
+    override def init(sparkConf: SparkConf): Unit = {
+
+    }
 }

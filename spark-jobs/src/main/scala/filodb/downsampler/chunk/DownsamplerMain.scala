@@ -405,8 +405,6 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     val chunkIdEnd = filodb.core.store.chunkID(userTimeEndExclusive, 0)
 
     val rawDataDF = spark.read
-      //.format("com.apple.pie.sbr.sparksql.CassandraDataSource")
-      //.format("org.apache.spark.sql.cassandra") //enable to test with spark connector
       .format(format)
       .option("env", sys.env.getOrElse("SBR_ENV", "if-prod"))
       .option("app", cassandraConfig.getString("application"))
