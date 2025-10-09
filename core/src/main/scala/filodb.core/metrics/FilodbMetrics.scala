@@ -7,7 +7,7 @@ import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.opentelemetry.api.OpenTelemetry
-import io.opentelemetry.api.common.{AttributeKey, Attributes}
+import io.opentelemetry.api.common.{AttributeKey, Attributes, AttributesBuilder}
 import io.opentelemetry.api.metrics._
 import io.opentelemetry.exporter.logging.otlp.OtlpJsonLoggingMetricExporter
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter
@@ -64,19 +64,18 @@ object OTelMetricsConfig {
  * Wrapper for OpenTelemetry instruments with additional key-value pairs
  */
 sealed trait MetricsInstrument {
-  def baseAttributes: Attributes
+  def baseAttributesBuilder: AttributesBuilder
   def withAttributes(additionalAttributes: Map[String, String]): Attributes = {
-    val builder = baseAttributes.toBuilder
     additionalAttributes.foreach { case (key, value) =>
-      builder.put(AttributeKey.stringKey(key), value)
+      baseAttributesBuilder.put(AttributeKey.stringKey(key), value)
     }
-    builder.build()
+    baseAttributesBuilder.build()
   }
 }
 
 case class MetricsCounter(otelCounter: Option[LongCounter],
                           kamonCounter: Option[kamon.metric.Counter],
-                          baseAttributes: Attributes) extends MetricsInstrument {
+                          baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
@@ -90,7 +89,7 @@ case class MetricsCounter(otelCounter: Option[LongCounter],
 
 case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
                                 kamonCounter: Option[kamon.metric.Gauge],
-                                baseAttributes: Attributes) extends MetricsInstrument {
+                                baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
@@ -104,7 +103,7 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
 
 case class MetricsGauge(otelGauge: Option[DoubleGauge],
                         kamonGauge: Option[kamon.metric.Gauge],
-                        baseAttributes: Attributes) extends MetricsInstrument {
+                        baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     otelGauge.foreach(_.set(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
@@ -119,7 +118,7 @@ case class MetricsGauge(otelGauge: Option[DoubleGauge],
 case class MetricsHistogram(otelHistogram: Option[DoubleHistogram],
                             kamonHistogram: Option[kamon.metric.Histogram],
                             timeUnit: Option[TimeUnit],
-                            baseAttributes: Attributes) extends MetricsInstrument {
+                            baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def record(value: Long, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     val valueInSeconds = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
@@ -151,7 +150,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     OpenTelemetry.noop()
   }
 
-  private val instrumentCache = new ConcurrentHashMap[String, MetricsInstrument]()
+  private val instrumentCache = new ConcurrentHashMap[(String, Map[String, String]), MetricsInstrument]()
 
   lazy private val meter: Meter = openTelemetry.getMeter("filodb")
 
@@ -244,7 +243,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
               isBytes: Boolean,
               timeUnit: Option[TimeUnit],
               baseAttributes: Map[String, String]): MetricsCounter = {
-    val cacheKey = s"counter:$name"
+    val cacheKey = (s"counter:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
       val otelCounter = if (!otelEnabled) None else {
@@ -260,7 +259,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
           Some(Kamon.counter(name).withTags(TagSet.from(baseAttributes)))
       }
 
-      val attributes = createAttributes(baseAttributes)
+      val attributes = createAttributesBuilder(baseAttributes)
       MetricsCounter(otelCounter, kamonCounter, attributes)
     }).asInstanceOf[MetricsCounter]
   }
@@ -276,7 +275,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   def upDownCounter(name: String,
                     isBytes: Boolean,
                     baseAttributes: Map[String, String]): MetricsUpDownCounter = {
-    val cacheKey = s"upDownCounter:$name"
+    val cacheKey = (s"upDownCounter:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
       val otelCounter = if (!otelEnabled) None else {
@@ -292,7 +291,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
           Some(Kamon.gauge(name).withTags(TagSet.from(baseAttributes)))
       }
 
-      val attributes = createAttributes(baseAttributes)
+      val attributes = createAttributesBuilder(baseAttributes)
       MetricsUpDownCounter(otelCounter, kamonCounter, attributes)
     }).asInstanceOf[MetricsUpDownCounter]
   }
@@ -309,7 +308,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
             isBytes: Boolean,
             timeUnit: Option[TimeUnit],
             baseAttributes: Map[String, String]): MetricsGauge = {
-    val cacheKey = s"gauge:$name"
+    val cacheKey = (s"gauge:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
       val otelGauge = if (!otelEnabled) None else {
@@ -325,7 +324,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
           Some(Kamon.gauge(name).withTags(TagSet.from(baseAttributes)))
       }
 
-      val attributes = createAttributes(baseAttributes)
+      val attributes = createAttributesBuilder(baseAttributes)
       MetricsGauge(otelGauge, kamonGauge, attributes)
     }).asInstanceOf[MetricsGauge]
   }
@@ -342,7 +341,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   def histogram(name: String,
                 timeUnit: Option[TimeUnit],
                 baseAttributes: Map[String, String]): MetricsHistogram = {
-    val cacheKey = s"histogram:$name"
+    val cacheKey = (s"histogram:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
       val otelHistogram = if (!otelEnabled) None else {
@@ -369,7 +368,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         Some(k)
       }
 
-      val attributes = createAttributes(baseAttributes)
+      val attributes = createAttributesBuilder(baseAttributes)
       MetricsHistogram(otelHistogram, kamonHistogram, timeUnit, attributes)
     }).asInstanceOf[MetricsHistogram]
   }
@@ -390,12 +389,12 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     } else nameWithUnit
   }
 
-  private def createAttributes(attributeMap: Map[String, String]): Attributes = {
+  private def createAttributesBuilder(attributeMap: Map[String, String]): AttributesBuilder = {
     val builder = Attributes.builder()
     attributeMap.foreach { case (key, value) =>
       builder.put(AttributeKey.stringKey(key), value)
     }
-    builder.build()
+    builder
   }
 
   /**
