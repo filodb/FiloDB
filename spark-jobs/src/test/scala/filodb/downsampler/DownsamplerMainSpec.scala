@@ -2582,7 +2582,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     )
 
     // Adds all recorded values to a list (for later validation).
-    class MockHistogram extends MetricsHistogram(None, None, None, Attributes.empty()) {
+    class MockHistogram extends MetricsHistogram(None, None, None, Attributes.builder()) {
       val values = new mutable.ArrayBuffer[Long]()
       override def record(value: Long, additionalAttributes: Map[String, String] = Map.empty) = {
         values.synchronized {
