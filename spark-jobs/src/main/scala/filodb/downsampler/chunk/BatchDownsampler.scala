@@ -246,14 +246,15 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     */
   // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
-                             readablePart: ReadablePartition,
+                             readablePart: PagedReadablePartition,
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                              dsRecordBuilder: RecordBuilder,
                              shouldTrace: Boolean) = {
-
     val rawSchemaId = RecordSchema.schemaID(readablePart.partKeyBytes, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
-    if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
+    if (rawPartSchema == Schemas.UnknownSchema) {
+      throw UnknownSchemaQueryErr(rawSchemaId)
+    }
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${readablePart.stringPartition}")
@@ -286,9 +287,6 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         downsampledParts.foreach { case (res, dsPartition) =>
           dsPartition.switchBuffers(offHeapMem.blockMemFactory, true)
           val newIt = downsampledChunksToPersist(res) ++ dsPartition.makeFlushChunks(offHeapMem.blockMemFactory)
-          if (newIt.isEmpty) {
-            DownsamplerContext.dsLogger.debug("empty shit")
-          }
           downsampledChunksToPersist(res) = newIt
         }
         downsampleSinglePartLatency.record(System.currentTimeMillis() - downsamplePartStart)
