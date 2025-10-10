@@ -381,6 +381,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val minSlidingIt3 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(0.0, rangeParams))), windowSize, step)
     val result3 = minSlidingIt3.map(_.getDouble(1)).toBuffer
     minSlidingIt3.close()
+
+    println(s"expected: $lowerAnomalies")
+    println(s"result: $result3")
     result3.zip(lowerAnomalies).foreach { case (r, a) =>
       if (a.isNaN) r.isNaN shouldEqual true
       else r shouldEqual a
