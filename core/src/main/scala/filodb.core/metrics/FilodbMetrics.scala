@@ -243,6 +243,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
               isBytes: Boolean,
               timeUnit: Option[TimeUnit],
               baseAttributes: Map[String, String]): MetricsCounter = {
+    require(!isBytes || timeUnit.isEmpty, "isBytes and timeUnit cannot both be set")
     val cacheKey = (s"counter:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
@@ -255,8 +256,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         // dont normalize name for kamon since it happens at publish time today
         if (isBytes)
           Some(Kamon.counter(name, MeasurementUnit.information.bytes).withTags(TagSet.from(baseAttributes)))
-        else
-          Some(Kamon.counter(name).withTags(TagSet.from(baseAttributes)))
+        else {
+          val mu = timeUnit.map(toKamonTimeUnit)
+          val k = mu match {
+            case Some(unit) => Kamon.counter(name, unit).withTags(TagSet.from(baseAttributes))
+            case None => Kamon.counter(name).withTags(TagSet.from(baseAttributes))
+          }
+          Some(k)
+        }
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
@@ -308,6 +315,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
             isBytes: Boolean,
             timeUnit: Option[TimeUnit],
             baseAttributes: Map[String, String]): MetricsGauge = {
+    require(!isBytes || timeUnit.isEmpty, "isBytes and timeUnit cannot both be set")
     val cacheKey = (s"gauge:$name", baseAttributes)
     instrumentCache.getOrElseUpdate(cacheKey, { _ =>
 
@@ -320,8 +328,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         // dont normalize name for kamon since it happens at publish time today
         if (isBytes)
           Some(Kamon.gauge(name, MeasurementUnit.information.bytes).withTags(TagSet.from(baseAttributes)))
-        else
-          Some(Kamon.gauge(name).withTags(TagSet.from(baseAttributes)))
+        else {
+          val mu = timeUnit.map(toKamonTimeUnit)
+          val k = mu match {
+            case Some(unit) => Kamon.gauge(name, unit).withTags(TagSet.from(baseAttributes))
+            case None => Kamon.gauge(name).withTags(TagSet.from(baseAttributes))
+          }
+          Some(k)
+        }
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
@@ -353,13 +367,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       }
 
       val kamonHistogram = if (!kamonEnabled) None else {
-        val mu = timeUnit.map {
-          case TimeUnit.MILLISECONDS => MeasurementUnit.time.milliseconds
-          case TimeUnit.SECONDS => MeasurementUnit.time.seconds
-          case TimeUnit.NANOSECONDS => MeasurementUnit.time.nanoseconds
-          case TimeUnit.MICROSECONDS => MeasurementUnit.time.microseconds
-          case _ => throw new IllegalArgumentException(s"Unsupported time unit: $timeUnit")
-        }
+        val mu = timeUnit.map(toKamonTimeUnit)
         // dont normalize name for kamon since it happens at publish time today
         val k = mu match {
           case Some(unit) => Kamon.histogram(name, unit).withTags(TagSet.from(baseAttributes))
@@ -371,6 +379,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       val attributes = createAttributesBuilder(baseAttributes)
       MetricsHistogram(otelHistogram, kamonHistogram, timeUnit, attributes)
     }).asInstanceOf[MetricsHistogram]
+  }
+
+  private def toKamonTimeUnit(timeUnit: TimeUnit): MeasurementUnit = timeUnit match {
+    case TimeUnit.NANOSECONDS => MeasurementUnit.time.nanoseconds
+    case TimeUnit.MICROSECONDS => MeasurementUnit.time.microseconds
+    case TimeUnit.MILLISECONDS => MeasurementUnit.time.milliseconds
+    case TimeUnit.SECONDS => MeasurementUnit.time.seconds
+    case _ => throw new IllegalArgumentException(s"Unsupported time unit: $timeUnit")
   }
 
   private def normalizeMetricName(name: String,
