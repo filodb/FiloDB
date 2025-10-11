@@ -2,7 +2,7 @@ package filodb.downsampler.chunk
 
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.{ListBuffer, Map => MMap}
+import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -120,39 +120,10 @@ class BatchDownsampler(val settings: DownsamplerSettings,
   @transient lazy private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
   /**
-   * Downsamples this ReadablePartition and returns it as a List of Spark Rows
-   * @param part
-   * @return
-   */
-  def downsampleReadablePartition(part: PagedReadablePartition) : ListBuffer[Row] = {
-    val offHeapMem = new OffHeapMemory(
-      rawSchemas.flatMap(_.downsample),
-      kamonTags, maxMetaSize, settings.downsampleStoreConfig
-    )
-    val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
-    val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
-    settings.downsampleResolutions.foreach { res =>
-      downsampledChunksToPersist(res) = Iterator.empty
-    }
-    try {
-      downsampleReadablePartition(offHeapMem, part, downsampledChunksToPersist, dsRecordBuilder)
-      val chunksToPersist : ListBuffer[Row] = getDownsampledChunksAsList(downsampledChunksToPersist)
-      chunksToPersist
-    } catch {
-      case e: Exception =>
-        numBatchesFailed.increment()
-        throw e // will be logged by spark
-    } finally {
-      offHeapMem.free() // free offheap mem
-    }
-  }
-  /**
-    * Downsample batch of raw partitions,
-    * If use-chunks-persistor is set to true, return downsampled chunks represented by
-    * the spark row, otherwise return empty list but persist the chunks in C*
+    * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   // scalastyle:off method.length
-  def downsampleBatch(readablePartsBatch: Seq[PagedReadablePartition]): ListBuffer[Row] = {
+  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition]): ListBuffer[Row] = {
 
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${readablePartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
@@ -164,17 +135,38 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
     }
+    val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
+    val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
     val offHeapMem = new OffHeapMemory(rawSchemas.flatMap(_.downsample),
       kamonTags, maxMetaSize, settings.downsampleStoreConfig)
     var numDsChunks = 0
     var chunksToPersist = ListBuffer.empty[Row]
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
     try {
-      readablePartsBatch.foreach { part : PagedReadablePartition =>
-        // downsampledChunksToPersist will collect the downsampled ChunkSet's
-        // these chunks will be residing on the off heap memory, hence, after
-        // these chunks are consumed, we need to free the memory
-        downsampleReadablePartition(offHeapMem, part, downsampledChunksToPersist, dsRecordBuilder)
+      numPartitionsEncountered.increment(readablePartsBatch.length)
+      readablePartsBatch.foreach { part =>
+        val rawSchemaId = RecordSchema.schemaID(part.partKeyBytes, UnsafeUtils.arayOffset)
+        val schema = schemas(rawSchemaId)
+        if (schema != Schemas.UnknownSchema) {
+          val pkPairs = schema.partKeySchema.toStringPairs(part.partKeyBytes, UnsafeUtils.arayOffset)
+          if (settings.isEligibleForDownsample(pkPairs)) {
+            try {
+              val shouldTrace = settings.shouldTrace(pkPairs)
+              downsamplePart(offHeapMem, part, pagedPartsToFree, downsampledPartsToFree,
+                             downsampledChunksToPersist, dsRecordBuilder, shouldTrace)
+              numPartitionsCompleted.increment()
+            } catch { case e: Exception =>
+              DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
+              numPartitionsFailed.increment()
+            }
+          } else {
+            DownsamplerContext.dsLogger.debug(s"Skipping blocked partition $pkPairs")
+            numPartitionsBlocked.increment()
+          }
+        } else {
+          numPartitionsSkipped.increment()
+          DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
+        }
       }
       if (settings.shouldUseChunksPersistor) {
         chunksToPersist = getDownsampledChunksAsList(downsampledChunksToPersist)
@@ -187,6 +179,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     } finally {
       downsampleBatchLatency.record(System.currentTimeMillis() - startedAt)
       offHeapMem.free()   // free offheap mem
+      downsampledPartsToFree.clear()
     }
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
@@ -196,41 +189,6 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     chunksToPersist
   }
 
-  def downsampleReadablePartition(
-    offHeapMem: OffHeapMemory,
-    readablePartition: PagedReadablePartition,
-    downsampledChunksToPersist : MMap[FiniteDuration, Iterator[ChunkSet]],
-    dsRecordBuilder: RecordBuilder
-  ): Unit = {
-    numPartitionsEncountered.increment()
-
-    val schema = readablePartition.schema
-    if (schema != Schemas.UnknownSchema) {
-      val pkPairs = schema.partKeySchema.toStringPairs(readablePartition.partKeyBytes, UnsafeUtils.arayOffset)
-      if (settings.isEligibleForDownsample(pkPairs)) {
-        try {
-          val shouldTrace = settings.shouldTrace(pkPairs)
-          downsamplePart(
-            offHeapMem, readablePartition,
-            downsampledChunksToPersist, dsRecordBuilder, shouldTrace
-          )
-          numPartitionsCompleted.increment()
-        } catch {
-          case e: Exception =>
-            DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
-            numPartitionsFailed.increment()
-        }
-      } else {
-        DownsamplerContext.dsLogger.debug(s"Skipping blocked partition $pkPairs")
-        numPartitionsBlocked.increment()
-      }
-    } else {
-      numPartitionsSkipped.increment()
-      val rawSchemaId : Int = RecordSchema.schemaID(readablePartition.partKeyBytes, UnsafeUtils.arayOffset)
-      DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
-    }
-
-  }
   /**
     * Creates new downsample partitions per per the resolutions
     * * specified by `bufferPools`.
@@ -239,22 +197,22 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     *
     * NOTE THAT THE OFF HEAP NEED TO BE FREED/SHUT DOWN BY THE CALLER ONCE CHUNKS ARE PERSISTED
     *
+    * @param pagedPartsToFree raw partitions that need to be freed are added to this mutable list
     * @param downsampledPartsToFree downsample partitions to be freed are added to this mutable list
-   *                               TODO don't see any point in this list, the memory is freed by calling
-   *                               offHeapMem.free
     * @param downsampledChunksToPersist downsample chunks to persist are added to this mutable map
     */
   // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
-                             readablePart: PagedReadablePartition,
+                             readablePart: ReadablePartition,
+                             pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
+                             downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                              dsRecordBuilder: RecordBuilder,
                              shouldTrace: Boolean) = {
+
     val rawSchemaId = RecordSchema.schemaID(readablePart.partKeyBytes, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
-    if (rawPartSchema == Schemas.UnknownSchema) {
-      throw UnknownSchemaQueryErr(rawSchemaId)
-    }
+    if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${readablePart.stringPartition}")
@@ -269,8 +227,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         // update schema of the partition key to downsample schema
         RecordBuilder.updateSchema(UnsafeUtils.ZeroPointer, partKeyPtr, downsampleSchema)
 
-        val downsampledParts : Map[FiniteDuration, TimeSeriesPartition] =
-          settings.downsampleResolutions.zip(settings.downsampledDatasetRefs).map {
+        val downsampledParts = settings.downsampleResolutions.zip(settings.downsampledDatasetRefs).map {
           case (res, ref) =>
             val part = if (shouldTrace)
               new TracingTimeSeriesPartition(0, ref, downsampleSchema, partKeyPtr, shardInfo, 1)
@@ -280,9 +237,10 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         }.toMap
 
         val downsamplePartStart = System.currentTimeMillis()
-        // here we return the data through downsampledParts
         downsampleChunks(offHeapMem, readablePart, downsamplers, periodMarker,
                          downsampledParts, dsRecordBuilder, shouldTrace)
+
+        downsampledPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
           dsPartition.switchBuffers(offHeapMem.blockMemFactory, true)

@@ -449,7 +449,8 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     val downsampledRowsRdd: RDD[ListBuffer[Row]] = pagedReadablePartitionsRdd.map { part : PagedReadablePartition =>
         // Here we do NOT save any data to C*
-        val rows: ListBuffer[Row] = batchDownsampler.downsampleReadablePartition(part)
+
+        val rows: ListBuffer[Row] = batchDownsampler.downsampleBatch(Seq(part))
         rows
       }
 
