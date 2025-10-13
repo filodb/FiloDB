@@ -12,4 +12,5 @@ object Query extends StrictLogging {
   val qLogger: Logger = logger
   // TODO refine with dataset tag
   protected[query] val droppedSamples = Kamon.counter("query-dropped-samples").withoutTags
+  val timeOutCounter = Kamon.counter("filodb-ask-timeout")
 }
