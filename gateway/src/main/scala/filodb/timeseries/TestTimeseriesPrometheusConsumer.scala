@@ -23,12 +23,12 @@ import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.serialization.{Deserializer, LongDeserializer}
 import org.xerial.snappy.Snappy
 
-import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
-import filodb.core.metadata.Schemas
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordContainer, RecordSchema}
+import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Schemas.global
 import filodb.gateway.remote.remote_storage.{LabelPair, Sample, TimeSeries, WriteRequest}
 import filodb.kafka.RecordContainerDeserializer
-import filodb.memory.format.RowReader
+import filodb.memory.BinaryRegionConsumer
 
 object TestTimeseriesPrometheusConsumer extends StrictLogging {
 
@@ -100,32 +100,82 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       }.toSeq
   }
 
-  // TODO: add support for additional metric types in addition to counter and gauge
-  private def recordContainerToPrometheusMetric(container: RecordContainer): Seq[PrometheusMetric] = {
-    val firstRecordWordOffset = container.offset + 16
-    val schemaId = RecordSchema.schemaID(container.base, firstRecordWordOffset)
-    val schemaName = Schemas.global.schemaName(schemaId)
-    val schema = global.schemas(schemaName)
+  private def processHistogramRecord(reader: BinaryRecordRowReader, schema: Schema,
+                                     metricNameIdx: Int, tagsIdx: Int, tsColIdx: Int): Seq[PrometheusMetric] = {
+    val sumColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "sum")
+    val countColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "count")
+    val histColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "h")
 
-    val iterator = container.iterate(schema.ingestionSchema)
-    val valueColIdx = schema match {
-      case Schemas.gauge => schema.ingestionSchema.columns.indexWhere(_.name == "value")
-      case Schemas.promCounter => schema.ingestionSchema.columns.indexWhere(_.name == "count")
-      case _ =>
-        throw new IllegalArgumentException(s"Unsupported schema type: $schema")
+    if (sumColIdx < 0 || countColIdx < 0 || histColIdx < 0) {
+      logger.error(s"Histogram schema ${schema.name} is missing one of sum, count, or h columns")
+      Seq.empty
+    } else {
+      val timestamp = reader.getLong(tsColIdx)
+      val baseMetricName = reader.getString(metricNameIdx)
+      val tagsMap = reader.getAny(tagsIdx).asInstanceOf[Map[String, String]]
+
+      val sumValue = reader.getDouble(sumColIdx)
+      val countValue = reader.getDouble(countColIdx)
+      val hist = reader.getHistogram(histColIdx)
+
+      val sumMetric = PrometheusMetric(s"${baseMetricName}_sum", tagsMap, sumValue, timestamp)
+      val countMetric = PrometheusMetric(s"${baseMetricName}_count", tagsMap, countValue, timestamp)
+
+      val bucketMetrics = (0 until hist.numBuckets).map { i =>
+        val le = if (hist.bucketTop(i).isPosInfinity) "+Inf" else hist.bucketTop(i).toString
+        val bucketTags = tagsMap + ("le" -> le)
+        PrometheusMetric(s"${baseMetricName}_bucket", bucketTags, hist.bucketValue(i), timestamp)
+      }
+      Seq(sumMetric, countMetric) ++ bucketMetrics
     }
+  }
 
-      schema.ingestionSchema.columns.indexWhere(_.name == "value")
+  private def processRecord(reader: BinaryRecordRowReader, schema: Schema): Seq[PrometheusMetric] = {
     val metricNameIdx = schema.ingestionSchema.columns.indexWhere(_.name == "_metric_")
     val tagsIdx = schema.ingestionSchema.columns.indexWhere(_.name == "tags")
     val tsColIdx = schema.ingestionSchema.columns.indexWhere(_.name == "timestamp")
-    iterator.map { row: RowReader =>
-      val timestamp = row.getLong(tsColIdx)
-      val value = row.getDouble(valueColIdx)
-      val metricName = row.getString(metricNameIdx)
-      val tagsMap = row.getAny(tagsIdx).asInstanceOf[Map[String, String]]
-      PrometheusMetric(metricName, tagsMap, value, timestamp)
-    }.toSeq
+
+    schema match {
+      case s if s.name.contains("histogram") => // Generic check for any histogram schema
+        processHistogramRecord(reader, schema, metricNameIdx, tagsIdx, tsColIdx)
+
+      case Schemas.gauge | Schemas.promCounter =>
+        val valueColName = if (schema == Schemas.gauge) "value" else "count"
+        val valueColIdx = schema.ingestionSchema.columns.indexWhere(_.name == valueColName)
+        if (valueColIdx < 0) {
+          logger.error(s"Schema ${schema.name} is missing required value column '$valueColName'")
+          Seq.empty
+        } else {
+          val timestamp = reader.getLong(tsColIdx)
+          val value = reader.getDouble(valueColIdx)
+          val metricName = reader.getString(metricNameIdx)
+          val tagsMap = reader.getAny(tagsIdx).asInstanceOf[Map[String, String]]
+          Seq(PrometheusMetric(metricName, tagsMap, value, timestamp))
+        }
+
+      case _ =>
+        logger.warn(s"Unsupported schema type: ${schema.name}. Skipping record.")
+        Seq.empty
+    }
+  }
+
+  private def recordContainerToPrometheusMetric(container: RecordContainer): Seq[PrometheusMetric] = {
+    val metrics = scala.collection.mutable.Buffer[PrometheusMetric]()
+
+    container.consumeRecords(new BinaryRegionConsumer {
+      def onNext(base: Any, offset: Long): Unit = {
+        val schemaId = RecordSchema.schemaID(base, offset)
+        val schemaName = Schemas.global.schemaName(schemaId)
+        val schema = global.schemas(schemaName)
+
+        val reader = new BinaryRecordRowReader(schema.ingestionSchema, base)
+        reader.recordOffset = offset
+
+        metrics ++= processRecord(reader, schema)
+      }
+    })
+
+    metrics
   }
 
   private def pushToPrometheus(batch: Seq[TimeSeries]): Future[HttpResponse] = {
