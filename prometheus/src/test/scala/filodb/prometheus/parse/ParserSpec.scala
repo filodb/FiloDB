@@ -861,7 +861,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val qts: Long = 1524855988L
     val step = 1000
 
-    // Only test with Antlr parser
     queryToLpString.foreach { case (q, e) =>
       info(s"Parsing with Antlr Parser: $q")
       val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
