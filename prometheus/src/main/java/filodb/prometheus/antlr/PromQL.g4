@@ -38,8 +38,8 @@ orOp:        OR;
 vector
     : function
     | aggregation
-    | instantOrRangeSelector
     | literal
+    | instantOrRangeSelector
     | parens
     ;
 
@@ -100,8 +100,6 @@ metricKeyword
     | OFFSET
     | LIMIT
     | AGGREGATION_OP
-    | INF
-    | NAN
     ;
 
 labelName:     labelKeyword | IDENTIFIER;
@@ -142,7 +140,6 @@ STRING
     | '"' (~('"' | '\\') | '\\' .)* '"'
     ;
 
-// Special numeric literals - must be defined before IDENTIFIER to take precedence
 INF: [+-]? I N F;
 NAN: N A N;
 

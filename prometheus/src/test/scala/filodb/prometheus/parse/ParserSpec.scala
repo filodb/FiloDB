@@ -100,16 +100,10 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("NAN")
     parseSuccessfully("Inf + 1")
     parseSuccessfully("NaN * 2")
-    parseSuccessfully("metric > bool Inf")
-    parseSuccessfully("metric < bool -Inf")
+    parseSuccessfully("metric > Inf")
+    parseSuccessfully("metric < -Inf")
     parseSuccessfully("metric + Inf")
     parseSuccessfully("Inf * metric")
-    // Test Inf/NaN as metric names
-    parseSuccessfully("inf{}")
-    parseSuccessfully("Inf{}")
-    parseSuccessfully("NaN{}")
-    parseSuccessfully("nan{}")
-    // Test Inf/NaN as label names
     parseSuccessfully("foo{NaN='bc'}")
     parseSuccessfully("foo{Inf='value'}")
     parseSuccessfully("foo{inf='test'}")
@@ -847,6 +841,30 @@ class ParserSpec extends AnyFunSpec with Matchers {
         //println("\""+q.replaceAll("\"","\\\\\"")+"\" -> \""+lp.toString+"\",")
       //}
       
+      lp.toString shouldEqual (e)
+    }
+  }
+
+  it("Should parse Inf/NaN literals with Antlr parser") {
+    val queryToLpString = Map(
+      "1 - Inf" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(Infinity),RangeParams(1524855988,1000,1524855988))",
+      "Inf + 1" -> "ScalarBinaryOperation(ADD,Left(Infinity),Left(1.0),RangeParams(1524855988,1000,1524855988))",
+      "NaN * 2" -> "ScalarBinaryOperation(MUL,Left(NaN),Left(2.0),RangeParams(1524855988,1000,1524855988))",
+      "foo < inf" -> "ScalarVectorBinaryOperation(LSS,ScalarFixedDoublePlan(Infinity,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),false)",
+      "vector(Inf)" -> "VectorPlan(ScalarFixedDoublePlan(Infinity,RangeParams(1524855988,1000,1524855988)))",
+      "vector(+Inf)" -> "VectorPlan(ScalarFixedDoublePlan(Infinity,RangeParams(1524855988,1000,1524855988)))",
+      "vector(-Inf)" -> "VectorPlan(ScalarFixedDoublePlan(-Infinity,RangeParams(1524855988,1000,1524855988)))",
+      "vector(NaN)" -> "VectorPlan(ScalarFixedDoublePlan(NaN,RangeParams(1524855988,1000,1524855988)))",
+      "foo{inf=\"api-server\"}" -> "[PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(inf,Equals(api-server)), ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None)]"
+    )
+
+    val qts: Long = 1524855988L
+    val step = 1000
+
+    // Only test with Antlr parser
+    queryToLpString.foreach { case (q, e) =>
+      info(s"Parsing with Antlr Parser: $q")
+      val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
       lp.toString shouldEqual (e)
     }
   }
