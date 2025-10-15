@@ -855,7 +855,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "vector(+Inf)" -> "VectorPlan(ScalarFixedDoublePlan(Infinity,RangeParams(1524855988,1000,1524855988)))",
       "vector(-Inf)" -> "VectorPlan(ScalarFixedDoublePlan(-Infinity,RangeParams(1524855988,1000,1524855988)))",
       "vector(NaN)" -> "VectorPlan(ScalarFixedDoublePlan(NaN,RangeParams(1524855988,1000,1524855988)))",
-      "foo{inf=\"api-server\"}" -> "[PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(inf,Equals(api-server)), ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None)]"
+      "foo{inf=\"api-server\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(inf,Equals(api-server)), ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None)"
     )
 
     val qts: Long = 1524855988L
