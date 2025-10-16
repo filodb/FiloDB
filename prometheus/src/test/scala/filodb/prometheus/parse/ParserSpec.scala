@@ -157,6 +157,10 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("(1 + heap_size{a=\"b\"}))")
     parseError("(1 + heap_size{a=\"b\"}) + (5")
     parseError("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"}")
+    parseError("inf{}")
+    parseError("+INF{}")
+    parseError("NaN{}")
+    parseError("Inf{job=\"api-server\"}")
 
     parseError("(")
     // NOTE: Uncomment when we move to antlr
@@ -847,6 +851,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   it("Should parse Inf/NaN literals with Antlr parser") {
     val queryToLpString = Map(
+      "inf1{}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(inf1))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None)",
       "1 - Inf" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(Infinity),RangeParams(1524855988,1000,1524855988))",
       "Inf + 1" -> "ScalarBinaryOperation(ADD,Left(Infinity),Left(1.0),RangeParams(1524855988,1000,1524855988))",
       "NaN * 2" -> "ScalarBinaryOperation(MUL,Left(NaN),Left(2.0),RangeParams(1524855988,1000,1524855988))",
