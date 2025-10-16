@@ -147,7 +147,7 @@ object Dependencies {
     "com.google.protobuf"    % "protobuf-java"             % "2.5.0",
     "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1",
     "com.softwaremill.quicklens" %% "quicklens"            % "1.4.12",
-    "org.antlr" % "antlr4-runtime" % "4.13.2"
+    "org.antlr" % "antlr4-runtime" % "4.9.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
