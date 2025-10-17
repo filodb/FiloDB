@@ -4,6 +4,8 @@ import java.nio.file.{Files, Paths}
 import java.time.Duration
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
+import scala.collection.mutable.ListBuffer
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.opentelemetry.api.OpenTelemetry
@@ -22,6 +24,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import net.ceedubs.ficus.Ficus._
+import oshi.SystemInfo
 
 import filodb.core.GlobalConfig
 
@@ -228,7 +231,48 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     closeables ++= Threads.registerObservers(sdk).asScala
     closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
     closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    closeables ++= registerProcessMetrics()
     sdk
+  }
+
+  private def registerProcessMetrics() = {
+    val systemInfo = new SystemInfo
+    val osInfo = systemInfo.getOperatingSystem
+    val processInfo = osInfo.getProcess(osInfo.getProcessId)
+    val observables = new ListBuffer[AutoCloseable]()
+    observables.append(meter.gaugeBuilder("process_java_memory_bytes").ofLongs()
+                         .buildWithCallback((r: ObservableLongMeasurement) => {
+      processInfo.updateAttributes()
+      r.record(processInfo.getResidentSetSize, Attributes.builder().put("type", "rss").build())
+      r.record(processInfo.getVirtualSize, Attributes.builder().put("type", "vms").build())
+    }))
+
+    observables.append(meter.gaugeBuilder("process_java_cpu_time_total_seconds")
+      .buildWithCallback((r: ObservableDoubleMeasurement) => {
+      processInfo.updateAttributes()
+      r.record(processInfo.getUserTime.toDouble / 1000, Attributes.builder().put("type", "user").build())
+      r.record(processInfo.getKernelTime.toDouble / 1000, Attributes.builder().put("type", "system").build())
+    }))
+
+    observables.append(meter.gaugeBuilder("process_major_page_faults_total").ofLongs()
+      .buildWithCallback((r: ObservableLongMeasurement) => {
+        processInfo.updateAttributes()
+        r.record(processInfo.getMajorFaults, Attributes.empty())
+      }))
+
+    observables.append(meter.gaugeBuilder("process_minor_page_faults_total").ofLongs()
+      .buildWithCallback((r: ObservableLongMeasurement) => {
+        processInfo.updateAttributes()
+        r.record(processInfo.getMinorFaults, Attributes.empty())
+      }))
+
+    observables.append(meter.gaugeBuilder("process_context_switches_total").ofLongs()
+      .buildWithCallback((r: ObservableLongMeasurement) => {
+        processInfo.updateAttributes()
+        r.record(processInfo.getContextSwitches, Attributes.empty())
+      }))
+
+    observables
   }
 
   /**
