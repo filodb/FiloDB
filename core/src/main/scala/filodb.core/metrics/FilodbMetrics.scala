@@ -4,6 +4,9 @@ import java.nio.file.{Files, Paths}
 import java.time.Duration
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
+import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.DurationInt
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.opentelemetry.api.OpenTelemetry
@@ -21,7 +24,10 @@ import io.opentelemetry.sdk.resources.Resource
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
+import monix.execution.Scheduler
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
+import oshi.SystemInfo
 
 import filodb.core.GlobalConfig
 
@@ -142,6 +148,8 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   private val kamonEnabled = filodbMetricsConfig.as[Boolean]("kamon-enabled")
   private val closeables = scala.collection.mutable.ListBuffer.empty[AutoCloseable]
 
+  val otelConfig: OTelMetricsConfig = OTelMetricsConfig.fromConfig(filodbMetricsConfig.getConfig("otel"))
+
   // TODO for some reason, enabling this line fails DownsamplerMainSpec
   // Kamon.init() // intialize anyway until tracing is migrated to otel as well
   private val openTelemetry: OpenTelemetry = if (otelEnabled) {
@@ -156,8 +164,6 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
   // scalastyle:off method.length
   private def initializeOpenTelemetry(): OpenTelemetry = {
-
-    val otelConfig: OTelMetricsConfig = OTelMetricsConfig.fromConfig(filodbMetricsConfig.getConfig("otel"))
 
     // Create resource with configured attributes
     val resourceBuilder = Resource.getDefault().toBuilder
@@ -228,7 +234,73 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     closeables ++= Threads.registerObservers(sdk).asScala
     closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
     closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    closeables ++= registerProcessMetrics(sdk)
     sdk
+  }
+
+  private def registerProcessMetrics(sdk: OpenTelemetrySdk) = {
+    val systemInfo = new SystemInfo
+    val osInfo = systemInfo.getOperatingSystem
+    val processInfo = osInfo.getProcess(osInfo.getProcessId)
+
+    implicit val sch: Scheduler = monix.execution.Scheduler.global
+    val observables = new ListBuffer[AutoCloseable]()
+    val strMem = "process_memory_bytes"
+    val strCpu = "process_cpu_time_total_seconds"
+    val strMajorFaults = "process_major_page_faults_total"
+    val strMinorFaults = "process_minor_page_faults_total"
+    val strContextSwitches = "process_context_switches_total"
+
+    if (kamonEnabled) {
+      val memRss = Kamon.gauge(strMem).withTag("type", "rss")
+      val memVms = Kamon.gauge(strMem).withTag("type", "vms")
+      val cpuUserTime = Kamon.gauge(strMem, MeasurementUnit.time.milliseconds).withTag("type", "user")
+      val cpuSystemTime = Kamon.gauge(strMem, MeasurementUnit.time.milliseconds).withTag("type", "system")
+      val majorPageFaults = Kamon.gauge(strMajorFaults).withoutTags()
+      val minorPageFaults = Kamon.gauge(strMinorFaults).withoutTags()
+      val contextSwitches = Kamon.gauge(strContextSwitches).withoutTags()
+
+      val future = Observable.intervalWithFixedDelay(0.seconds, otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
+        processInfo.updateAttributes()
+        memRss.update(processInfo.getResidentSetSize)
+        memVms.update(processInfo.getVirtualSize)
+        cpuSystemTime.update(processInfo.getKernelTime.toDouble)
+        cpuUserTime.update(processInfo.getUserTime.toDouble)
+        majorPageFaults.update(processInfo.getMajorFaults.toDouble)
+        minorPageFaults.update(processInfo.getMinorFaults.toDouble)
+        contextSwitches.update(processInfo.getContextSwitches.toDouble)
+      }
+      observables.append(() => future.cancel())
+    }
+
+    if (otelEnabled) {
+      val meter = sdk.getMeter("filodb-process-metrics")
+      observables.append(meter.gaugeBuilder(strMem).ofLongs().buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getResidentSetSize, Attributes.builder().put("type", "rss").build())
+          r.record(processInfo.getVirtualSize, Attributes.builder().put("type", "vms").build())
+        }))
+      observables.append(meter.counterBuilder(strCpu).ofDoubles()
+        .buildWithCallback((r: ObservableDoubleMeasurement) => {
+          processInfo.updateAttributes()
+          // convert ms to seconds
+          r.record(processInfo.getUserTime.toDouble / 1000, Attributes.builder().put("type", "user").build())
+          r.record(processInfo.getKernelTime.toDouble / 1000, Attributes.builder().put("type", "system").build())
+        }))
+      observables.append(meter.counterBuilder(strMajorFaults).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getMajorFaults)
+        }))
+      observables.append(meter.counterBuilder(strMinorFaults).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getMinorFaults)
+        }))
+      observables.append(meter.counterBuilder(strContextSwitches).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getContextSwitches)
+        }))
+    }
+    observables
   }
 
   /**
