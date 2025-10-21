@@ -37,7 +37,7 @@ import filodb.core.GlobalConfig
 case class OTelMetricsConfig(exportIntervalSeconds: Int = 60,
                              resourceAttributes: Map[String, String],
                              otlpHeaders: Map[String, String],
-                             exporterType: String, // "otlp" or "log"
+                             exporterFactoryClassName: String, // Fully qualified class name of MetricExporterFactory
                              exponentialHistogram: Boolean,
                              customHistogramBucketsTime: List[Double], // used only if exponentialHistogram=false
                              customHistogramBuckets: List[Double], // used only if exponentialHistogram=false
@@ -46,14 +46,79 @@ case class OTelMetricsConfig(exportIntervalSeconds: Int = 60,
                              otlpClientCertPath: Option[String],
                              otlpClientKeyPath: Option[String])
 
-object OTelMetricsConfig {
-  def fromConfig(metricsConfig: Config): OTelMetricsConfig = {
+/**
+ * Factory interface for creating MetricExporter instances
+ */
+trait MetricExporterFactory {
+  /**
+   * Creates a MetricExporter instance
+   * @param config The OTelMetricsConfig to use for configuration
+   * @return A configured MetricExporter
+   */
+  def create(config: OTelMetricsConfig): MetricExporter
+}
 
+/**
+ * Factory for creating OtlpGrpcMetricExporter instances
+ */
+class OtlpGrpcMetricExporterFactory extends MetricExporterFactory {
+  override def create(config: OTelMetricsConfig): MetricExporter = {
+    val b = OtlpGrpcMetricExporter.builder()
+      .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
+      .setEndpoint(config.otlpEndpoint.getOrElse(
+        throw new IllegalArgumentException("otlp-endpoint must be configured when using OTLP exporter")))
+
+    if (config.otlpTrustedCertsPath.isDefined) {
+      b.setTrustedCertificates(Files.readAllBytes(Paths.get(config.otlpTrustedCertsPath.get)))
+    }
+    if (config.otlpClientKeyPath.isDefined && config.otlpClientCertPath.isDefined) {
+      b.setClientTls(Files.readAllBytes(Paths.get(config.otlpClientKeyPath.get)),
+        Files.readAllBytes(Paths.get(config.otlpClientCertPath.get)))
+    }
+    config.otlpHeaders.foreach { case (key, value) =>
+      b.addHeader(key, value)
+    }
+    b.build()
+  }
+}
+
+/**
+ * Factory for creating OtlpJsonLoggingMetricExporter instances
+ */
+class LogMetricExporterFactory extends MetricExporterFactory {
+  override def create(config: OTelMetricsConfig): MetricExporter = {
+    OtlpJsonLoggingMetricExporter.create(AggregationTemporality.DELTA)
+  }
+}
+
+object OTelMetricsConfig {
+
+  /**
+   * Creates a MetricExporterFactory instance using reflection
+   * @param className Fully qualified class name of the factory
+   * @return Instance of MetricExporterFactory
+   */
+  def instantiateExporterFactory(className: String): MetricExporterFactory = {
+    try {
+      val clazz = Class.forName(className)
+      clazz.getDeclaredConstructor().newInstance().asInstanceOf[MetricExporterFactory]
+    } catch {
+      case e: ClassNotFoundException =>
+        throw new IllegalArgumentException(s"Factory class not found: $className", e)
+      case e: ClassCastException =>
+        throw new IllegalArgumentException(
+          s"Class $className does not implement MetricExporterFactory trait", e)
+      case e: Exception =>
+        throw new IllegalArgumentException(s"Failed to instantiate factory: $className", e)
+    }
+  }
+
+  def fromConfig(metricsConfig: Config): OTelMetricsConfig = {
     OTelMetricsConfig(
       otlpEndpoint = metricsConfig.as[Option[String]]("otlp-endpoint"),
       exportIntervalSeconds = metricsConfig.as[Int]("export-interval-seconds"),
       resourceAttributes = metricsConfig.as[Map[String, String]]("resource-attributes"),
-      exporterType = metricsConfig.as[String]("exporter-type"),
+      exporterFactoryClassName = metricsConfig.as[String]("exporter-factory-class-name"),
       exponentialHistogram = metricsConfig.as[Boolean]("exponential-histogram"),
       customHistogramBucketsTime = metricsConfig.as[List[Double]]("custom-histogram-buckets-time").sorted,
       customHistogramBuckets = metricsConfig.as[List[Double]]("custom-histogram-buckets").sorted,
@@ -173,30 +238,10 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     }
     val resource = resourceBuilder.build()
 
-    // Create exporter based on configuration
-    val metricExporter: MetricExporter = otelConfig.exporterType.toLowerCase match {
-      case "log" =>
-        logger.info("Using log-based metrics exporter")
-        OtlpJsonLoggingMetricExporter.create(AggregationTemporality.DELTA)
-      case "otlp" =>
-        logger.info(s"Using OTLP metrics exporter with endpoint: ${otelConfig.otlpEndpoint}")
-        val b = OtlpGrpcMetricExporter.builder()
-          .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
-          .setEndpoint(otelConfig.otlpEndpoint.get)
-
-        if (otelConfig.otlpTrustedCertsPath.isDefined) {
-          b.setTrustedCertificates(Files.readAllBytes(Paths.get(otelConfig.otlpTrustedCertsPath.get)))
-        }
-        if (otelConfig.otlpClientKeyPath.isDefined && otelConfig.otlpClientCertPath.isDefined) {
-          b.setClientTls(Files.readAllBytes(Paths.get(otelConfig.otlpClientKeyPath.get)),
-                         Files.readAllBytes(Paths.get(otelConfig.otlpClientCertPath.get)))
-        }
-        otelConfig.otlpHeaders.foreach { case (key, value) =>
-          b.addHeader(key, value)
-        }
-        b.build()
-      case _ => throw new IllegalArgumentException(s"Unknown exporter type: ${otelConfig.exporterType}")
-    }
+    // Create exporter using the configured factory
+    logger.info(s"Using ${otelConfig.exporterFactoryClassName} metrics exporter")
+    val metricExporter: MetricExporter =
+        OTelMetricsConfig.instantiateExporterFactory(otelConfig.exporterFactoryClassName).create(otelConfig)
 
     // Create periodic metric reader with delta aggregation
     val metricReader = PeriodicMetricReader.builder(metricExporter)
