@@ -43,8 +43,10 @@ case class OTelMetricsConfig(exportIntervalSeconds: Int = 60,
                              customHistogramBuckets: List[Double], // used only if exponentialHistogram=false
                              otlpEndpoint: Option[String],
                              otlpTrustedCertsPath: Option[String],
+                             // one of client cert/key or p12 keystore must be provided for mTLS
                              otlpClientCertPath: Option[String],
-                             otlpClientKeyPath: Option[String])
+                             otlpClientKeyPath: Option[String],
+                             otlpClientP12KeystorePath: Option[String])
 
 /**
  * Factory interface for creating MetricExporter instances
@@ -68,12 +70,14 @@ class OtlpGrpcMetricExporterFactory extends MetricExporterFactory {
       .setEndpoint(config.otlpEndpoint.getOrElse(
         throw new IllegalArgumentException("otlp-endpoint must be configured when using OTLP exporter")))
 
-    if (config.otlpTrustedCertsPath.isDefined) {
+    if (config.otlpTrustedCertsPath.isDefined &&
+        config.otlpClientKeyPath.isDefined &&
+        config.otlpClientCertPath.isDefined) {
       b.setTrustedCertificates(Files.readAllBytes(Paths.get(config.otlpTrustedCertsPath.get)))
-    }
-    if (config.otlpClientKeyPath.isDefined && config.otlpClientCertPath.isDefined) {
       b.setClientTls(Files.readAllBytes(Paths.get(config.otlpClientKeyPath.get)),
         Files.readAllBytes(Paths.get(config.otlpClientCertPath.get)))
+    } else if (config.otlpTrustedCertsPath.isDefined && config.otlpClientP12KeystorePath.isDefined) {
+      // TODO support later
     }
     config.otlpHeaders.foreach { case (key, value) =>
       b.addHeader(key, value)
@@ -126,7 +130,9 @@ object OTelMetricsConfig {
       otlpHeaders = metricsConfig.as[Map[String, String]]("otlp-headers"),
       otlpTrustedCertsPath = metricsConfig.as[Option[String]]("otlp-trusted-certs-path"),
       otlpClientCertPath = metricsConfig.as[Option[String]]("otlp-client-cert-path"),
-      otlpClientKeyPath = metricsConfig.as[Option[String]]("otlp-client-key-path")
+      otlpClientKeyPath = metricsConfig.as[Option[String]]("otlp-client-key-path"),
+      otlpClientP12KeystorePath = metricsConfig.as[Option[String]]("otlp-client-p12-keystore-path")
+      // TODO add support for passwords if needed later
     )
   }
 }
