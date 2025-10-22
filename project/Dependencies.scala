@@ -25,7 +25,7 @@ object Dependencies {
   val otelVersion       = "1.54.1"
   val otelInstVersion   = "2.20.1-alpha"
   val monixKafkaVersion = "1.0.0-RC6"
-  val sparkVersion      = "2.4.8"
+  val sparkVersion      = "3.4.0"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
