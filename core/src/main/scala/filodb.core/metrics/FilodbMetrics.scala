@@ -150,11 +150,16 @@ sealed trait MetricsInstrument {
   }
 }
 
-case class MetricsCounter(otelCounter: Option[LongCounter],
+case class MetricsCounter(otelCounter: Option[DoubleCounter],
                           kamonCounter: Option[kamon.metric.Counter],
+                          timeUnit: Option[TimeUnit],
                           baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
+    val valueInSeconds = timeUnit match {
+      case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
+      case None => value
+    }
+    otelCounter.foreach(_.add(valueInSeconds, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
@@ -180,9 +185,14 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
 
 case class MetricsGauge(otelGauge: Option[DoubleGauge],
                         kamonGauge: Option[kamon.metric.Gauge],
+                        timeUnit: Option[TimeUnit],
                         baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    otelGauge.foreach(_.set(value, withAttributes(additionalAttributes)))
+    val valueInSeconds = timeUnit match {
+      case Some(unit) => unit.toNanos(value.toLong).toDouble / 1e9 // convert to seconds as double
+      case None => value
+    }
+    otelGauge.foreach(_.set(valueInSeconds, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
@@ -372,7 +382,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val otelCounter = if (!otelEnabled) None else {
         val n = normalizeMetricName(name, isBytes, isCounter = true, timeUnit)
-        Some(meter.counterBuilder(n).build())
+        Some(meter.counterBuilder(n).ofDoubles().build())
       }
 
       val kamonCounter = if (!kamonEnabled) None else {
@@ -390,7 +400,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
-      MetricsCounter(otelCounter, kamonCounter, attributes)
+      MetricsCounter(otelCounter, kamonCounter, timeUnit, attributes)
     }).asInstanceOf[MetricsCounter]
   }
 
@@ -462,7 +472,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
-      MetricsGauge(otelGauge, kamonGauge, attributes)
+      MetricsGauge(otelGauge, kamonGauge, timeUnit, attributes)
     }).asInstanceOf[MetricsGauge]
   }
 
