@@ -4,6 +4,7 @@ import java.nio.file.{Files, Paths}
 import java.time.Duration
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.DurationInt
 
@@ -30,6 +31,7 @@ import net.ceedubs.ficus.Ficus._
 import oshi.SystemInfo
 
 import filodb.core.GlobalConfig
+
 
 /**
  * Configuration for OpenTelemetry metrics
@@ -155,11 +157,11 @@ case class MetricsCounter(otelCounter: Option[DoubleCounter],
                           timeUnit: Option[TimeUnit],
                           baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    val valueInSeconds = timeUnit match {
+    val value2 = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
       case None => value
     }
-    otelCounter.foreach(_.add(valueInSeconds, withAttributes(additionalAttributes)))
+    otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
@@ -183,16 +185,18 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
   }
 }
 
-case class MetricsGauge(otelGauge: Option[DoubleGauge],
+case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], Double]],
                         kamonGauge: Option[kamon.metric.Gauge],
                         timeUnit: Option[TimeUnit],
-                        baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
+                        baseAttributes: Map[String, String]
+                        ) extends MetricsInstrument {
+  val baseAttributesBuilder: AttributesBuilder = Attributes.builder() // not used
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    val valueInSeconds = timeUnit match {
+    val value2 = timeUnit match {
       case Some(unit) => unit.toNanos(value.toLong).toDouble / 1e9 // convert to seconds as double
       case None => value
     }
-    otelGauge.foreach(_.set(valueInSeconds, withAttributes(additionalAttributes)))
+    otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributes, value2))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
@@ -454,7 +458,17 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val otelGauge = if (!otelEnabled) None else {
         val n = normalizeMetricName(name, isBytes, isCounter = false, timeUnit)
-        Some(meter.gaugeBuilder(n).build())
+        // There is no synchronous gauge in OTel that hold set values like the one in Kamon,
+        // so we need to use a callback to report values. We use a mutable map to hold the recorded values
+        // for different attribute combinations and report all the values to the instrument in the callback.
+        val valueHolder = mutable.HashMap.empty[Map[String, String], Double]
+        meter.gaugeBuilder(n).buildWithCallback { r: ObservableDoubleMeasurement =>
+          valueHolder.foreach { case (attrMap, value) =>
+            val attributes = createAttributesBuilder(attrMap).build()
+            r.record(value, attributes)
+          }
+        }
+        Some(valueHolder)
       }
 
       val kamonGauge = if (!kamonEnabled) None else {
@@ -472,7 +486,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
-      MetricsGauge(otelGauge, kamonGauge, timeUnit, attributes)
+      MetricsGauge(otelGauge, kamonGauge, timeUnit, baseAttributes)
     }).asInstanceOf[MetricsGauge]
   }
 
