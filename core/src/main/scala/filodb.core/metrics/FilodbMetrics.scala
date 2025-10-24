@@ -462,7 +462,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         // so we need to use a callback to report values. We use a mutable map to hold the recorded values
         // for different attribute combinations and report all the values to the instrument in the callback.
         val valueHolder = mutable.HashMap.empty[Map[String, String], Double]
-        meter.gaugeBuilder(n).buildWithCallback { r: ObservableDoubleMeasurement =>
+        closeables += meter.gaugeBuilder(n).buildWithCallback { r: ObservableDoubleMeasurement =>
           valueHolder.foreach { case (attrMap, value) =>
             val attributes = createAttributesBuilder(attrMap).build()
             r.record(value, attributes)
