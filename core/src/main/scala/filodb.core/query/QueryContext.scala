@@ -26,6 +26,7 @@ case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 case class PerQueryLimits(
         execPlanSamples: Int = 1000000,       // Limit on ExecPlan results in samples, default is 100K
+        execPlanLeafSamples: Int = 1000000,   // Limit on ExecPlanLeaf results in samples, default is 100K
         execPlanResultBytes: Long = 18000000, // Limit on ExecPlan results in bytes, default is 18MB
         groupByCardinality: Int = 100000,     // Limit on "group by" clause results, default is 100K
         joinQueryCardinality: Int = 100000,   // Limit on binary join input size, default is 100K
