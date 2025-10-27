@@ -7,7 +7,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.memstore.{PartLookupResult, SchemaMismatch, TimeSeriesShard}
+import filodb.core.memstore.{PartLookupResult, PopulateResult, SchemaMismatch, TimeSeriesShard}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -235,7 +235,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
  * Responsible for uploading RawPartDatas to offheap memory and creating a queryable ReadablePartition
  */
 trait RawToPartitionMaker {
-  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition]
+  def populateRawChunks(rawPartition: RawPartData): Task[PopulateResult]
 }
 
 /**

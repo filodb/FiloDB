@@ -16,6 +16,27 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.UnsafeUtils
 
 /**
+ * Result of populating raw chunks into a partition.
+ * Contains the partition and information about whether all chunks were successfully loaded.
+ *
+ * @param partition The partition with loaded chunks
+ * @param chunksSkipped Number of chunks that were skipped (e.g., due to insufficient memory)
+ * @param chunksLoaded Number of chunks that were successfully loaded
+ */
+case class PopulateResult(
+  partition: ReadablePartition,
+  chunksSkipped: Int = 0,
+  chunksLoaded: Int = 0
+) {
+  def isPartialResult: Boolean = chunksSkipped > 0
+  def partialResultReason: Option[String] =
+    if (chunksSkipped > 0)
+      Some(s"Skipped $chunksSkipped chunks due to insufficient memory")
+    else
+      None
+}
+
+/**
   * This class is responsible for the storage of On-Demand Paged chunks from
   * ChunkSource (example, cassandra) to offheap block memory.  One of these should exist per shard.
   *
@@ -50,9 +71,10 @@ extends RawToPartitionMaker with StrictLogging {
 
   // scalastyle:off method.length
   /**
-   * Stores raw chunks into offheap memory and populates chunks into partition
+   * Stores raw chunks into offheap memory and populates chunks into partition.
+   * Returns PopulateResult containing the partition and information about skipped chunks.
    */
-  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task.eval { // note this is not async
+  def populateRawChunks(rawPartition: RawPartData): Task[PopulateResult] = Task.eval { // note this is not async
     FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
@@ -131,7 +153,7 @@ extends RawToPartitionMaker with StrictLogging {
         logger.warn(s"ODP completed with partial results for partId=${tsPart.partID} shard=${tsShard.shardNum}: " +
           s"successfully paged $chunksSuccessfullyPaged chunks, skipped $chunksSkippedDueToMemory chunks due to memory constraints")
       }
-      tsPart
+      PopulateResult(tsPart, chunksSkippedDueToMemory, chunksSuccessfullyPaged)
     }.getOrElse {
       // This should never happen.  The code in OnDemandPagingShard pre-creates partitions before we ODP them.
       throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey, StandardCharsets.UTF_8)}] " +
