@@ -115,13 +115,13 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
-                                     row.getAs[Double](LabelCard1h).toLong,
-                                     row.getAs[Double](LabelCard7d).toLong) }.toSet
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
     cards shouldEqual Set(
       ("bulk_ws", "_ns_", 1, 1),
       ("bulk_ws", "_ws_", 1, 1),
       ("bulk_ws", "instance", numInstances/2, numInstances/2),
-      ("bulk_ws", "container", 10206, 10206),
+      ("bulk_ws", "container", 10207, 10207),
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2),
     )
@@ -147,13 +147,13 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
-                                     row.getAs[Double](LabelCard1h).toLong,
-                                     row.getAs[Double](LabelCard7d).toLong) }.toSet
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
     cards shouldEqual Set(
       ("bulk_ws", "_ns_", 1, 1),
       ("bulk_ws", "_ws_", 1, 1),
       ("bulk_ws", "instance", numInstances/2, numInstances/2),
-      ("bulk_ws", "container", 10206, 10206),
+      ("bulk_ws", "container", 10207, 10207),
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2),
     )
@@ -180,13 +180,13 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
-                                     row.getAs[Double](LabelCard1h).toLong,
-                                     row.getAs[Double](LabelCard7d).toLong) }.toSet
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
     cards shouldEqual Set(
       ("bulk_ws", "_ns_", 1, 1),
       ("bulk_ws", "_ws_", 1, 1),
       ("bulk_ws", "instance", numInstances/2, numInstances/2),
-      ("bulk_ws", "container", 10206, 10206),
+      ("bulk_ws", "container", 10207, 10207),
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2)
     )

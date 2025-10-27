@@ -171,17 +171,20 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
    * Placeholder for future actions on label stats - example, sending it to a churn monitoring system etc.
    */
   def actionOnLabelStats(df: DataFrame): Unit = {
-    countsFromSketches(df).show(truncate = false)
+    val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
+      LabelCard1h, LabelCard3d, LabelCard7d)
+    countsFromSketches(df).foreach { r =>
+      logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
+    }
   }
 
   protected[labelchurnfinder] def countsFromSketches(df: DataFrame): DataFrame = {
     val countUDF = functions.udf { sketch: Array[Byte] =>
-      HllSketch.heapify(sketch).getEstimate
+      Math.round(HllSketch.heapify(sketch).getEstimate)
     }
     df.withColumn(LabelCard1h, countUDF(col(LabelSketch1hCol)))
       .withColumn(LabelCard3d, countUDF(col(LabelSketch3dCol)))
       .withColumn(LabelCard7d, countUDF(col(LabelSketch7dCol)))
-
   }
 
 }
