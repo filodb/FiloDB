@@ -107,8 +107,9 @@ extends RawToPartitionMaker with StrictLogging {
               // Check if we have enough memory (with safety margin)
               if (freeBlocks < (blocksNeeded + 1)) {
                 shouldSkipChunk = true
-                logger.warn(s"Skipping chunk $chunkID for partId=${tsPart.partID} shard=${tsShard.shardNum}: " +
-                  s"insufficient memory (need ~$blocksNeeded blocks, have $freeBlocks). Query will return partial results.")
+                logger.warn(s"Skipping chunk $chunkID for partId=${tsPart.partID} " +
+                  s"shard=${tsShard.shardNum}: insufficient memory (need ~$blocksNeeded blocks, " +
+                  s"have $freeBlocks). Query will return partial results.")
               } else {
                 // Sufficient memory - proceed with allocation
                 memFactory.startMetaSpan()
@@ -150,8 +151,9 @@ extends RawToPartitionMaker with StrictLogging {
       tsShard.shardStats.numChunksPagedIn.increment(chunksSuccessfullyPaged)
       // Log summary if any chunks were skipped
       if (chunksSkippedDueToMemory > 0) {
-        logger.warn(s"ODP completed with partial results for partId=${tsPart.partID} shard=${tsShard.shardNum}: " +
-          s"successfully paged $chunksSuccessfullyPaged chunks, skipped $chunksSkippedDueToMemory chunks due to memory constraints")
+        logger.warn(s"ODP completed with partial results for partId=${tsPart.partID} " +
+          s"shard=${tsShard.shardNum}: successfully paged $chunksSuccessfullyPaged chunks, " +
+          s"skipped $chunksSkippedDueToMemory chunks due to memory constraints")
       }
       PopulateResult(tsPart, chunksSkippedDueToMemory, chunksSuccessfullyPaged)
     }.getOrElse {
