@@ -58,7 +58,9 @@ extends RawToPartitionMaker with StrictLogging {
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       logger.debug(s"Populating paged chunks for shard=${tsShard.shardNum} partId=${tsPart.partID}")
       tsShard.shardStats.partitionsPagedFromColStore.increment()
-      tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSetsTimeOrdered.size)
+      var chunksSkippedDueToMemory = 0
+      var chunksSuccessfullyPaged = 0
+
       // One chunkset at a time, load them into offheap and populate the partition
       // Populate newest chunk first so concurrent queries dont assume all data is populated in to chunk-map already
       rawPartition.chunkSetsTimeOrdered.reverseIterator.foreach { case RawChunkSet(infoBytes, rawVectors) =>
@@ -70,35 +72,64 @@ extends RawToPartitionMaker with StrictLogging {
         if (!rawVectors.isEmpty) {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
           if (!tsPart.chunkmapContains(chunkID)) {
+            // Calculate memory needed OUTSIDE synchronized block
+            val estimatedBytesNeeded = rawVectors.map(_.remaining()).sum + tsPart.schema.data.blockMetaSize +
+                                       (rawVectors.length * 100) // overhead for alignment, etc
+            val blocksNeeded = Math.ceil(estimatedBytesNeeded.toDouble / blockManager.blockSizeInBytes).toInt
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
             var metaAddr: Long = 0
+            var shouldSkipChunk = false
             memFactory.synchronized {
-              memFactory.startMetaSpan()
-              try {
-                copyToOffHeap(rawVectors, memFactory, chunkPtrs)
-              } catch {
-                case t: Throwable =>
-                  // Failure above may indicate data corruption. At the very least,
-                  //   something has gone remarkably wrong.
-                  logger.error(s"Unexpected error when doing on-demand paging; shutting down.", t)
-                  Shutdown.haltAndCatchFire(t)
+              // Check availability INSIDE synchronized block for thread safety
+              val freeBlocks = blockManager.numFreeBlocks
+              // Check if we have enough memory (with safety margin)
+              if (freeBlocks < (blocksNeeded + 1)) {
+                shouldSkipChunk = true
+                logger.warn(s"Skipping chunk $chunkID for partId=${tsPart.partID} shard=${tsShard.shardNum}: " +
+                  s"insufficient memory (need ~$blocksNeeded blocks, have $freeBlocks). Query will return partial results.")
+              } else {
+                // Sufficient memory - proceed with allocation
+                memFactory.startMetaSpan()
+                try {
+                  copyToOffHeap(rawVectors, memFactory, chunkPtrs)
+                } catch {
+                  case t: Throwable =>
+                    // Any error during allocation indicates serious problem - halt to avoid corruption
+                    logger.error(s"Unexpected error when doing on-demand paging; shutting down.", t)
+                    Shutdown.haltAndCatchFire(t)
+                }
+                metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                  tsPart.schema.data.blockMetaSize.toShort)
               }
-              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                tsPart.schema.data.blockMetaSize.toShort)
             }
-            require(metaAddr != 0)
-            val infoAddr = metaAddr + 4 // Important: don't point at partID
-            val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
-            logger.debug(s"Populating paged chunk into memory chunkId=$chunkID inserted=$inserted " +
-              s"partId=${tsPart.partID} shard=${tsShard.shardNum} ${tsPart.stringPartition}")
-            if (!inserted) {
-              logger.error(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has " +
-                  s"chunk $chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
-                  s"${ChunkSetInfo.getEndTime(infoBytes)}) partition currentEarliestTime=${tsPart.earliestTime}")
+            // Process results outside synchronized block
+            if (shouldSkipChunk) {
+              chunksSkippedDueToMemory += 1
+            } else {
+              require(metaAddr != 0)
+              val infoAddr = metaAddr + 4 // Important: don't point at partID
+              val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
+
+              chunksSuccessfullyPaged += 1
+              logger.debug(s"Populating paged chunk into memory chunkId=$chunkID inserted=$inserted " +
+                s"partId=${tsPart.partID} shard=${tsShard.shardNum} ${tsPart.stringPartition}")
+              if (!inserted) {
+                logger.error(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has " +
+                    s"chunk $chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
+                    s"${ChunkSetInfo.getEndTime(infoBytes)}) partition currentEarliestTime=${tsPart.earliestTime}")
+              }
             }
           }
         }
+      }
+
+      // Update stats with actual paged chunks
+      tsShard.shardStats.numChunksPagedIn.increment(chunksSuccessfullyPaged)
+      // Log summary if any chunks were skipped
+      if (chunksSkippedDueToMemory > 0) {
+        logger.warn(s"ODP completed with partial results for partId=${tsPart.partID} shard=${tsShard.shardNum}: " +
+          s"successfully paged $chunksSuccessfullyPaged chunks, skipped $chunksSkippedDueToMemory chunks due to memory constraints")
       }
       tsPart
     }.getOrElse {
