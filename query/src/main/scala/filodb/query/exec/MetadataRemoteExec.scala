@@ -166,6 +166,4 @@ case class MetadataRemoteExec(queryEndpoint: String,
     QueryResult(id, schema, srvSeq, QueryStats(), QueryWarnings(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
-
-  // override def checkSamplesLimit(numResultSamples: Int, queryWarnings: QueryWarnings): Unit = {}
 }

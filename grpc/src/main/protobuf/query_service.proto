@@ -28,6 +28,7 @@ message PerQueryLimits {
   optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max estimated data scanned per shard
   optional uint32 timeSeriesScanned             = 6; // Limit on max time series scanned
   optional uint64 rawScannedBytes               = 7; // Limit on max actual scanned bytes per shard
+  optional uint32 execPlanLeafSamples           = 8; // Limit on ExecPlanLeaf results in samples
 }
 
 message DownPartition {
@@ -172,6 +173,7 @@ message QueryWarnings {
   uint64 timeSeriesSamplesScannedBytes = 5;
   uint32 timeSeriesScanned             = 6;
   uint64 rawScannedBytes               = 7;
+  uint32 execPlanLeafSamples           = 8;
 }
 
 message DatasetRef {
