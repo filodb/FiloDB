@@ -357,6 +357,7 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.PerQueryLimits = {
       val quotaBuilder = GrpcMultiPartitionQueryService.PerQueryLimits.newBuilder()
       quotaBuilder.setExecPlanSamples(sq.execPlanSamples)
+      quotaBuilder.setExecPlanLeafSamples(sq.execPlanLeafSamples)
       quotaBuilder.setExecPlanResultBytes(sq.execPlanResultBytes)
       quotaBuilder.setGroupByCardinality(sq.groupByCardinality)
       quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
