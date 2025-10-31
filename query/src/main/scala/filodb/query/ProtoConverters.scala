@@ -379,6 +379,11 @@ object ProtoConverters {
             giq.getExecPlanSamples
           else
             defaultQ.execPlanSamples,
+        execPlanLeafSamples =
+          if (giq.hasExecPlanLeafSamples)
+            giq.getExecPlanLeafSamples
+          else
+            defaultQ.execPlanLeafSamples,
         execPlanResultBytes =
           if (giq.hasExecPlanResultBytes)
             giq.getExecPlanResultBytes
