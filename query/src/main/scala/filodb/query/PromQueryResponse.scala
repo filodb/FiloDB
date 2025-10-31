@@ -21,6 +21,7 @@ final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
                                  dataBytesScanned: Long, samplesScanned: Long, resultBytes: Long, cpuNanos: Long)
 final case class QueryWarningsResponse(
   execPlanSamples: Int = 0,
+  execPlanLeafSamples: Int = 0,
   execPlanResultBytes: Long  = 0,
   groupByCardinality: Int = 0,
   joinQueryCardinality: Int = 0,

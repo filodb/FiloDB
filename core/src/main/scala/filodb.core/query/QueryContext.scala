@@ -58,6 +58,7 @@ object QueryWarnings {
 }
 case class QueryWarnings(
   execPlanSamples: AtomicInteger = new AtomicInteger(0),
+  execPlanLeafSamples: AtomicInteger = new AtomicInteger(0),
   execPlanResultBytes: AtomicLong = new AtomicLong(0),
   groupByCardinality: AtomicInteger = new AtomicInteger(0),
   joinQueryCardinality: AtomicInteger = new AtomicInteger(0),
@@ -68,6 +69,7 @@ case class QueryWarnings(
 
   def hasWarnings() : Boolean = {
     execPlanSamples.get() > 0 ||
+    execPlanLeafSamples.get() > 0 ||
     execPlanResultBytes.get() > 0 ||
     groupByCardinality.get() > 0 ||
     joinQueryCardinality.get() > 0 ||
@@ -78,6 +80,7 @@ case class QueryWarnings(
 
   def merge(warnings: QueryWarnings) : Unit = {
     updateExecPlanSamples(warnings.execPlanSamples.get())
+    updateExecPlanLeafSamples(warnings.execPlanLeafSamples.get())
     updateExecPlanResultBytes(warnings.execPlanResultBytes.get())
     updateGroupByCardinality(warnings.groupByCardinality.get())
     updateJoinQueryCardinality(warnings.joinQueryCardinality.get())
@@ -88,6 +91,10 @@ case class QueryWarnings(
 
   def updateExecPlanSamples(samples: Int): Unit = {
     execPlanSamples.updateAndGet(s => if (s < samples) samples else s)
+  }
+
+  def updateExecPlanLeafSamples(leafSamples: Int): Unit = {
+    execPlanLeafSamples.updateAndGet(s => if (s < leafSamples) leafSamples else s)
   }
 
   def updateExecPlanResultBytes(bytes: Long): Unit = {
@@ -118,6 +125,7 @@ case class QueryWarnings(
     w2Compare match {
       case w2: QueryWarnings =>
         execPlanSamples.get().equals(w2.execPlanSamples.get()) &&
+          execPlanLeafSamples.get().equals(w2.execPlanLeafSamples.get()) &&
           execPlanResultBytes.get().equals(w2.execPlanResultBytes.get()) &&
           groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
           joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
