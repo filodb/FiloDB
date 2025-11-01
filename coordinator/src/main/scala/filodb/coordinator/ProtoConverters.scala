@@ -350,7 +350,7 @@ object ProtoConverters {
     cd.getInputColIdsList.asScala.toSeq.map(i => i.intValue())
   }
 
-  //  TimeDownsampler
+  // TimeDownsampler
   implicit class TimeDownsamplerToProtoConverter(td: filodb.core.downsample.TimeDownsampler) {
     def toProto: GrpcMultiPartitionQueryService.TimeDownsampler = {
       val builder = GrpcMultiPartitionQueryService.TimeDownsampler.newBuilder()
