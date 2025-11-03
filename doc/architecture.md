@@ -88,7 +88,7 @@ Contains off-heap memory management as well as columnar encoding/decoding/super 
 
 ### Cassandra
 
-An implementation of ColumnStore and MetaStore for Apache Cassandra.
+An implementation of ColumnStore and MetaStore for Apache Cassandra. ScyllaDB 2025.1.4+ can be used as a drop-in replacement with zero code changes (see [SCYLLADB_INTEGRATION.md](../SCYLLADB_INTEGRATION.md)).
 
 ### Kafka
 
