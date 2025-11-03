@@ -53,6 +53,15 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
         -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-delta-counter"}[300s])) by (container)""",
       """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="otel-delta-histogram"}[300s])) by (container)"""
         -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-otel-delta-histogram"}[300s])) by (container)""",
+
+      // do not optimize prom-counter since it is not pre-aggregated
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="prom-counter"}[300s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="prom-counter"}[300s])) by (container)""",
+
+      // do not optimize queries with type filter that is not equals
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_=~"gaug.*"}[300s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_=~"gaug.*"}[300s])) by (container)"""
+
     )
     testOptimization(excludeRules1, testCases)
   }

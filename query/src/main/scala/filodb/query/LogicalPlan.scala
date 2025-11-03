@@ -247,7 +247,9 @@ case class RawSeries(rangeSelector: RangeSelector,
   def updateRawSeriesForAggOptimize(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = {
     val typeValue = this.filters.find(_.column == Schemas.TypeLabel) match {
       case Some(ColumnFilter(_, Equals(value))) => Some(value.toString)
-      case _ => None
+      case Some(c) => throw new IllegalStateException(s"Should not be optimizing query with type " +
+                                                      s"filter which is not equals: $c")
+      case None => None
     }
     val filtersToReplace = typeValue.flatMap(t => Schemas.preAggSchema.get(t)) match {
       case Some(preAggType) => newFilters :+ ColumnFilter(Schemas.TypeLabel, Equals(preAggType))
