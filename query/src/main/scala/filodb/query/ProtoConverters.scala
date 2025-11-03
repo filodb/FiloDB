@@ -4,7 +4,7 @@ package filodb.query
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import akka.pattern.AskTimeoutException
 import com.google.protobuf.ByteString
@@ -541,7 +541,7 @@ object ProtoConverters {
 
   implicit class ThrowableFromProtoConverter(throwableProto: GrpcMultiPartitionQueryService.Throwable) {
     def fromProto: Throwable = {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val cause = if (throwableProto.hasCause) Some(throwableProto.getCause.fromProto) else None
       // to avoid multiple combinations, we will treat null message as an empty string
       val message  = if (throwableProto.hasMessage) throwableProto.getMessage else ""
@@ -598,7 +598,7 @@ object ProtoConverters {
 
   implicit class ResultSchemaToProtoConverter(resultSchema: ResultSchema) {
     def toProto: ProtoRangeVector.ResultSchema = {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val builder = ProtoRangeVector.ResultSchema.newBuilder()
       builder.setNumRowKeys(resultSchema.numRowKeyColumns)
       if (resultSchema.fixedVectorLen.isDefined) {
@@ -616,7 +616,7 @@ object ProtoConverters {
 
   implicit class ResultSchemaFromProtoConverter(resultSchemaProto: ProtoRangeVector.ResultSchema) {
     def fromProto: ResultSchema = {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       ResultSchema(
         resultSchemaProto.getColumnsList.asScala.map(_.fromProto).toList,
         resultSchemaProto.getNumRowKeys,
@@ -630,7 +630,7 @@ object ProtoConverters {
 
   implicit class ResponseToProtoConverter(response: QueryResponse) {
     def toProto: GrpcMultiPartitionQueryService.Response = {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val builder = GrpcMultiPartitionQueryService.Response.newBuilder()
       response match {
         case QueryError(id, stats, throwable)                                                       =>
@@ -655,7 +655,7 @@ object ProtoConverters {
 
   implicit class ResponseFromProtoConverter(responseProto: GrpcMultiPartitionQueryService.Response) {
     def fromProto: QueryResponse = {
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       if (responseProto.hasThrowable) {
         QueryError(responseProto.getId, responseProto.getStats.fromProto, responseProto.getThrowable.fromProto)
       } else {

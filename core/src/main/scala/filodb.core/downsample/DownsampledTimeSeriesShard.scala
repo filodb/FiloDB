@@ -218,7 +218,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
         indexUpdatedHour.set(endHour)
         partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
-        stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
+        stats.shardTotalRecoveryTime.update((System.currentTimeMillis() - creationTime).toDouble)
         cardManager.triggerCardinalityCount(indexRefreshCount)
         startHousekeepingTask()
         startStatsUpdateTask()
@@ -316,8 +316,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def updateGauges(): Unit = {
-    stats.indexEntries.update(partKeyIndex.indexNumEntries)
-    stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
+    stats.indexEntries.update(partKeyIndex.indexNumEntries.toDouble)
+    stats.indexRamBytes.update(partKeyIndex.indexRamBytes.toDouble)
   }
 
   def refreshPartKeyIndexBlocking(): Unit = {}
@@ -576,12 +576,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         }
       )
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
-      rows.toIterator
+      rows.iterator
     }
 
     override def hasNext: Boolean = rows.hasNext
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next()
   }
 
   case class SingleLabelValuesResultIterator(filters: Seq[ColumnFilter], startTime: Long, endTime: Long, label: String,
@@ -617,26 +617,30 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         }
       )
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
-      rows.toIterator
+      rows.iterator
     }
 
     def hasNext: Boolean = rows.hasNext
 
-    def next(): ZeroCopyUTF8String = rows.next
+    def next(): ZeroCopyUTF8String = rows.next()
   }
 
   /**
    * Retrieve partKey for a given PartId by looking up index
    */
-  private def partKeyFromPartId(partId: Int): Array[Byte] = {
-    val partKeyBytes = partKeyIndex.partKeyFromPartId(partId)
-    if (partKeyBytes.isDefined)
-    // make a copy because BytesRef from lucene can have additional length bytes in its array
-    // TODO small optimization for some other day
-      util.Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
-        partKeyBytes.get.offset + partKeyBytes.get.length)
-    else throw new IllegalStateException(s"Could not find partKey or partId $partId. This is not a expected behavior.")
-  }
+  // Commented out - unused for now but may be needed later
+  // private def partKeyFromPartId(partId: Int): Array[Byte] = {
+  //   val partKeyBytes = partKeyIndex.partKeyFromPartId(partId)
+  //   if (partKeyBytes.isDefined)
+  //   // make a copy because BytesRef from lucene can have additional length bytes in its array
+  //   // TODO small optimization for some other day
+  //     util.Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
+  //       partKeyBytes.get.offset + partKeyBytes.get.length)
+  //   else throw new IllegalStateException(
+  //     s"Could not find partKey or partId $partId. This is not a expected behavior.")
+  //   else throw new IllegalStateException(
+  //     s"Could not find partKey or partId $partId. This is not an expected behavior.")
+  // }
 
   def cleanup(): Unit = {
     Option(houseKeepingFuture).foreach(_.cancel())

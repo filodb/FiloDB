@@ -3,7 +3,7 @@ package filodb.coordinator
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}

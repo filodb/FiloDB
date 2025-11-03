@@ -123,7 +123,7 @@ class CardinalityTracker(ref: DatasetRef,
       toStore += neu
     }
 
-    toStore.map { case neu =>
+    toStore.toSeq.map { case neu =>
       store.store(neu)
       neu
     }

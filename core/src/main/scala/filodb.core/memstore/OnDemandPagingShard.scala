@@ -192,11 +192,11 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
       if (storeConfig.multiPartitionODP) {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
-          val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
+          val multiPart = MultiPartitionScan(partKeyBytesToPage.toSeq, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             val startTime = System.currentTimeMillis()
-            rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods))
+            rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods.toSeq))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
@@ -305,7 +305,7 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
           callback(p.partID, p.partKeyBytes)
           Some(p)
       }
-    }.toVector.flatten
+    }.toVector().flatten
   }
 
   private def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {

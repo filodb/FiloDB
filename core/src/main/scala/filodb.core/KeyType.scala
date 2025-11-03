@@ -2,13 +2,12 @@ package filodb.core
 
 import java.sql.Timestamp
 
-import scala.math.Ordering
-
 import org.joda.time.DateTime
 import spire.syntax.cfor._
 
 import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader._
+
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.
@@ -156,15 +155,18 @@ object SingleKeyTypes {
   }
 
   import Types._
-  implicit val utf8MapExtractor = ObjectFieldExtractor(emptyUTF8Map)
+  implicit val utf8MapExtractor:
+    filodb.memory.format.RowReader.ObjectFieldExtractor[scala.collection.immutable.Map[filodb.core.Types.UTF8MapKey,
+      filodb.memory.format.ZeroCopyUTF8String]] =
+    ObjectFieldExtractor(emptyUTF8Map)
   // Kind of bogus ordering - but is there really a way of ordering maps?
-  implicit val utf8MapOrdering = Ordering.by((m: UTF8Map) => m.size)
+  implicit val utf8MapOrdering: scala.math.Ordering[filodb.core.Types.UTF8Map] = Ordering.by((m: UTF8Map) => m.size)
 
   implicit case object UTF8MapKeyType extends SingleKeyTypeBase[UTF8Map] {
     def fromString(str: String): UTF8Map = ???
   }
 
-  implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
+  implicit val timestampOrdering: scala.math.Ordering[java.sql.Timestamp] = Ordering.by((t: Timestamp) => t.getTime)
 
   implicit case object TimestampKeyType extends SingleKeyTypeBase[Timestamp] {
     // Assume that most Timestamp string args are ISO8601-style date time strings.  Fallback to long ms.
@@ -178,7 +180,8 @@ object SingleKeyTypes {
   }
 
   // Order histograms by top bucket value
-  implicit val histOrdering = Ordering.by((h: bv.Histogram) => h.bucketValue(h.numBuckets - 1))
+  implicit val histOrdering: scala.math.Ordering[filodb.memory.format.vectors.Histogram] =
+    Ordering.by((h: bv.Histogram) => h.bucketValue(h.numBuckets - 1))
   implicit case object HistogramKeyType extends SingleKeyTypeBase[bv.Histogram] {
     def fromString(str: String): bv.Histogram = ???
   }

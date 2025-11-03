@@ -140,7 +140,7 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   new Iterator[Histogram] with TypedIterator {
     var elem = startElement
     def hasNext: Boolean = elem < getNumHistograms(acc, histVect)
-    def next: Histogram = {
+    def next(): Histogram = {
       val h = apply(elem)
       elem += 1
       h

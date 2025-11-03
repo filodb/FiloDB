@@ -55,7 +55,7 @@ object ComputedColumn {
 
 trait InvalidFunctionSpec
 case class BadArgument(reason: String) extends InvalidFunctionSpec
-case class WrongNumberArguments(given: Int, expected: Int) extends InvalidFunctionSpec
+case class WrongNumberArguments(`given`: Int, expected: Int) extends InvalidFunctionSpec
 case class NoSuchFunction(func: String) extends InvalidFunctionSpec
 case object NotComputedColumn extends InvalidFunctionSpec
 

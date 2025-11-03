@@ -21,7 +21,7 @@ object Utils extends StrictLogging {
 
   def calculateAvailableOffHeapMemory(filodbConfig: Config): Long = {
     val containerMemory = ManagementFactory.getOperatingSystemMXBean()
-      .asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize()
+      .asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalMemorySize()
     val currentJavaHeapMemory = Runtime.getRuntime().maxMemory()
     val osMemoryNeeds = filodbConfig.getMemorySize("memstore.memory-alloc.os-memory-needs").toBytes
     logger.info(s"Detected available memory containerMemory=$containerMemory" +

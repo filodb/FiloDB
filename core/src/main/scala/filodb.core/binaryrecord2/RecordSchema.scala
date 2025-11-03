@@ -286,7 +286,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
-    result
+    result.toSeq
   }
 
   def colNames(base: Any, offset: Long): Seq[String] = {
@@ -304,7 +304,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (BinaryRecordColumn, i) => ???
       case (HistogramColumn, i) => result += colNames(i)
     }
-    result
+    result.toSeq
   }
 
   def singleColValues(base: Any, offset: Long, col: String,
@@ -344,7 +344,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     }
     if (cols.contains(Schemas.TypeLabel)) res(cols.indexOf(Schemas.TypeLabel)) =
       Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
-    res
+    res.toSeq
   }
 
   /**
@@ -572,12 +572,12 @@ object RecordSchema {
 // Used with PartitionTimeRangeReader, when a user queries for a partition column
 final class PartKeyUTF8Iterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.UTF8Iterator {
   val blob = schema.asZCUTF8Str(base, offset, fieldNo)
-  final def next: ZeroCopyUTF8String = blob
+  def next: ZeroCopyUTF8String = blob
 }
 
 final class PartKeyLongIterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.LongIterator {
   val num = schema.getLong(base, offset, fieldNo)
-  final def next: Long = num
+  def next: Long = num
 }
 
 /**

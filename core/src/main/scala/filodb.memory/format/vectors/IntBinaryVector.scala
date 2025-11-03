@@ -57,7 +57,7 @@ object IntBinaryVector {
     case 32 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setInt(addr + numBytes, v)
+          UnsafeUtils.setInt(this.addr + numBytes, v)
           incWriteOffset(4)
           Ack
         case other: AddResponse => other
@@ -66,7 +66,7 @@ object IntBinaryVector {
     case 16 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setShort(addr + numBytes, v.toShort)
+          UnsafeUtils.setShort(this.addr + numBytes, v.toShort)
           incWriteOffset(2)
           Ack
         case other: AddResponse => other
@@ -75,7 +75,7 @@ object IntBinaryVector {
     case 8 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setByte(addr + numBytes, v.toByte)
+          UnsafeUtils.setByte(this.addr + numBytes, v.toByte)
           incWriteOffset(1)
           Ack
         case other: AddResponse => other
@@ -185,7 +185,7 @@ object IntBinaryVector {
     // Get nbits and signed
     val (min, max) = vector.minMax
     val (nbits, signed) = minMaxToNbitsSigned(min, max)
-    val dispose = () => vector.dispose()
+    @scala.annotation.nowarn("msg=never used") val dispose = () => vector.dispose()
     if (vector.noNAs) {
       if (min == max) {
         ConstVector.make(memFactory, vector.length, 4) { addr => UnsafeUtils.setInt(ZeroPointer, addr, vector(0)) }

@@ -12,14 +12,12 @@ import sbtassembly.AssemblyPlugin.autoImport._
 /* Settings */
 object FiloSettings {
 
-  /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
+  /* The REPL can't cope with -Xfatal-warnings
      so we disable for console */
   lazy val consoleSettings = Seq(
-   scalacOptions in (Compile, console) ~= (_.filterNot(Set(
-     "-Ywarn-unused-import",
+   Compile / console / scalacOptions ~= (_.filterNot(Set(
      "-Xfatal-warnings"))),
-   scalacOptions in (Test, console) ~= (_.filterNot(Set(
-     "-Ywarn-unused-import",
+   Test / console / scalacOptions ~= (_.filterNot(Set(
      "-Xfatal-warnings"))))
 
   lazy val compilerSettings = Seq(
@@ -28,27 +26,19 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-target:jvm-1.8",
+      "-release", "17",  // Target JDK 17
       "-feature",
-      "-Xfuture",
       "-Xfatal-warnings",
-      "-Ywarn-inaccessible",
       "-Ywarn-dead-code",
-      "-Ywarn-unused-import",
-      "-Yno-adapted-args",
       "-language:existentials",
       "-language:experimental.macros",
       "-language:higherKinds",
       "-language:implicitConversions"
-      // TODO relocate here: -Ywarn-unused-import, add -Ywarn-numeric-widen
-      // TODO in 2.12: remove: -Yinline-warnings, add the new applicable ones
-
-      // Don't enable this option. It makes all fields lazy, hurting performance.
-      //"-Xcheckinit"
     ),
 
     javacOptions ++= Seq(
-      "-encoding", "UTF-8"
+      "-encoding", "UTF-8",
+      "--release", "17"  // Target JDK 17
     ))
 
   // Create a default Scala style task to run with tests
@@ -67,18 +57,19 @@ object FiloSettings {
     (compile in Test) := ((compile in Test) dependsOn compileScalastyle).value)
 
   lazy val evictionSettings = Seq(
-    evictionWarningOptions in update := EvictionWarningOptions.default
+    update / evictionWarningOptions := EvictionWarningOptions.default
       .withWarnTransitiveEvictions(false)
       .withWarnDirectEvictions(false)
       .withWarnScalaVersionEviction(false))
 
-  // TODO disabled for now: "-Xlint:infer-any", "-Xlint",
+  // Updated for Scala 2.13 - removed deprecated lint flags
   lazy val lintSettings = Seq(
     scalacOptions ++= Seq(
       "-Xlint:adapted-args",
       "-Xlint:nullary-unit",
       "-Xlint:inaccessible",
-      "-Xlint:nullary-override",
+      // "-Xlint:nullary-override",  // Removed: not valid in Scala 2.13
+      "-Xlint:infer-any",
       "-Xlint:missing-interpolator",
       "-Xlint:doc-detached",
       "-Xlint:private-shadow",
@@ -86,10 +77,17 @@ object FiloSettings {
       "-Xlint:poly-implicit-overload",
       "-Xlint:option-implicit",
       "-Xlint:delayedinit-select",
-      "-Xlint:by-name-right-associative",
       "-Xlint:package-object-classes",
-      "-Xlint:unsound-match",
-      "-Xlint:stars-align"
+      "-Xlint:stars-align",
+      "-Xlint:constant",
+      "-Xlint:unused",
+      "-Xlint:nonlocal-return",
+      "-Xlint:implicit-not-found",
+      "-Xlint:serial",
+      "-Xlint:valpattern",
+      "-Xlint:eta-zero",
+      "-Xlint:eta-sam",
+      "-Xlint:deprecation"
     ),
 
     javacOptions ++= Seq(
@@ -106,9 +104,9 @@ object FiloSettings {
       consoleSettings
 
   lazy val testSettings = Seq(
-    parallelExecution in Test := false,
-    fork in Test := true,
-    testOptions in Test += Tests.Argument(TestFrameworks.ScalaTest, "-oF"),
+    Test / parallelExecution := false,
+    Test / fork := true,
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oF"),
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
@@ -117,7 +115,7 @@ object FiloSettings {
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
     // and https://github.com/travis-ci/travis-ci/issues/3775
-    concurrentRestrictions in Global := Seq(
+    Global / concurrentRestrictions := Seq(
       // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
       Tags.limit(Tags.CPU, 1),
       // limit to 1 concurrent test task, even across sub-projects
@@ -128,23 +126,23 @@ object FiloSettings {
   )
 
   lazy val itSettings = Defaults.itSettings ++ Seq(
-    fork in IntegrationTest := true,
+    IntegrationTest / fork := true,
 
-    parallelExecution in IntegrationTest := false,
+    IntegrationTest / parallelExecution := false,
 
-    internalDependencyClasspath in IntegrationTest := (Classpaths.concat(
-      internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
+    IntegrationTest / internalDependencyClasspath := (Classpaths.concat(
+      IntegrationTest / internalDependencyClasspath, Test / exportedProducts)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
-    compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
+    MultiJvm / javaOptions := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
+    MultiJvm / compile := ((MultiJvm / compile) triggeredBy (Test / compile)).value)
 
   lazy val testMultiJvmToo = Seq(
     // make sure that MultiJvm tests are executed by the default test target,
     // and combine the results from ordinary test and multi-jvm tests
-    executeTests in Test := {
-      val testResults = (executeTests in Test).value
-      val multiNodeResults = (executeTests in MultiJvm).value
+    Test / executeTests := {
+      val testResults = (Test / executeTests).value
+      val multiNodeResults = (MultiJvm / executeTests).value
       // passed, failed, error
       // 0, 1, 2
       val overall =
@@ -174,7 +172,7 @@ object FiloSettings {
           runPolicy = Tests.SubProcess(ForkOptions()))
       }
 
-    Seq(testGrouping in Test := ((definedTests in Test) map jvmPerTest).value)
+    Seq(Test / testGrouping := ((Test / definedTests) map jvmPerTest).value)
   }
 
   // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
@@ -204,7 +202,7 @@ object FiloSettings {
     updateOptions := updateOptions.value.withCachedResolution(true))
 
   lazy val assemblySettings = Seq(
-    assemblyMergeStrategy in assembly := {
+    assembly / assemblyMergeStrategy := {
       case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
       case PathList("scala", "collection", "compat", xs @ _*) => MergeStrategy.first
       case PathList("scala", "annotation", "nowarn.class") => MergeStrategy.first
@@ -223,30 +221,29 @@ object FiloSettings {
       case PathList("scala", "jdk", xs @ _*) => MergeStrategy.first
       case PathList("scala", "util", "control", "compat", xs @ _*) => MergeStrategy.first
       case x =>
-        val oldStrategy = (assemblyMergeStrategy in assembly).value
+        val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
     },
-    assemblyShadeRules in assembly := Seq(
+    assembly / assemblyShadeRules := Seq(
       ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
       ShadeRule.rename("com.google.common.**" -> "filodb.com.google.common.@1").inAll,
       ShadeRule.rename("org.apache.http.**" -> "filodb.org.apache.http.@1").inAll
     ),
-    test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
+    assembly / test := {} //noisy for end-user since the jar is not available and user needs to build the project locally
   )
 
   lazy val assemblyExcludeScala = assemblySettings ++ Seq(
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+    assembly / assemblyOption ~= { _.withIncludeScala(false) })
 
   // Builds cli as a standalone executable to make it easier to launch commands
   lazy val cliAssemblySettings = assemblySettings ++ Seq(
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(
-      prependShellScript = Some(shellScript)),
-    assemblyJarName in assembly := s"filo-cli-${version.value}"
+    assembly / assemblyOption ~= { _.withPrependShellScript(shellScript) },
+    assembly / assemblyJarName := s"filo-cli-${version.value}"
   )
 
   // builds timeseries-gen as a fat jar so it can be executed for development test scenarios
   lazy val gatewayAssemblySettings = assemblySettings ++ Seq(
-    assemblyJarName in assembly := s"gateway-${version.value}"
+    assembly / assemblyJarName := s"gateway-${version.value}"
   )
 
 

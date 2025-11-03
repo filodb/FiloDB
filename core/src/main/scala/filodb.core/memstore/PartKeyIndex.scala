@@ -190,7 +190,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
         logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
         NoOpIndexer
     }
-  }.toArray
+  }.toArray[Indexer]
 
   protected val numPartColumns = schema.columns.length
 
@@ -598,7 +598,7 @@ abstract class PartKeyQueryBuilder {
           equalsQuery(regex)
         } else if (QueryUtils.containsPipeOnlyRegex(regex)) {
           // if pipe is only regex special char present, then convert to IN query
-          visitTermInQuery(column, regex.split('|'), OccurMust)
+          visitTermInQuery(column, regex.split('|').toIndexedSeq, OccurMust)
         } else if (regex.endsWith(".*") && regex.length > 2 &&
           !QueryUtils.containsRegexChars(regex.dropRight(2))) {
           // if suffix is .* and no regex special chars present in non-empty prefix, then use prefix query
@@ -631,7 +631,7 @@ abstract class PartKeyQueryBuilder {
         visitEndBooleanQuery()
 
       case In(values) =>
-        visitTermInQuery(column, values.toArray.map(t => t.toString), OccurMust)
+        visitTermInQuery(column, values.toSeq.map(t => t.toString), OccurMust)
 
       case And(lhs, rhs) =>
         visitStartBooleanQuery()

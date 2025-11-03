@@ -128,7 +128,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
 
   override def removePartKeys(partIds: Buffer[Int]): Unit = {
     if (!partIds.isEmpty) {
-      TantivyNativeMethods.removePartKeys(indexHandle, partIds.toArray)
+      TantivyNativeMethods.removePartKeys(indexHandle, partIds.toArray())
     }
   }
 
@@ -180,7 +180,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += TermInfo(ZeroCopyUTF8String.apply(strBytes), count.toInt)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   private def decodeStringArray(arr: Array[Byte]): Seq[String] = {
@@ -197,7 +197,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += new String(strBytes, StandardCharsets.UTF_8)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   override def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
@@ -356,7 +356,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += PartKeyLuceneIndexRecord(pk, start, end)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   override def partIdFromPartKeySlow(partKeyBase: Any, partKeyOffset: Long): Option[Int] = {

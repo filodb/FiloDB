@@ -94,9 +94,9 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
     otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
-      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
+      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value.toDouble))
     } else {
-      kamonCounter.foreach(_.increment(value))
+      kamonCounter.foreach(_.increment(value.toDouble))
     }
   }
 }
@@ -122,7 +122,7 @@ case class MetricsHistogram(otelHistogram: Option[DoubleHistogram],
   def record(value: Long, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     val valueInSeconds = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
-      case None => value
+      case None => value.toDouble
     }
     otelHistogram.foreach(_.record(valueInSeconds, withAttributes(additionalAttributes)))
 
@@ -205,7 +205,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder().setType(InstrumentType.HISTOGRAM).build(),
         View.builder().setAggregation(Aggregation.base2ExponentialBucketHistogram(64, 20)).build())
     } else {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val timeBuckets = otelConfig.customHistogramBucketsTime.map(Double.box).asJava
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder()
         .setType(InstrumentType.HISTOGRAM).setUnit("seconds")
@@ -221,7 +221,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     closeables ++= Classes.registerObservers(sdk).asScala
     closeables ++= Cpu.registerObservers(sdk).asScala
     closeables ++= MemoryPools.registerObservers(sdk).asScala

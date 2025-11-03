@@ -3,9 +3,9 @@ package filodb.core.memstore
 import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
@@ -53,9 +53,9 @@ trait TimeSeriesStore extends ChunkSource {
     .foreach { _ =>
       val pools = ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean])
       for (pool <- pools.asScala) {
-        jvmPoolCount.update(pool.getCount, Map("poolName" -> pool.getName))
-        jvmPoolUsed.update(pool.getMemoryUsed, Map("poolName" -> pool.getName))
-        jvmPoolCapacity.update(pool.getTotalCapacity, Map("poolName" -> pool.getName))
+        jvmPoolCount.update(pool.getCount.toDouble, Map("poolName" -> pool.getName))
+        jvmPoolUsed.update(pool.getMemoryUsed.toDouble, Map("poolName" -> pool.getName))
+        jvmPoolCapacity.update(pool.getTotalCapacity.toDouble, Map("poolName" -> pool.getName))
       }
     }(GlobalScheduler.globalImplicitScheduler)
 

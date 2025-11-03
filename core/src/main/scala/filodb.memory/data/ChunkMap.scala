@@ -114,7 +114,7 @@ object ChunkMap extends StrictLogging {
         }
       }
 
-      countMap.clear
+      countMap.clear()
     }
     execPlanTracker.remove(Thread.currentThread())
     total
@@ -168,7 +168,7 @@ abstract class ChunkMap(var capacity: Int) {
 
   require(capacity > 0)
 
-  private var lockState: Int = 0
+  @scala.annotation.nowarn("msg=never used") private var lockState: Int = 0
   private var size: Int = 0
   private var first: Int = 0
   private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero = true)
@@ -680,8 +680,8 @@ abstract class ChunkMap(var capacity: Int) {
     var high = first + size - 1
 
     while (low <= high) {
-      var mid = (low + high) >>> 1
-      var midKey = chunkmapKeyRetrieve(arrayGet(realIndex(mid)))
+      val mid = (low + high) >>> 1
+      val midKey = chunkmapKeyRetrieve(arrayGet(realIndex(mid)))
       if (midKey < key) {
         low = mid + 1
       } else if (midKey > key) {

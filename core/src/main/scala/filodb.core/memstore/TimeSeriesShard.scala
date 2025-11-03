@@ -207,7 +207,7 @@ object PartitionIterator {
   def fromPartIt(baseIt: Iterator[TimeSeriesPartition]): PartitionIterator = new PartitionIterator {
     val skippedPartIDs = Buffer.empty[Int]
     final def hasNext: Boolean = baseIt.hasNext
-    final def next: TimeSeriesPartition = baseIt.next
+    final def next(): TimeSeriesPartition = baseIt.next()
   }
 }
 
@@ -274,7 +274,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                       evictionPolicy: PartitionEvictionPolicy,
                       filodbConfig: Config)
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   import FiloSchedulers._
   import TimeSeriesShard._
@@ -563,7 +563,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     findNext()
 
     final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
-    final def next: TimeSeriesPartition = {
+    final def next(): TimeSeriesPartition = {
       val toReturn = nextPart
       nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
       findNext()
@@ -590,7 +590,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
 
-    final def next: TimeSeriesPartition = {
+    final def next(): TimeSeriesPartition = {
       val toReturn = nextPart
       nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
       findNext()
@@ -663,12 +663,12 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       shardStats.partkeyLabelScans.increment(partLoopIndx)
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
-      rows.toIterator
+      rows.iterator
     }
 
     def hasNext: Boolean = rows.hasNext
 
-    def next(): ZeroCopyUTF8String = rows.next
+    def next(): ZeroCopyUTF8String = rows.next()
   }
 
   /**
@@ -701,12 +701,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         partLoopIndx += 1
       }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
-      rows.toIterator
+      rows.iterator
     }
 
     override def hasNext: Boolean = rows.hasNext
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next()
   }
 
   /////// END INNER CLASS DEFINITIONS ///////////////////
@@ -991,7 +991,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
-        val oldActivelyIngestingSize = activelyIngesting.size
+        // val oldActivelyIngestingSize = activelyIngesting.size // unused
         activelyIngesting -= p.partID
 
         markPartAsNotIngesting(p, odp = false)
@@ -1379,10 +1379,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       // ingestionTime is _probably_ less likely to occur after currentTime than container.timestamp
       //   (given that it's the result of the  Math.max() above). If really needed, it can get the same
       //   two-metric treatment as ingestionPipelineLatency.
-      shardStats.ingestionClockDelay.update(Math.max(0, currentTime - ingestionTime))
+      shardStats.ingestionClockDelay.update(Math.max(0, currentTime - ingestionTime).toDouble)
     }
 
-    tasks
+    tasks.toSeq
   }
 
   private def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
@@ -1395,8 +1395,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def updateGauges(): Unit = {
     assertThreadName(IngestSchedName)
     shardStats.bufferPoolSize.update(bufferPools.valuesArray.map(_.poolSize).sum)
-    shardStats.indexEntries.update(partKeyIndex.indexNumEntries)
-    shardStats.indexBytes.update(partKeyIndex.indexRamBytes)
+    shardStats.indexEntries.update(partKeyIndex.indexNumEntries.toDouble)
+    shardStats.indexBytes.update(partKeyIndex.indexRamBytes.toDouble)
     shardStats.numPartitions.update(numActivePartitions)
     val numIngesting = activelyIngesting.synchronized { activelyIngesting.size }
     shardStats.numActivelyIngestingParts.update(numIngesting)
@@ -1525,12 +1525,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         DataDropped
       }
       // Update stats
-      if (_offset >= 0) shardStats.offsetLatestInMem.update(_offset)
+      if (_offset >= 0) shardStats.offsetLatestInMem.update(_offset.toDouble)
       groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
       val maxWatermark = groupWatermark.max
       val minWatermark = groupWatermark.min
-      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.update(maxWatermark)
-      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.update(minWatermark)
+      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.update(maxWatermark.toDouble)
+      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.update(minWatermark.toDouble)
       fut
     } else {
       Future.successful(NotApplied)
@@ -1684,7 +1684,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     var numPartsIngestingNotEvictable = 0
     val successfullyEvictedParts = new EWAHCompressedBitmap()
     while (intIt.hasNext) {
-      val partitionObj = partitions.get(intIt.next)
+      val partitionObj = partitions.get(intIt.next())
       if (partitionObj != UnsafeUtils.ZeroPointer) {
         if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
           logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
@@ -1714,7 +1714,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val elemCount = evictedPartKeys.synchronized {
       if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
     }
-    shardStats.evictedPkBloomFilterSize.update(elemCount)
+    shardStats.evictedPkBloomFilterSize.update(elemCount.toDouble)
     logger.info(s"Eviction task complete on dataset=$ref shard=$shardNum numPartsEvicted=$numPartsEvicted " +
       s"numPartsAlreadyEvicted=$numPartsAlreadyEvicted numPartsIngestingNotEvictable=$numPartsIngestingNotEvictable")
     shardStats.partitionsEvicted.increment(numPartsEvicted)
@@ -1775,7 +1775,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
     // We force evict since we cannot slow down ingestion since alerting queries are at stake.
-    val forceEvict = addPartitionsDisabled.get || blockStoreCurrentFreePercent < 1d ||
+    val forceEvict = addPartitionsDisabled.get() || blockStoreCurrentFreePercent < 1d ||
       tspCountFreePercent < 1d || nativeMemFreePercent < 1d
 
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
@@ -1939,6 +1939,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
+  @scala.annotation.nowarn("msg=never used")
   private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
     val results = new mutable.HashSet[String]
     if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty

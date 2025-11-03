@@ -203,14 +203,15 @@ class RecordBuilder(memFactory: MemFactory,
     * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
     * If this method is used, then caller needs to also update the partitionHash manually.
     */
-  private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
-    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addMap")
-    checkFieldAndMemory(numBytes + 2)
-    UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
-    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
-    updateFieldPointerAndLens(numBytes + 2)
-    fieldNo += 1
-  }
+  // Commented out - unused for now but may be needed later
+  // private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
+  //   require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addMap")
+  //   checkFieldAndMemory(numBytes + 2)
+  //   UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
+  //   UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
+  //   updateFieldPointerAndLens(numBytes + 2)
+  //   fieldNo += 1
+  // }
 
   private def addBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
     val blobDataOffset = schema.blobOffset(base, offset, col)
@@ -222,10 +223,11 @@ class RecordBuilder(memFactory: MemFactory,
     * IMPORTANT: Internal method, does not update hash values for the data.
     * If this method is used, then caller needs to also update the partitionHash manually.
     */
-  private def addLargeBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
-    val strDataOffset = schema.utf8StringOffset(base, offset, col)
-    addMap(base, strDataOffset + 4, BinaryRegionLarge.numBytes(base, strDataOffset))
-  }
+  // Commented out - unused for now but may be needed later
+  // private def addLargeBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+  //   val strDataOffset = schema.utf8StringOffset(base, offset, col)
+  //   addMap(base, strDataOffset + 4, BinaryRegionLarge.numBytes(base, strDataOffset))
+  // }
 
   private def addLongFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
     addLong(schema.getLong(base, offset, col))
@@ -470,7 +472,7 @@ class RecordBuilder(memFactory: MemFactory,
   /**
    * Returns the list of all current containers
    */
-  def allContainers: Seq[RecordContainer] = containers
+  def allContainers: Seq[RecordContainer] = containers.toSeq
 
   // Used for debugging...  throws exception if there is no data.  Be careful here.
   def curContainerBase: Any = currentContainer.get.base
@@ -708,7 +710,7 @@ object RecordBuilder {
     val implicitTargetSchema = nonMetricShardKeys.keySet ++ targetSchema
     val useTargetSchema = targetSchema.nonEmpty && implicitTargetSchema.diff(tags).isEmpty
     val shardingLabels = if (useTargetSchema) {
-      implicitTargetSchema.toStream.sorted.map(labelPairs(_))
+      implicitTargetSchema.to(LazyList).sorted.map(labelPairs(_))
     } else nonShardKeyLabelPair.values  // NOTE: avoiding a sort here to preserve legacy logic
     shardingLabels.foreach { v => {
         hash = RecordBuilder

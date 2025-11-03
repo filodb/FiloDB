@@ -2,7 +2,7 @@ package filodb.core.metadata
 
 import java.nio.charset.StandardCharsets
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import net.ceedubs.ficus.Ficus._
@@ -91,10 +91,10 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "metricColumn" -> metricColumn,
       "hasDownsampledData" -> hasDownsampledData,
       "ignoreShardKeyColumnSuffixes" ->
-        ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
+        ignoreShardKeyColumnSuffixes.view.mapValues(_.asJava).toMap.asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
       "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava,
-      "multiColumnFacets" -> multiColumnFacets.mapValues(_.asJava).asJava)
+      "multiColumnFacets" -> multiColumnFacets.view.mapValues(_.asJava).toMap.asJava)
 
     ConfigFactory.parseMap(map.asJava)
   }

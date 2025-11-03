@@ -4,7 +4,7 @@ import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.duration.FiniteDuration
 
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}

@@ -33,6 +33,6 @@ class ClusterMembershipTracker extends Actor with StrictLogging {
       logger.info("Member is Removed: {} after {}. New member list {}", member.address, previousStatus, members)
     case _: MemberEvent => // ignore
     case ClusterMembershipRequest =>
-      sender ! ClusterMembershipResponse(members.toList)
+      sender() ! ClusterMembershipResponse(members.toList)
   }
 }

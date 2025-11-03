@@ -2,7 +2,7 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 

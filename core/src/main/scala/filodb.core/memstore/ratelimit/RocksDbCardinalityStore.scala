@@ -130,11 +130,11 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
         logger.info(s"Card Store Stats dataset=$ref shard=$shard $statsAsString")
         lastMetricsReportTime = now
       }
-      diskSpaceUsedMetric.update(diskSpaceUsed)
-      numKeysMetric.update(estimatedNumKeys)
-      memoryUsedMetric.update(memTablesSize + blockCacheSize + tableReadersSize)
-      compactionBytesPendingMetric.update(compactionBytesPending)
-      numRunningCompactionsMetric.update(numRunningCompactions)
+      diskSpaceUsedMetric.update(diskSpaceUsed.toDouble)
+      numKeysMetric.update(estimatedNumKeys.toDouble)
+      memoryUsedMetric.update((memTablesSize + blockCacheSize + tableReadersSize).toDouble)
+      compactionBytesPendingMetric.update(compactionBytesPending.toDouble)
+      numRunningCompactionsMetric.update(numRunningCompactions.toDouble)
     }
   }
 
@@ -272,12 +272,12 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             val node = bytesToCardinalityValue(it.value())
             // Drop the first element, since it's just the size of the prefix.
             // Ex: 2{KeySeparator}A{KeySeparator}B ==(split)==> [2, A, B] ==(drop)==> [A, B]
-            val prefix = key.split(KeySeparator).drop(1)
+            val prefix = key.split(KeySeparator).drop(1).toIndexedSeq
             buf += CardinalityValue.toCardinalityRecord(node, prefix, shard)
           } else {
             // no matching prefixes remain
             complete = true
-            break
+            break()
           }
           it.next()
         }
@@ -298,7 +298,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
               childrenCount = childrenCount + node.childrenCount
               childrenQuota = childrenQuota + node.childrenQuota
             } else {
-              break  // don't continue beyond valid results
+              break()  // don't continue beyond valid results
             }
             it.next()
           } while (it.isValid())
@@ -309,7 +309,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     } finally {
       it.close();
     }
-    buf
+    buf.toSeq
   }
   // scalastyle:on method.length
 

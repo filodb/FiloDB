@@ -78,7 +78,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
     var curOffset = offset + ContainerHeaderLen
 
     final def hasNext: Boolean = curOffset < endOffset
-    final def next: BinaryRecordRowReader = {
+    final def next(): BinaryRecordRowReader = {
       val recordLen = BinaryRegionLarge.numBytes(base, curOffset)
       reader.recordOffset = curOffset
       curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes

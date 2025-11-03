@@ -29,7 +29,7 @@ class TimeSeriesMemStore(filodbConfig: Config,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -146,7 +146,7 @@ extends TimeSeriesStore with StrictLogging {
     val shard = getShardE(dataset, shardNum)
     shard.isReadyForQuery = true
     logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
-    shard.shardStats.shardTotalRecoveryTime.update(System.currentTimeMillis() - shard.creationTime)
+    shard.shardStats.shardTotalRecoveryTime.update((System.currentTimeMillis() - shard.creationTime).toDouble)
     shard.startIngestion(stream, cancelTask, flushSched)
   }
 

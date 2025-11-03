@@ -574,7 +574,7 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   new Iterator[Histogram] with TypedIterator {
     var elem = startElement
     def hasNext: Boolean = elem < getNumHistograms(acc, histVect)
-    def next: Histogram = {
+    def next(): Histogram = {
       val h = apply(elem)
       elem += 1
       h
@@ -629,7 +629,7 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
       extends RowHistogramReader(acc2, histVect) with CounterHistogramReader with StrictLogging {
   // baseHist is section base histogram; summedHist used to compute base + delta or other sums
   private val summedHist = LongHistogram.empty(buckets)
-  private val baseHist = summedHist.copy
+  private val baseHist = summedHist.copy()
   private val baseSink = NibblePack.DeltaSink(baseHist.values)
 
   // override setSection: also set the base histogram for getting real value
@@ -689,7 +689,7 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
       .collect {
       case (i, s) if i > 0 && s.sectionType(acc) == Section.TypeDrop =>
         dropped = true
-        (i, apply(i - 1).asInstanceOf[LongHistogram].copy)
+        (i, apply(i - 1).asInstanceOf[LongHistogram].copy())
     }.toBuffer
     if (dropped) {
       logger.debug(s"detected counter reset in histogram correction=${correctionData}\n" +
@@ -715,13 +715,13 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     // Go through and add corrections
     corrections.foreach { case (_, corr) => correction.add(corr) }
 
-    HistogramCorrection(apply(length - 1).asInstanceOf[LongHistogram].copy, correction)
+    HistogramCorrection(apply(length - 1).asInstanceOf[LongHistogram].copy(), correction)
   }
 
   def correctedValue(n: Int, meta: CorrectionMeta): HistogramWithBuckets = {
     // Get the raw histogram value -- COPY it as we need to modify it, and also
     // calling corrections below might modify the temporary value
-    val h = apply(n).asInstanceOf[LongHistogram].copy
+    val h = apply(n).asInstanceOf[LongHistogram].copy()
 
     // Apply any necessary corrections
     corrections.foreach { case (ci, corr) =>

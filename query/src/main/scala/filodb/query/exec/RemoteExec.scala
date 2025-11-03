@@ -228,7 +228,7 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig)
 
 object RemoteHttpClient {
 
-  import scala.collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   /**
    * A default prom remote http client backend from DefaultPromRemoteHttpClientFactory.
