@@ -217,7 +217,7 @@ object AggLpOptimization extends StrictLogging{
   private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String,
                                        col: Seq[String], rf: Option[RangeFunctionId]): Aggregate = {
     agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing]
-      .replaceRFFiltersAndColumn(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
+    .updateRawSeriesForAggOptimize(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
   }
 
   private def metricNameWithoutSuffix(metricNameStr: String): String = metricNameStr.split(":::").head

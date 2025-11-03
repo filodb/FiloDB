@@ -45,6 +45,18 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
+  it ("[exclude rules] should change type label when optimizing queries") {
+    val testCases = Seq(
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="gauge"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-gauge-v2"}[300s])) by (container)""",
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="delta-counter"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-delta-counter"}[300s])) by (container)""",
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="otel-delta-histogram"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-otel-delta-histogram"}[300s])) by (container)""",
+    )
+    testOptimization(excludeRules1, testCases)
+  }
+
   it ("[exclude rules] should not optimize if window less than 60s") {
     val testCases = Seq(
       // should use rule 1 level 1 since container is needed
