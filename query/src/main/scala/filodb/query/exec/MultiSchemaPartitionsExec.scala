@@ -42,15 +42,28 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
 
-  // Remove _columnName suffix from metricName and generate PartLookupResult
+  /**
+   * Remove _columnName suffix from metricName and generate PartLookupResult.
+   * If hasAggSuffix is true, it means the metric name has metric_columnName:::agg format.
+   * In that case, we need to remove _columnName in the metric and leave :::agg as is so that we look up metric::agg
+   * with the columnName chosen.
+   *
+   * @return (PartLookupResult, Option[String]) - the PartLookupResult generated after removing suffix,
+   *         and Option with columnName if the lookupResult schema has the requested columnName, None otherwise.
+   */
   private def removeSuffixAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
+                                                  hasAggSuffix: Boolean,
                                                   source: ChunkSource,
                                                   datasetRef: DatasetRef,
                                                   originalLookupResult: PartLookupResult,
                                                   querySession: QuerySession) = {
     // Assume metric name has only equal filter
-    val filterWithoutColumn = filters.filterNot(_.column == metricColumn) :+
-      ColumnFilter(metricColumn, Equals(metricName.stripSuffix(s"_$columnName")))
+    val filterWithoutColumn = if (hasAggSuffix)
+      filters.filterNot(_.column == metricColumn) :+
+        ColumnFilter(metricColumn, Equals(metricName.replace(s"_$columnName:::", ":::")))
+    else
+      filters.filterNot(_.column == metricColumn) :+
+        ColumnFilter(metricColumn, Equals(metricName.stripSuffix(s"_$columnName")))
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filterWithoutColumn)
     // clear stats since previous call to lookupPartitions set the stat with metric name that has suffix
@@ -96,14 +109,24 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     /*
      * As part of Histogram query compatibility with Prometheus format histograms, we
      * remove _sum, _count suffix from metric name here. _bucket & le are already
-     * removed in SingleClusterPlanner. We remove the suffix only when partition lookup does not return any results
+     * removed in SingleClusterPlanner. We remove the suffix only when partition lookup does not return any results.
+     * If the metric name has the agg suffix in the format metric_columnName:::agg, we remove only the _columnName part
+     * and leave the :::agg part as is.  This is to support querying aggregated histogram data.
      */
     if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram &&
         colName.isEmpty && metricName.isDefined) {
       val res = if (metricName.get.endsWith("_sum"))
-        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, dataset, lookupRes, querySession)
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", hasAggSuffix = false,
+          source, dataset, lookupRes, querySession)
       else if (metricName.get.endsWith("_count"))
-        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, dataset, lookupRes, querySession)
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = false,
+          source, dataset, lookupRes, querySession)
+      else if (metricName.get.matches(".*_sum:::\\w*")) // querying aggregated data without column
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", hasAggSuffix = true,
+          source, dataset, lookupRes, querySession)
+      else if (metricName.get.matches(".*_count:::\\w*")) // querying aggregated data without column
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = true,
+          source, dataset, lookupRes, querySession)
       else (lookupRes, newColName)
 
       lookupRes = res._1
