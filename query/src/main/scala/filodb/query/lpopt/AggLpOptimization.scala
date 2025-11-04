@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
 import filodb.core.GlobalConfig
+import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
 import filodb.query._
@@ -210,14 +211,22 @@ object AggLpOptimization extends StrictLogging{
     } else {
       // if the query column is not the same as the suggested aggregation column, it is a wierd case, so don't optimize
       val queryColumnOpt = ret.get.rawSeriesColumn
-      if (queryColumnOpt.isEmpty || queryColumnOpt == ret.get.aggColumnToUse) ret else None
+      val typeFilterCanBeTranslated = ret.get.rawSeriesFilters.find(_.column == Schemas.TypeLabel) match {
+        case Some(ColumnFilter(_, Equals(value))) =>
+          // only optimize if the type filter is querying pre-aggregated schema
+          Schemas.preAggSchema.contains(value.toString)
+        case Some(_) => false // if there are other operators on type filter, cannot optimize
+        case None => true // can optimize if there is no type filter
+      }
+      if ((queryColumnOpt.isEmpty || queryColumnOpt == ret.get.aggColumnToUse) && typeFilterCanBeTranslated) ret
+      else None
     }
   }
 
   private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String,
                                        col: Seq[String], rf: Option[RangeFunctionId]): Aggregate = {
     agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing]
-      .replaceRFFiltersAndColumn(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
+       .updateRawSeriesForAggOptimize(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
   }
 
   private def metricNameWithoutSuffix(metricNameStr: String): String = metricNameStr.split(":::").head
