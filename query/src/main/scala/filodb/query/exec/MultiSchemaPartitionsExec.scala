@@ -45,7 +45,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   /**
    * Remove _columnName suffix from metricName and generate PartLookupResult.
    * If hasAggSuffix is true, it means the metric name has metric_columnName:::agg format.
-   * In that case, we need to remove _columnName in the metric and leave :::agg as is so that we look up metric::agg
+   * In that case, we need to remove _columnName in the metric and leave :::agg as is so that we look up metric:::agg
    * with the columnName chosen.
    *
    * @return (PartLookupResult, Option[String]) - the PartLookupResult generated after removing suffix,
@@ -121,10 +121,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
       else if (metricName.get.endsWith("_count"))
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = false,
           source, dataset, lookupRes, querySession)
-      else if (metricName.get.matches(".*_sum:::\\w*")) // querying aggregated data without column
+      else if (metricName.get.matches(".*_sum:::\\w+")) // querying aggregated data without column
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", hasAggSuffix = true,
           source, dataset, lookupRes, querySession)
-      else if (metricName.get.matches(".*_count:::\\w*")) // querying aggregated data without column
+      else if (metricName.get.matches(".*_count:::\\w+")) // querying aggregated data without column
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = true,
           source, dataset, lookupRes, querySession)
       else (lookupRes, newColName)
