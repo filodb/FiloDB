@@ -15,6 +15,12 @@ final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
             "the partitionkeys tables were not truncated.")
 
+object MultiSchemaPartitionsExec {
+  // FYI \w in regex below matches [a-zA-Z0-9_]
+  private val sumMetricRegex = ".*_sum:::\\w+".r.pattern
+  private val countMetricRegex = ".*_count:::\\w+".r.pattern
+}
+
 /**
   * ExecPlan to select raw data from partitions that the given filter resolves to,
   * in the given shard, for the given row key range.  Schema-agnostic - discovers the schema and
@@ -36,6 +42,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
+  import MultiSchemaPartitionsExec._
 
   override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
 
@@ -115,16 +122,17 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
      */
     if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram &&
         colName.isEmpty && metricName.isDefined) {
+
       val res = if (metricName.get.endsWith("_sum"))
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", hasAggSuffix = false,
           source, dataset, lookupRes, querySession)
       else if (metricName.get.endsWith("_count"))
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = false,
           source, dataset, lookupRes, querySession)
-      else if (metricName.get.matches(".*_sum:::\\w+")) // querying aggregated data without column
+      else if (sumMetricRegex.matcher(metricName.get).matches()) // querying aggregated data without column
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", hasAggSuffix = true,
           source, dataset, lookupRes, querySession)
-      else if (metricName.get.matches(".*_count:::\\w+")) // querying aggregated data without column
+      else if (countMetricRegex.matcher(metricName.get).matches()) // querying aggregated data without column
         removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", hasAggSuffix = true,
           source, dataset, lookupRes, querySession)
       else (lookupRes, newColName)
