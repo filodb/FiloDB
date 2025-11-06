@@ -95,9 +95,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 3. **Database** (choose one):
    - [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
      - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`
-   - [ScyllaDB](https://www.scylladb.com/) as a drop-in replacement
-     - See [SCYLLADB_INTEGRATION.md](SCYLLADB_INTEGRATION.md) for setup instructions
-     - Uses the same DataStax driver with zero code changes
+   - [ScyllaDB](https://www.scylladb.com/) as a drop-in replacement (uses the same DataStax driver with zero code changes)
 4. [Apache Kafka](http://kafka.apache.org/) 0.10.x or above
 5. [Rust](https://www.rust-lang.org/tools/install) to build native components
 6. A working C compiler for your system (GCC or Clang)
@@ -196,8 +194,6 @@ docker run -d --name scylla-test -p 9042:9042 \
 # Wait for ScyllaDB to be ready (30-60 seconds)
 docker exec scylla-test cqlsh -e "describe keyspaces"
 ```
-
-For detailed ScyllaDB setup and validation, see [SCYLLADB_INTEGRATION.md](SCYLLADB_INTEGRATION.md).
 
 Build the required projects
 ```
@@ -865,8 +861,6 @@ ScyllaDB-specific test suites are available to validate drop-in compatibility:
 # Run ScyllaDB-specific tests
 SCYLLADB_HOST=localhost SCYLLADB_PORT=9042 sbt "cassandra/testOnly filodb.cassandra.columnstore.ScyllaDbColumnStoreSpec"
 ```
-
-See [SCYLLADB_INTEGRATION.md](SCYLLADB_INTEGRATION.md) for detailed ScyllaDB setup and testing.
 
 The docs use [mermaid](https://github.com/knsv/mermaid) and [doctoc](https://github.com/thlorenz/doctoc).  On a Mac, to install:
 
