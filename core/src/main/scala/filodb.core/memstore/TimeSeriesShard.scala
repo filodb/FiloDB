@@ -89,6 +89,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numActivelyIngestingParts = FilodbMetrics.gauge("num-ingesting-partitions", tags)
 
   val numChunksPagedIn = FilodbMetrics.counter("chunks-paged-in", tags)
+  val odpMemoryInsufficientBlockCount = FilodbMetrics.counter("odp-memory-insufficient-block-count", tags)
   val partitionsPagedFromColStore = FilodbMetrics.counter("memstore-partitions-paged-in", tags)
   val partitionsQueried = FilodbMetrics.counter("memstore-partitions-queried", tags)
   val purgedPartitions = FilodbMetrics.counter("memstore-partitions-purged", tags)

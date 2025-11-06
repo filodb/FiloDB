@@ -107,6 +107,7 @@ extends RawToPartitionMaker with StrictLogging {
               // Check if we have enough memory (with safety margin)
               if (freeBlocks < (blocksNeeded + 1)) {
                 shouldSkipChunk = true
+                tsShard.shardStats.odpMemoryInsufficientBlockCount.increment(blocksNeeded + 1)
                 logger.warn(s"Skipping chunk $chunkID for partId=${tsPart.partID} " +
                   s"shard=${tsShard.shardNum}: insufficient memory (need ~$blocksNeeded blocks, " +
                   s"have $freeBlocks). Query will return partial results.")

@@ -203,10 +203,8 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
                 partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
                   // Check if any chunks were skipped and update QuerySession
                   if (result.isPartialResult) {
-                    throw QueryLimitException("The result it too large" +
+                    throw QueryLimitException("The result is too large" +
                       " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId);
-//                    querySession.resultCouldBePartial = true
-//                    querySession.partialResultsReason = result.partialResultReason
                   }
                   result.partition
                 }
@@ -238,10 +236,8 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
                     partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
                       // Check if any chunks were skipped and update QuerySession
                       if (result.isPartialResult) {
-                        throw QueryLimitException("The result it too large" +
-                          " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId);
-//                        querySession.resultCouldBePartial = true
-//                        querySession.partialResultsReason = result.partialResultReason
+                        throw QueryLimitException("The result is too large" +
+                          " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId)
                       }
                       result.partition
                     }
