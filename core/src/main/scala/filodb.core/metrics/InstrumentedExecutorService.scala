@@ -26,19 +26,15 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
   private val activeGauge = metrics.gauge("executor_threads_active", isBytes = false, None, baseAttributes)
   private val latencyHist = metrics.histogram("executor_task_wait_latency", Some(TimeUnit.NANOSECONDS), baseAttributes)
 
-  // For ThreadPoolExecutor-based executors, we can track queue size and active threads
+  private val scheduler = monix.execution.Scheduler.global
   private val fut = underlying match {
     case tpe: ThreadPoolExecutor =>
-      // Set up periodic sampling of queue size and active threads
-      val scheduler = monix.execution.Scheduler.global
       monix.reactive.Observable.interval(metrics.otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
         queueGauge.update(tpe.getQueue.size().toDouble)
         activeGauge.update(tpe.getActiveCount.toDouble)
       }(scheduler)
 
     case fjp: ForkJoinPool =>
-      // Set up periodic sampling of queue size and active threads for ForkJoinPool
-      val scheduler = monix.execution.Scheduler.global
       monix.reactive.Observable.interval(metrics.otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
         queueGauge.update(fjp.getQueuedSubmissionCount.toDouble)
         activeGauge.update(fjp.getActiveThreadCount.toDouble)
@@ -55,15 +51,13 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
     val submitTime = System.nanoTime()
     tasksSubmitted.increment()
 
-    new Runnable {
-      override def run(): Unit = {
-        try {
-          val waitLatency = System.nanoTime() - submitTime
-          latencyHist.record(waitLatency)
-          r.run()
-        } finally {
-          tasksCompleted.increment()
-        }
+    () => {
+      try {
+        val waitLatency = System.nanoTime() - submitTime
+        latencyHist.record(waitLatency)
+        r.run()
+      } finally {
+        tasksCompleted.increment()
       }
     }
   }
@@ -73,15 +67,13 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
     val submitTime = System.nanoTime()
     tasksSubmitted.increment()
 
-    new Callable[T] {
-      override def call(): T = {
-        try {
-          val waitLatency = System.nanoTime() - submitTime
-          latencyHist.record(waitLatency)
-          c.call()
-        } finally {
-          tasksCompleted.increment()
-        }
+    () => {
+      try {
+        val waitLatency = System.nanoTime() - submitTime
+        latencyHist.record(waitLatency)
+        c.call()
+      } finally {
+        tasksCompleted.increment()
       }
     }
   }
@@ -120,11 +112,9 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
     underlying.invokeAny(wrappedTasks)
   }
 
-  override def invokeAny[T](
-                             tasks: java.util.Collection[_ <: Callable[T]],
-                             timeout: Long,
-                             unit: TimeUnit
-                           ): T = {
+  override def invokeAny[T](tasks: java.util.Collection[_ <: Callable[T]],
+                            timeout: Long,
+                            unit: TimeUnit): T = {
     val wrappedTasks = new java.util.ArrayList[Callable[T]](tasks.size())
     tasks.asScala.foreach(task => wrappedTasks.add(wrapCallable(task)))
     underlying.invokeAny(wrappedTasks, timeout, unit)
@@ -141,7 +131,6 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
   }
 
   override def isShutdown: Boolean = {
-    fut.cancel()
     underlying.isShutdown
   }
 
