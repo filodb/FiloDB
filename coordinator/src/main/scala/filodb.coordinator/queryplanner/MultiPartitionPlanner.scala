@@ -19,6 +19,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._
+import filodb.query.RangeFunctionId.AbsentOverTime
 import filodb.query.exec._
 
 //scalastyle:off file.size.limit
@@ -517,6 +518,22 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             materializeForAggregateAssignment(aggregate, assignment, queryContext, timeRangeOverride)
           case binaryJoin: BinaryJoin =>
             materializeForBinaryJoinAssignment(binaryJoin, assignment, queryContext, timeRangeOverride)
+          case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime =>
+            val plans = proportionMap.map(entry => {
+              val partitionDetails = entry._2
+              materializeForPartition(logicalPlan, partitionDetails.partitionName,
+                partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
+            }).toSeq
+            val dispatcher = PlannerUtil.pickDispatcher(plans)
+            // 0 present 1 absent => 01/10/00 are present. 11 is absent.
+            val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
+              plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), AggregationOperator.Absent, Nil)
+            if (!queryContext.plannerParams.skipAggregatePresent) {
+              val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+              reducer.addRangeVectorTransformer(AggregatePresenter(AggregationOperator.Absent, Nil,
+                RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+            }
+            reducer
           case _ =>
             val plans = proportionMap.map(entry => {
               val partitionDetails = entry._2
@@ -698,11 +715,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * @param logicalPlan the logic plan.
    * @return true if the binary join or aggregation has clauses.
    */
-  private def hasJoinClause(logicalPlan: LogicalPlan): Boolean = {
+  private def hasJoinOrAggClause(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin => binaryJoin.on.nonEmpty || binaryJoin.ignoring.nonEmpty
-      case aggregate: Aggregate => hasJoinClause(aggregate.vectors)
-      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinClause)
+      case aggregate: Aggregate => hasJoinOrAggClause(aggregate.vectors)
+      // AbsentOverTime is a special case that is converted to aggregation.
+      case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime => true
+      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinOrAggClause)
       case _ => false
     }
   }
@@ -714,7 +733,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(hasMultiPartitionNamespace && hasJoinClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClause(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(

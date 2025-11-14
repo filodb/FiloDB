@@ -123,6 +123,7 @@ object RowAggregator {
   def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
     val valColType = ResultSchema.valueColumnType(schema)
     aggrOp match {
+      case Absent if valColType != ColumnType.HistogramColumn =>  AbsentRowAggregator
       case Min if valColType != ColumnType.HistogramColumn => MinRowAggregator
       case Max if valColType != ColumnType.HistogramColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
