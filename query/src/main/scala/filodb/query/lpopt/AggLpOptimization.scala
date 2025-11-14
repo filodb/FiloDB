@@ -19,8 +19,14 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  */
 object AggLpOptimization extends StrictLogging{
 
+  // GOTCHA for LP Optimization:
+  // If raw data is 10-secondly, and pre-aggregated data is 1-minutely, then query results won't match exactly.
+  // We optimize the query anyway since we do not have pre-agg use cases that publish 10s data yet.
+  // To support query equivalence, we would need to have pre-aggregated data at same frequency as raw data.
+  // If there is a use case that should not optimize for such scenarios prior to pre-agg supporting 10s data,
+  // instruct users to the no_optimize promql function to bypass the optimization.
+
   // configure if needed later
-  private val aggTimeWindow = 1.minutes.toMillis // pre-aggregated data is at 1m resolution
   private val aggDelay  = 1.minutes.toMillis // pre-aggregated data is delayed by 1m
 
   private val numAggLpOptimized = Kamon.counter(s"num_agg_lps_optimized").withoutTags()
@@ -140,7 +146,7 @@ object AggLpOptimization extends StrictLogging{
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Rate, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(increase(foo))
@@ -149,41 +155,41 @@ object AggLpOptimization extends StrictLogging{
       // sum(increase(foo:::agg::count))
       // sum(increase(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Increase, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(sum_over_time(foo))
       // sum(sum_over_time(foo:::agg::sum))
       // sum(sum_over_time(foo:::agg::count))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.SumOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption.orElse(Some("sum")), None)
 
       // sum(count_over_time(foo))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.CountOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().isEmpty
+                    _) if rs.columns().isEmpty
           => makeResult(rs, Some("count"), Some(SumOverTime))
 
       // min(min_over_time(foo))
       // min(min_over_time(foo:::agg::min))
       case Aggregate(AggregationOperator.Min,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MinOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("min"))
+                    _) if rs.columns().toSet.subsetOf(Set("min"))
           => makeResult(rs, Some("min"), None)
 
       // max(max_over_time(foo))
       // max(max_over_time(foo:::agg::max))
       case Aggregate(AggregationOperator.Max,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MaxOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("max"))
+                    _) if rs.columns().toSet.subsetOf(Set("max"))
           => makeResult(rs, Some("max"), None)
 
       /*
