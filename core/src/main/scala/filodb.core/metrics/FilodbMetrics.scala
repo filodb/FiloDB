@@ -577,13 +577,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   }
 
   def instrumentExecutor(ex: ExecutorService, name: String): ExecutorService = {
+    var newEx = ex
     if (otelEnabled) {
-      new InstrumentedExecutorService(ex, name, this)
-    } else if (kamonEnabled) {
-      ExecutorInstrumentation.instrument(ex, name)
-    } else {
-      ex
+      newEx = new InstrumentedExecutorService(newEx, name, this)
     }
+    if (kamonEnabled) {
+      newEx = ExecutorInstrumentation.instrument(newEx, name)
+    }
+    newEx
   }
 }
 
