@@ -2,7 +2,7 @@ package filodb.core.metrics
 
 import java.nio.file.{Files, Paths}
 import java.time.Duration
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.{ConcurrentHashMap, ExecutorService, TimeUnit}
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
@@ -23,6 +23,7 @@ import io.opentelemetry.sdk.metrics.data.AggregationTemporality
 import io.opentelemetry.sdk.metrics.export.{AggregationTemporalitySelector, MetricExporter, PeriodicMetricReader}
 import io.opentelemetry.sdk.resources.Resource
 import kamon.Kamon
+import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.execution.Scheduler
@@ -485,7 +486,6 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         }
       }
 
-      val attributes = createAttributesBuilder(baseAttributes)
       MetricsGauge(otelGauge, kamonGauge, timeUnit, baseAttributes)
     }).asInstanceOf[MetricsGauge]
   }
@@ -575,6 +575,17 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       Kamon.stop()
     }
   }
+
+  def instrumentExecutor(ex: ExecutorService, name: String): ExecutorService = {
+    var newEx = ex
+    if (otelEnabled) {
+      newEx = new InstrumentedExecutorService(newEx, name, this)
+    }
+    if (kamonEnabled) {
+      newEx = ExecutorInstrumentation.instrument(newEx, name)
+    }
+    newEx
+  }
 }
 
 /**
@@ -644,5 +655,9 @@ object FilodbMetrics {
 
   def shutdown(): Unit = {
     instance.shutdown()
+  }
+
+  def instrumentExecutor(ex: ExecutorService, name: String): ExecutorService = {
+    instance.instrumentExecutor(ex, name)
   }
 }
