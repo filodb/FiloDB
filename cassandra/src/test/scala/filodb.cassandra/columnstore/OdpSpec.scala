@@ -29,7 +29,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
 
   implicit val s = monix.execution.Scheduler.Implicits.global
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session

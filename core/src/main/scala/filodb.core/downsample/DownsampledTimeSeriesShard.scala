@@ -1,6 +1,7 @@
 package filodb.core.downsample
 
 import java.util
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable
@@ -9,9 +10,6 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
@@ -22,6 +20,7 @@ import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.{CardinalityManager, CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -30,34 +29,28 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val shardTotalRecoveryTime = Kamon.gauge("downsample-total-shard-recovery-time",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
-  val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
-  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
-  val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").withTags(TagSet.from(tags))
-  val indexEntriesPurged = Kamon.counter("index-entries-purged").withTags(TagSet.from(tags))
-  val indexRefreshFailed = Kamon.counter("index-refresh-failed").withTags(TagSet.from(tags))
-  val indexPurgeFailed = Kamon.counter("index-purge-failed").withTags(TagSet.from(tags))
-  val indexEntries = Kamon.gauge("downsample-store-index-entries").withTags(TagSet.from(tags))
-  val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").withTags(TagSet.from(tags))
-  val singlePartCassFetchLatency = Kamon.histogram("single-partition-cassandra-latency",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val purgeIndexEntriesLatency = Kamon.histogram("downsample-store-purge-index-entries-latency",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val shardTotalRecoveryTime = FilodbMetrics.gauge("downsample-total-shard-recovery-time", tags)
+  val partitionsQueried = FilodbMetrics.counter("downsample-partitions-queried", tags)
+  val queryTimeRangeMins = FilodbMetrics.histogram("query-time-range-minutes", tags)
 
-  val dataShapeKeyLength = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "key-length")
-  val dataShapeValueLength = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "value-length")
-  val dataShapeLabelCount = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "label-count")
-  val dataShapeMetricLength = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "metric-length")
-  val dataShapeTotalLength = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "total-length")
-  val dataShapeBucketCount = Kamon.histogram("data-shape")
-    .withTags(TagSet.from(tags)).withTag("dimension", "bucket-count")
+  val queriesBySchema = FilodbMetrics.counter("leaf-queries-by-schema", tags)
+  val indexEntriesRefreshed = FilodbMetrics.counter("index-entries-refreshed", tags)
+  val indexEntriesPurged = FilodbMetrics.counter("index-entries-purged", tags)
+  val indexRefreshFailed = FilodbMetrics.counter("index-refresh-failed", tags)
+  val indexPurgeFailed = FilodbMetrics.counter("index-purge-failed", tags)
+  val indexEntries = FilodbMetrics.gauge("downsample-store-index-entries", tags)
+  val indexRamBytes = FilodbMetrics.bytesGauge("downsample-store-index-ram-bytes", tags)
+  val singlePartCassFetchLatency = FilodbMetrics.timeHistogram("single-partition-cassandra-latency",
+    TimeUnit.MILLISECONDS, tags)
+  val purgeIndexEntriesLatency = FilodbMetrics.timeHistogram("downsample-store-purge-index-entries-latency",
+    TimeUnit.MILLISECONDS, tags)
+
+  val dataShapeKeyLength = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "key-length"))
+  val dataShapeValueLength = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "value-length"))
+  val dataShapeLabelCount = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "label-count"))
+  val dataShapeMetricLength = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "metric-length"))
+  val dataShapeTotalLength = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "total-length"))
+  val dataShapeBucketCount = FilodbMetrics.histogram("data-shape", tags ++ Map("dimension" -> "bucket-count"))
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -350,7 +343,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
           _schema.foreach { s =>
-            stats.queriesBySchema.withTag("schema", schemas(s).name).increment()
+            stats.queriesBySchema.increment(1, Map("schema" -> schemas(s).name))
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns

@@ -3,9 +3,8 @@ package filodb.memory
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 
+import filodb.core.metrics.FilodbMetrics
 import filodb.memory.EvictionLock.sharedLockAcquireLatency
 
 object EvictionLock {
@@ -17,8 +16,7 @@ object EvictionLock {
    */
   val direCircumstanceMaxTimeoutMillis = 90000
 
-  val sharedLockAcquireLatency = Kamon.histogram("eviction-lock-shared-acquisition",
-    MeasurementUnit.time.nanoseconds).withoutTags()
+  val sharedLockAcquireLatency = FilodbMetrics.timeHistogram("eviction-lock-shared-acquisition", TimeUnit.NANOSECONDS)
 }
 
 /**

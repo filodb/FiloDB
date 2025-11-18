@@ -1,12 +1,11 @@
 package filodb.downsampler
 
-import kamon.Kamon
-
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, ReadablePartition}
 
 object Utils {
 
-  lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
+  lazy val numRawChunksSkipped = FilodbMetrics.counter("num-raw-chunks-skipped")
 
   /**
    * Specifies a range of a chunk's rows.

@@ -6,7 +6,6 @@ import scala.concurrent.duration._
 import akka.actor.ActorRef
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -14,6 +13,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{Filter, _}
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
@@ -27,7 +27,7 @@ import filodb.query.exec.InternalRangeFunction.Last
 // scalastyle:off file.size.limit
 
 object SingleClusterPlanner {
-  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
+  private val mdNoShardKeyFilterRequests = FilodbMetrics.counter("queryengine-metadata-no-shardkey-requests")
 
   // Find the TargetSchema that is applicable i.e effective for the current query window
   private def findTargetSchema(targetSchemaChanges: Seq[TargetSchemaChange],
@@ -99,13 +99,11 @@ class SingleClusterPlanner(val dataset: Dataset,
   // failed failover counter captures failovers which are not possible because at least one shard
   // is down both on the primary and DR clusters, the query will get executed only when the
   // partial results are acceptable otherwise an exception is thrown
-  val shardUnavailableFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
-    .withTag("cluster", clusterName)
-    .withTag("type", "shardUnavailable")
+  val shardUnavailableFailoverCounter = FilodbMetrics.counter(HighAvailabilityPlanner.FailoverCounterName,
+                                                Map("cluster" -> clusterName, "type" -> "shardUnavailable"))
 
-  val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
-    .withTag("cluster", clusterName)
-    .withTag("dataset", dataset.ref.dataset)
+  val numPlansMaterialized = FilodbMetrics.counter("single-cluster-plans-materialized",
+                                                Map("cluster" -> clusterName, "dataset" -> dataset.ref.dataset))
 
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)

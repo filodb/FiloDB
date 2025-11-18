@@ -18,6 +18,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 
 import filodb.core.GlobalScheduler
 import filodb.core.memstore.FiloSchedulers
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.MetaStore
 
 /** The base Coordinator Extension implementation providing standard ActorSystem startup.
@@ -200,6 +201,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
       metaStore.shutdown()
       memStore.shutdown()
       ioPool.shutdown()
+      FilodbMetrics.shutdown()
     } catch {
       case _: Exception =>
         system.terminate()

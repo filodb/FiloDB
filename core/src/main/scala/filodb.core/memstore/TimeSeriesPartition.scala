@@ -178,8 +178,8 @@ extends ChunkMap(initMapSize) with ReadablePartition {
     } else {
       val shardKey = schema.partKeySchema.colValues(partKeyBase, partKeyOffset, schema.options.shardKeyColumns)
       if (shardKey.length >= 2 && shardKey(0) != UnsafeUtils.ZeroPointer && shardKey(1) != UnsafeUtils.ZeroPointer) {
-        shardInfo.stats.outOfOrderDroppedTenant.withTag("metric_ws", shardKey(0))
-                                               .withTag("metric_ns", shardKey(1)).increment()
+        shardInfo.stats.outOfOrderDroppedTenant.increment(1, Map("metric_ws" -> shardKey(0),
+                                                                 "metric_ns" -> shardKey(1)))
       }
       shardInfo.stats.outOfOrderDropped.increment()
     }

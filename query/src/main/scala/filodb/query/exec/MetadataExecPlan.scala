@@ -336,7 +336,7 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: TimeSeriesStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanSamples)
+          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanLeafSamples)
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case _ => Observable.empty

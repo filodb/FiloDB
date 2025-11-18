@@ -5,9 +5,11 @@ import scala.concurrent.Await
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
+import filodb.core.metrics.FilodbMetrics
+
 object Shutdown extends StrictLogging {
 
-  val forcedShutdowns = Kamon.counter("forced-shutdowns").withoutTags()
+  val forcedShutdowns = FilodbMetrics.counter("forced-shutdowns")
   def haltAndCatchFire(e: Throwable, unitTest: Boolean = false): Unit = {
     forcedShutdowns.increment()
     Thread.sleep(60000)  // Sleep 1m to make sure counter is published.

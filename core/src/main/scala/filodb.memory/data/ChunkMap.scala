@@ -6,8 +6,8 @@ import scala.collection.mutable.{HashMap, Map}
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 
+import filodb.core.metrics.FilodbMetrics
 import filodb.memory.{NativeMemoryManager, OutOfOffheapMemoryException}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.format.UnsafeUtils
@@ -51,9 +51,9 @@ object ChunkMap extends StrictLogging {
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
   private val MaxExclusiveRetryTimeoutNanos = 10.minute.toNanos
 
-  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").withoutTags
-  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering").withoutTags
-  private val chunkEvictions = Kamon.counter("memory-chunk-evictions").withoutTags
+  private val exclusiveLockWait = FilodbMetrics.counter("memory-exclusive-lock-waits")
+  private val sharedLockLingering = FilodbMetrics.counter("memory-shared-lock-lingering")
+  private val chunkEvictions = FilodbMetrics.counter("memory-chunk-evictions")
 
   // Tracks all the shared locks held, by each thread.
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
