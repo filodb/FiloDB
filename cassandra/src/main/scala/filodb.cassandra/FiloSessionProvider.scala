@@ -88,6 +88,7 @@ class DefaultFiloSessionProvider(val config: Config) extends FiloSessionProvider
            .withSocketOptions(socketOptions)
            .withQueryOptions(queryOptions)
            .withCompression(cqlCompression)
+           .withoutJMXReporting() // disable JMX reporting - there was a jar conflict blocking 3.4 spark upgrade
            .build
 
   val session = cluster.connect()

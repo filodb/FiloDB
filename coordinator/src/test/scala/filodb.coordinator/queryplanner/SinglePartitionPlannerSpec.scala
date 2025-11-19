@@ -35,7 +35,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
 
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
-    withFallback(routingConfig)
+    withFallback(routingConfig).resolve()
   private val queryConfig = QueryConfig(config).copy(partitionName = Some("partName"),
                                                       plannerSelector = Some("raw-prom"))
 

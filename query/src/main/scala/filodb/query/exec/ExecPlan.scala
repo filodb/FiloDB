@@ -1,12 +1,12 @@
 package filodb.query.exec
 
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -16,12 +16,12 @@ import filodb.core.{DatasetRef, Utils}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
-
 
 // scalastyle:off file.size.limit
 
@@ -172,9 +172,8 @@ trait ExecPlan extends QueryCommand {
         } finally {
           step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
         }
-        Kamon.histogram("query-execute-time-elapsed-step1-done",
-          MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
+        FilodbMetrics.timeHistogram("query-execute-time-elapsed-step1-done", TimeUnit.MILLISECONDS,
+          Map("plan" -> getClass.getSimpleName))
           .record(Math.max(0, System.currentTimeMillis - startExecute))
         span.mark(s"execute-step1-end-${getClass.getSimpleName}")
         doEx
@@ -186,8 +185,8 @@ trait ExecPlan extends QueryCommand {
       val task = res.schema.map { resSchema =>
         // avoid any work when plan has waited in executor queue for long
         queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
-        Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
+        FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
+          Map("plan" -> getClass.getSimpleName))
           .record(Math.max(0, System.currentTimeMillis - startExecute))
         FiloSchedulers.assertThreadName(QuerySchedName)
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
@@ -221,12 +220,11 @@ trait ExecPlan extends QueryCommand {
           )
         } else {
           val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-          Kamon
-            .histogram(
+          FilodbMetrics.timeHistogram(
               "query-execute-time-elapsed-step2-transformer-pipeline-setup",
-              MeasurementUnit.time.milliseconds
+              TimeUnit.MILLISECONDS,
+              Map("plan" -> getClass.getSimpleName)
             )
-            .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
           makeResult(finalRes._1, recSchema, finalRes._2)
         }
@@ -269,9 +267,8 @@ trait ExecPlan extends QueryCommand {
           StreamQueryResult(queryContext.queryId, planId, rvs)
         }
         .guarantee(Task.eval {
-          Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
-            MeasurementUnit.time.milliseconds)
-            .withTag("plan", getClass.getSimpleName)
+          FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-result-materialized", TimeUnit.MILLISECONDS,
+            Map("plan" -> getClass.getSimpleName))
             .record(Math.max(0, System.currentTimeMillis - startExecute))
           SerializedRangeVector.queryResultBytes.record(resultSize)
           // recording and adding step1 to queryStats at the end of execution since the grouping
@@ -386,9 +383,8 @@ trait ExecPlan extends QueryCommand {
         } finally {
           step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
         }
-        Kamon.histogram("query-execute-time-elapsed-step1-done",
-          MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
+        FilodbMetrics.timeHistogram("query-execute-time-elapsed-step1-done", TimeUnit.MILLISECONDS,
+          Map("plan" -> getClass.getSimpleName))
           .record(Math.max(0, System.currentTimeMillis - startExecute))
         span.mark(s"execute-step1-end-${getClass.getSimpleName}")
         doEx
@@ -399,8 +395,8 @@ trait ExecPlan extends QueryCommand {
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.flatMap { resSchema =>
       // avoid any work when plan has waited in executor queue for long
       queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
-      Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
-        .withTag("plan", getClass.getSimpleName)
+      FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
+        Map("plan" -> getClass.getSimpleName))
         .record(Math.max(0, System.currentTimeMillis - startExecute))
       span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
@@ -435,12 +431,11 @@ trait ExecPlan extends QueryCommand {
           })
         } else {
           val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-          Kamon
-            .histogram(
+          FilodbMetrics.timeHistogram(
             "query-execute-time-elapsed-step2-transformer-pipeline-setup",
-              MeasurementUnit.time.milliseconds
+              TimeUnit.MILLISECONDS,
+              Map("plan" -> getClass.getSimpleName)
             )
-            .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
           makeResult(finalRes._1, recSchema, finalRes._2)
         }
@@ -489,9 +484,8 @@ trait ExecPlan extends QueryCommand {
           .toListL
           .map { r =>
             SerializedRangeVector.queryResultBytes.record(resultSize)
-            Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
-                  MeasurementUnit.time.milliseconds)
-              .withTag("plan", getClass.getSimpleName)
+            FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-result-materialized", TimeUnit.MILLISECONDS,
+                  Map("plan" -> getClass.getSimpleName))
               .record(Math.max(0, System.currentTimeMillis - startExecute))
             // recording and adding step1 to queryStats at the end of execution since the grouping
             // for stats is not formed yet at the beginning

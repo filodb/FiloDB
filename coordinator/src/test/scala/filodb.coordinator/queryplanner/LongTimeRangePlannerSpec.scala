@@ -50,7 +50,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
   val earliestRawTime = now - rawRetention.toMillis
   val latestDownsampleTime = now - 4.minutes.toMillis // say it takes 4 minutes to downsample
 
-  private val config = ConfigFactory.load("application_test.conf")
+  private val config = ConfigFactory.load("application_test.conf").resolve()
   private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private def disp = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
@@ -432,7 +432,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     val routingConfig = ConfigFactory.parseString(routingConfigString)
 
     val localConfig = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
-      withFallback(routingConfig)
+      withFallback(routingConfig).resolve()
     val queryConfigWithSelector = QueryConfig(localConfig).copy(plannerSelector = Some("plannerSelector"))
 
     val queryConfigWithGrpcEndpoint = QueryConfig(

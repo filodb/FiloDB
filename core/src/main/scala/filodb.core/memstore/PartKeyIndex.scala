@@ -3,14 +3,13 @@ package filodb.core.memstore
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 import scala.collection.immutable.HashSet
 import scala.util.{Failure, Success}
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.lucene.util.BytesRef
 
 import filodb.core.{concurrentCache, DatasetRef, Utils}
@@ -22,6 +21,7 @@ import filodb.core.memstore.PartKeyQueryBuilder.removeRegexAnchors
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, Filter, QueryUtils}
 import filodb.core.query.Filter.{And, Equals, EqualsRegex, In, NotEquals, NotEqualsRegex}
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
@@ -66,25 +66,17 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
                                protected val addMetricTypeField: Boolean = true)
   extends StrictLogging {
 
-  protected val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
-      MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  protected val startTimeLookupLatency = FilodbMetrics.timeHistogram("index-startTime-lookup-latency",
+    TimeUnit.NANOSECONDS, Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  protected val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
-      MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  protected val labelValuesQueryLatency = FilodbMetrics.timeHistogram("index-label-values-query-latency",
+      TimeUnit.NANOSECONDS, Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  protected val queryIndexLookupLatency = Kamon.histogram("index-partition-lookup-latency",
-      MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  protected val queryIndexLookupLatency = FilodbMetrics.timeHistogram("index-partition-lookup-latency",
+      TimeUnit.NANOSECONDS, Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  protected val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
-      MeasurementUnit.time.nanoseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  protected val partIdFromPartKeyLookupLatency = FilodbMetrics.timeHistogram("index-ingestion-partId-lookup-latency",
+      TimeUnit.NANOSECONDS, Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
   private val _indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
     .getOrElse(createTempDir(ref, shardNum)).toPath
@@ -270,6 +262,11 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    * new writes to readers at the given min and max delays
    */
   def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit
+
+  /**
+   * Start background thread for collecting and publishing index statistics
+   */
+  def startStatsThread(): Unit
 
   /**
    * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.

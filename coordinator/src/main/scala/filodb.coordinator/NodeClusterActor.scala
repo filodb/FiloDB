@@ -10,11 +10,11 @@ import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
-import kamon.Kamon
 
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
 //scalastyle:off number.of.types
@@ -220,7 +220,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   // Counter is incremented each time shardmapper snapshot is published.
   // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
-  val iamShardManager = Kamon.counter("shardmanager-ping").withoutTags
+  val iamShardManager = FilodbMetrics.counter("shardmanager-ping")
 
   val publishInterval = settings.ShardMapPublishFrequency
 

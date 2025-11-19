@@ -18,11 +18,11 @@ public class PromQLParser extends Parser {
 		new PredictionContextCache();
 	public static final int
 		T__0=1, T__1=2, T__2=3, T__3=4, T__4=5, T__5=6, T__6=7, T__7=8, NUMBER=9, 
-		STRING=10, ADD=11, SUB=12, MUL=13, DIV=14, MOD=15, POW=16, EQ=17, DEQ=18, 
-		NE=19, GT=20, LT=21, GE=22, LE=23, RE=24, NRE=25, AT=26, AND=27, OR=28, 
-		UNLESS=29, BY=30, WITHOUT=31, ON=32, IGNORING=33, GROUP_LEFT=34, GROUP_RIGHT=35, 
-		OFFSET=36, LIMIT=37, BOOL=38, START=39, END=40, AGGREGATION_OP=41, DURATION=42, 
-		IDENTIFIER=43, IDENTIFIER_EXTENDED=44, WS=45, COMMENT=46;
+		STRING=10, INF=11, NAN=12, ADD=13, SUB=14, MUL=15, DIV=16, MOD=17, POW=18, 
+		EQ=19, DEQ=20, NE=21, GT=22, LT=23, GE=24, LE=25, RE=26, NRE=27, AT=28, 
+		AND=29, OR=30, UNLESS=31, BY=32, WITHOUT=33, ON=34, IGNORING=35, GROUP_LEFT=36, 
+		GROUP_RIGHT=37, OFFSET=38, LIMIT=39, BOOL=40, START=41, END=42, AGGREGATION_OP=43, 
+		DURATION=44, IDENTIFIER=45, IDENTIFIER_EXTENDED=46, WS=47, COMMENT=48;
 	public static final int
 		RULE_expression = 0, RULE_vectorExpression = 1, RULE_unaryOp = 2, RULE_powOp = 3, 
 		RULE_multOp = 4, RULE_addOp = 5, RULE_compareOp = 6, RULE_andUnlessOp = 7, 
@@ -51,19 +51,19 @@ public class PromQLParser extends Parser {
 	private static String[] makeLiteralNames() {
 		return new String[] {
 			null, "'('", "')'", "'{'", "'}'", "'['", "']'", "':'", "','", null, null, 
-			"'+'", "'-'", "'*'", "'/'", "'%'", "'^'", "'='", "'=='", "'!='", "'>'", 
-			"'<'", "'>='", "'<='", "'=~'", "'!~'", "'@'"
+			null, null, "'+'", "'-'", "'*'", "'/'", "'%'", "'^'", "'='", "'=='", 
+			"'!='", "'>'", "'<'", "'>='", "'<='", "'=~'", "'!~'", "'@'"
 		};
 	}
 	private static final String[] _LITERAL_NAMES = makeLiteralNames();
 	private static String[] makeSymbolicNames() {
 		return new String[] {
 			null, null, null, null, null, null, null, null, null, "NUMBER", "STRING", 
-			"ADD", "SUB", "MUL", "DIV", "MOD", "POW", "EQ", "DEQ", "NE", "GT", "LT", 
-			"GE", "LE", "RE", "NRE", "AT", "AND", "OR", "UNLESS", "BY", "WITHOUT", 
-			"ON", "IGNORING", "GROUP_LEFT", "GROUP_RIGHT", "OFFSET", "LIMIT", "BOOL", 
-			"START", "END", "AGGREGATION_OP", "DURATION", "IDENTIFIER", "IDENTIFIER_EXTENDED", 
-			"WS", "COMMENT"
+			"INF", "NAN", "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "EQ", "DEQ", 
+			"NE", "GT", "LT", "GE", "LE", "RE", "NRE", "AT", "AND", "OR", "UNLESS", 
+			"BY", "WITHOUT", "ON", "IGNORING", "GROUP_LEFT", "GROUP_RIGHT", "OFFSET", 
+			"LIMIT", "BOOL", "START", "END", "AGGREGATION_OP", "DURATION", "IDENTIFIER", 
+			"IDENTIFIER_EXTENDED", "WS", "COMMENT"
 		};
 	}
 	private static final String[] _SYMBOLIC_NAMES = makeSymbolicNames();
@@ -295,6 +295,8 @@ public class PromQLParser extends Parser {
 			case T__2:
 			case NUMBER:
 			case STRING:
+			case INF:
+			case NAN:
 			case AND:
 			case OR:
 			case UNLESS:
@@ -821,11 +823,11 @@ public class PromQLParser extends Parser {
 		public AggregationContext aggregation() {
 			return getRuleContext(AggregationContext.class,0);
 		}
-		public InstantOrRangeSelectorContext instantOrRangeSelector() {
-			return getRuleContext(InstantOrRangeSelectorContext.class,0);
-		}
 		public LiteralContext literal() {
 			return getRuleContext(LiteralContext.class,0);
+		}
+		public InstantOrRangeSelectorContext instantOrRangeSelector() {
+			return getRuleContext(InstantOrRangeSelectorContext.class,0);
 		}
 		public ParensContext parens() {
 			return getRuleContext(ParensContext.class,0);
@@ -866,14 +868,14 @@ public class PromQLParser extends Parser {
 				enterOuterAlt(_localctx, 3);
 				{
 				setState(160);
-				instantOrRangeSelector();
+				literal();
 				}
 				break;
 			case 4:
 				enterOuterAlt(_localctx, 4);
 				{
 				setState(161);
-				literal();
+				instantOrRangeSelector();
 				}
 				break;
 			case 5:
@@ -1048,7 +1050,7 @@ public class PromQLParser extends Parser {
 					setState(179);
 					_errHandler.sync(this);
 					_la = _input.LA(1);
-					if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
+					if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << INF) | (1L << NAN) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 						{
 						setState(178);
 						labelMatcherList();
@@ -1639,7 +1641,7 @@ public class PromQLParser extends Parser {
 			setState(251);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
-			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << T__0) | (1L << T__2) | (1L << NUMBER) | (1L << STRING) | (1L << ADD) | (1L << SUB) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << LIMIT) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER) | (1L << IDENTIFIER_EXTENDED))) != 0)) {
+			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << T__0) | (1L << T__2) | (1L << NUMBER) | (1L << STRING) | (1L << INF) | (1L << NAN) | (1L << ADD) | (1L << SUB) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << LIMIT) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER) | (1L << IDENTIFIER_EXTENDED))) != 0)) {
 				{
 				setState(243);
 				parameter();
@@ -1927,6 +1929,8 @@ public class PromQLParser extends Parser {
 			case T__2:
 			case NUMBER:
 			case STRING:
+			case INF:
+			case NAN:
 			case ADD:
 			case SUB:
 			case AND:
@@ -2268,6 +2272,8 @@ public class PromQLParser extends Parser {
 			setState(309);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
+			case INF:
+			case NAN:
 			case AND:
 			case OR:
 			case UNLESS:
@@ -2340,7 +2346,7 @@ public class PromQLParser extends Parser {
 			setState(320);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
-			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
+			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << INF) | (1L << NAN) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 				{
 				setState(312);
 				labelName();
@@ -2404,6 +2410,8 @@ public class PromQLParser extends Parser {
 		public TerminalNode LIMIT() { return getToken(PromQLParser.LIMIT, 0); }
 		public TerminalNode BOOL() { return getToken(PromQLParser.BOOL, 0); }
 		public TerminalNode AGGREGATION_OP() { return getToken(PromQLParser.AGGREGATION_OP, 0); }
+		public TerminalNode INF() { return getToken(PromQLParser.INF, 0); }
+		public TerminalNode NAN() { return getToken(PromQLParser.NAN, 0); }
 		public LabelKeywordContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
@@ -2424,7 +2432,7 @@ public class PromQLParser extends Parser {
 			{
 			setState(327);
 			_la = _input.LA(1);
-			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP))) != 0)) ) {
+			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << INF) | (1L << NAN) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP))) != 0)) ) {
 			_errHandler.recoverInline(this);
 			}
 			else {
@@ -2448,6 +2456,8 @@ public class PromQLParser extends Parser {
 	public static class LiteralContext extends ParserRuleContext {
 		public TerminalNode NUMBER() { return getToken(PromQLParser.NUMBER, 0); }
 		public TerminalNode STRING() { return getToken(PromQLParser.STRING, 0); }
+		public TerminalNode INF() { return getToken(PromQLParser.INF, 0); }
+		public TerminalNode NAN() { return getToken(PromQLParser.NAN, 0); }
 		public LiteralContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
@@ -2468,7 +2478,7 @@ public class PromQLParser extends Parser {
 			{
 			setState(329);
 			_la = _input.LA(1);
-			if ( !(_la==NUMBER || _la==STRING) ) {
+			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << NUMBER) | (1L << STRING) | (1L << INF) | (1L << NAN))) != 0)) ) {
 			_errHandler.recoverInline(this);
 			}
 			else {
@@ -2519,7 +2529,7 @@ public class PromQLParser extends Parser {
 	}
 
 	public static final String _serializedATN =
-		"\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3\60\u014e\4\2\t\2"+
+		"\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3\62\u014e\4\2\t\2"+
 		"\4\3\t\3\4\4\t\4\4\5\t\5\4\6\t\6\4\7\t\7\4\b\t\b\4\t\t\t\4\n\t\n\4\13"+
 		"\t\13\4\f\t\f\4\r\t\r\4\16\t\16\4\17\t\17\4\20\t\20\4\21\t\21\4\22\t\22"+
 		"\4\23\t\23\4\24\t\24\4\25\t\25\4\26\t\26\4\27\t\27\4\30\t\30\4\31\t\31"+
@@ -2544,9 +2554,9 @@ public class PromQLParser extends Parser {
 		"\n!\3\"\3\"\5\"\u012d\n\"\3#\3#\3#\5#\u0132\n#\3$\3$\3%\3%\5%\u0138\n"+
 		"%\3&\3&\3&\3&\7&\u013e\n&\f&\16&\u0141\13&\5&\u0143\n&\3&\5&\u0146\n&"+
 		"\3&\3&\3\'\3\'\3(\3(\3(\2\3\4)\2\4\6\b\n\f\16\20\22\24\26\30\32\34\36"+
-		" \"$&(*,.\60\62\64\668:<>@BDFHJLN\2\13\3\2\r\16\3\2\17\21\3\2\24\31\4"+
-		"\2\35\35\37\37\4\2\13\13)*\5\2\23\23\25\25\32\33\5\2\35!&\'++\4\2\35("+
-		"++\3\2\13\f\2\u0157\2P\3\2\2\2\4X\3\2\2\2\6\u0090\3\2\2\2\b\u0092\3\2"+
+		" \"$&(*,.\60\62\64\668:<>@BDFHJLN\2\13\3\2\17\20\3\2\21\23\3\2\26\33\4"+
+		"\2\37\37!!\4\2\13\13+,\5\2\25\25\27\27\34\35\5\2\37#()--\5\2\r\16\37*"+
+		"--\3\2\13\16\2\u0157\2P\3\2\2\2\4X\3\2\2\2\6\u0090\3\2\2\2\b\u0092\3\2"+
 		"\2\2\n\u0094\3\2\2\2\f\u0096\3\2\2\2\16\u0098\3\2\2\2\20\u009c\3\2\2\2"+
 		"\22\u009e\3\2\2\2\24\u00a5\3\2\2\2\26\u00a7\3\2\2\2\30\u00ab\3\2\2\2\32"+
 		"\u00be\3\2\2\2\34\u00c0\3\2\2\2\36\u00c4\3\2\2\2 \u00c7\3\2\2\2\"\u00d2"+
@@ -2571,13 +2581,13 @@ public class PromQLParser extends Parser {
 		"v\3\2\2\2\u008b}\3\2\2\2\u008b\u0084\3\2\2\2\u008b\u0089\3\2\2\2\u008c"+
 		"\u008f\3\2\2\2\u008d\u008b\3\2\2\2\u008d\u008e\3\2\2\2\u008e\5\3\2\2\2"+
 		"\u008f\u008d\3\2\2\2\u0090\u0091\t\2\2\2\u0091\7\3\2\2\2\u0092\u0093\7"+
-		"\22\2\2\u0093\t\3\2\2\2\u0094\u0095\t\3\2\2\u0095\13\3\2\2\2\u0096\u0097"+
-		"\t\2\2\2\u0097\r\3\2\2\2\u0098\u009a\t\4\2\2\u0099\u009b\7(\2\2\u009a"+
+		"\24\2\2\u0093\t\3\2\2\2\u0094\u0095\t\3\2\2\u0095\13\3\2\2\2\u0096\u0097"+
+		"\t\2\2\2\u0097\r\3\2\2\2\u0098\u009a\t\4\2\2\u0099\u009b\7*\2\2\u009a"+
 		"\u0099\3\2\2\2\u009a\u009b\3\2\2\2\u009b\17\3\2\2\2\u009c\u009d\t\5\2"+
-		"\2\u009d\21\3\2\2\2\u009e\u009f\7\36\2\2\u009f\23\3\2\2\2\u00a0\u00a6"+
-		"\5.\30\2\u00a1\u00a6\5\64\33\2\u00a2\u00a6\5\30\r\2\u00a3\u00a6\5N(\2"+
-		"\u00a4\u00a6\5\26\f\2\u00a5\u00a0\3\2\2\2\u00a5\u00a1\3\2\2\2\u00a5\u00a2"+
-		"\3\2\2\2\u00a5\u00a3\3\2\2\2\u00a5\u00a4\3\2\2\2\u00a6\25\3\2\2\2\u00a7"+
+		"\2\u009d\21\3\2\2\2\u009e\u009f\7 \2\2\u009f\23\3\2\2\2\u00a0\u00a6\5"+
+		".\30\2\u00a1\u00a6\5\64\33\2\u00a2\u00a6\5N(\2\u00a3\u00a6\5\30\r\2\u00a4"+
+		"\u00a6\5\26\f\2\u00a5\u00a0\3\2\2\2\u00a5\u00a1\3\2\2\2\u00a5\u00a2\3"+
+		"\2\2\2\u00a5\u00a3\3\2\2\2\u00a5\u00a4\3\2\2\2\u00a6\25\3\2\2\2\u00a7"+
 		"\u00a8\7\3\2\2\u00a8\u00a9\5\4\3\2\u00a9\u00aa\7\4\2\2\u00aa\27\3\2\2"+
 		"\2\u00ab\u00ad\5\32\16\2\u00ac\u00ae\5\34\17\2\u00ad\u00ac\3\2\2\2\u00ad"+
 		"\u00ae\3\2\2\2\u00ae\u00b0\3\2\2\2\u00af\u00b1\5\"\22\2\u00b0\u00af\3"+
@@ -2586,46 +2596,46 @@ public class PromQLParser extends Parser {
 		"\u00b7\3\2\2\2\u00b7\u00b9\7\6\2\2\u00b8\u00b3\3\2\2\2\u00b8\u00b9\3\2"+
 		"\2\2\u00b9\u00bf\3\2\2\2\u00ba\u00bb\7\5\2\2\u00bb\u00bc\5,\27\2\u00bc"+
 		"\u00bd\7\6\2\2\u00bd\u00bf\3\2\2\2\u00be\u00b2\3\2\2\2\u00be\u00ba\3\2"+
-		"\2\2\u00bf\33\3\2\2\2\u00c0\u00c1\7\7\2\2\u00c1\u00c2\7,\2\2\u00c2\u00c3"+
-		"\7\b\2\2\u00c3\35\3\2\2\2\u00c4\u00c5\7&\2\2\u00c5\u00c6\7,\2\2\u00c6"+
-		"\37\3\2\2\2\u00c7\u00c8\7\34\2\2\u00c8\u00c9\t\6\2\2\u00c9!\3\2\2\2\u00ca"+
+		"\2\2\u00bf\33\3\2\2\2\u00c0\u00c1\7\7\2\2\u00c1\u00c2\7.\2\2\u00c2\u00c3"+
+		"\7\b\2\2\u00c3\35\3\2\2\2\u00c4\u00c5\7(\2\2\u00c5\u00c6\7.\2\2\u00c6"+
+		"\37\3\2\2\2\u00c7\u00c8\7\36\2\2\u00c8\u00c9\t\6\2\2\u00c9!\3\2\2\2\u00ca"+
 		"\u00d3\5\36\20\2\u00cb\u00d3\5 \21\2\u00cc\u00cd\5\36\20\2\u00cd\u00ce"+
 		"\5 \21\2\u00ce\u00d3\3\2\2\2\u00cf\u00d0\5 \21\2\u00d0\u00d1\5\36\20\2"+
 		"\u00d1\u00d3\3\2\2\2\u00d2\u00ca\3\2\2\2\u00d2\u00cb\3\2\2\2\u00d2\u00cc"+
-		"\3\2\2\2\u00d2\u00cf\3\2\2\2\u00d3#\3\2\2\2\u00d4\u00d5\7\'\2\2\u00d5"+
-		"\u00d6\7\13\2\2\u00d6%\3\2\2\2\u00d7\u00d8\7\7\2\2\u00d8\u00d9\7,\2\2"+
-		"\u00d9\u00db\7\t\2\2\u00da\u00dc\7,\2\2\u00db\u00da\3\2\2\2\u00db\u00dc"+
-		"\3\2\2\2\u00dc\u00dd\3\2\2\2\u00dd\u00de\7\b\2\2\u00de\'\3\2\2\2\u00df"+
-		"\u00e0\5H%\2\u00e0\u00e1\5*\26\2\u00e1\u00e2\7\f\2\2\u00e2)\3\2\2\2\u00e3"+
-		"\u00e4\t\7\2\2\u00e4+\3\2\2\2\u00e5\u00ea\5(\25\2\u00e6\u00e7\7\n\2\2"+
-		"\u00e7\u00e9\5(\25\2\u00e8\u00e6\3\2\2\2\u00e9\u00ec\3\2\2\2\u00ea\u00e8"+
-		"\3\2\2\2\u00ea\u00eb\3\2\2\2\u00eb-\3\2\2\2\u00ec\u00ea\3\2\2\2\u00ed"+
-		"\u00ee\7-\2\2\u00ee\u00ef\5\62\32\2\u00ef/\3\2\2\2\u00f0\u00f3\5N(\2\u00f1"+
-		"\u00f3\5\4\3\2\u00f2\u00f0\3\2\2\2\u00f2\u00f1\3\2\2\2\u00f3\61\3\2\2"+
-		"\2\u00f4\u00fd\7\3\2\2\u00f5\u00fa\5\60\31\2\u00f6\u00f7\7\n\2\2\u00f7"+
-		"\u00f9\5\60\31\2\u00f8\u00f6\3\2\2\2\u00f9\u00fc\3\2\2\2\u00fa\u00f8\3"+
-		"\2\2\2\u00fa\u00fb\3\2\2\2\u00fb\u00fe\3\2\2\2\u00fc\u00fa\3\2\2\2\u00fd"+
-		"\u00f5\3\2\2\2\u00fd\u00fe\3\2\2\2\u00fe\u00ff\3\2\2\2\u00ff\u0100\7\4"+
-		"\2\2\u0100\63\3\2\2\2\u0101\u0102\7+\2\2\u0102\u0111\5\62\32\2\u0103\u0106"+
-		"\7+\2\2\u0104\u0107\5\66\34\2\u0105\u0107\58\35\2\u0106\u0104\3\2\2\2"+
-		"\u0106\u0105\3\2\2\2\u0107\u0108\3\2\2\2\u0108\u0109\5\62\32\2\u0109\u0111"+
-		"\3\2\2\2\u010a\u010b\7+\2\2\u010b\u010e\5\62\32\2\u010c\u010f\5\66\34"+
-		"\2\u010d\u010f\58\35\2\u010e\u010c\3\2\2\2\u010e\u010d\3\2\2\2\u010f\u0111"+
+		"\3\2\2\2\u00d2\u00cf\3\2\2\2\u00d3#\3\2\2\2\u00d4\u00d5\7)\2\2\u00d5\u00d6"+
+		"\7\13\2\2\u00d6%\3\2\2\2\u00d7\u00d8\7\7\2\2\u00d8\u00d9\7.\2\2\u00d9"+
+		"\u00db\7\t\2\2\u00da\u00dc\7.\2\2\u00db\u00da\3\2\2\2\u00db\u00dc\3\2"+
+		"\2\2\u00dc\u00dd\3\2\2\2\u00dd\u00de\7\b\2\2\u00de\'\3\2\2\2\u00df\u00e0"+
+		"\5H%\2\u00e0\u00e1\5*\26\2\u00e1\u00e2\7\f\2\2\u00e2)\3\2\2\2\u00e3\u00e4"+
+		"\t\7\2\2\u00e4+\3\2\2\2\u00e5\u00ea\5(\25\2\u00e6\u00e7\7\n\2\2\u00e7"+
+		"\u00e9\5(\25\2\u00e8\u00e6\3\2\2\2\u00e9\u00ec\3\2\2\2\u00ea\u00e8\3\2"+
+		"\2\2\u00ea\u00eb\3\2\2\2\u00eb-\3\2\2\2\u00ec\u00ea\3\2\2\2\u00ed\u00ee"+
+		"\7/\2\2\u00ee\u00ef\5\62\32\2\u00ef/\3\2\2\2\u00f0\u00f3\5N(\2\u00f1\u00f3"+
+		"\5\4\3\2\u00f2\u00f0\3\2\2\2\u00f2\u00f1\3\2\2\2\u00f3\61\3\2\2\2\u00f4"+
+		"\u00fd\7\3\2\2\u00f5\u00fa\5\60\31\2\u00f6\u00f7\7\n\2\2\u00f7\u00f9\5"+
+		"\60\31\2\u00f8\u00f6\3\2\2\2\u00f9\u00fc\3\2\2\2\u00fa\u00f8\3\2\2\2\u00fa"+
+		"\u00fb\3\2\2\2\u00fb\u00fe\3\2\2\2\u00fc\u00fa\3\2\2\2\u00fd\u00f5\3\2"+
+		"\2\2\u00fd\u00fe\3\2\2\2\u00fe\u00ff\3\2\2\2\u00ff\u0100\7\4\2\2\u0100"+
+		"\63\3\2\2\2\u0101\u0102\7-\2\2\u0102\u0111\5\62\32\2\u0103\u0106\7-\2"+
+		"\2\u0104\u0107\5\66\34\2\u0105\u0107\58\35\2\u0106\u0104\3\2\2\2\u0106"+
+		"\u0105\3\2\2\2\u0107\u0108\3\2\2\2\u0108\u0109\5\62\32\2\u0109\u0111\3"+
+		"\2\2\2\u010a\u010b\7-\2\2\u010b\u010e\5\62\32\2\u010c\u010f\5\66\34\2"+
+		"\u010d\u010f\58\35\2\u010e\u010c\3\2\2\2\u010e\u010d\3\2\2\2\u010f\u0111"+
 		"\3\2\2\2\u0110\u0101\3\2\2\2\u0110\u0103\3\2\2\2\u0110\u010a\3\2\2\2\u0111"+
-		"\65\3\2\2\2\u0112\u0113\7 \2\2\u0113\u0114\5J&\2\u0114\67\3\2\2\2\u0115"+
-		"\u0116\7!\2\2\u0116\u0117\5J&\2\u01179\3\2\2\2\u0118\u011b\5<\37\2\u0119"+
+		"\65\3\2\2\2\u0112\u0113\7\"\2\2\u0113\u0114\5J&\2\u0114\67\3\2\2\2\u0115"+
+		"\u0116\7#\2\2\u0116\u0117\5J&\2\u01179\3\2\2\2\u0118\u011b\5<\37\2\u0119"+
 		"\u011b\5> \2\u011a\u0118\3\2\2\2\u011a\u0119\3\2\2\2\u011b\u011e\3\2\2"+
 		"\2\u011c\u011f\5@!\2\u011d\u011f\5B\"\2\u011e\u011c\3\2\2\2\u011e\u011d"+
-		"\3\2\2\2\u011e\u011f\3\2\2\2\u011f;\3\2\2\2\u0120\u0121\7\"\2\2\u0121"+
-		"\u0122\5J&\2\u0122=\3\2\2\2\u0123\u0124\7#\2\2\u0124\u0125\5J&\2\u0125"+
-		"?\3\2\2\2\u0126\u0128\7$\2\2\u0127\u0129\5J&\2\u0128\u0127\3\2\2\2\u0128"+
-		"\u0129\3\2\2\2\u0129A\3\2\2\2\u012a\u012c\7%\2\2\u012b\u012d\5J&\2\u012c"+
-		"\u012b\3\2\2\2\u012c\u012d\3\2\2\2\u012dC\3\2\2\2\u012e\u0132\5F$\2\u012f"+
-		"\u0132\7-\2\2\u0130\u0132\7.\2\2\u0131\u012e\3\2\2\2\u0131\u012f\3\2\2"+
-		"\2\u0131\u0130\3\2\2\2\u0132E\3\2\2\2\u0133\u0134\t\b\2\2\u0134G\3\2\2"+
-		"\2\u0135\u0138\5L\'\2\u0136\u0138\7-\2\2\u0137\u0135\3\2\2\2\u0137\u0136"+
-		"\3\2\2\2\u0138I\3\2\2\2\u0139\u0142\7\3\2\2\u013a\u013f\5H%\2\u013b\u013c"+
-		"\7\n\2\2\u013c\u013e\5H%\2\u013d\u013b\3\2\2\2\u013e\u0141\3\2\2\2\u013f"+
+		"\3\2\2\2\u011e\u011f\3\2\2\2\u011f;\3\2\2\2\u0120\u0121\7$\2\2\u0121\u0122"+
+		"\5J&\2\u0122=\3\2\2\2\u0123\u0124\7%\2\2\u0124\u0125\5J&\2\u0125?\3\2"+
+		"\2\2\u0126\u0128\7&\2\2\u0127\u0129\5J&\2\u0128\u0127\3\2\2\2\u0128\u0129"+
+		"\3\2\2\2\u0129A\3\2\2\2\u012a\u012c\7\'\2\2\u012b\u012d\5J&\2\u012c\u012b"+
+		"\3\2\2\2\u012c\u012d\3\2\2\2\u012dC\3\2\2\2\u012e\u0132\5F$\2\u012f\u0132"+
+		"\7/\2\2\u0130\u0132\7\60\2\2\u0131\u012e\3\2\2\2\u0131\u012f\3\2\2\2\u0131"+
+		"\u0130\3\2\2\2\u0132E\3\2\2\2\u0133\u0134\t\b\2\2\u0134G\3\2\2\2\u0135"+
+		"\u0138\5L\'\2\u0136\u0138\7/\2\2\u0137\u0135\3\2\2\2\u0137\u0136\3\2\2"+
+		"\2\u0138I\3\2\2\2\u0139\u0142\7\3\2\2\u013a\u013f\5H%\2\u013b\u013c\7"+
+		"\n\2\2\u013c\u013e\5H%\2\u013d\u013b\3\2\2\2\u013e\u0141\3\2\2\2\u013f"+
 		"\u013d\3\2\2\2\u013f\u0140\3\2\2\2\u0140\u0143\3\2\2\2\u0141\u013f\3\2"+
 		"\2\2\u0142\u013a\3\2\2\2\u0142\u0143\3\2\2\2\u0143\u0145\3\2\2\2\u0144"+
 		"\u0146\7\n\2\2\u0145\u0144\3\2\2\2\u0145\u0146\3\2\2\2\u0146\u0147\3\2"+

@@ -10,15 +10,13 @@ import scala.reflect.io.Directory
 import com.esotericsoftware.kryo.{Kryo, Serializer}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import kamon.tag.TagSet
 import monix.reactive.Observable
 import org.rocksdb._
 import spire.syntax.cfor._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.core.memstore.ratelimit.CardinalityStore._
+import filodb.core.metrics.FilodbMetrics
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -111,16 +109,13 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
   // ======= Metrics ===========
   private val tags = Map("shard" -> shard.toString, "dataset" -> ref.toString)
-  private val diskSpaceUsedMetric = Kamon.gauge("card-store-disk-space-used", MeasurementUnit.information.bytes)
-    .withTags(TagSet.from(tags))
-  private val memoryUsedMetric = Kamon.gauge("card-store-offheap-mem-used")
-    .withTags(TagSet.from(tags))
-  private val compactionBytesPendingMetric = Kamon.gauge("card-store-compaction-pending",
-    MeasurementUnit.information.bytes).withTags(TagSet.from(tags))
-  private val numRunningCompactionsMetric = Kamon.gauge("card-store-num-running-compactions")
-    .withTags(TagSet.from(tags))
-  private val numKeysMetric = Kamon.gauge("card-store-est-num-keys")
-    .withTags(TagSet.from(tags))
+  private val diskSpaceUsedMetric = FilodbMetrics.bytesGauge("card-store-disk-space-used",
+    tags)
+  private val memoryUsedMetric = FilodbMetrics.gauge("card-store-offheap-mem-used",
+    tags)
+  private val compactionBytesPendingMetric = FilodbMetrics.bytesGauge("card-store-compaction-pending", tags)
+  private val numRunningCompactionsMetric = FilodbMetrics.gauge("card-store-num-running-compactions", tags)
+  private val numKeysMetric = FilodbMetrics.gauge("card-store-est-num-keys", tags)
 
   private val metricsReporter = Observable.interval(1.minute)
     .onErrorRestart(Int.MaxValue)

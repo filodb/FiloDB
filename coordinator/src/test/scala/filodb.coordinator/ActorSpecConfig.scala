@@ -36,7 +36,7 @@ trait ActorSpecConfig {
   // Allow Java system properties to set config options like akka.test.timefactor
   lazy val config = ConfigFactory.parseString(configString)
     .withFallback(ConfigFactory.parseResources("application_test.conf"))
-    .withFallback(ConfigFactory.load("filodb-defaults.conf"))
+    .withFallback(ConfigFactory.load("filodb-defaults.conf")).resolve()
 
   def getNewSystem = {
     FilodbSettings.initialize(config)
@@ -94,7 +94,7 @@ object AkkaSpec extends SeedNodeConfig {
       |akka.debug.lifecycle = on
       |akka.jvm-exit-on-fatal-error = off
     """.stripMargin + logAkkaToConsole)
-    .withFallback(ConfigFactory.load("application_test.conf"))
+    .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
   val settings = new FilodbSettings(userConfig.withFallback(serverConfig))
 

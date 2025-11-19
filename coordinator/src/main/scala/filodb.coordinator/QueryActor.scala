@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
@@ -8,7 +10,6 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
-import kamon.tag.TagSet
 import monix.catnap.CircuitBreaker
 import monix.eval.Task
 import monix.execution.exceptions.ExecutionRejectedException
@@ -20,6 +21,7 @@ import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.QueryConfig
 import filodb.core.query.QueryContext
 import filodb.core.query.QueryLimitException
@@ -85,10 +87,11 @@ final class QueryActor(memStore: TimeSeriesStore,
   val queryScheduler = QueryScheduler.queryScheduler
 
   private val tags = Map("dataset" -> dsRef.toString)
-  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
-  private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
-  private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
-  private val numRejectedPlans = Kamon.counter("circuit-breaker-num-rejected-plans").withTags(TagSet.from(tags))
+  private val lpRequests = FilodbMetrics.counter("queryactor-logicalPlan-requests", tags)
+  private val epRequests = FilodbMetrics.counter("queryactor-execplan-requests", tags)
+  private val queryErrors = FilodbMetrics.counter("queryactor-query-errors", tags)
+  private val numRejectedPlans = FilodbMetrics.counter("circuit-breaker-num-rejected-plans", tags)
+  private val execPlanLatency = FilodbMetrics.timeHistogram("queryactor-execplan-latency", TimeUnit.NANOSECONDS, tags)
 
   private val streamResultsEnabled = config.getBoolean("filodb.query.streaming-query-results-enabled")
   private val circuitBreakerEnabled = config.getBoolean("filodb.query.circuit-breaker.enabled")
@@ -112,6 +115,7 @@ final class QueryActor(memStore: TimeSeriesStore,
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
         .asChildOf(Kamon.currentSpan())
         .start()
+      val startTime = System.nanoTime()
       // Dont finish span since we finish it asynchronously when response is received
       Kamon.runWithSpan(queryExecuteSpan, false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
@@ -146,6 +150,8 @@ final class QueryActor(memStore: TimeSeriesStore,
               SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               querySession.close()
               queryExecuteSpan.finish()
+              val timeTaken = System.nanoTime() - startTime
+              execPlanLatency.record(timeTaken, Map("plan" -> q.getClass.getSimpleName))
             }).completedL
         } else { // TODO remove this block when query streaming is enabled and working well
           q.execute(memStore, querySession)(queryScheduler)
@@ -171,6 +177,8 @@ final class QueryActor(memStore: TimeSeriesStore,
               SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               queryExecuteSpan.finish()
               querySession.close()
+              val timeTaken = System.nanoTime() - startTime
+              execPlanLatency.record(timeTaken, Map("plan" -> q.getClass.getSimpleName))
             })
         }
 
