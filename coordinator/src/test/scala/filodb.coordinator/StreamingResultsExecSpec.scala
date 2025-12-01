@@ -38,7 +38,9 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val queryConfig = QueryConfig(filodbConfig.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(filodbConfig, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    filodbConfig, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
   val metric = "http_req_total"

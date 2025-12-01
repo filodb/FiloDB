@@ -34,6 +34,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
   implicit val s = monix.execution.Scheduler.Implicits.global
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
+  lazy val downsampleColumnStore = new CassandraColumnStore(config, s, session, true)
 
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
                                                                     |flush-interval = 1h
@@ -94,7 +95,9 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
   it ("should be able to do full ODP for non concurrent queries") {
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
-    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    val memStore = new TimeSeriesMemStore(
+      config, colStore, downsampleColumnStore, new InMemoryMetaStore(), Some(policy)
+    )
     try {
       memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
@@ -110,7 +113,9 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
   it ("should be able to do full ODP for concurrent queries") {
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
-    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    val memStore = new TimeSeriesMemStore(
+      config, colStore, downsampleColumnStore, new InMemoryMetaStore(), Some(policy)
+    )
     try {
       memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
@@ -132,7 +137,9 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
   it ("should be able to do partial ODP for non concurrent queries") {
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
-    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    val memStore = new TimeSeriesMemStore(
+      config, colStore, downsampleColumnStore, new InMemoryMetaStore(), Some(policy)
+    )
     try {
       memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
@@ -155,7 +162,9 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
   it ("should be able to do partial ODP for concurrent queries") {
     val policy = new FixedMaxPartitionsEvictionPolicy(20)
-    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    val memStore = new TimeSeriesMemStore(
+      config, colStore, downsampleColumnStore, new InMemoryMetaStore(), Some(policy)
+    )
     try {
       memStore.setup(dataset.ref, schemas, 0, TestData.storeConf, 1)
       memStore.recoverIndex(dataset.ref, 0).futureValue
