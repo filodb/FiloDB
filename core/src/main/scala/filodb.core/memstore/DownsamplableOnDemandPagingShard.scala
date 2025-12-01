@@ -47,11 +47,7 @@ class DownsamplableOnDemandPagingShard (
   import FiloSchedulers._
 
   override def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
-    val originalDirtyPartsToFlushNumber = flushGroup.dirtyPartsToFlush.length
-    print(originalDirtyPartsToFlushNumber)
     val rawResponse : Future[Response] = super.writeDirtyPartKeys(flushGroup)
-    val laterDirtyPartsToFlushNumber = flushGroup.dirtyPartsToFlush.length
-    print(laterDirtyPartsToFlushNumber)
     val partKeyRecords: Iterator[filodb.core.store.PartKeyRecord] =
       InMemPartitionIterator2(flushGroup.dirtyPartsToFlush)
         .map(toPartKeyRecord)
