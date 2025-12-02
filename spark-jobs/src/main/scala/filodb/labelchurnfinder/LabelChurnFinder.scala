@@ -76,7 +76,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable {
 
   // Read min active time series threshold from config,
   private val minAtsThreshold = dsSettings.filodbConfig.as[Option[Double]]("labelchurnfinder.min-ats-threshold")
-                                        .getOrElse(1000)
+                                        .getOrElse(1000.0)
 
   /**
    * Returns DataFrame with columns:

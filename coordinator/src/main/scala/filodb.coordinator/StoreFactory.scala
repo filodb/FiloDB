@@ -51,7 +51,7 @@ object StoreFactory extends Instance with StrictLogging {
  * Not what you want for production, but good for getting started and running tests.
  */
 class TimeSeriesNullStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
-  implicit val ioSched = ioPool
+  implicit val ioSched: Scheduler = ioPool
   val metaStore = SingleJvmInMemoryStore.metaStore
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, metaStore)
 }

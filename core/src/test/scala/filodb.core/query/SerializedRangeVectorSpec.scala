@@ -54,7 +54,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     srv.estimateSerializedRowBytes shouldEqual 80 // 4 non nan records each of 20 bytes
-    val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -80,7 +80,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 11
     srv.estimateSerializedRowBytes shouldEqual 220
-    val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -107,7 +107,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
     queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
-    val res = srv.rows.map(r => (r.getLong(0), r.getHistogram(1))).toList
+    val res = srv.rows().map(r => (r.getLong(0), r.getHistogram(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isEmpty) shouldEqual Seq(h1, h1, h1, h1)

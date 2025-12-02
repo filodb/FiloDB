@@ -877,21 +877,21 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
   override def endMs: Long = rangeParams.endSecs * 1000
   override def isRoutable: Boolean = false
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
-    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.replacePeriodicSeriesFilters(filters).
-                      asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
-    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.replacePeriodicSeriesFilters(filters).
-                      asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+    val updatedLhs = if (lhs.isRight) Right(lhs.toOption.get.replacePeriodicSeriesFilters(filters).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(lhs.swap.toOption.get)
+    val updatedRhs = if (rhs.isRight) Right(rhs.toOption.get.replacePeriodicSeriesFilters(filters).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(rhs.swap.toOption.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {
     val updatedLhs = if (lhs.isRight)
-      Right(lhs.right.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
-    else Left(lhs.left.get)
+      Right(lhs.toOption.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
+    else Left(lhs.swap.toOption.get)
 
     val updatedRhs = if (rhs.isRight)
-      Right(rhs.right.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
-    else Left(rhs.left.get)
+      Right(rhs.toOption.get.useAggregatedMetricIfApplicable(aggRuleProvider).asInstanceOf[ScalarBinaryOperation])
+    else Left(rhs.swap.toOption.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
 }
@@ -949,9 +949,9 @@ object LogicalPlan {
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
      case lp: TsCardinalities             => Seq(lp)
-     case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
+     case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.toOption.get)
                                                              else Nil
-                                             val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)
+                                             val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.toOption.get)
                                                              else Nil
                                              lhsLeafs ++ rhsLeafs
      case lp: ScalarFixedDoublePlan       => Seq(lp)
@@ -1022,7 +1022,7 @@ object LogicalPlan {
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
         case lp: LabelCardinality      => lp.filters.toSet
-        case lp: TsCardinalities       => lp.filters.toSet
+        case lp: TsCardinalities       => lp.filters().toSet
         case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
         case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
         case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]
@@ -1051,7 +1051,7 @@ object LogicalPlan {
         case lp: RawChunkMeta => (lp.filters toSet, true)
         case lp: SeriesKeysByFilters => (lp.filters toSet, true)
         case lp: LabelCardinality => (lp.filters.toSet, true)
-        case lp: TsCardinalities => (lp.filters.toSet, true)
+        case lp: TsCardinalities => (lp.filters().toSet, true)
         case _: ScalarTimeBasedPlan => (Set.empty[ColumnFilter], false)
         case _: ScalarFixedDoublePlan => (Set.empty[ColumnFilter], false)
         case _: ScalarBinaryOperation => (Set.empty[ColumnFilter], false)

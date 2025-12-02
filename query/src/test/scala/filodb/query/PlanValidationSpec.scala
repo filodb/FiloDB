@@ -28,7 +28,7 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
       // Recursively build a list of child strings, then sort and concatenate.
       val currIndent = getIndent(lines(index))
       var i = index + 1
-      val children = new mutable.ArrayBuffer[String]()
+      val children = new mutable.Seq[String]()
       // iterate while lines remain and the next line's indent is greater than the current line's
       while (i < lines.size && getIndent(lines(i)) > currIndent) {
         val (nextIndex, child) = helper(lines, i)

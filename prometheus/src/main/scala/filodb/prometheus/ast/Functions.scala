@@ -4,7 +4,7 @@ import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 import filodb.query.RangeFunctionId.Timestamp
 
-case class Function(name: String, allParams: Seq[Expression]) extends Expression with PeriodicSeries {
+case class Function(name: String, allParams: Seq[Expression]) extends Expression with filodb.prometheus.ast.PeriodicSeries {
   private val ignoreChecks = name.equalsIgnoreCase("vector") || name.equalsIgnoreCase("time")
 
   if (!ignoreChecks &&
@@ -125,7 +125,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
                  }
       if (instantFunctionIdOpt.isDefined) {
         val instantFunctionId = instantFunctionIdOpt.get
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
         ApplyInstantFunction(periodicSeriesPlan, instantFunctionId, otherParams)
         // Special FiloDB functions to extract things like chunk metadata
       } else if (filoFunctionIdOpt.isDefined) {
@@ -160,26 +160,26 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
         case s: StringLiteral => s.str
       }
       val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
-      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
       ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
     } else if (scalarFunctionIdOpt.isDefined) {
-      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
       ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get)
     } else if (sortFunctionIdOpt.isDefined) {
       val sortFunctionId = sortFunctionIdOpt.get
-      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
       ApplySortFunction(periodicSeriesPlan, sortFunctionId)
     } else if (absentFunctionIdOpt.isDefined) {
       val columnFilter = if (seriesParam.isInstanceOf[InstantExpression])
         seriesParam.asInstanceOf[InstantExpression].columnFilters else Seq.empty[ColumnFilter]
-      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
       ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
         timeParams.end))
     } else if (limitFunctionIdOpt.isDefined) {
       val limit = allParams(0).asInstanceOf[Scalar].toScalar.toInt
       val columnFilter = if (seriesParam.isInstanceOf[InstantExpression])
         seriesParam.asInstanceOf[InstantExpression].columnFilters else Seq.empty[ColumnFilter]
-      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      val periodicSeriesPlan = seriesParam.asInstanceOf[filodb.prometheus.ast.PeriodicSeries].toSeriesPlan(timeParams)
       ApplyLimitFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
         timeParams.end), limit)
     } else {
@@ -224,7 +224,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     rangeFunctionId: RangeFunctionId,
     otherParams: Seq[FunctionArgsPlan]
   ) : PeriodicSeriesPlan = {
-    var subqueryStepToUseMs = SubqueryUtils.getSubqueryStepMs(sqe.sqcl.step)
+    val subqueryStepToUseMs = SubqueryUtils.getSubqueryStepMs(sqe.sqcl.step)
     // when start and stop are the same, step should be zero too
     var outerStepMs = timeParams.step * 1000
     if (timeParams.start == timeParams.end) {

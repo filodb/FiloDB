@@ -585,7 +585,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   private def removeAndReleaseResources(ref: DatasetRef, shardNum: Int): Unit = {
     // TODO: Wait for all the queries to stop
-    streamSubscriptions.remove(shardNum).foreach(_.cancel)
+    streamSubscriptions.remove(shardNum).foreach(_.cancel())
     streams.remove(shardNum).foreach(_.teardown())
     // Release memory for shard in MemStore
 

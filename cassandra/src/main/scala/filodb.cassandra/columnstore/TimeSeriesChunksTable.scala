@@ -24,7 +24,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                    writeConsistencyLevel: ConsistencyLevel,
                                    readConsistencyLevel: ConsistencyLevel)
                                   (implicit sched: Scheduler) extends BaseDatasetTable {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
   import filodb.cassandra.Util._
   import filodb.core.Iterators._
 
@@ -147,7 +147,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                               .toIterator.handleErrors
                               .map(_.map { row => chunkSetFromRow(row) })
     Task.fromFuture(futChunksets).map { chunkSetIt =>
-      RawPartData(partKeyBytes, chunkSetIt.toBuffer)
+      RawPartData(partKeyBytes, chunkSetIt.toBuffer.toSeq)
     }
   }
 
@@ -202,7 +202,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
                                  .sortedGroupBy(_._1)
                                  .map { case (partKeyBuffer, chunkSetIt) =>
-                                   RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+                                   RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer.toSeq)
                                  }
                              }
     for {
@@ -224,7 +224,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
             .map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
             .sortedGroupBy(_._1)
             .map { case (partKeyBuffer, chunkSetIt) =>
-              RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+              RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer.toSeq)
             }.toSeq
   }
 
@@ -242,7 +242,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                 rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
                   .sortedGroupBy(_._1)
                   .map { case (partKeyBuffer, chunkSetIt) =>
-                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer.toSeq)
                   }
               }
     }

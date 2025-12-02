@@ -111,7 +111,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val resp = execPlan.executeStreaming(memStore, querySession).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
@@ -142,7 +142,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val resp = reducerExec.executeStreaming(memStore, querySession).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tupleCounts.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual Map()
@@ -184,7 +184,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val resp = actorPlanDispatcher.dispatchStreaming(
       ExecPlanWithClientParams(reducerExec, ClientParams(5000)), memStore).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tupleCounts.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual Map()

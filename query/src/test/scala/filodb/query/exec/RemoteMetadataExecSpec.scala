@@ -152,8 +152,8 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next.asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next.asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
@@ -187,8 +187,8 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 2
-        rv.rows.map(row => {
+        rv.rows().size shouldEqual 2
+        rv.rows().map(row => {
           val record = row.asInstanceOf[BinaryRecordRowReader]
           rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
         })
@@ -211,8 +211,8 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         response.flatMap(rv => {
-          rv.rows.size shouldEqual 0
-          rv.rows.map(row => {
+          rv.rows().size shouldEqual 0
+          rv.rows().map(row => {
             val record = row.asInstanceOf[BinaryRecordRowReader]
             rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
           })
@@ -231,8 +231,8 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 4
-        rv.rows.map(row => {
+        rv.rows().size shouldEqual 4
+        rv.rows().map(row => {
           val record = row.asInstanceOf[BinaryRecordRowReader]
           rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
         })

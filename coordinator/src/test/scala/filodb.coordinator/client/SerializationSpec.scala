@@ -173,8 +173,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       roundTripResult.result(i)
         .asInstanceOf[query.SerializedRangeVector].schema shouldEqual result.result(i)
         .asInstanceOf[query.SerializedRangeVector].schema
-      roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
-        result.result(i).rows.map(_.getDouble(1)).toSeq
+      roundTripResult.result(i).rows().map(_.getDouble(1)).toSeq shouldEqual
+        result.result(i).rows().map(_.getDouble(1)).toSeq
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
       roundTripResult.result(i).key.sourceShards shouldEqual result.result(i).key.sourceShards
       roundTripResult.result(i).key.schemaNames shouldEqual result.result(i).key.schemaNames
@@ -330,13 +330,13 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     roundTripResult.result.size shouldEqual 1
 
     val srv = roundTripResult.result(0)
-    srv.rows.size shouldEqual 1
-    val actual = srv.rows.map(record => {
+    srv.rows().size shouldEqual 1
+    val actual = srv.rows().map(record => {
       val rowReader = record.asInstanceOf[BinaryRecordRowReader]
       srv.asInstanceOf[query.SerializedRangeVector]
         .schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
     })
-    actual.toList shouldEqual expected
+    actual.toList() shouldEqual expected
   }
 
   it ("should serialize and deserialize serialize ExecPlan with config") {

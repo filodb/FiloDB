@@ -66,7 +66,7 @@ class IntSumReadBenchmark {
     val it = intReader.iterate(acc, intVectAddr, 0)
     var sum = 0
     cforRange { 0 until NumRows } { i =>
-      sum += it.next
+      sum += it.next()
     }
     sum
   }

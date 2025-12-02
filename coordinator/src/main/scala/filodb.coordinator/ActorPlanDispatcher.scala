@@ -31,7 +31,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     val ep =
       if (doProto) {
         import filodb.coordinator.ProtoConverters._
-        val protoPlan = execPlan.toExecPlanContainerProto
+        val protoPlan = execPlan.toExecPlanContainerProto()
         val protoQueryContext = execPlan.queryContext.toProto
         ProtoExecPlan(execPlan.dataset, protoPlan.toByteArray, protoQueryContext.toByteArray, execPlan.submitTime)
       } else {

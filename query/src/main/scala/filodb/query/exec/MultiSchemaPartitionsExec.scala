@@ -37,7 +37,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
-  override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
+  override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers.toSeq
 
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
@@ -126,7 +126,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             // Get exact column IDs needed, including max column as needed for histogram calculations.
             // This code is responsible for putting exact IDs needed by any range functions.
-            val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
+            val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers.toSeq)
 
             val colIDs = if (sch.data.columns.exists(_.name == "min") &&
                              sch.data.columns.exists(_.name == "max") &&
@@ -134,7 +134,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                          else colIDs1
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
-            val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
+            val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers.toSeq).toSeq
             val newxformers = isMaxMinColumnsEnabled(maxMinTenantFilter) match {
               case true => newXFormersForHistMaxMin(sch, colIDs, newxformers1)
               case _ => newxformers1

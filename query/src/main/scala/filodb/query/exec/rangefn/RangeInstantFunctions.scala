@@ -39,7 +39,7 @@ object RangeInstantFunctions {
     val covXY = sumXY - sumX*sumY/n
     val varX = sumX2 - sumX*sumX/n
     val slope = covXY / varX
-    val intercept = sumY/n - slope*sumX/n // keeping it, needed for predict_linear function = slope*duration + intercept
+    val _ = sumY/n - slope*sumX/n // intercept kept for potential predict_linear function = slope*duration + intercept
     slope
   }
 
@@ -52,8 +52,8 @@ object RangeInstantFunctions {
     } else {
       require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
       require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
-      var lastSample = window.last.value
-      var prevSampleRow = window(window.size - 2)
+      val lastSample = window.last.value
+      val prevSampleRow = window(window.size - 2)
       var resultValue = lastSample - prevSampleRow.value
 
       if (isRate && lastSample < prevSampleRow.value) {
@@ -225,7 +225,7 @@ object IRatePeriodicFunction extends RangeFunction[TransientRow] {
 
 object IRatePeriodicFunctionH extends RangeFunction[TransientHistRow] {
 
-  private var lastFunc = new LastSampleFunctionH()
+  private val lastFunc = new LastSampleFunctionH()
   def addedToWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
   def removedFromWindow(row: TransientHistRow, window: Window[TransientHistRow]): Unit = {}
 

@@ -118,6 +118,8 @@ class SingleClusterPlanner(val dataset: Dataset,
           QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
         case ColumnFilter(col, equals: Equals) =>
           Seq(equals.value.toString)
+        case _ =>
+          throw new IllegalArgumentException(s"Unexpected filter type: $filter")
       }
       (filter.column, values)
     }.toMap
@@ -125,7 +127,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     QueryUtils.makeAllKeyValueCombos(keyToValues).exists { shardKeys =>
       // Replace any EqualsRegex shard-key filters with Equals.
       val equalsFilters = shardKeys.map(entry => ColumnFilter(entry._1, Equals(entry._2))).toSeq
-      val newFilters = LogicalPlanUtils.upsertFilters(shardKeyFilters, equalsFilters)
+      val newFilters: Seq[ColumnFilter] = LogicalPlanUtils.upsertFilters(shardKeyFilters, equalsFilters).toSeq
       val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(newFilters)
       targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
     }
@@ -260,14 +262,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     // GenericRemoteExec exists only because we cannot directly query the shards
     // from a coordinator. GenericRemoteExec will pass it to a machine that can resolve
     // ActorRef of a remote shard and dispatch to the appropriate actor.
-    val pp = qContext.plannerParams
+    val _pp = qContext.plannerParams
     if (
-      pp.failoverMode == ShardLevelFailoverMode &&
-      (!pp.buddyShardMapper.get.allShardsActive) && // not shipping the entire plan remotely
+      _pp.failoverMode == ShardLevelFailoverMode &&
+      (!_pp.buddyShardMapper.get.allShardsActive) && // not shipping the entire plan remotely
       ep.dispatcher.isInstanceOf[RemoteActorPlanDispatcher]
     ) {
       GenericRemoteExec(
-        GrpcPlanDispatcher(pp.buddyGrpcEndpoint.get, pp.buddyGrpcTimeoutMs.get),
+        GrpcPlanDispatcher(_pp.buddyGrpcEndpoint.get, _pp.buddyGrpcTimeoutMs.get),
         ep
       )
     } else ep
@@ -283,7 +285,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       //For binary join LHS & RHS should have same times
       val boundParams = periodicSeriesPlan.get.head match {
         case p: PeriodicSeries => (p.startMs, p.stepMs, WindowConstants.staleDataLookbackMillis,
-          p.offsetMs.getOrElse(0L), p.atMs.getOrElse(0), p.endMs)
+          p.offsetMs.getOrElse(0L), p.atMs.getOrElse(0L), p.endMs)
         case w: PeriodicSeriesWithWindowing => (w.startMs, w.stepMs, w.window, w.offsetMs.getOrElse(0L),
           w.atMs.getOrElse(0L), w.endMs)
         case _  => throw new UnsupportedOperationException(s"Invalid plan: ${periodicSeriesPlan.get.head}")
@@ -321,7 +323,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val materialized = logicalPlans match {
         case Seq(one) => materializeTimeSplitPlan(one, qContext, false)
         case many =>
-          val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext, false))
+          val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext, false)).toSeq
           val targetActor = PlannerUtil.pickDispatcher(materializedPlans)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
@@ -527,35 +529,42 @@ class SingleClusterPlanner(val dataset: Dataset,
                         renamedFilters: Seq[ColumnFilter])
 
     // construct a LeafInfo for each leaf...
-    val leafInfos = new ArrayBuffer[LeafInfo]()
-    for (leafPlan <- findLeafLogicalPlans(lp)) {
-      val filters = getColumnFilterGroup(leafPlan).map(_.toSeq)
-      assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
-      leafPlan match {
-        case rs: RawSeries =>
-          // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
-          val startEndMsPairOpt = rs.rangeSelector match {
-            case is: IntervalSelector => Some((is.from, is.to))
-            case _ => None
-          }
-          val (startMs, endMs): (Long, Long) = startEndMsPairOpt.getOrElse((0, Long.MaxValue))
-          leafInfos.append(LeafInfo(leafPlan, startMs, endMs, renameMetricFilter(filters.head)))
-        // Do nothing; not pulling data from any shards.
-        case sc: ScalarPlan => { }
-        // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
-        case _ => return None
+    val leafInfosOpt: Option[ArrayBuffer[LeafInfo]] = {
+      val buffer = new ArrayBuffer[LeafInfo]()
+      var failed = false
+      for (leafPlan <- findLeafLogicalPlans(lp) if !failed) {
+        val filters = getColumnFilterGroup(leafPlan).map(_.toSeq)
+        assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
+        leafPlan match {
+          case rs: RawSeries =>
+            // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
+            val startEndMsPairOpt = rs.rangeSelector match {
+              case is: IntervalSelector => Some((is.from, is.to))
+              case _ => None
+            }
+            val (startMs, endMs): (Long, Long) = startEndMsPairOpt.getOrElse((0, Long.MaxValue))
+            buffer.append(LeafInfo(leafPlan, startMs, endMs, renameMetricFilter(filters.head)))
+          // Do nothing; not pulling data from any shards.
+          case sc: ScalarPlan => { }
+          // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
+          case _ => failed = true
+        }
       }
+      if (failed) None else Some(buffer)
     }
 
-    // if we can't extract shards from all filters, return an empty result
-    if (!leafInfos.forall{ leaf =>
-      canGetShardsFromFilters(leaf.renamedFilters, qContext)
-    }) return None
+    leafInfosOpt.flatMap { leafInfos =>
+      // if we can't extract shards from all filters, return an empty result
+      if (!leafInfos.forall{ leaf =>
+        canGetShardsFromFilters(leaf.renamedFilters, qContext)
+      }) None
+      else {
+        val shards = leafInfos.flatMap( leaf =>
+          shardsFromFilters(leaf.renamedFilters, qContext, leaf.startMs, leaf.endMs)).toSet
 
-    val shards = leafInfos.flatMap( leaf =>
-      shardsFromFilters(leaf.renamedFilters, qContext, leaf.startMs, leaf.endMs)).toSet
-
-    Some(shards)
+        Some(shards)
+      }
+    }
   }
   // scalastyle:on method.length
 
@@ -731,7 +740,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             forceInProcess = true, forceDispatcher = Some(dispatcher)).plans
         case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
       }
-      val pp = qContext.plannerParams
+      @scala.annotation.unused val _pp = qContext.plannerParams
       eps.map(ep => makeBuddyExecPlanIfNeeded(qContext, ep))
     }
     PlanResult(plans)
@@ -762,7 +771,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], logicalPlanWithoutBucket: PeriodicSeriesWithWindowing) =
       if (queryConfig.translatePromToFilodbHistogram) {
        val result = removeBucket(Right(lp))
-        (result._1, result._2, result._3.right.get)
+        (result._1, result._2, result._3.toOption.get)
     } else (None, None, lp)
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
@@ -848,9 +857,9 @@ class SingleClusterPlanner(val dataset: Dataset,
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
-                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
               else
-                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
           }
         }
@@ -867,7 +876,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
     if (queryConfig.translatePromToFilodbHistogram) {
      val result = removeBucket(Left(lp))
-      (result._1, result._2, result._3.left.get)
+      (result._1, result._2, result._3.swap.toOption.get)
 
     } else (None, None, lp)
 
@@ -1132,7 +1141,7 @@ class SingleClusterPlanner(val dataset: Dataset,
    */
   private def materializeAggregateNoPushdown(qContext: QueryContext,
                                    lp: Aggregate,
-                                   forceInProcess: Boolean = false,
+                                   forceInProcess: Boolean,
                                    forceDispatcher: Option[PlanDispatcher] = None): PlanResult = {
     val canPushdownInner = !LogicalPlanUtils.hasDescendantAggregateOrJoin(lp.vectors) ||
       getPushdownShards(qContext, lp.vectors).isDefined

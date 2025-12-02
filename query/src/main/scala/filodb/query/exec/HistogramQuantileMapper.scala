@@ -71,7 +71,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
           leDouble -> bucket
         }.sortBy(_._1)
 
-        val samples = sortedBucketRvs.map(_._2.rows)
+        val samples = sortedBucketRvs.map(_._2.rows())
 
         // The buckets here will be populated for each instant for quantile calculation
         val buckets = sortedBucketRvs.map { b => Bucket(b._1, 0d) }

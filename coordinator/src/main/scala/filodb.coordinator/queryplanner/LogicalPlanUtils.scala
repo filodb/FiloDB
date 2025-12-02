@@ -164,11 +164,11 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarFixedDoublePlan       => lp.copy(timeStepParams = RangeParams(timeRange.startMs / 1000,
                                               lp.timeStepParams.stepSecs, timeRange.endMs / 1000))
       case lp: ScalarBinaryOperation       =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
-                                              (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
-                                              Left(lp.lhs.left.get)
+                                              (lp.lhs.toOption.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
+                                              Left(lp.lhs.swap.toOption.get)
                                               val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedTimeRange(
-                                                lp.rhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation])
-                                              else Left(lp.rhs.left.get)
+                                                lp.rhs.toOption.get, timeRange).asInstanceOf[ScalarBinaryOperation])
+                                              else Left(lp.rhs.swap.toOption.get)
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
@@ -287,14 +287,14 @@ object LogicalPlanUtils extends StrictLogging {
     * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
     * if it is not the prometheus standard
     */
-   def renameLabels(labels: Seq[String], datasetMetricColumn: String): Seq[String] =
+   def renameLabels(labels: Seq[String], datasetMetricColumn: String): scala.collection.immutable.Seq[String] =
     if (datasetMetricColumn != PromMetricLabel) {
-      labels map {
+      labels.map {
         case PromMetricLabel     => datasetMetricColumn
         case other: String       => other
-      }
+      }.toSeq
     } else {
-      labels
+      labels.toSeq
     }
 
   /**
@@ -362,8 +362,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelCardinality            => None
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
-      case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)
-                                               else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.right.get)
+      case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.toOption.get)
+                                               else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.toOption.get)
                                                else None
       case lp: ScalarFixedDoublePlan       => None
       case lp: RawChunkMeta                => None
@@ -402,7 +402,7 @@ object LogicalPlanUtils extends StrictLogging {
   def getTargetSchemaIfUnchanging(targetSchemaProvider: TargetSchemaProvider,
                                   filters: Seq[ColumnFilter],
                                   intervalSelector: IntervalSelector): Option[Seq[String]] = {
-    val tsChanges = targetSchemaProvider.targetSchemaFunc(filters)
+    val tsChanges = targetSchemaProvider.targetSchemaFunc(filters.toSeq)
     val ichange = tsChanges.lastIndexWhere(change => change.time < intervalSelector.from)
     if (ichange > -1) {
       // Is this the final change?
@@ -454,18 +454,18 @@ object LogicalPlanUtils extends StrictLogging {
       // Cannot handle RawSeries without IntervalSelector.
       return None
     }
-    val rsTschemaOpts = rawSeries.flatMap{ rs =>
-        val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+    val rsTschemaOpts: Seq[Option[Seq[String]]] = rawSeries.flatMap{ rs =>
+        @scala.annotation.unused val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
         val rawShardKeyFilters = getShardKeyFilters(rs)
         // The filters might contain pipe-concatenated EqualsRegex values.
         // Convert these into sets of single-valued Equals filters.
         val resolvedShardKeyFilters = rawShardKeyFilters.flatMap { filters =>
-          val equalsFilters: Seq[Seq[ColumnFilter]] = filters.map { filter =>
-            filter.filter match {
+          val equalsFilters: scala.collection.immutable.Seq[scala.collection.immutable.Seq[ColumnFilter]] = filters.toSeq.map { filter =>
+            (filter.filter match {
               case EqualsRegex(values: String) if QueryUtils.containsPipeOnlyRegex(values) =>
                 QueryUtils.splitAtUnescapedPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
-              case _ => Seq(filter)
-            }
+              case _ => scala.collection.immutable.Seq(filter)
+            }): scala.collection.immutable.Seq[ColumnFilter]
           }
           // E.g. foo{key1=~"baz|bat",key2=~"bar|bak"} would give the following combos:
           // [[baz,bar], [baz,bak], [bat,bar], [bat,bak]]
@@ -475,7 +475,7 @@ object LogicalPlanUtils extends StrictLogging {
         val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
         LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
       }
-    }
+    }.toSeq
     if (rsTschemaOpts.isEmpty) {
       return None
     }
@@ -621,14 +621,14 @@ object LogicalPlanUtils extends StrictLogging {
    */
   def resolvePipeConcatenatedShardKeyFilters(lp: LogicalPlan,
                                              nonMetricShardKeyCols: Seq[String]): Seq[Seq[ColumnFilter]] = {
-    LogicalPlan.getNonMetricShardKeyFilters(lp, nonMetricShardKeyCols)
+    LogicalPlan.getNonMetricShardKeyFilters(lp, nonMetricShardKeyCols.toSeq)
       .flatMap { group =>
-        val keyToValues = group.map { filter =>
-          val values = filter match {
+        val keyToValues: scala.collection.immutable.Map[String, scala.collection.immutable.Seq[String]] = group.map { filter =>
+          val values: scala.collection.immutable.Seq[String] = filter match {
             case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
               QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
             case ColumnFilter(col, equals: Equals) =>
-              Seq(equals.value.toString)
+              scala.collection.immutable.Seq(equals.value.toString)
             case _ => throw new IllegalArgumentException("unexpected filter: " + filter)
           }
           (filter.column, values)

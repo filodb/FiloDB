@@ -61,7 +61,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
 
   private val _clusterActor = new AtomicReference[Option[ActorRef]](None)
 
-  implicit lazy val ec = GlobalScheduler.globalImplicitScheduler
+  implicit lazy val ec: monix.execution.schedulers.SchedulerService = GlobalScheduler.globalImplicitScheduler
 
   lazy val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
                                  reporter = UncaughtExceptionReporter(
@@ -188,7 +188,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
     implicit val timeout = Timeout(15.seconds)
     // Reset shuts down all ingestion and query actors on this node
     // TODO: be sure that status gets updated across cluster?
-    (coordinatorActor ? NodeProtocol.ResetState).map(_ ⇒ Done)
+    (coordinatorActor ? NodeProtocol.ResetState).map(_ => Done)
   }
 
   // TODO: hook into service-stop "forcefully kill connections?"  Maybe send each outstanding query "TooBad" etc.
@@ -272,7 +272,7 @@ private[filodb] trait FilodbClusterNode extends KamonInit with NodeConfiguration
 
   lazy val cluster = FilodbCluster(system)
 
-  implicit lazy val ec = cluster.ec
+  implicit lazy val ec: monix.execution.schedulers.SchedulerService = cluster.ec
 
   lazy val metaStore: MetaStore = cluster.metaStore
 

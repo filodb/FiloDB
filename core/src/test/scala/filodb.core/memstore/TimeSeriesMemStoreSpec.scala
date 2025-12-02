@@ -22,7 +22,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._
   import ZeroCopyUTF8String._
@@ -37,7 +37,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                             .withFallback(ConfigFactory.load("application_test.conf")).resolve()
                             .getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
   after {
     memStore.reset()
@@ -463,7 +463,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val range = TimeRangeChunkScan(105000L, 2000000L)
     val res = memStore.lookupPartitions(dataset2.ref, FilteredPartitionScan(split, Seq(filter)), range,
-      QuerySession.makeForTestingOnly)
+      QuerySession.makeForTestingOnly())
     res.firstSchemaId shouldEqual Some(schema2.schemaHash)
     res.partsInMemory.length shouldEqual 2   // two partitions should match
     res.shard shouldEqual 0
@@ -641,7 +641,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       ColumnFilter("_ws_", Filter.Equals("test_ws")),
       ColumnFilter("_ns_", Filter.EqualsRegex("App-0|App-1")),
       ColumnFilter("_metric_", Filter.Equals("http_latency")))
-    val value = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, filters),
+    @scala.annotation.unused val value = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, filters),
       querySession = session)
       .toListL.runToFuture.futureValue
     session.queryStats.stat.size shouldEqual 1

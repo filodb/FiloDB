@@ -3,7 +3,6 @@ package filodb.memory.format
 import filodb.memory.format.vectors.Base2ExpHistogramBuckets
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import org.scalatest._
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers

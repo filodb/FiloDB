@@ -127,13 +127,13 @@ object NamesTestData {
  */
 object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
-                         .getLines.toSeq.drop(1)     // drop the header line
+                         .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltUniqueLines = Source.fromURL(getClass.getResource("/GDELT-unique-samples.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltLines3 = Source.fromURL(getClass.getResource("/GDELT-sample-test3.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val schema = Seq("GLOBALEVENTID:long",
                    "SQLDATE:long",
@@ -168,7 +168,7 @@ object GdeltTestData {
     val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem))
     records.records.map { case (base, offset) =>
       ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
-    }.toVector
+    }.toVector()
   }
 
   val badLine = ArrayStringRowReader("NotANumber, , , , , , ,".split(','))   // Will fail
@@ -236,7 +236,7 @@ object MachineMetricsData {
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
                        incr: Long = 1000): LazyList[Product] = {
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       (Some(initTs + n * incr),
        Some((45 + nextInt(10)).toDouble),
        Some((60 + nextInt(25)).toDouble),
@@ -290,7 +290,7 @@ object MachineMetricsData {
 
   def multiSeriesData(): LazyList[Seq[Any]] = {
     val initTs = System.currentTimeMillis
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       Seq(initTs + n * 1000,
          (45 + nextInt(10)).toDouble,
          (60 + nextInt(25)).toDouble,
@@ -303,7 +303,7 @@ object MachineMetricsData {
   // Everything increments by 1 for simple predictability and testing
   def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
                         seriesPrefix: String = "Series "): LazyList[Seq[Any]] = {
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       Seq(startTs + n * timeStep,
          (1 + n).toDouble,
          (20 + n).toDouble,
@@ -376,7 +376,7 @@ object MachineMetricsData {
         buckets(b) += 1
       }
     }
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
           (1 + n).toLong,
@@ -397,7 +397,7 @@ object MachineMetricsData {
         buckets(b) += 1
       }
     }
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
         (1 + n).toLong,

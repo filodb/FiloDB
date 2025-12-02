@@ -1516,7 +1516,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
     }.toList
 
@@ -1553,7 +1553,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
     }.toList
 
@@ -1584,7 +1584,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       (r.getLong(0), r.getDouble(1))
     }.toList
 
@@ -1628,7 +1628,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       (r.getLong(0), r.getDouble(1))
     }.toList
 
@@ -1684,7 +1684,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -1730,7 +1730,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -1790,7 +1790,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -1837,7 +1837,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -1897,7 +1897,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3).asInstanceOf[LongHistogram]
       val b = h.buckets.asInstanceOf[Base2ExpHistogramBuckets]
       // doing a take on values since reading values from exp histogram can return longer array
@@ -1932,14 +1932,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 11, 14)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4, 6, 8, 11, 14)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -1988,7 +1988,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val rv2 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart2, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
-    val downsampledData2 = rv2.rows.map { r =>
+    val downsampledData2 = rv2.rows().map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
     }.toList
 
@@ -2018,7 +2018,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
 
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       (r.getLong(0), r.getDouble(1))
     }.toList
 
@@ -2056,14 +2056,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -2099,14 +2099,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 10, 13)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4, 6, 8, 10, 13)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
-    val downsampledData1 = rv1.rows.map { r =>
+    val downsampledData1 = rv1.rows().map { r =>
       val h = r.getHistogram(3)
       h.numBuckets shouldEqual 3
       (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
@@ -2357,7 +2357,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1
-    res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
+    res.result.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList() shouldEqual
       List((74372982000L, 88.0), (74373042000L, 24.0))
     downsampleTSStore.shutdown()
 
@@ -2653,7 +2653,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         }
       }
 
-      val rows = spec.rows.map{ raw =>
+      val rows = spec.rows().map{ raw =>
         Seq(nextTimestamp.getAndAdd(stepMs)) ++ raw ++ Seq(spec.metric, labels)
       }
       val startMs = rows.head(0).asInstanceOf[Long]

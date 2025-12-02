@@ -150,7 +150,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val curTime = System.currentTimeMillis
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
-        val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
+        val vals = r.result.flatMap(_.rows().map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
         // info(s"result values were $vals")
         vals.length should be > 0
         vals.map(_._2).sum
@@ -170,7 +170,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
       case r: QueryResult2 =>
         // Transform range query vectors
         val map = r.result.map { rv =>
-          val sampleArray = rv.rows.map(_.getDouble(1)).toArray
+          val sampleArray = rv.rows().map(_.getDouble(1)).toArray
           totalSamples += sampleArray.size
           rv.key.toString -> sampleArray
         }.toMap
@@ -183,7 +183,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   def compareRangeResults(map1: Map[String, Array[Double]], map2: Map[String, Array[Double]]): Unit = {
     map1.keySet shouldEqual map2.keySet
     map1.foreach { case (key, samples) =>
-      samples.toList shouldEqual map2(key).toList
+      samples.toList() shouldEqual map2(key).toList
     }
   }
 

@@ -254,7 +254,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     // downsample cluster. This is deprecated now and needs to be removed.
     if (settings.exportIsEnabled && settings.exportKeyToConfig.nonEmpty) {
       // Used to process tasks in parallel. Allows configurable parallelism.
-      val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
+      @scala.annotation.unused val taskSupport = new ForkJoinTaskSupport(new ForkJoinPool(settings.exportParallelism))
       val exportTasks = {
         // downsample the data as the first key is exported
         val firstExportTaskWithDs = Seq(() => {
@@ -265,12 +265,10 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         val remainingExportTasksWithoutDs = settings.exportKeyToConfig.tail.map { case (filters, config) =>
           () => exportForKey(pagedReadablePartitionsRdd, filters, config, batchExporter, spark)
         }
-        // create a parallel sequence of tasks
-        (firstExportTaskWithDs ++ remainingExportTasksWithoutDs).par
+        // create a sequence of tasks (parallel collections removed in Scala 2.13)
+        firstExportTaskWithDs ++ remainingExportTasksWithoutDs
       }
-      // applies the configured parallelism
-      exportTasks.tasksupport = taskSupport
-      // export/downsample RDDs in parallel
+      // export/downsample RDDs sequentially (parallel collections require separate library in Scala 2.13)
       exportTasks.foreach(_.apply())
     }
 
@@ -328,7 +326,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     jobCompletedNoTags.increment()
     val downsampleHourStartGauge = FilodbMetrics.gauge("chunk-downsampler-period-start-hour",
       Map("downsamplePeriod" -> downsamplePeriodStr))
-    downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
+    downsampleHourStartGauge.update((userTimeStart / 1000 / 60 / 60).toDouble)
     if (settings.shouldSleepForMetricsFlush)
       Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
     spark

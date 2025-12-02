@@ -187,7 +187,7 @@ trait PartKeyIndexRawSpec {
       // the returned result is empty
 
       // Add the first ten keys and row numbers
-      val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      @scala.annotation.unused val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
         .zipWithIndex.map { case (addr, i) =>
           val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
           keyIndex.addPartKey(pk, i, i, i + 10)()
@@ -207,7 +207,7 @@ trait PartKeyIndexRawSpec {
       val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
       val start = System.currentTimeMillis()
       // we dont care much about the partKey here, but the startTime against partId.
-      val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+      val partKeys = LazyList.continually(readers.head).take(numPartIds).toList
       partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
         .zipWithIndex.foreach { case (addr, i) =>
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i)()
@@ -257,7 +257,7 @@ trait PartKeyIndexRawSpec {
       val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
       val start = 1000
       // we dont care much about the partKey here, but the startTime against partId.
-      val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+      val partKeys = LazyList.continually(readers.head).take(numPartIds).toList
       partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
         .zipWithIndex.foreach { case (addr, i) =>
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
@@ -286,7 +286,7 @@ trait PartKeyIndexRawSpec {
       val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
       val start = 1000
       // we dont care much about the partKey here, but the startTime against partId.
-      val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+      val partKeys = LazyList.continually(readers.head).take(numPartIds).toList
       partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
         .zipWithIndex.foreach { case (addr, i) =>
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
@@ -317,7 +317,7 @@ trait PartKeyIndexRawSpec {
 
       val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
       val start = 1000
-      val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+      val partKeys = LazyList.continually(readers.head).take(numPartIds).toList
       partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
         .zipWithIndex.foreach { case (addr, i) =>
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
@@ -547,7 +547,7 @@ trait PartKeyIndexRawSpec {
     it("should be able to fetch label values efficiently using additonal facets") {
       val facetIndex = createNewIndex(dataset7.ref, dataset7.schema.partition,
         true, true, 0, 1.hour.toMillis)
-      val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+      @scala.annotation.unused val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
         .zipWithIndex.map { case (addr, i) =>
           val start = Math.abs(Random.nextLong())
           facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()
@@ -593,7 +593,7 @@ trait PartKeyIndexRawSpec {
         indexState =>
           val indexDirectory = new File(
             System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-          val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+          val shardDirectory = new File(indexDirectory, dataset6.ref.toString + File.separator + "0")
           shardDirectory.mkdirs()
           new File(shardDirectory, "empty").createNewFile()
           // Validate the file named empty exists
@@ -640,7 +640,7 @@ trait PartKeyIndexRawSpec {
         indexState =>
           val indexDirectory = new File(
             System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-          val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+          val shardDirectory = new File(indexDirectory, dataset6.ref.toString + File.separator + "0")
           // Delete directory to create an index from scratch
           scala.reflect.io.Directory(shardDirectory).deleteRecursively()
           shardDirectory.mkdirs()
@@ -804,7 +804,7 @@ trait PartKeyIndexRawSpec {
         indexState =>
           val indexDirectory = new File(
             System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-          val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+          val shardDirectory = new File(indexDirectory, dataset6.ref.toString + File.separator + "0")
           shardDirectory.mkdirs()
           new File(shardDirectory, "empty").createNewFile()
           Files.writeString(new File(shardDirectory, "meta.json").toPath, "Hello", StandardOpenOption.CREATE)

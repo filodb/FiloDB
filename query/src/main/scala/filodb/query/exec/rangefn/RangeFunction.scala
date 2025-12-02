@@ -413,7 +413,7 @@ object RangeFunction {
   // scalastyle:off cyclomatic.complexity
   private def iteratingFunctionH(func: Option[InternalRangeFunction],
                                  schema: ResultSchema,
-                                 funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+                                 funcParams: Seq[Any]): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
     case None                                     => () => new LastSampleFunctionH()
     case Some(Last)                               => () => new LastSampleFunctionH()
@@ -498,6 +498,7 @@ object RangeFunction {
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+    case Some(other)                            => throw new UnsupportedOperationException(s"Function $other not supported for iterating windowing")
   }
 }
 
@@ -513,19 +514,24 @@ class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeF
             sampleToEmit: TransientHistRow,
             queryConfig: QueryConfig): Unit = {
 
-    for (i <- (window.size - 1) to 0 by -1) {
+    var found = false
+    var i = window.size - 1
+    while (i >= 0 && !found) {
       val row = window(i)
       val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
-      if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN ) {
+      if (hist.numBuckets > 0 && !hist.bucketValue(0).isNaN) {
         sampleToEmit.setValues(endTimestamp, hist)
         if (isMinMaxHistogram) {
           sampleToEmit.setDouble(2, row.getDouble(2))
           sampleToEmit.setDouble(3, row.getDouble(3))
         }
-        return
+        found = true
       }
+      i -= 1
     }
-    sampleToEmit.setValues(endTimestamp, HistogramWithBuckets.empty)
+    if (!found) {
+      sampleToEmit.setValues(endTimestamp, HistogramWithBuckets.empty)
+    }
   }
 }
 
@@ -537,15 +543,20 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
             window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    for (i <- (window.size - 1) to 0 by -1) {
+    var found = false
+    var i = window.size - 1
+    while (i >= 0 && !found) {
       val row = window.apply(i)
       val rowValue = row.getDouble(1)
-      if (!rowValue.isNaN ) {
+      if (!rowValue.isNaN) {
         sampleToEmit.setValues(endTimestamp, rowValue)
-        return
+        found = true
       }
+      i -= 1
     }
-    sampleToEmit.setValues(endTimestamp, Double.NaN)
+    if (!found) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
   }
 }
 

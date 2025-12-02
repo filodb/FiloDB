@@ -14,7 +14,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val builder = IntBinaryVector(memFactory, orig)
       builder.length shouldEqual 4
       val frozen = builder.freeze(memFactory)
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual orig
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() shouldEqual orig
     }
 
     it("should append 16-bit Ints and read them back") {
@@ -23,7 +23,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
       builder.length should equal (5)
       val frozen = builder.freeze(memFactory)
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList should equal (orig)
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() should equal (orig)
     }
 
     it("should append bytes and read them back") {
@@ -32,7 +32,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
       builder.length should equal (4)
       val frozen = builder.freeze(memFactory)
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList should equal (orig)
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() should equal (orig)
     }
 
     it("should be able to read from on-heap IntBinaryVector") {
@@ -47,7 +47,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
         MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
       onHeapAcc.foreach { a =>
-        IntBinaryVector(a, 0).toBuffer(a, 0).toList shouldEqual orig
+        IntBinaryVector(a, 0).toBuffer(a, 0).toList() shouldEqual orig
       }
     }
 
@@ -57,7 +57,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       builder.length shouldEqual orig.length
       val frozen = builder.freeze(memFactory)
       (2 to 5).foreach { start =>
-        IntBinaryVector(acc, frozen).toBuffer(acc, frozen, start).toList shouldEqual orig.drop(start)
+        IntBinaryVector(acc, frozen).toBuffer(acc, frozen, start).toList() shouldEqual orig.drop(start)
       }
     }
 
@@ -68,12 +68,12 @@ class IntBinaryVectorTest extends NativeVectorTest {
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
       val readVect = IntBinaryVector(acc, builder.addr)
       readVect.length(acc, builder.addr) shouldEqual 4
-      readVect.toBuffer(acc, builder.addr).toList shouldEqual orig
+      readVect.toBuffer(acc, builder.addr).toList() shouldEqual orig
 
       builder.frozenSize should equal (24)
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(acc, frozen).length(acc, frozen) shouldEqual 4
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual orig
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() shouldEqual orig
     }
 
     it("should return VectorTooSmall if not enough space to add new items") {
@@ -91,30 +91,30 @@ class IntBinaryVectorTest extends NativeVectorTest {
       builder.length should equal (0)
       builder.addData(2) shouldEqual Ack
       builder.numBytes should equal (8 + 1)
-      builder.reader.toBuffer(acc, builder.addr).toList shouldEqual Seq(2)
+      builder.reader.toBuffer(acc, builder.addr).toList() shouldEqual Seq(2)
       builder.addData(4) shouldEqual Ack
       builder.addData(3) shouldEqual Ack
       builder.length should equal (3)
-      builder.reader.toBuffer(acc, builder.addr).toList shouldEqual Seq(2, 4, 3)
+      builder.reader.toBuffer(acc, builder.addr).toList() shouldEqual Seq(2, 4, 3)
       builder.frozenSize should equal (8 + 2)
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(acc, frozen).length(acc, frozen) shouldEqual 3
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual Seq(2, 4, 3)
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() shouldEqual Seq(2, 4, 3)
     }
 
     it("should append and read back list with nbits=2") {
       val builder = IntBinaryVector.appendingVectorNoNA(memFactory, 10, nbits = 2, signed = false)
       val orig = Seq(0, 2, 1, 3, 2)
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
-      builder.reader.toBuffer(acc, builder.addr).toList shouldEqual orig
+      builder.reader.toBuffer(acc, builder.addr).toList() shouldEqual orig
       builder.numBytes shouldEqual 10
 
       val frozen = builder.freeze(memFactory)
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual orig
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() shouldEqual orig
     }
 
     it("should append correctly when memory has previous values / was not zeroed") {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val evictionLock = new EvictionLock
       val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024,
         new MemoryStats(Map("test"-> "test")), null, 16, evictionLock) {
@@ -126,13 +126,13 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val builder = IntBinaryVector.appendingVectorNoNA(blockFactory, 10, nbits = 4, signed = false)
       val orig = Seq(0, 1, 1, 3, 4)
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
-      builder.reader.toBuffer(acc, builder.addr).toList shouldEqual orig
+      builder.reader.toBuffer(acc, builder.addr).toList() shouldEqual orig
 
       // original values will get mixed with nonzero contents if append does not overwrite original memory
       val builder2 = IntBinaryVector.appendingVectorNoNA(blockFactory, 10, nbits = 2, signed = false)
       val orig2 = Seq(0, 1, 1, 0, 2)
       orig2.foreach(x => builder2.addData(x) shouldEqual Ack)
-      builder2.reader.toBuffer(acc, builder2.addr).toList shouldEqual orig2
+      builder2.reader.toBuffer(acc, builder2.addr).toList() shouldEqual orig2
 
       blockStore.releaseBlocks()
     }
@@ -141,7 +141,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val orig = Seq(0, 2, 1, 3, 2)
       val builder1 = IntBinaryVector(memFactory, orig)
       val intVect = builder1.optimize(memFactory)
-      IntBinaryVector(acc, intVect).toBuffer(acc, intVect).toList shouldEqual orig
+      IntBinaryVector(acc, intVect).toBuffer(acc, intVect).toList() shouldEqual orig
       BinaryVector.totalBytes(acc, intVect) shouldEqual 10
 
       val builder2 = IntBinaryVector.appendingVectorNoNA(memFactory, 10)
@@ -153,7 +153,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
   describe("MaskedIntAppendingVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = IntBinaryVector.appendingVector(memFactory, 100)
-      builder.addNA shouldEqual Ack
+      builder.addNA() shouldEqual Ack
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
       val sc = builder.optimize(memFactory)
@@ -166,11 +166,11 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
     it("should encode a mix of NAs and Ints and decode iterate and skip NAs") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.isAllNA should be (false)
       cb.noNAs should be (false)
       val sc = cb.optimize(memFactory)
@@ -200,7 +200,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val numInts = 1000
       val builder = IntBinaryVector.appendingVector(memFactory, numInts / 2)
       builder shouldBe a[GrowableVector[_]]
-      (0 until numInts).foreach(i => builder.addNA shouldEqual Ack)
+      (0 until numInts).foreach(i => builder.addNA() shouldEqual Ack)
       builder.length should equal (numInts)
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
@@ -208,11 +208,11 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
     it("should be able to return minMax accurately with NAs") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       val inner = cb.asInstanceOf[GrowableVector[Int]].inner.asInstanceOf[MaskedIntAppendingVector]
       inner.minMax should equal ((101, 103))
     }
@@ -227,16 +227,16 @@ class IntBinaryVectorTest extends NativeVectorTest {
       BinaryVector.totalBytes(acc, frozen) should equal (12 + 8 + 8 + 20)  // bitmask truncated
 
       IntBinaryVector(acc, frozen).length(acc, frozen) shouldEqual 5
-      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList should equal (0 to 4)
+      IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList() should equal (0 to 4)
     }
 
     it("should optimize and parse back using IntBinaryVector.apply") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       val buffer = cb.optimize(memFactory)
       val readVect = IntBinaryVector(acc, buffer)
       readVect.toBuffer(acc, buffer) shouldEqual Buffer(101, 102, 103)
@@ -248,10 +248,10 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val orig = Seq(100000, 200001, 300002)
       cb.addNA() shouldEqual Ack
       orig.foreach(x => cb.addData(x) shouldEqual Ack)
-      cb.copyToBuffer.toList shouldEqual orig
+      cb.copyToBuffer.toList() shouldEqual orig
       val optimized = cb.optimize(memFactory)
       val readVect1 = IntBinaryVector(acc, optimized)
-      readVect1.toBuffer(acc, optimized).toList shouldEqual orig
+      readVect1.toBuffer(acc, optimized).toList() shouldEqual orig
 
       // Now the optimize should not have damaged original vector
       cb.copyToBuffer shouldEqual Buffer.fromIterable(orig)
@@ -260,8 +260,8 @@ class IntBinaryVectorTest extends NativeVectorTest {
       orig2.foreach(x => cb.addData(x) shouldEqual Ack)
       val frozen2 = cb.optimize(memFactory)
       val readVect2 = IntBinaryVector(BinaryVector.asBuffer(frozen2))
-      readVect2.toBuffer(acc, frozen2).toList shouldEqual orig2
-      cb.copyToBuffer.toList shouldEqual orig2
+      readVect2.toBuffer(acc, frozen2).toList() shouldEqual orig2
+      cb.copyToBuffer.toList() shouldEqual orig2
     }
 
     it("should be able to optimize a 32-bit appending vector to smaller size") {

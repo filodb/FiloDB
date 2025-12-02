@@ -8,19 +8,19 @@ class BufferableCounterCorrectionIteratorSpec extends AnyFunSpec with Matchers {
 
   it("should correct dips in counter") {
     val input = Seq(3, 5, 7, 13, 2, 34).map(d => new TransientRow(0, d))
-    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 15d,
+    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList() shouldEqual Seq(3d, 5d, 7d, 13d, 15d,
       47d)
   }
 
   it("should correct multiple dips in counter") {
     val input = Seq(3, 5, 7, 13, 2, 34, 4, 6).map(d => new TransientRow(0, d))
     new BufferableCounterCorrectionIterator(input.iterator)
-      .map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 15d, 47d, 51d, 53d)
+      .map(_.value).toList() shouldEqual Seq(3d, 5d, 7d, 13d, 15d, 47d, 51d, 53d)
   }
 
   it("should not correct when no dips in counter") {
     val input = Seq(3, 5, 7, 13, 22, 34).map(d => new TransientRow(0, d))
-    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 22d,
+    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList() shouldEqual Seq(3d, 5d, 7d, 13d, 22d,
       34d)
   }
 

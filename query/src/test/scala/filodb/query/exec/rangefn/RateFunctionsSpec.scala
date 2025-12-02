@@ -66,7 +66,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should compute rate correctly when reset occurs at chunk boundaries") {
@@ -88,7 +88,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should be able to handle NAN at the beginning") {
@@ -147,7 +147,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
 
     // Two drops in one chunk
     val rv2 = timeValueRVPk(resetChunk1 ++ resetChunk2)
@@ -162,7 +162,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1).isNaN shouldEqual true
+    it.next().getDouble(1).isNaN shouldEqual true
   }
 
   it("should return rate of 0 when counter samples do not increase") {
@@ -174,7 +174,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual 0.0
+    it.next().getDouble(1) shouldEqual 0.0
   }
 
   // Also ensures that chunked rate works across chunk boundaries
@@ -280,7 +280,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
                                         new HistRateFunction, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -320,7 +320,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, endTs - startTs,
                                         new HistRateFunction, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -463,7 +463,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedIncreaseFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("delta should work when start and end are outside window") {
@@ -478,7 +478,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val gaugeRV = timeValueRVPk(gaugeSamples)
     val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedDeltaFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("idelta should work when start and end are outside window") {

@@ -128,11 +128,11 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val cols = new Array[ColumnInfo](2)
     cols(0) = source.columns(0)
     cols(1) = ColumnInfo("map", ColumnType.StringColumn)
-    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
+    ResultSchema(cols.toIndexedSeq, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)).toIndexedSeq, 1,
       fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }

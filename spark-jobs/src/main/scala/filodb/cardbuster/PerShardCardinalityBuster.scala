@@ -50,7 +50,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
                       .as[Option[Int]]("cardbuster.cass-delete-parallelism-per-spark-thread")
 
   @transient lazy val deleteFilter = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.mapValues(_.r.pattern).toSeq)
+    .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.view.mapValues(_.r.pattern).toMap.toSeq)
 
   @transient lazy val startTimeGTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
     .as[String]("cardbuster.delete-startTimeGTE"))).toEpochMilli
@@ -126,7 +126,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
             numPartKeysCouldNotDelete.increment()
             numCouldNotDelete += 1
         }
-        Unit
+        ()
       }
     }.completedL.runToFuture(BusterSchedulers.computeSched)
     import scala.concurrent.duration._

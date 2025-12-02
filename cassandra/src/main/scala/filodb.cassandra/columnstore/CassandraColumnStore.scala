@@ -57,7 +57,7 @@ class CassandraColumnStore(val config: Config, val readEc: Scheduler,
                            val downsampledData: Boolean = false)
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   import filodb.core.store._
 
@@ -431,9 +431,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     def finishBatch(partition: ByteBuffer): Unit = {
       if (diskTimeToLiveSeconds == 0) {
-        futures += targetChunksTable.deleteChunks(partition, chunkInfos)
+        futures += targetChunksTable.deleteChunks(partition, chunkInfos.toSeq)
       } else {
-        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
+        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos.toSeq).iterator.asScala) {
           futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
         }
       }
@@ -707,7 +707,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   def session: Session
   def readEc: Scheduler
 
-  implicit val readSched = readEc
+  implicit val readSched: Scheduler = readEc
 
   val stats = new ChunkSourceStats
 

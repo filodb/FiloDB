@@ -70,7 +70,7 @@ object SelectRawPartitionsExec extends {
       qLogger.debug(s"Replacing range function $origFunc with $newFunc...")
       replaceRangeFunction(transformers, origFunc, newFunc)
     } else {
-      transformers.toBuffer // Produce an immutable copy, so the original one is not mutated by accident
+      transformers.toSeq // Produce an immutable copy, so the original one is not mutated by accident
     }
   }
 

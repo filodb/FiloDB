@@ -20,12 +20,12 @@ object StitchRvsExec {
     extends RangeVectorCursor {
     private val weight = math.pow(10, toleranceNumDecimal)
     private val bVectors = vectors.map(_.buffered)
-    val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
+    val mins = new mutable.ArrayBuffer[scala.collection.BufferedIterator[RowReader]](2)
     val nanResult = new NaNRowReader(0)
-    val tsIter: BufferedIterator[Long] = outputRange match {
+    val tsIter: scala.collection.BufferedIterator[Long] = outputRange match {
       case Some(RvRange(startMs, 0, endMs)) =>
         if (startMs == endMs)
-          List(startMs).toIterator.buffered
+          List(startMs).iterator.buffered
         else {
           // Should never happen
           throw new IllegalStateException("Expected to a non zero step size when start and end timestamps are not same")
@@ -138,13 +138,14 @@ final case class StitchRvsExec(queryContext: QueryContext,
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map(_._1.result).toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
-      groups.mapValues { toMerge =>
+      val merged = groups.map { case (_, toMerge) =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange,
           enableApproximatelyEqualCheck, toleranceNumDecimal)
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows, outputRvRange)
-      }.values
-    }.map(Observable.fromIterable)
+      }
+      Observable.fromIterable(merged)
+    }
     Observable.fromTask(stitched).flatten
   }
 
@@ -162,12 +163,13 @@ final case class StitchRvsMapper(outputRvRange: Option[RvRange]) extends RangeVe
     qLogger.debug(s"StitchRvsMapper: Stitching results:")
     val stitched = source.toListL.map { rvs =>
       val groups = rvs.groupBy(_.key)
-      groups.mapValues { toMerge =>
+      val merged = groups.map { case (_, toMerge) =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows, outputRvRange)
-      }.values
-    }.map(Observable.fromIterable)
+      }
+      Observable.fromIterable(merged)
+    }
     Observable.fromTask(stitched).flatten
   }
 

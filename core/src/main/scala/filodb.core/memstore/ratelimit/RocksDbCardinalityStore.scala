@@ -279,7 +279,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             complete = true
             break()
           }
-          it.next()
+          it.next
         }
       }
 
@@ -300,7 +300,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             } else {
               break()  // don't continue beyond valid results
             }
-            it.next()
+            it.next
           } while (it.isValid())
         }
         buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX, CardinalityValue(

@@ -221,7 +221,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       val rpExec = l1.asInstanceOf[MultiSchemaPartitionsExec]
-      rpExec.filters.map(_.column).toSet shouldEqual Set("kpi", "job")
+      rpExec.filters().map(_.column).toSet shouldEqual Set("kpi", "job")
     }
   }
 

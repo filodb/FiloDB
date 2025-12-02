@@ -517,7 +517,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   it("should correctly do changes") {
     var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
     val windowSize = 100
     val step = 20
@@ -648,7 +648,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val data = scala.util.Random.shuffle(data2 ++ data1)
 
       val rv = timeValueRV(data)
-      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+      val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
       val stepTimeMillis = step.toLong * pubFreq
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)

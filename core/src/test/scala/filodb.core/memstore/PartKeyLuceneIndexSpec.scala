@@ -41,7 +41,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     def toSeq: Seq[Int] = {
       val newSeq = new collection.mutable.ArrayBuffer[Int]()
       while (ii.hasNext) { newSeq += ii.next }
-      newSeq
+      newSeq.toSeq
     }
   }
 
@@ -191,7 +191,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   it("should be able to do regular operations when faceting is disabled and additional faceting in dataset") {
     val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
       false, true, 0, 1.hour.toMillis)
-    val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+    @scala.annotation.unused val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
       val start = Math.abs(Random.nextLong())
       facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()

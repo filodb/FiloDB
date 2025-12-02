@@ -26,12 +26,11 @@ object ProtoConverters {
   implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
 
     def toProto: ProtoRangeVector.SerializedRangeVector = {
-      import collection.JavaConverters._
       val builder = ProtoRangeVector.SerializedRangeVector.newBuilder()
       builder.setKey(rv.key.toProto)
       builder.setNumRowsSerialized(rv.numRowsSerialized)
       builder.addAllRecordContainers(rv.containersIterator.map(container => ByteString.copyFrom(
-        if (container.hasArray) container.array else container.trimmedArray)).toIterable.asJava)
+        if (container.hasArray) container.array else container.trimmedArray)).toSeq.asJava)
       builder.setRecordSchema(rv.schema.toProto)
       builder.setStartRecordNo(rv.startRecordNo)
       rv.outputRange match {
@@ -45,11 +44,9 @@ object ProtoConverters {
   implicit class RangeVectorFromProtoConversion(rvProto: ProtoRangeVector.SerializedRangeVector) {
 
     def fromProto: SerializedRangeVector = {
-      import collection.JavaConverters._
-
       new SerializedRangeVector(rvProto.getKey.fromProto,
         rvProto.getNumRowsSerialized,
-        rvProto.getRecordContainersList.asScala.map(byteString => RecordContainer(byteString.toByteArray)),
+        rvProto.getRecordContainersList.asScala.map(byteString => RecordContainer(byteString.toByteArray)).toSeq,
         rvProto.getRecordSchema.fromProto,
         rvProto.getStartRecordNo,
         if (rvProto.hasRvRange) Some(rvProto.getRvRange.fromProto) else None)
@@ -59,7 +56,6 @@ object ProtoConverters {
 
   implicit class RangeVectorKeyToProtoConversion(rvk: RangeVectorKey) {
     def toProto: ProtoRangeVector.RangeVectorKey = {
-      import collection.JavaConverters._
       val builder = ProtoRangeVector.RangeVectorKey.newBuilder()
       builder.putAllLabels(rvk.labelValues.map {
         case (key, value) => key.toString -> value.toString
@@ -70,11 +66,10 @@ object ProtoConverters {
 
   implicit class RangeVectorKeyFromProtoConversion(rvkProto: ProtoRangeVector.RangeVectorKey) {
     def fromProto: RangeVectorKey = {
-      import collection.JavaConverters._
       import filodb.memory.format.ZeroCopyUTF8String._
 
       CustomRangeVectorKey(labelValues = rvkProto.getLabelsMap.asScala.map {
-        case (key, value) => key.utf8 -> value.utf8
+        case (key: String, value: String) => key.utf8 -> value.utf8
       }.toMap)
     }
   }
@@ -96,14 +91,13 @@ object ProtoConverters {
 
   implicit class RecordSchemaFromProtoConversion(rvkProto: ProtoRangeVector.RecordSchema) {
     def fromProto: RecordSchema = {
-      import collection.JavaConverters._
       new RecordSchema(
                    columns = rvkProto.getColumnsList.asScala.toList.map(ci => ci.fromProto),
                    partitionFieldStart = if (rvkProto.hasPartitionFieldStart)
                                             Some(rvkProto.getPartitionFieldStart) else None,
                    predefinedKeys = rvkProto.getPredefinedKeysList.asScala.toList,
                    brSchema = rvkProto.getBrSchemaMap.asScala.map
-                     { case (key, value) => (key.toInt, value.fromProto)}.toMap,
+                     { case (key: Integer, value) => (key.toInt, value.fromProto)}.toMap,
                    schemaVersion = rvkProto.getSchemaVersion)
     }
   }
@@ -313,7 +307,7 @@ object ProtoConverters {
       val enforcedLimits = gpp.getEnforcedLimits.fromProto(PerQueryLimits.defaultEnforcedLimits())
       val warnLimits = gpp.getWarnLimits.fromProto(PerQueryLimits.defaultWarnLimits())
       val downPartitionsMutableSet = scala.collection.mutable.Set[DownPartition]()
-      val downPartitions = gpp.getDownPartitionsList().asScala.foreach(dp => downPartitionsMutableSet.add(dp.fromProto))
+      gpp.getDownPartitionsList().asScala.foreach(dp => downPartitionsMutableSet.add(dp.fromProto))
       val failoverMode = if (gpp.hasFailoverMode) {
         gpp.getFailoverMode.fromProto
       } else {
@@ -897,14 +891,12 @@ object ProtoConverters {
   }
 
   implicit class ScalarVaryingDoubleFromProtoConverter(svd: ProtoRangeVector.ScalarVaryingDouble) {
-    import collection.JavaConverters._
     def fromProto: ScalarVaryingDouble = ScalarVaryingDouble(
-      svd.getTimeValueMapMap.asScala.map{ case (k, v) => (k.toLong, v.toDouble)}.toMap,
+      svd.getTimeValueMapMap.asScala.map{ case (k: java.lang.Long, v: java.lang.Double) => (k.toLong, v.toDouble)}.toMap,
       if (svd.hasRvRange) Some(svd.getRvRange.fromProto) else None)
   }
 
   implicit class ScalarVaryingDoubleToProtoConverter(dom: ScalarVaryingDouble) {
-    import collection.JavaConverters._
     def toProto: ProtoRangeVector.ScalarVaryingDouble = {
       val builder = ProtoRangeVector.ScalarVaryingDouble.newBuilder()
       dom.outputRange match {
@@ -912,7 +904,7 @@ object ProtoConverters {
         case None           =>
       }
       builder.putAllTimeValueMap(dom.timeValueMap.map{
-        case (k, v) => (java.lang.Long.valueOf(k), java.lang.Double.valueOf(v))}.asJava)
+        case (k, v) => (java.lang.Long.valueOf(k), java.lang.Double.valueOf(v))}.toMap.asJava)
       builder.build()
     }
   }
@@ -951,8 +943,7 @@ object ProtoConverters {
 
   implicit class SerializableRangeVectorListFromProtoConverter(
                                             rvList: java.util.List[ProtoRangeVector.SerializableRangeVector]) {
-    import collection.JavaConverters._
-    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto)
+    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto).toSeq
   }
 
   implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {
@@ -975,7 +966,6 @@ object ProtoConverters {
   }
 
   implicit class SerializableRangeVectorListToProtoConverter(rvSeq: Seq[SerializableRangeVector]) {
-    import collection.JavaConverters._
     def toProto: java.util.List[ProtoRangeVector.SerializableRangeVector] = rvSeq.map(_.toProto).asJava
   }
 

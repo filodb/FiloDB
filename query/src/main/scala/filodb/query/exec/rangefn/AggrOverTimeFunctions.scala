@@ -188,7 +188,7 @@ private case class MaxMinTracker(ordering: Ordering[Double]) {
 class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
   extends RangeFunction[TransientHistRow] {
     private val sumOverTimeFunction: SumOverTimeFunctionH = new SumOverTimeFunctionH(sum, 0)
-    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.IeeeOrdering)
   /**
    * Called when a sample is added to the sliding window
    */
@@ -221,8 +221,8 @@ class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.em
 class RateAndMaxMinOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
   extends RangeFunction[TransientHistRow] {
   private val rateOverDeltaFunction: RateOverDeltaFunctionH = new RateOverDeltaFunctionH
-  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
-  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.reverse)
+  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.IeeeOrdering)
+  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.IeeeOrdering.reverse)
   /**
    * Called when a sample is added to the sliding window
    */
@@ -594,7 +594,7 @@ extends TimeRangeFunction[TransientHistRow] {
     val sum = reader.asHistReader.sum(startRowNum, endRowNum)
     h match {
       // sum is mutable histogram, copy to be sure it's our own copy
-      case hist if hist.numBuckets == 0 => h = sum.copy
+      case hist if hist.numBuckets == 0 => h = sum.copy()
       case hist: bv.MutableHistogram    => hist.add(sum)
     }
   }
@@ -1092,7 +1092,7 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
     }
     val changesResult = longReader.changes(longVectAcc, longVect, startRowNum, endRowNum, prev.toLong)
     changes += changesResult._1
-    prev = changesResult._2
+    prev = changesResult._2.toDouble
   }
 }
 
@@ -1129,7 +1129,6 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
     if (size > 0) {
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
       val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
-      val iter = values.iterator()
       for (value <- values) {
         diffFromMedians.append(Math.abs(median - value))
       }
@@ -1152,7 +1151,6 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
                                 endRowNum: Int): Unit = {
     //Only support StaticFuncArgs for now as we don't have time to get value from scalar vector
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
-    var counter = 0
 
     if (q < 0) quantileResult = Double.NegativeInfinity
     else if (q > 1) quantileResult = Double.PositiveInfinity
@@ -1160,7 +1158,7 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
       var rowNum = startRowNum
       val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
       while (rowNum <= endRowNum) {
-        var nextvalue = it.next
+        val nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
         if (!JLDouble.isNaN(nextvalue)) {
           values += nextvalue
@@ -1207,8 +1205,8 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
       var rowNum = startRowNum
       val it = longReader.iterate(longVectAcc, longVect, startRowNum)
       while (rowNum <= endRowNum) {
-        var nextvalue = it.next
-        values += nextvalue
+        val nextvalue = it.next
+        values += nextvalue.toDouble
         rowNum += 1
       }
     }
@@ -1225,7 +1223,7 @@ class MedianAbsoluteDeviationOverTimeChunkedFunctionL
       val it = longReader.iterate(longVectAcc, longVect, startRowNum)
       for (_ <- startRowNum to endRowNum) {
         val nextvalue = it.next
-        values += nextvalue
+        values += nextvalue.toDouble
       }
   }
 }
@@ -1441,7 +1439,7 @@ class PredictLinearChunkedFunctionL(funcParams: Seq[Any]) extends PredictLinearC
       val nexttime = itTimestamp.next
       val x = (nexttime-endTime)/1000.0
       if (sumY.isNaN) {
-        sumY = nextvalue
+        sumY = nextvalue.toDouble
         sumX = x
         sumXY = x * nextvalue
         sumX2 = x * x

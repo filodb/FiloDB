@@ -48,7 +48,7 @@ class LcfTask(dsSettings: DownsamplerSettings) extends Serializable {
   @transient lazy private[labelchurnfinder] val colStore =
     new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
   @transient lazy private[labelchurnfinder] val filters = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.mapValues(_.r.pattern).toSeq)
+    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.view.mapValues(_.r.pattern).toMap.toSeq)
 
   @transient lazy private[labelchurnfinder] val numShards = dsSettings.filodbSettings.streamConfigs
     .find(_.getString("dataset") == datasetName)

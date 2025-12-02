@@ -15,7 +15,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
                                             val connector: FiloCassandraConnector,
                                             writeConsistencyLevel: ConsistencyLevel,
                                             readConsistencyLevel: ConsistencyLevel)
-                                           (implicit ec: ExecutionContext) extends BaseDatasetTable {
+                                           (implicit @scala.annotation.unused ec: ExecutionContext) extends BaseDatasetTable {
 
   import filodb.cassandra.Util._
 

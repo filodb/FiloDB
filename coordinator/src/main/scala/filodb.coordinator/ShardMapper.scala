@@ -63,7 +63,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   override def toString: String = s"ShardMapper ${shardValues.zipWithIndex}"
 
-  def shardValues: Seq[(ActorRef, ShardStatus)] = shardMap.zip(statusMap).toBuffer
+  def shardValues: Seq[(ActorRef, ShardStatus)] = shardMap.zip(statusMap).toSeq
 
   def statuses: Array[ShardStatus] = statusMap
 

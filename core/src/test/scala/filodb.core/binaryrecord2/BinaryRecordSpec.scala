@@ -133,7 +133,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       containers.head.numBytes shouldEqual container1Bytes
       containers.last.numBytes shouldEqual 76
 
-      containers.last.countRecords shouldEqual 1
+      containers.last.countRecords() shouldEqual 1
 
       containers.foreach(_.version shouldEqual RecordBuilder.Version)
       containers.foreach(_.isCurrentVersion shouldEqual true)
@@ -207,7 +207,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val containers = builder.allContainers
       containers should have length (1)
       containers.head.numBytes shouldEqual 76
-      containers.last.countRecords shouldEqual 1
+      containers.last.countRecords() shouldEqual 1
     }
 
     it("should add records, reset, and be able to add records again") {
@@ -220,7 +220,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.isEmpty shouldEqual false
       builder.currentContainer.get.isEmpty shouldEqual false
-      builder.allContainers.head.countRecords shouldEqual 10
+      builder.allContainers.head.countRecords() shouldEqual 10
       val origTimestamp = builder.allContainers.head.timestamp
       origTimestamp shouldEqual curTime +- 20000   // 20 seconds
 
@@ -240,7 +240,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       addToBuilder(builder, linearMultiSeries() take 9)
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual (12 + 64*9)
-      builder.allContainers.head.countRecords shouldEqual 9
+      builder.allContainers.head.countRecords() shouldEqual 9
     }
 
     it("should add records and iterate") {
@@ -251,7 +251,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
-      builder.allContainers.head.countRecords shouldEqual 10
+      builder.allContainers.head.countRecords() shouldEqual 10
 
       val it = builder.allContainers.head.iterate(recSchema1)
       val doubles = data.map(_(1).asInstanceOf[Double])
@@ -292,7 +292,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       builder.addDouble(10.1) // max
       builder.addLong(123456L)  // count
       builder.addString("Series 1")   // series (partition key)
-      val offset1 = builder.endRecord()
+      @scala.annotation.unused val offset1 = builder.endRecord()
 
       // now test everything
       val containers = builder.allContainers
@@ -465,7 +465,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
 
   // This method allows us to build a "partKey" schema BinaryRecord without using the RecordComparator method,
   // just to let us test partitionMatch() independently of buildPartKeyFromIngest()
-  private def dataset2AddPartKeys(builder: RecordBuilder, data: Stream[Seq[Any]]) = {
+  private def dataset2AddPartKeys(builder: RecordBuilder, data: LazyList[Seq[Any]]) = {
     data.foreach { values =>
       builder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.schemaHash)
       builder.addString(values(5).asInstanceOf[String])  // series (partition key)
@@ -588,10 +588,10 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     val labels = Map("job" -> "prometheus",
                      "dc" -> "AWS-USE", "instance" -> "0123892E342342A90",
                      "__name__" -> "host_cpu_load")
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     it("should sortAndComputeHashes") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory)
+      @scala.annotation.unused val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
       val hashes = RecordBuilder.sortAndComputeHashes(pairs)
       hashes.size shouldEqual labels.size
@@ -635,7 +635,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     it("should compute partitionKey hash correctly when target schema doesn't specify shardkeys") {
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
+      @scala.annotation.unused val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
       val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
       val targetSchema = Seq("instance") // job, __name__, instance

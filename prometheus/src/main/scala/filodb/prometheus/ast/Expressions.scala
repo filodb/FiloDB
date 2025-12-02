@@ -3,7 +3,7 @@ package filodb.prometheus.ast
 import filodb.core.query.RangeParams
 import filodb.query._
 
-case class UnaryExpression(operator: Operator, operand: Expression) extends Expression with PeriodicSeries {
+case class UnaryExpression(operator: Operator, operand: Expression) extends Expression with filodb.prometheus.ast.PeriodicSeries {
   //TODO Need to pass an operator to a series
   override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     if (operator != Add && operator != Sub) {
@@ -30,7 +30,7 @@ case class PrecedenceExpression(expression: Expression) extends Expression
 case class BinaryExpression(lhs: Expression,
                             operator: Operator,
                             vectorMatch: Option[VectorMatch],
-                            rhs: Expression) extends Expression with PeriodicSeries {
+                            rhs: Expression) extends Expression with filodb.prometheus.ast.PeriodicSeries {
 
   def validate(): Unit = {
     operator match {
@@ -85,13 +85,13 @@ case class BinaryExpression(lhs: Expression,
         case (lh: ScalarExpression, rh: ScalarExpression) =>
           ScalarBinaryOperation(operator.getPlanOperator, Left(lh.toScalar), Left(rh.toScalar), rangeParams)
         // (2 + 3) + 5
-        case (lh: PeriodicSeries, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), Left(rh.toScalar), rangeParams)
         // 2 + (3 * 5)
-        case (lh: ScalarExpression, rh: PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: ScalarExpression, rh: filodb.prometheus.ast.PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
           Left(lh.toScalar), Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
         // (2 + 3) + (5 - 6)
-        case (lh: PeriodicSeries, rh: PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: filodb.prometheus.ast.PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]),
           Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
       }
@@ -104,33 +104,33 @@ case class BinaryExpression(lhs: Expression,
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
 
         // 2 + http_requests
-        case (lh: ScalarExpression, rh: PeriodicSeries) =>
+        case (lh: ScalarExpression, rh: filodb.prometheus.ast.PeriodicSeries) =>
           val scalar = ScalarFixedDoublePlan(lh.toScalar,
             RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = rh.toSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
 
         // http_requests + 2
-        case (lh: PeriodicSeries, rh: ScalarExpression) =>
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: ScalarExpression) =>
           val scalar = ScalarFixedDoublePlan(rh.toScalar, RangeParams(timeParams.start, timeParams.step,
             timeParams.end))
           val seriesPlan = lh.toSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
 
         // scalar(http_requests) + node_info
-        case (lh: Function, rh: PeriodicSeries) if lh.isScalarFunction() =>
+        case (lh: Function, rh: filodb.prometheus.ast.PeriodicSeries) if lh.isScalarFunction() =>
           val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rh.toSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
 
         // node_info + scalar(http_requests)
-        case (lh: PeriodicSeries, rh: Function) if rh.isScalarFunction =>
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: Function) if rh.isScalarFunction() =>
           val scalar = rh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanlhs = lh.toSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
 
         // node_info + http_requests
-        case (lh: PeriodicSeries, rh: PeriodicSeries) =>
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: filodb.prometheus.ast.PeriodicSeries) =>
           //10/2 + foo
           if (hasScalarResult(lh)) {
             val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]

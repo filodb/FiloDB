@@ -31,7 +31,7 @@ class PartitionKeyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter
     def toSeq: Seq[Int] = {
       val newSeq = new collection.mutable.ArrayBuffer[Int]()
       while (ii.hasNext) { newSeq += ii.next }
-      newSeq
+      newSeq.toSeq
     }
   }
 
@@ -131,11 +131,11 @@ class PartitionKeyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
-    keyIndex.indexSize shouldEqual 15
+    keyIndex.indexSize() shouldEqual 15
 
     val entries = EWAHCompressedBitmap.bitmapOf(2, 3)
     keyIndex.removeEntries("Actor2Code".utf8, Seq("AGR".utf8, "CHN".utf8), entries)
-    keyIndex.indexSize shouldEqual 14   // CHN entry removed, but not AGR
+    keyIndex.indexSize() shouldEqual 14   // CHN entry removed, but not AGR
 
     val filters2 = Seq(ColumnFilter("Actor2Code", Equals("AGR".utf8)))
     val (partNums2, unFounded2) = keyIndex.parseFilters(filters2)

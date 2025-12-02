@@ -360,7 +360,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
   private def getDownsampledChunksAsList(
     downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]
   ): ListBuffer[Row] = {
-    val start = System.currentTimeMillis()
+    @scala.annotation.unused val start = System.currentTimeMillis()
     @volatile var numChunks = 0
     val allRows = new ListBuffer[Row]
     downsampledChunksToPersist.foreach { case (res, chunks) =>
@@ -436,7 +436,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
       val res = Duration.apply(row.getString(0)).asInstanceOf[FiniteDuration]
       val chunkTable = downsampleCassandraColStore.getOrCreateChunkTable(
         downsampleRefsByRes(res))
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val chunks = row.getAs[Seq[Array[Byte]]](4).map(ByteBuffer.wrap).toList.asJava
       val insert = chunkTable.writeChunksCql.bind()
         .setBytes(0, ByteBuffer.wrap(row.getAs[Array[Byte]](1)))

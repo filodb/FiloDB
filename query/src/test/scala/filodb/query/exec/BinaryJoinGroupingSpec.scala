@@ -163,8 +163,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
+    result(0).rows().map(_.getDouble(1)).toList() shouldEqual List(3)
+    result(1).rows().map(_.getDouble(1)).toList() shouldEqual List(1)
   }
 
   it("should join many-to-one with ignoring ") {
@@ -198,8 +198,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
+    result(0).rows().map(_.getDouble(1)).toList() shouldEqual List(3)
+    result(1).rows().map(_.getDouble(1)).toList() shouldEqual List(1)
   }
 
   it("should join many-to-one with by and grouping without arguments") {
@@ -246,10 +246,10 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(0).rows().map(_.getDouble(1)).toList() shouldEqual List(0.75)
+    result(1).rows().map(_.getDouble(1)).toList() shouldEqual List(0.25)
+    result(2).rows().map(_.getDouble(1)).toList() shouldEqual List(0.2)
+    result(3).rows().map(_.getDouble(1)).toList() shouldEqual List(0.8)
   }
 
   it("copy sample role to node using group right ") {
@@ -278,8 +278,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     result.size shouldEqual 1
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(2))
+    result.foreach(_.rows().size shouldEqual(1))
+    result(0).rows().map(_.getDouble(1)).foreach(_ shouldEqual(2))
   }
 
   it("should join many-to-one when group left label does not exist") {
@@ -326,10 +326,10 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(0).rows().map(_.getDouble(1)).toList() shouldEqual List(0.75)
+    result(1).rows().map(_.getDouble(1)).toList() shouldEqual List(0.25)
+    result(2).rows().map(_.getDouble(1)).toList() shouldEqual List(0.2)
+    result(3).rows().map(_.getDouble(1)).toList() shouldEqual List(0.8)
   }
 
   it("should have metric name when operator is not MathOperator") {

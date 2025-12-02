@@ -3,7 +3,7 @@ package filodb.coordinator
 import scala.collection.mutable.{HashMap => MutableHashMap, Map => MMap}
 
 import akka.actor._
-import akka.cluster.singleton._
+import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings, ClusterSingletonProxy, ClusterSingletonProxySettings}
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesStore
@@ -92,10 +92,10 @@ final class NodeGuardian(val settings: FilodbSettings,
       val watcher = e.watcher.getOrElse(self)
       val mgr = context.actorOf(
         ClusterSingletonManager.props(
-          singletonProps = NodeClusterActor.props(
+          NodeClusterActor.props(
             settings, e.role, metaStore, assignmentStrategy, NodeClusterActor.ActorArgs(proxy, self, watcher)),
-          terminationMessage = PoisonPill,
-          settings = ClusterSingletonManagerSettings(context.system)
+          PoisonPill,
+          ClusterSingletonManagerSettings(context.system)
             .withRole(e.role)
             .withSingletonName(ClusterSingletonName)),
           name = ClusterSingletonManagerName)
@@ -114,8 +114,8 @@ final class NodeGuardian(val settings: FilodbSettings,
   private def clusterActor(role: String): ActorRef = {
     val proxy = context.child(ClusterSingletonProxyName).getOrElse {
       context.actorOf(ClusterSingletonProxy.props(
-        singletonManagerPath = s"/user/$NodeGuardianName/$ClusterSingletonManagerName",
-        settings = ClusterSingletonProxySettings(context.system).withRole(role)),
+        s"/user/$NodeGuardianName/$ClusterSingletonManagerName",
+        ClusterSingletonProxySettings(context.system).withRole(role)),
         name = ClusterSingletonProxyName)
     }
 
@@ -143,10 +143,8 @@ private[filodb] object NodeGuardian {
 object NodeProtocol {
 
   /** Commands to start a task. */
-  @SerialVersionUID(1)
   sealed trait TaskCommand extends Serializable
   /* Acked on task complete */
-  @SerialVersionUID(1)
   sealed trait TaskAck extends Serializable
 
   sealed trait LifecycleCommand extends TaskCommand
@@ -168,7 +166,6 @@ object NodeProtocol {
   private[coordinator] final case class ShutdownComplete(ref: ActorRef) extends LifecycleAck
 
   /** Identity ACK. */
-  @SerialVersionUID(1)
   sealed trait ActorIdentity extends Serializable {
     def identity: ActorRef
   }

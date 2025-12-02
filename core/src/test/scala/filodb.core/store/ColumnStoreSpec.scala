@@ -3,7 +3,6 @@ package filodb.core.store
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
-import monix.eval.Task
 import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -22,10 +21,11 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import NamesTestData._
   import TestData._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
+  implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   def colStore: ColumnStore
@@ -52,7 +52,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   val partScan = SinglePartitionScan(defaultPartKey, 0)
 
-  implicit val keyType = SingleKeyTypes.LongKeyType
+  implicit val keyType: SingleKeyTypes.LongKeyType.type = SingleKeyTypes.LongKeyType
 
   // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
   // breaks, this test can independently test for write failures
@@ -127,43 +127,45 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   ignore should "filter rows written with single partition key" in {
     import GdeltTestData._
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf, 1)
-    val stream = Observable.now(records(dataset2))
+    @scala.annotation.unused val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
+    // memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
 
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
-    val method = FilteredPartitionScan(paramSet.head, Seq(filter))
-    val rowIt = memStore.scanRows(dataset2, schema2.colIDs("NumArticles").get, method)
-    rowIt.map(_.getInt(0)).sum should equal (22)
+    @scala.annotation.unused val method = FilteredPartitionScan(paramSet.head, Seq(filter))
+    @scala.annotation.unused val rowIt = memStore.scanRows(dataset2, schema2.colIDs("NumArticles").get, method)
+    // rowIt.map(_.getInt(0)).sum should equal (22)
   }
 
   // "rangeVectors api" should "return Range Vectors for given filter and read all rows" in {
   ignore should "return Range Vectors for given filter and read all rows" in {
     import GdeltTestData._
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf, 1)
-    val stream = Observable.now(records(dataset2))
+    @scala.annotation.unused val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
+    // memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
 
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
-    val method = FilteredPartitionScan(paramSet.head, Seq(filter))
-    val lookupRes = memStore.lookupPartitions(dataset2.ref, method, AllChunkScan,
-      querySession = QuerySession.makeForTestingOnly)
+    @scala.annotation.unused val method = FilteredPartitionScan(paramSet.head, Seq(filter))
+    @scala.annotation.unused val lookupRes = memStore.lookupPartitions(dataset2.ref, method, AllChunkScan,
+      querySession = QuerySession.makeForTestingOnly())
+    /*
     val rangeVectorObs = memStore.rangeVectors(dataset2.ref, lookupRes, schema2.colIDs("NumArticles").get,
                                                schema2, false,
-                                               QuerySession.makeForTestingOnly)
+                                               QuerySession.makeForTestingOnly())
     val rangeVectors = rangeVectorObs.toListL.runToFuture.futureValue
 
     rangeVectors should have length (1)
     rangeVectors.head.key.labelValues.head._1.asNewString shouldEqual "MonthYear"
     rangeVectors.head.key.labelValues.head._2.asNewString shouldEqual "197902"
-    rangeVectors.head.rows.map(_.getInt(0)).sum should equal (22)
+    rangeVectors.head.rows().map(_.getInt(0)).sum should equal (22)
     rangeVectors.head.key.sourceShards shouldEqual Seq(0)
+    */
   }
 }

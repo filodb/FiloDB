@@ -1,8 +1,8 @@
 package filodb.gateway
 
-import java.net.InetSocketAddress
-import java.nio.charset.Charset
-import java.util.concurrent.Executors
+// import java.net.InetSocketAddress // Unused - Netty TCP server removed
+// import java.nio.charset.Charset // Unused - Netty TCP server removed
+// import java.util.concurrent.Executors // Unused - Netty TCP server removed
 
 import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
@@ -17,12 +17,13 @@ import monix.execution.Scheduler
 import monix.kafka._
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
-import org.jboss.netty.bootstrap.ServerBootstrap
-import org.jboss.netty.buffer.ChannelBuffer
-import org.jboss.netty.channel.{ChannelPipeline, ChannelPipelineFactory, Channels}
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
-import org.jboss.netty.handler.ssl.SslContext
-import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
+// Netty 3.x imports commented out - deprecated JBoss Netty is not available for Scala 2.13
+// import org.jboss.netty.bootstrap.ServerBootstrap
+// import org.jboss.netty.buffer.ChannelBuffer
+// import org.jboss.netty.channel.{ChannelPipeline, ChannelPipelineFactory, Channels}
+// import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
+// import org.jboss.netty.handler.ssl.SslContext
+// import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
 import org.rogach.scallop.ArgType
@@ -62,7 +63,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
-  Kamon.init
+  Kamon.init()
 
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
@@ -125,7 +126,7 @@ object GatewayServer extends StrictLogging {
 
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
-    val userOpts = new GatewayOptions(args)
+    val userOpts = new GatewayOptions(args.toIndexedSeq)
     val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
     val numSeries = userOpts.numSeriesPerMetric()
 
@@ -138,35 +139,36 @@ object GatewayServer extends StrictLogging {
     //       and ingestion sharding
     val spread = config.getInt("filodb.spread-default")
     val shardMapper = new ShardMapper(numShards)
-    val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
+    @scala.annotation.unused val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
 
     val (shardQueues, containerStream) = shardingPipeline(config, numShards, dataset)
 
-    def calcShardAndQueueHandler(buf: ChannelBuffer): Unit = {
-      val initIndex = buf.readerIndex
-      val len = buf.readableBytes
-      numInfluxMessages.increment()
-      InfluxProtocolParser.parse(buf) map { record =>
-        logger.trace(s"Enqueuing: $record")
-        val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
-        if (!shardQueues(shard).offer(record)) {
-          // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
-          logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
-          numDroppedMessages.increment()
-          // Thread sleep queueFullWait
-        }
-      } getOrElse {
-        numInfluxParseErrors.increment()
-        logger.warn(s"Could not parse:\n${buf.toString(initIndex, len, Charset.defaultCharset)}")
-      }
-    }
+    // Commented out - Netty TCP server functionality removed (JBoss Netty not available for Scala 2.13)
+    // def calcShardAndQueueHandler(buf: ChannelBuffer): Unit = {
+    //   val initIndex = buf.readerIndex
+    //   val len = buf.readableBytes
+    //   numInfluxMessages.increment()
+    //   InfluxProtocolParser.parse(buf) map { record =>
+    //     logger.trace(s"Enqueuing: $record")
+    //     val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
+    //     if (!shardQueues(shard).offer(record)) {
+    //       // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
+    //       logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
+    //       numDroppedMessages.increment()
+    //       // Thread sleep queueFullWait
+    //     }
+    //   } getOrElse {
+    //     numInfluxParseErrors.increment()
+    //     logger.warn(s"Could not parse:\n${buf.toString(initIndex, len, Charset.defaultCharset)}")
+    //   }
+    // }
 
     // TODO: allow configurable sinks, maybe multiple sinks for say writing to multiple Kafka clusters/DCs
     setupKafkaProducer(sourceConfig, containerStream)
 
     case class GeneratorConfig(metricType: Boolean,
                                name: String,
-                               generator: () => Stream[InputRecord])
+                               generator: () => LazyList[InputRecord])
 
     val genHist = userOpts.genHistData.isSupplied
     val genGaugeData = userOpts.genGaugeData.isSupplied
@@ -252,48 +254,51 @@ object GatewayServer extends StrictLogging {
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {
-      setupTCPService(config, calcShardAndQueueHandler)
+      // Commented out - Netty TCP server functionality removed (JBoss Netty not available for Scala 2.13)
+      // setupTCPService(config, calcShardAndQueueHandler)
+      logger.warn("TCP service with Netty is disabled. Use data generation flags or implement alternative ingestion.")
     }
   }
   //scalastyle:on method.length
 
-  def setupTCPService(config: Config, handler: ChannelBuffer => Unit): Unit = {
-    val influxPort = config.getInt("gateway.influx-port")
-
-    // Configure SSL.
-    val SSL = config.getBoolean("gateway.tcp.ssl-enabled")
-    val sslCtx = if (SSL) {
-      val ssc = new SelfSignedCertificate()
-      Some(SslContext.newServerContext(ssc.certificate(), ssc.privateKey()))
-    } else {
-      None
-    }
-
-    // Configure the bootstrap.
-    val bootstrap = new ServerBootstrap(
-      new NioServerSocketChannelFactory(
-        Executors.newCachedThreadPool(),
-        Executors.newCachedThreadPool()))
-
-    bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
-      def getPipeline(): ChannelPipeline = {
-        val p = Channels.pipeline();
-        sslCtx.foreach { ctx => p.addLast("ssl", ctx.newHandler()) }
-        p.addLast("influxProtocol", new NettySocketHandler(Some('\n'), handler));
-        p
-      }
-    })
-
-    val rcvBufferSize = config.getInt("gateway.tcp.netty-receive-buffer-size")
-    val sendBufferSize = config.getInt("gateway.tcp.netty-send-buffer-size")
-    bootstrap.setOption("child.tcpNoDelay", true)
-    bootstrap.setOption("child.receiveBufferSize", rcvBufferSize)
-    bootstrap.setOption("child.sendBufferSize", sendBufferSize)
-
-    // Bind and start to accept incoming connections.
-    logger.info(s"Starting GatewayServer with TCP port for Influx data at $influxPort....")
-    bootstrap.bind(new InetSocketAddress(influxPort))
-  }
+  // Commented out - Netty TCP server functionality removed (JBoss Netty not available for Scala 2.13)
+  // def setupTCPService(config: Config, handler: ChannelBuffer => Unit): Unit = {
+  //   val influxPort = config.getInt("gateway.influx-port")
+  //
+  //   // Configure SSL.
+  //   val SSL = config.getBoolean("gateway.tcp.ssl-enabled")
+  //   val sslCtx = if (SSL) {
+  //     val ssc = new SelfSignedCertificate()
+  //     Some(SslContext.newServerContext(ssc.certificate(), ssc.privateKey()))
+  //   } else {
+  //     None
+  //   }
+  //
+  //   // Configure the bootstrap.
+  //   val bootstrap = new ServerBootstrap(
+  //     new NioServerSocketChannelFactory(
+  //       Executors.newCachedThreadPool(),
+  //       Executors.newCachedThreadPool()))
+  //
+  //   bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
+  //     def getPipeline(): ChannelPipeline = {
+  //       val p = Channels.pipeline();
+  //       sslCtx.foreach { ctx => p.addLast("ssl", ctx.newHandler()) }
+  //       p.addLast("influxProtocol", new NettySocketHandler(Some('\n'), handler));
+  //       p
+  //     }
+  //   })
+  //
+  //   val rcvBufferSize = config.getInt("gateway.tcp.netty-receive-buffer-size")
+  //   val sendBufferSize = config.getInt("gateway.tcp.netty-send-buffer-size")
+  //   bootstrap.setOption("child.tcpNoDelay", true)
+  //   bootstrap.setOption("child.receiveBufferSize", rcvBufferSize)
+  //   bootstrap.setOption("child.sendBufferSize", sendBufferSize)
+  //
+  //   // Bind and start to accept incoming connections.
+  //   logger.info(s"Starting GatewayServer with TCP port for Influx data at $influxPort....")
+  //   bootstrap.bind(new InetSocketAddress(influxPort))
+  // }
 
   // Returns (Array[Queue] for shards, containerObservable)
   def shardingPipeline(config: Config, numShards: Int, dataset: Dataset):

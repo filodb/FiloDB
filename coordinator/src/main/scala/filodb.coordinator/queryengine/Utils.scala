@@ -84,21 +84,27 @@ object Utils extends StrictLogging {
   private def shardHashFromFilters(filters: Seq[ColumnFilter],
                                    shardColumns: Seq[String],
                                    dataset: Dataset): Option[Int] = {
-    val shardValMap = shardColumns.map { shardCol =>
-      // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
-      filters.find(f => f.column == shardCol) match {
-        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => shardCol -> filtVal
-        case Some(ColumnFilter(_, filter)) =>
-          logger.debug(s"Found filter for shard column $shardCol but $filter cannot be used for shard key routing")
-          return None
-        case _ =>
-          logger.debug(s"Could not find filter for shard key column $shardCol, shard key hashing disabled")
-          return None
+    // Check if all shard columns have valid Equals filters
+    val shardValMapOpt = shardColumns.foldLeft[Option[Map[String, String]]](Some(Map.empty)) { (accOpt, shardCol) =>
+      accOpt.flatMap { acc =>
+        filters.find(f => f.column == shardCol) match {
+          case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
+            Some(acc + (shardCol -> filtVal))
+          case Some(ColumnFilter(_, filter)) =>
+            logger.debug(s"Found filter for shard column $shardCol but $filter cannot be used for shard key routing")
+            None
+          case _ =>
+            logger.debug(s"Could not find filter for shard key column $shardCol, shard key hashing disabled")
+            None
+        }
       }
-    }.toMap
-    val metricColumn = dataset.options.metricColumn
-    val metric = shardValMap(metricColumn)
-    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metricColumn, metric))
+    }
+
+    shardValMapOpt.map { shardValMap =>
+      val metricColumn = dataset.options.metricColumn
+      val metric = shardValMap(metricColumn)
+      RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metricColumn, metric)
+    }
   }
 
   /**

@@ -553,7 +553,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shardInfo, initMapSize) {
   }
 
   override def chunkmapReleaseShared(): Unit = {
-    super.chunkmapReleaseShared()
+    super.chunkmapReleaseShared()()
     _log.info(s"SHARED LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
   }
 

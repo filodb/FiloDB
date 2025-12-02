@@ -468,7 +468,7 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     } else {
       val seconds = getTotalSecondsFromAntlrDurationString(str)
       assert(seconds > 0, "bracket-notation duration cannot be zero")
-      Duration(seconds, Second)
+      Duration(seconds.toDouble, Second)
     }
   }
 }

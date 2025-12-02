@@ -120,7 +120,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
-    val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultRangeVectors.flatMap(_.rows().map(_.getDouble(1)).toList)
     resultRows.size shouldEqual (1)
     resultRows.head.isNaN shouldEqual true
   }
@@ -130,7 +130,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), querySession, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarVaryingDouble]) shouldEqual (true)
-    val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultRangeVectors.flatMap(_.rows().map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(1, 10, 30))
   }
 
@@ -144,7 +144,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[TimeScalar] shouldEqual(true)
-        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        val res = rv.rows().map(x=>(x.getLong(0), x.getDouble(1))).toList
         List((10000,10.0), (20000,20.0), (30000,30.0), (40000,40.0), (50000,50.0), (60000,60.0),
           (70000,70.0), (80000,80.0), (90000,90.0), (100000,100.0)).sameElements(res) shouldEqual(true)
       }
@@ -160,7 +160,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[HourScalar] shouldEqual(true)
-        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        val res = rv.rows().map(x=>(x.getLong(0), x.getDouble(1))).toList
         List((1565627710000L,16.0), (1565627720000L,16.0), (1565627730000L,16.0), (1565627740000L,16.0),
           (1565627750000L,16.0), (1565627760000L,16.0), (1565627770000L,16.0), (1565627780000L,16.0), (1565627790000L,16.0))
           .sameElements(res) shouldEqual(true)
@@ -177,7 +177,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[DayOfWeekScalar] shouldEqual(true)
-        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        val res = rv.rows().map(x=>(x.getLong(0), x.getDouble(1))).toList
         List((1583682900000L,0.0), (1583683000000L,0.0), (1583683100000L,0.0), (1583683200000L,0.0),
           (1583683300000L,0.0), (1583683400000L,0.0)).sameElements(res) shouldEqual(true)
       }
@@ -194,7 +194,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       operator = BinaryOperator.MUL,
       dispatcher = inProcessDispatcher)
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult]
-    val res = resp.result.head.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+    val res = resp.result.head.rows().map(x=>(x.getLong(0), x.getDouble(1))).toList
     List((1583682900000L, 3600.0), (1583683000000L, 3600.0), (1583683100000L, 3600.0), (1583683200000L, 3600.0),
       (1583683300000L, 3600.0), (1583683400000L, 3600.0)).sameElements(res) shouldEqual (true)
   }
@@ -213,7 +213,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       scalarOnLhs = true,
       funcParams =  Seq(TimeFuncArgs(range))))
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult]
-    val res = resp.result.head.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val res = resp.result.head.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
     List((3600000L, 0.0), (3700000L, 100.0), (3800000L, 200.0), (3900000L, 300.0),
       (4000000L, 400.0), (4100000L, 500.0)).sameElements(res) shouldEqual (true)
   }

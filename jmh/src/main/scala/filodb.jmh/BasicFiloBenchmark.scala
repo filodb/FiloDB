@@ -73,7 +73,7 @@ class BasicFiloBenchmark {
     var total = 0L
     val it = ivReader.iterate(acc, iv)
     cforRange { 0 until numValues } { i =>
-      total += it.next
+      total += it.next()
     }
     total
   }
@@ -118,7 +118,7 @@ class BasicFiloBenchmark {
     var total = 0L
     val it = byteReader.iterate(acc, byteVect)
     cforRange { 0 until numValues } { i =>
-      total += it.next
+      total += it.next()
     }
     total
   }

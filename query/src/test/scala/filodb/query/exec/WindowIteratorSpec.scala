@@ -206,14 +206,14 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                     Some(InternalRangeFunction.SumOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSlidingD, queryConfig, false, new TransientRow())
     // NOTE: dum_over_time sliding iterator does not handle the NaN at the end correctly!
-    // slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual windowResults
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    // slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList() shouldEqual windowResults
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 1100000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.SumOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = true).asChunkedD, querySession)
-    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
   }
 
   it("should calculate the rate of given samples matching the prometheus rate function") {
@@ -490,14 +490,14 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSlidingD, queryConfig, false, new TransientRow())
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
     slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = true).asChunkedD, querySession)
-    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
   }
 
   it("should calculate CountOverTime correctly even for windows with no values") {
@@ -526,14 +526,14 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.CountOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSlidingD, queryConfig, false, new TransientRow())
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
     slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.CountOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = true).asChunkedD, querySession)
-    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
   }
 
 
@@ -572,7 +572,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(dsResSchema, rangeFunc,
         ColumnType.DoubleColumn, queryConfig,
         useChunked = true).asChunkedD, querySession)
-    chunkedItAvg.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual avgWindowResults
+    chunkedItAvg.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual avgWindowResults
 
     val rvCnt = timeValueRvDownsample(samples, Array(0, 4))
 
@@ -587,7 +587,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedItCnt = new ChunkedWindowIteratorD(rvCnt, 50000L, 100000, 750000L, 100000,
       RangeFunction(dsResSchema, cntFunc,
         ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
-    chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual countWindowResults
+    chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual countWindowResults
   }
 
   it("should calculate MinOverTime correctly even for windows with no values") {
@@ -616,14 +616,14 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MinOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSlidingD, queryConfig, false, new TransientRow())
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
     slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MinOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = true).asChunkedD, querySession)
-    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
 
   }
 
@@ -653,13 +653,13 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MaxOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSlidingD, queryConfig, false, new TransientRow())
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
     slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MaxOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = true).asChunkedD, querySession)
-    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList() shouldEqual windowResults
   }
 }

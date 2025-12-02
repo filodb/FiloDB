@@ -241,11 +241,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
     case LocalShardsHealthRequest =>
       try {
-        val resp = localShardMaps.flatMap { case (ref, mapper) =>
+        val resp = localShardMaps.toSeq.flatMap { case (ref, mapper) =>
           mapper.statuses.zipWithIndex.filter(_._1 != ShardStatusUnassigned).map { case (status, shard) =>
             DatasetShardHealth(ref, shard, status)
           }
-        }.toSeq
+        }
         sender() ! resp
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message LocalShardsHealthRequest", e)

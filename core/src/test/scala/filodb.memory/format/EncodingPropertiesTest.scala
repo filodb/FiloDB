@@ -32,7 +32,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
   def optionList[T](implicit a: Arbitrary[T]): Gen[Seq[Option[T]]] =
     Gen.containerOf[Seq, Option[T]](noneOrThing[T])
 
-  implicit val utf8arb = Arbitrary(arbitrary[String].map(ZeroCopyUTF8String.apply))
+  implicit val utf8arb: Arbitrary[ZeroCopyUTF8String] = Arbitrary(arbitrary[String].map(ZeroCopyUTF8String.apply))
 
   it("should match elements and length for BinaryIntVectors with missing/NA elements") {
     val memFactory = new NativeMemoryManager(1000 * 1024)
@@ -43,7 +43,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
       val ptr = intVect.optimize(memFactory)
       val reader = IntBinaryVector(acc, ptr)
       reader.length(acc, ptr) should equal (s.length)
-      reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
+      reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
     }
   }
 
@@ -58,7 +58,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
         val ptr = utf8vect.optimize(memFactory)
         val reader = UTF8Vector(acc, ptr)
         reader.length(acc, ptr) should equal (s.length)
-        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
+        reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }
@@ -74,7 +74,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
                                                             AutoDictString(spaceThreshold=0.8))
         val reader = UTF8Vector(acc, ptr)
         reader.length(acc, ptr) should equal (s.length)
-        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
+        reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }
