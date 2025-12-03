@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
-import scala.collection.mutable.ArrayBuffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -79,7 +78,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
   // sum = summation of non-nan values.
   def sumWithNaN(arr: Seq[Double]): Double = {
     var currPos = 0
-    var length = arr.length
+    val length = arr.length
     var sum = Double.NaN
     var count = 0
     if (length > 0) {
@@ -199,7 +198,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(numSamples: Int = 100, numBuckets: Int = 8, infBucket: Boolean = false):
-  (Stream[Seq[Any]], RawDataRangeVector) =
+  (LazyList[Seq[Any]], RawDataRangeVector) =
     MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets, infBucket)
 
   def chunkedWindowIt(data: Seq[Double],
@@ -418,7 +417,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should correctly aggregate min_over_time / max_over_time using both chunked and sliding iterators") {
     val data = (1 to 240).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
@@ -449,7 +447,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should aggregate count_over_time and avg_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
 
     (0 until numIterations).foreach { x =>
@@ -484,7 +481,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should aggregate var_over_time and stddev_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
 
     (0 until numIterations).foreach { x =>
@@ -515,13 +511,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("should correctly do changes") {
-    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+    val data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
-    val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
-
-    val windowSize = 100
-    val step = 20
-
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), querySession)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
@@ -560,7 +551,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
     }
     val emptyData = Seq()
-    var rv = timeValueRVPk(emptyData)
+    val rv = timeValueRVPk(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
       new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), querySession)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
@@ -648,9 +639,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val data = scala.util.Random.shuffle(data2 ++ data1)
 
       val rv = timeValueRV(data)
-      val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
-      val stepTimeMillis = step.toLong * pubFreq
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
 
@@ -776,7 +765,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
       val ChunkedIt = chunkedWindowIt(data, rv2, new PredictLinearChunkedFunctionD(params), windowSize, step)
       val aggregated2 = ChunkedIt.map(_.getDouble(1)).toBuffer
-      var res = new ArrayBuffer[Double]
+      val res = new ArrayBuffer[Double]
       var startTime = defaultStartTS + pubFreq
       var endTime = startTime + (windowSize - 2) * pubFreq
       for (item <- data.sliding(windowSize, step).map(_.drop(1))) {

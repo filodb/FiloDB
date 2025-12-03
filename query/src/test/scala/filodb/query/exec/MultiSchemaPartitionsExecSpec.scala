@@ -48,7 +48,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
@@ -87,7 +87,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val histDataDisabledWS = MMD.linearHistSeries(ws = GlobalConfig.workspacesDisabledForMaxMin.get.head).take(100)
   val histMaxMinDataDisabledWS = MMD.histMaxMin(histDataDisabledWS)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
@@ -198,7 +198,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
     val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1)))
     val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
-    resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
+    resultIt.zip(orig.iterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
   it ("should read periodic samples from Memstore") {
@@ -302,8 +302,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1)))
     val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3)) }
-    resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
+                       .zip((start to end by step).iterator).map { case (r, t) => (t, r(3)) }
+    resultIt.zip(orig.iterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
   it("should extract bucket from Histogram samples then calculate rate") {
@@ -329,7 +329,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1)))
 
     val expected = (start to end by step).zip(Seq(Double.NaN, 0.049167, 0.078333, 0.115278, 0.145))
-    resultIt.zip(expected.toIterator).foreach { case (res, exp) =>
+    resultIt.zip(expected.iterator).foreach { case (res, exp) =>
       res._1 shouldEqual exp._1
       if (!java.lang.Double.isNaN(exp._2)) res._2 shouldEqual exp._2 +- 0.00001
     }
@@ -385,8 +385,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
-    resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+                       .zip((start to end by step).iterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
+    resultIt.zip(orig.iterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
     }
@@ -427,8 +427,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
     val orig = histMaxMinData.filter(_(7).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
-                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
-    resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+                       .zip((start to end by step).iterator).map { case (r, t) => (t, r(3), r(5), r(4)) }
+    resultIt.zip(orig.iterator).foreach { case (res, origData) =>
       res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
       res._4.isNaN shouldEqual false

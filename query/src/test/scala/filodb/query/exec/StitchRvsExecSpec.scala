@@ -200,7 +200,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     // Notice how the output RVRange is same as the one passed during initialization of the StitchRvsExec
     output.head.outputRange shouldEqual Some(RvRange(0, 10, 150))
-    compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
+    compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.iterator)
   }
 
 
@@ -250,7 +250,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         .toListL.runToFuture.futureValue
         output.size shouldEqual 1
         output.head.outputRange shouldEqual None
-        compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
+        compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.iterator)
   }
 
   it ("should reduce result schemas with different fixedVecLengths without error") {
@@ -387,7 +387,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
       .map(r => (r.getLong(0), r.getLong(2), r.getDouble(1)))
-    compareIterAvg(result, expected.toIterator)
+    compareIterAvg(result, expected.iterator)
   }
 
   it("should honor the passed RvRange from planner when generating rows") {
@@ -520,7 +520,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
       .map(r => (r.getLong(0), r.getHistogram(1).asInstanceOf[HistogramWithBuckets]))
 
-    compareIterHist(result, expected.toIterator)
+    compareIterHist(result, expected.iterator)
   }
 
   def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)]): Unit = {
@@ -535,7 +535,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
       .map(r => (r.getLong(0), r.getDouble(1)))
-    compareIter(result, expected.toIterator)
+    compareIter(result, expected.iterator)
   }
 
   @tailrec
@@ -548,7 +548,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         if (v1._2.isNaN) v2._2.isNaN shouldEqual true
         else Math.abs(v1._2-v2._2) should be < error
         compareIter(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
@@ -564,17 +564,13 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         if (v1._3.isNaN) v2._3.isNaN shouldEqual true
         else Math.abs(v1._3 - v2._3) should be < error
         compareIterAvg(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
 
   def arraysEqual(arr1: Array[Double], arr2: Array[Double]): Boolean = {
-    if (arr1.length != arr2.length) return false
-    for (i <- arr1.indices) {
-      if (arr1(i) != arr2(i)) return false
-    }
-    true
+    arr1.sameElements(arr2)
   }
 
   @tailrec
@@ -588,7 +584,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         v1._2.buckets.equals(v2._2.buckets) shouldEqual true
         arraysEqual(v1._2.valueArray, v2._2.valueArray) shouldEqual true
         compareIterHist(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }

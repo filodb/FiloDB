@@ -50,7 +50,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
-      val data: Stream[TransientRow] = Stream.from(0).map { n =>
+      val data: LazyList[TransientRow] = LazyList.from(0).map { n =>
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
 
@@ -217,12 +217,6 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
       else if (scalar > v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedGTR_BOOL, BinaryOperator.GTR_BOOL, scalar, true)
-
-    // LTE_BOOL - prefix
-    val expectedLTE_BOOL = samples.map(_.rows().map { v =>
-      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
-      else if (scalar <= v.getDouble(1)) 1.0 else 0.0
-    })
 
     // LTR_BOOL - prefix
     val expectedLTR_BOOL = samples.map(_.rows().map { v =>

@@ -122,15 +122,11 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
 
   it("should not have keys when ColumnFilter is MetricName") {
     val columnFilter = Seq(ColumnFilter("metric", Equals("http_requests")))
-    val expectedKeys = Map(ZeroCopyUTF8String("host") -> ZeroCopyUTF8String("host1"),
-      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
-    val expectedRows = List(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 2, 11), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), querySession, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual (1)
     val keys = result.map(_.key.labelValues)
-    val rows = result.flatMap(_.rows().map(_.getDouble(1)).toList)
     keys.head.isEmpty shouldEqual true
   }
 

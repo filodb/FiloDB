@@ -72,7 +72,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
   it ("should calculate histogram_quantile correctly") {
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
       import NoCloseCursor._
-      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator, None)
+      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).iterator, None)
     }
 
     val expectedResult = Seq(histKey1 -> quantile50Result)
@@ -82,9 +82,9 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
   it ("should calculate histogram_quantile correctly for multiple histograms") {
     import NoCloseCursor._
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
-      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator, None)
+      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).iterator, None)
     } ++ bucketValues.zipWithIndex.map { case (rv, i) =>
-      IteratorBackedRangeVector(histBuckets2(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator, None)
+      IteratorBackedRangeVector(histBuckets2(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).iterator, None)
     }
 
     val expectedResult = Seq(histKey2 -> quantile50Result, histKey1 -> quantile50Result)
@@ -94,7 +94,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
   it ("should sort the buckets to calculate histogram_quantile correctly ") {
     import NoCloseCursor._
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
-      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator, None)
+      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).iterator, None)
     }
 
     val shuffledHistRvs = Random.shuffle(histRvs.toSeq).toArray
@@ -115,7 +115,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
       Array[(Int, Double)]( (10, 35), (20, 45), (30, 46), (40, 89) )
     ).zipWithIndex.map { case (rv, i) =>
       import NoCloseCursor._
-      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2)).toIterator, None)
+      IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2)).iterator, None)
     }
 
     val expectedResult = Seq(histKey1 -> Seq((10, 4.666666666666667), (20, 3.3), (30, 3.4), (40, 1.9)))

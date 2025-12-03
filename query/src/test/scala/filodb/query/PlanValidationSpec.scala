@@ -10,7 +10,7 @@ import scala.collection.mutable
 trait PlanValidationSpec extends Matchers with StrictLogging {
 
   private def getIndent(line: String): Int = {
-    line.prefixLength(c => c == '-')
+    line.segmentLength(c => c == '-')
   }
 
   private def removeNoise(planString: String): String = {
@@ -42,7 +42,7 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
       }
       (i, result)
     }
-    helper(planString.split('\n'), 0)._2
+    helper(planString.split('\n').toIndexedSeq, 0)._2
   }
 
   /**

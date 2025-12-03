@@ -93,10 +93,10 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   val container: RecordContainer = builder.allContainers.head
 
   val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory)
-  val mmdTuples: Stream[Seq[Any]] = MMD.linearMultiSeries().take(100)
+  val mmdTuples: LazyList[Seq[Any]] = MMD.linearMultiSeries().take(100)
   val mmdSomeData: SomeData = MMD.records(MMD.dataset1, mmdTuples)
-  val histData: Stream[Seq[Any]] = MMD.linearHistSeries().take(100)
-  val histMaxData: Stream[Seq[Any]] = MMD.histMaxMin(histData)
+  val histData: LazyList[Seq[Any]] = MMD.linearHistSeries().take(100)
+  val histMaxData: LazyList[Seq[Any]] = MMD.histMaxMin(histData)
 
   val source = UnsupportedChunkSource()
 

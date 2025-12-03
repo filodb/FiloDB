@@ -35,8 +35,8 @@ import scala.util.Using
 class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures
                                 with StrictLogging with BeforeAndAfter with BeforeAndAfterAll {
 
-  implicit val scheduler = monix.execution.Scheduler.Implicits.global
-  implicit val defaultPatience = PatienceConfig(timeout = Span(60000, Millis))
+  implicit val scheduler: Scheduler = monix.execution.Scheduler.Implicits.global
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(60000, Millis))
 
   private def toRv(samples: Seq[(Long, Double)],
                    rangeVectorKey: RangeVectorKey,

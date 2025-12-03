@@ -36,7 +36,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
       import NoCloseCursor._
-      val data = Stream.from(0).map { n=>
+      val data: Seq[TransientRow] = LazyList.from(0).map { n=>
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
@@ -54,7 +54,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
-    val readyToAggr = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr = samples.toList.map(_.rows().toList).transpose
     compareIter(result(0).rows().map(_.getDouble(1)), readyToAggr.map(_.map(_.getDouble(1)).sum).iterator)
 
     // Min
@@ -65,7 +65,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
-    val readyToAggr2 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr2 = samples.toList.map(_.rows().toList).transpose
     compareIter(result2(0).rows().map(_.getDouble(1)), readyToAggr2.map(_.map(_.getDouble(1)).min).iterator)
 
     // Count
@@ -79,7 +79,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result3 = resultObs3.toListL.runToFuture.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
-    val readyToAggr3 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr3 = samples.toList.map(_.rows().toList).transpose
     compareIter(result3(0).rows().map(_.getDouble(1)), readyToAggr3.map(_.map(_.getDouble(1)).size.toDouble).iterator)
 
     // Avg
@@ -93,7 +93,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result4 = resultObs4.toListL.runToFuture.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
-    val readyToAggr4 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr4 = samples.toList.map(_.rows().toList).transpose
     compareIter(result4(0).rows().map(_.getDouble(1)), readyToAggr4.map { v =>
       v.map(_.getDouble(1)).sum / v.map(_.getDouble(1)).size
     }.iterator)
@@ -109,7 +109,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result5 = resultObs5.toListL.runToFuture.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
-    val readyToAggr5 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr5 = samples.toList.map(_.rows().toList).transpose
     compareIter2(result5(0).rows().map(r=> Set(r.getDouble(2), r.getDouble(4), r.getDouble(6))),
       readyToAggr5.map { v =>
       v.map(_.getDouble(1)).sorted.take(3).toSet
@@ -122,7 +122,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
-    val readyToAggr6 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr6 = samples.toList.map(_.rows().toList).transpose
     compareIter2(result6(0).rows().map(r=> Set(r.getDouble(2), r.getDouble(4), r.getDouble(6))),
       readyToAggr6.map { v =>
         v.map(_.getDouble(1)).sorted(Ordering[Double].reverse).take(3).toSet
@@ -136,7 +136,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result7 = resultObs7b.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
-    val readyToAggr7 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr7 = samples.toList.map(_.rows().toList).transpose
     compareIter(result7(0).rows().map(_.getDouble(1)), readyToAggr7.map { v =>
       quantile(0.70, v.map(_.getDouble(1)))
     }.iterator)
@@ -149,7 +149,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
 
-    val readyToAggr8 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr8 = samples.toList.map(_.rows().toList).transpose
     compareIter(result8(0).rows().map(_.getDouble(1)), readyToAggr8.map { v =>
       stdvar(v.map(_.getDouble(1)))
     }.iterator)
@@ -162,7 +162,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
 
-    val readyToAggr9 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr9 = samples.toList.map(_.rows().toList).transpose
     compareIter(result9(0).rows().map(_.getDouble(1)), readyToAggr9.map { v =>
       stddev(v.map(_.getDouble(1)))
     }.iterator)
@@ -175,7 +175,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result10.size shouldEqual 1
     result10(0).key shouldEqual noKey
 
-    val readyToAggr10 = samples.toList.map(_.rows.toList).transpose
+    val readyToAggr10 = samples.toList.map(_.rows().toList).transpose
     compareIter(result10(0).rows().map(_.getDouble(1)), readyToAggr10.map { v => 1d }.iterator)
   }
 
@@ -610,13 +610,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(1).key shouldEqual ignoreKey
 
     result(0).rows().map(_.getLong(0)).
-      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
+      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).iterator) shouldEqual true
     result(1).rows().map(_.getLong(0)).
-      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
-    compareIter(result(0).rows().map(_.getDouble(1)).toIterator,
-      Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).toIterator)
-    compareIter(result(1).rows().map(_.getDouble(1)).toIterator,
-      Seq(Double.NaN, 5.1, Double.NaN, Double.NaN, Double.NaN, Double.NaN).toIterator)
+      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).iterator) shouldEqual true
+    compareIter(result(0).rows().map(_.getDouble(1)).iterator,
+      Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).iterator)
+    compareIter(result(1).rows().map(_.getDouble(1)).iterator,
+      Seq(Double.NaN, 5.1, Double.NaN, Double.NaN, Double.NaN, Double.NaN).iterator)
   }
 
     it("should sum and compute max of histogram & max RVs") {
@@ -710,7 +710,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val res = Seq.fill(8)(Double.NaN)
     // Since bucket size is different value should be NaN
-    sums.foreach( s => compareIter(s.values.toIterator, res.toIterator))
+    sums.foreach( s => compareIter(s.values.iterator, res.iterator))
     result(0).rows().map(_.getHistogram(1)).toList shouldEqual sums
 
   }
@@ -843,7 +843,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
         if (v1.isNaN) v2.isNaN shouldEqual true
         else Math.abs(v1-v2) should be < error
         compareIter(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
@@ -856,7 +856,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
         val v2 = it2.next()
         v1 shouldEqual v2
         compareIter2(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }

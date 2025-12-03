@@ -172,7 +172,6 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
       }
     }
     val irateDCounterWindow = new QueueBasedWindow(irateDelta)
-    val size = irateDCounterWindow.size
     val expected = (irateDelta.last.value) / 60 * 1000
     val toEmit = new TransientRow
     IRatePeriodicFunction.apply(startTs, endTs, irateDCounterWindow, toEmit, queryConfig)
@@ -214,8 +213,6 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
       periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
       // lookback is not extended for delta schemas
-      val p2 = new PagedReadablePartition(Schemas.otelDeltaHistogram, 0, -1, rawData, publishInterval)
-      val rv2 = RawDataRangeVector(CustomRangeVectorKey(Map.empty), p2, InMemoryChunkScan, Array(), new AtomicLong(0), new AtomicLong(0), 0, "")
       periodicSamplesVectorFnMapper3.extendLookback(rv, 3) shouldEqual 3
 
     }
