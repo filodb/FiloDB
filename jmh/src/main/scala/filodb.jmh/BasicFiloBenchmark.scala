@@ -26,7 +26,7 @@ class BasicFiloBenchmark {
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
   val acc = nativePtrReader
 
-  val randomLongs = (0 until numValues).map(i => util.Random.nextInt.toLong)
+  val randomLongs = (0 until numValues).map(i => util.Random.nextInt().toLong)
 
   val ivbuilder = LongBinaryVector.appendingVectorNoNA(memFactory, numValues)
   randomLongs.foreach(ivbuilder.addData)
@@ -72,8 +72,10 @@ class BasicFiloBenchmark {
   def sumAllLongsIterate(): Long = {
     var total = 0L
     val it = ivReader.iterate(acc, iv)
-    cforRange { 0 until numValues } { i =>
-      total += it.next()
+    var i = 0
+    while (i < numValues) {
+      total = total + it.next
+      i += 1
     }
     total
   }
@@ -117,8 +119,10 @@ class BasicFiloBenchmark {
   def sumTimeSeriesBytesIterate(): Long = {
     var total = 0L
     val it = byteReader.iterate(acc, byteVect)
-    cforRange { 0 until numValues } { i =>
-      total += it.next()
+    var i = 0
+    while (i < numValues) {
+      total = total + it.next
+      i += 1
     }
     total
   }

@@ -46,7 +46,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
 
     val outSchema = periodicSamplesVectorFnMapper.schema(resultSchema)
     outSchema.columns shouldEqual resultSchema.columns
@@ -70,7 +70,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
 
     val outSchema = periodicSamplesVectorFnMapper.schema(resultSchema)
     outSchema.columns shouldEqual resultSchema.columns
@@ -149,7 +149,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
   it("should increase resets for NaN") {

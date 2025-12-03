@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.memory.format._
 
@@ -19,7 +19,7 @@ class DoubleVectorTest extends NativeVectorTest {
       // Just to make sure this does not throw an exception
       DoubleVector(acc, sc)(acc, sc, 0)
       DoubleVector(acc, sc)
-        .toBuffer(acc, sc) shouldEqual Buffer.empty[Double]
+        .toBuffer(acc, sc) shouldEqual ArrayBuffer.empty[Double]
     }
 
     it("should encode a mix of NAs and Doubles and decode iterate and skip NAs") {
@@ -37,7 +37,7 @@ class DoubleVectorTest extends NativeVectorTest {
         .length(acc, sc) shouldEqual 5
       DoubleVector(acc, sc)(acc, sc, 1) shouldEqual 101.0
       DoubleVector(acc, sc)
-        .toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 103)
+        .toBuffer(acc, sc) shouldEqual ArrayBuffer(101, 102.5, 103)
     }
 
     it("should be able to append lots of Doubles off-heap and grow vector") {
@@ -71,7 +71,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       DoubleVector(acc, frozen).length(acc, frozen) shouldEqual 5
       DoubleVector(acc, frozen)
-        .toBuffer(acc, frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toDouble))
+        .toBuffer(acc, frozen) shouldEqual ArrayBuffer.from((0 to 4).map(_.toDouble))
     }
 
     it("should be able to optimize all integral vector to DeltaDeltaVector") {
@@ -79,7 +79,7 @@ class DoubleVectorTest extends NativeVectorTest {
       val builder = DoubleVector(memFactory, orig)
       val optimized = builder.optimize(memFactory)
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual 10
-      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList() shouldEqual orig
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
       DoubleVector(acc, optimized)(acc, optimized, 0) shouldEqual 0.0
       DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 2.0
       // Const DeltaDeltaVector (since this is linearly increasing)
@@ -97,7 +97,7 @@ class DoubleVectorTest extends NativeVectorTest {
         MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
       onHeapAcc.foreach { a =>
-        DoubleVector(a, 0).toBuffer(a, 0).toList() shouldEqual orig
+        DoubleVector(a, 0).toBuffer(a, 0).toList shouldEqual orig
       }
     }
     it("should encode counter drops when NaN is ingested at the beginning") {
@@ -124,7 +124,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       val optimized = appender.optimize(memFactory)
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
-      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList().dropRight(1) shouldEqual orig.dropRight(1)
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList.dropRight(1) shouldEqual orig.dropRight(1)
       PrimitiveVectorReader.dropped(acc, optimized) shouldEqual true
     }
 
@@ -138,8 +138,8 @@ class DoubleVectorTest extends NativeVectorTest {
 
       val optimized = appender.optimize(memFactory)
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
-      DoubleVector(acc, optimized).dropPositions(acc, optimized).toList() shouldEqual dropPos
-      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList().filter(!_.isNaN) shouldEqual orig.filter(!_.isNaN)
+      DoubleVector(acc, optimized).dropPositions(acc, optimized).toList shouldEqual dropPos
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList.filter(!_.isNaN) shouldEqual orig.filter(!_.isNaN)
       DoubleVector(acc, optimized).debugString(acc, optimized) shouldEqual orig.mkString(",")
       PrimitiveVectorReader.dropped(acc, optimized) shouldEqual true
     }
@@ -152,7 +152,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       val optimized = appender.optimize(memFactory)
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
-      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList() shouldEqual orig
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
       BinaryVector.totalBytes(acc, optimized) should be > (24)   // Not const DDV!
     }
 
@@ -164,7 +164,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual 5
       DoubleVector(acc, optimized)
-        .toBuffer(acc, optimized) shouldEqual Buffer.fromIterable((100000 to 100004).map(_.toDouble))
+        .toBuffer(acc, optimized) shouldEqual ArrayBuffer.from((100000 to 100004).map(_.toDouble))
       DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 100002.0
       // Const DeltaDeltaVector (since this is linearly increasing)
       BinaryVector.totalBytes(acc, optimized) shouldEqual 24
@@ -177,7 +177,7 @@ class DoubleVectorTest extends NativeVectorTest {
       builder.length shouldEqual orig.length
       val frozen = builder.optimize(memFactory)
       (2 to 5).foreach { start =>
-        DoubleVector(acc, frozen).toBuffer(acc, frozen, start).toList() shouldEqual orig.drop(start)
+        DoubleVector(acc, frozen).toBuffer(acc, frozen, start).toList shouldEqual orig.drop(start)
       }
     }
 
@@ -219,18 +219,18 @@ class DoubleVectorTest extends NativeVectorTest {
       val orig = Seq(11.11E101, -2.2E-176, 1.77E88)
       cb.addNA()
       orig.foreach(cb.addData)
-      cb.copyToBuffer.toList() shouldEqual orig
+      cb.copyToBuffer.toList shouldEqual orig
       val optimized = cb.optimize(memFactory)
-      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList() shouldEqual orig
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
 
       // Now the optimize should not have damaged original vector
-      cb.copyToBuffer.toList() shouldEqual orig
+      cb.copyToBuffer.toList shouldEqual orig
       cb.reset()
       val orig2 = orig.map(_ * 2)
       orig2.foreach(cb.addData)
       val opt2 = cb.optimize(memFactory)
-      DoubleVector(acc, opt2).toBuffer(acc, opt2).toList() shouldEqual orig2
-      cb.copyToBuffer.toList() shouldEqual orig2
+      DoubleVector(acc, opt2).toBuffer(acc, opt2).toList shouldEqual orig2
+      cb.copyToBuffer.toList shouldEqual orig2
     }
   }
 
@@ -317,7 +317,7 @@ class DoubleVectorTest extends NativeVectorTest {
       val sc = cb.optimize(memFactory)
       PrimitiveVectorReader.dropped(acc, sc) shouldEqual true
 
-      DoubleVector(acc, sc).toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 9, 13.3, 21.1)
+      DoubleVector(acc, sc).toBuffer(acc, sc) shouldEqual ArrayBuffer(101, 102.5, 9, 13.3, 21.1)
 
       // Make sure return correcting version of reader as well
       cb.reader shouldBe a[CorrectingDoubleVectorReader]
@@ -355,7 +355,7 @@ class DoubleVectorTest extends NativeVectorTest {
       reader shouldBe a[CorrectingDoubleVectorReader]
 
       reader.length(acc, sc) shouldEqual orig.length
-      reader.toBuffer(acc, sc).toList() shouldEqual orig
+      reader.toBuffer(acc, sc).toList shouldEqual orig
     }
   }
 }

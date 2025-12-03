@@ -731,7 +731,7 @@ object ProtoConverters {
       builder.setChunkMethod(plr.chunkMethod.toProto)
       plr.partsInMemory.foreach(p => builder.addPartsInMemory(p))
       plr.firstSchemaId.foreach(fsi => builder.setFirstSchemaID(fsi))
-      plr.partIdsMemTimeGap.foreach((k, v) => builder.putPartIdsMemTimeGap(k, v))
+      plr.partIdsMemTimeGap.foreach { case (k, v) => builder.putPartIdsMemTimeGap(k, v) }
       plr.partIdsNotInMemory.foreach(i => builder.addPartIdsNotInMemory(i))
       plr.pkRecords.foreach(pklir => builder.addPkRecords(pklir.toProto))
       builder.setDataBytesScannedCtr(plr.dataBytesScannedCtr.longValue())
@@ -743,12 +743,12 @@ object ProtoConverters {
   implicit class PartLookupResultFromProtoConverter(plr: GrpcMultiPartitionQueryService.PartLookupResult) {
     def fromProto: PartLookupResult = {
       val psim = plr.getPartsInMemoryList.asScala.map(intgr => intgr.intValue())
-      val partsInMemory = debox.Buffer.fromIterable(psim)
+      val partsInMemory = scala.collection.mutable.ArrayBuffer.from(psim)
       val firstSchemaId = if (plr.hasFirstSchemaID) Option(plr.getFirstSchemaID) else None
       val pimtg = plr.getPartIdsMemTimeGapMap.asScala.map{case (key, value) => (key.intValue(), value.longValue())}
-      val partIdsMemTimeGap = debox.Map.fromIterable(pimtg)
+      val partIdsMemTimeGap = scala.collection.mutable.HashMap.from(pimtg)
       val pinim = plr.getPartIdsNotInMemoryList.asScala.map(intgr => intgr.intValue())
-      val partIdsNotInMemory = debox.Buffer.fromIterable(pinim)
+      val partIdsNotInMemory = scala.collection.mutable.ArrayBuffer.from(pinim)
       val pkRecords = plr.getPkRecordsList.asScala.map(pklir => pklir.fromProto).toSeq
       PartLookupResult(
         plr.getShard,

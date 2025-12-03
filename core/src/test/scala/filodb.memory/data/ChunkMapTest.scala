@@ -4,7 +4,7 @@ import scala.collection.mutable.HashSet
 import scala.concurrent.Future
 import scala.util.Random
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.memory.BinaryRegion.NativePointer
@@ -25,8 +25,8 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   def makeElems(ids: Seq[Long]): Array[NativePointer] = ids.toArray.map(makeElementWithID)
 
-  def checkElems(ids: Seq[Long], elems: Buffer[Long]): Unit = {
-    elems.map(UnsafeUtils.getLong).toVector() shouldEqual ids
+  def checkElems(ids: Seq[Long], elems: ArrayBuffer[Long]): Unit = {
+    elems.map(UnsafeUtils.getLong).toVector shouldEqual ids
   }
 
   it("should be empty when first starting") {
@@ -38,7 +38,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst() }
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetLast() }
     map.chunkmapDoGet(5L) shouldEqual 0
-    map.chunkmapIterate().toBuffer shouldEqual Buffer.empty[Long]
+    map.chunkmapIterate().toBuffer shouldEqual ArrayBuffer.empty[Long]
 
     map.chunkmapFree()
   }
@@ -440,8 +440,8 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapContains(3L) shouldEqual false
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst() }
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetLast() }
-    map.chunkmapIterate().toBuffer shouldEqual Buffer.empty[Long]
-    map.chunkmapSliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
+    map.chunkmapIterate().toBuffer shouldEqual ArrayBuffer.empty[Long]
+    map.chunkmapSliceToEnd(18L).toBuffer shouldEqual ArrayBuffer.empty[Long]
     map.chunkmapSize() shouldEqual 0
     map.chunkmapDoRemove(6L)
 

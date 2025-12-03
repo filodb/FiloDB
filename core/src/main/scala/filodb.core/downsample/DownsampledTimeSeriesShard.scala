@@ -357,8 +357,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
           val samplesScannedCounter = querySession.queryStats.getSamplesScannedCounter(metricGroupBy)
 
-          PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter, samplesScannedCounter)
+          PartLookupResult(shardNum, chunkMethod, scala.collection.mutable.ArrayBuffer.empty,
+            _schema, scala.collection.mutable.HashMap.empty, scala.collection.mutable.ArrayBuffer.empty,
+            recs, chunksReadCounter, samplesScannedCounter)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }

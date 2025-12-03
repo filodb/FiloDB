@@ -168,7 +168,7 @@ object GdeltTestData {
     val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem))
     records.records.map { case (base, offset) =>
       ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
-    }.toVector()
+    }.toVector
   }
 
   val badLine = ArrayStringRowReader("NotANumber, , , , , , ,".split(','))   // Will fail

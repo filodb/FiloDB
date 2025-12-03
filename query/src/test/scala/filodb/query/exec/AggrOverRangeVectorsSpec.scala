@@ -374,7 +374,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
     // prior to this fix, test was returning List(NaN, NaN, NaN, NaN, NaN, 1.0, 1.0)
-    result4(0).rows().map(_.getDouble(1)).toList() shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    result4(0).rows().map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
   }
 
   it("stdvar and stddev should work for with NaN Test case 2") {
@@ -559,7 +559,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       h1
     }.toList
 
-    result(0).rows().map(_.getHistogram(1)).toList() shouldEqual sums
+    result(0).rows().map(_.getHistogram(1)).toList shouldEqual sums
 
     // Test mapReduce of empty histogram sums
     val agg2 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
@@ -584,7 +584,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val counts = data1.map(_ => 2).toList
-    result(0).rows().map(_.getDouble(1)).toList() shouldEqual counts
+    result(0).rows().map(_.getDouble(1)).toList shouldEqual counts
   }
 
   it ("should add NaN in topK") {
@@ -711,7 +711,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val res = Seq.fill(8)(Double.NaN)
     // Since bucket size is different value should be NaN
     sums.foreach( s => compareIter(s.values.toIterator, res.toIterator))
-    result(0).rows().map(_.getHistogram(1)).toList() shouldEqual sums
+    result(0).rows().map(_.getHistogram(1)).toList shouldEqual sums
 
   }
 

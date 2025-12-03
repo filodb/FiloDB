@@ -336,7 +336,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       srv.asInstanceOf[query.SerializedRangeVector]
         .schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
     })
-    actual.toList() shouldEqual expected
+    actual.toList shouldEqual expected
   }
 
   it ("should serialize and deserialize serialize ExecPlan with config") {

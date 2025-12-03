@@ -1,6 +1,6 @@
 package filodb.core.memstore.synchronization
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 
 import filodb.core.Response
@@ -15,7 +15,7 @@ trait PartKeyUpdatesPublisher {
 
   val shard: Int
 
-  var buffer: debox.Buffer[Int] = debox.Buffer.empty[Int]
+  var buffer: scala.collection.mutable.ArrayBuffer[Int] = scala.collection.mutable.ArrayBuffer.empty[Int]
 
   /**
    * Stores the updated or dirty part ids in a buffer.
@@ -30,10 +30,10 @@ trait PartKeyUpdatesPublisher {
    * Make sure that this is called only in IngestionThread
    * @return buffer[updated-partIds]
    */
-  def fetchAll(): Buffer[Int] = {
+  def fetchAll(): ArrayBuffer[Int] = {
     assertThreadName(IngestSchedName)
     val old = buffer
-    buffer = debox.Buffer.empty[Int]
+    buffer = scala.collection.mutable.ArrayBuffer.empty[Int]
     old
   }
 

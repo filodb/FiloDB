@@ -272,7 +272,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
    * @return matching partIds
    */
-  def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int]
+  def partIdsEndedBefore(endedBefore: Long): scala.collection.mutable.ArrayBuffer[Int]
 
   /**
    * Method to delete documents from index that ended before the provided end time
@@ -286,7 +286,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
   /**
    * Delete partitions with given partIds
    */
-  def removePartKeys(partIds: debox.Buffer[Int]): Unit
+  def removePartKeys(partIds: scala.collection.mutable.ArrayBuffer[Int]): Unit
 
   /**
    * Memory used by index, esp for unflushed data
@@ -378,7 +378,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
    * Fetch start time for given set of partIds. Used to check if ODP is needed for
    * queries.
    */
-  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long]
+  def startTimeFromPartIds(partIds: Iterator[Int]): scala.collection.mutable.HashMap[Int, Long]
 
   /**
    * Commit index contents to disk
@@ -406,7 +406,7 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long,
-                         limit: Int = Int.MaxValue): debox.Buffer[Int]
+                         limit: Int = Int.MaxValue): scala.collection.mutable.ArrayBuffer[Int]
 
   /**
    * Fetch list of part key records for given column filters

@@ -31,7 +31,7 @@ sealed trait DataOrCommand
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
-                            dirtyPartsToFlush: debox.Buffer[Int])
+                            dirtyPartsToFlush: scala.collection.mutable.ArrayBuffer[Int])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 

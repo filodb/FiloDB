@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -15,7 +15,6 @@ import bloomfilter.mutable.BloomFilter
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import debox.{Buffer, Map => DMap}
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
@@ -200,12 +199,12 @@ private[core] final case class PartKey(base: Any, offset: Long)
 private[core] final case class PartKeyWithTimes(base: Any, offset: Long, startTime: Long, endTime: Long)
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
-  def skippedPartIDs: Buffer[Int]
+  def skippedPartIDs: ArrayBuffer[Int]
 }
 
 object PartitionIterator {
   def fromPartIt(baseIt: Iterator[TimeSeriesPartition]): PartitionIterator = new PartitionIterator {
-    val skippedPartIDs = Buffer.empty[Int]
+    val skippedPartIDs = ArrayBuffer.empty[Int]
     final def hasNext: Boolean = baseIt.hasNext
     final def next(): TimeSeriesPartition = baseIt.next()
   }
@@ -223,10 +222,12 @@ object PartitionIterator {
   */
 case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
-                            partsInMemory: debox.Buffer[Int],
+                            partsInMemory: scala.collection.mutable.ArrayBuffer[Int],
                             firstSchemaId: Option[Int] = None,
-                            partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
-                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
+                            partIdsMemTimeGap: scala.collection.mutable.HashMap[Int, Long] =
+                              scala.collection.mutable.HashMap.empty,
+                            partIdsNotInMemory: scala.collection.mutable.ArrayBuffer[Int] =
+                              scala.collection.mutable.ArrayBuffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
                             dataBytesScannedCtr: AtomicLong,
                             samplesScannedCtr: AtomicLong)
@@ -241,7 +242,7 @@ object SchemaMismatch {
 
 case class TimeSeriesShardInfo(shardNum: Int,
                                stats: TimeSeriesShardStats,
-                               bufferPools: debox.Map[Int, WriteBufferPool],
+                               bufferPools: scala.collection.mutable.HashMap[Int, WriteBufferPool],
                                nativeMemoryManager: NativeMemoryManager)
 
 // scalastyle:off number.of.methods
@@ -453,7 +454,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val pools = schemas.schemas.values.map { sch =>
       sch.schemaHash -> new WriteBufferPool(bufferMemoryManager, sch.data, storeConfig)
     }
-    DMap(pools.toSeq: _*)
+    HashMap(pools.toSeq: _*)
   }
 
   private val shardInfo = TimeSeriesShardInfo(shardNum, shardStats, bufferPools, bufferMemoryManager)
@@ -466,7 +467,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
     * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
     */
-  private[memstore] final val activelyIngesting = debox.Set.empty[Int]
+  private[memstore] final val activelyIngesting = scala.collection.mutable.HashSet.empty[Int]
 
   private val numFlushIntervalsDuringRetention = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
@@ -478,7 +479,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     *
     * IMPORTANT. Only modify this var in IngestScheduler
     */
-  private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
+  private[memstore] final var dirtyPartitionsForIndexFlush = scala.collection.mutable.ArrayBuffer.empty[Int]
 
   /**
    * This data structure is used for real time tracking and publishing updated partIds within a shard. This is published
@@ -551,7 +552,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
-    val skippedPartIDs = debox.Buffer.empty[Int]
+    val skippedPartIDs = scala.collection.mutable.ArrayBuffer.empty[Int]
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
         val nextPartID = intIt.next
@@ -574,9 +575,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Iterate TimeSeriesPartition objects relevant to given partIds.
     */
-  case class InMemPartitionIterator2(partIds: debox.Buffer[Int]) extends PartitionIterator {
+  case class InMemPartitionIterator2(partIds: scala.collection.mutable.ArrayBuffer[Int]) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
-    val skippedPartIDs = debox.Buffer.empty[Int]
+    val skippedPartIDs = scala.collection.mutable.ArrayBuffer.empty[Int]
     var nextPartId = -1
     findNext()
 
@@ -641,7 +642,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * This is specifically implemented to avoid building a Map for single label.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
-  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String,
+  case class SingleLabelValuesResultIterator(partIds: scala.collection.mutable.ArrayBuffer[Int], label: String,
                                              querySession: QuerySession, statsGroup: Seq[String], limit: Int)
     extends Iterator[ZeroCopyUTF8String] {
     private val rows = labels
@@ -675,7 +676,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Iterator for traversal of partIds, value for the given labels will be extracted from the PartitionKey.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
-  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String],
+  case class LabelValueResultIterator(partIds: scala.collection.mutable.ArrayBuffer[Int], labelNames: Seq[String],
                                       querySession: QuerySession, statsGroup: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     private lazy val rows = labelValues
@@ -977,7 +978,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
-                                     dirtyParts: debox.Buffer[Int]): Unit = {
+                                     dirtyParts: scala.collection.mutable.ArrayBuffer[Int]): Unit = {
     // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
     // causing the iterator to be consumed synchronously in some cases. It doesnt
     // seem to be consistent environment to environment.
@@ -1245,10 +1246,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       ensureCapOnEvictablePartIds()
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       val old = dirtyPartitionsForIndexFlush
-      dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
+      dirtyPartitionsForIndexFlush = scala.collection.mutable.ArrayBuffer.empty[Int]
       old
     } else {
-      debox.Buffer.ofSize[Int](0)
+      new scala.collection.mutable.ArrayBuffer[Int](0)
     }
 
     FlushGroup(shardNum, groupNum, latestOffset, dirtyPartKeys)
@@ -1260,7 +1261,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
     val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.diskTTLSeconds * 1000)
-    val removedParts = debox.Buffer.empty[Int]
+    val removedParts = scala.collection.mutable.ArrayBuffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)
     partIter.foreach { p =>
       if (!p.ingesting) {
@@ -1394,7 +1395,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def updateGauges(): Unit = {
     assertThreadName(IngestSchedName)
-    shardStats.bufferPoolSize.update(bufferPools.valuesArray.map(_.poolSize).sum)
+    shardStats.bufferPoolSize.update(bufferPools.values.toArray.map(_.poolSize).sum)
     shardStats.indexEntries.update(partKeyIndex.indexNumEntries.toDouble)
     shardStats.indexBytes.update(partKeyIndex.indexRamBytes.toDouble)
     shardStats.numPartitions.update(numActivePartitions)
@@ -1456,7 +1457,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // NOTE: We need to make sure that the store/fetch operation to fetch has to happen in Ingestion thread.
     val updatedPartIds = updatedPartIdsForPublishing match {
       case Some(publisher) => publisher.fetchAll()
-      case None => debox.Buffer.empty[Int]
+      case None => scala.collection.mutable.ArrayBuffer.empty[Int]
     }
 
     /* Step 5.3: We flush dirty part keys in the one designated group for each shard.
@@ -1550,7 +1551,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Publishing partKey updates for downstream consumers.
    * @return filodb.core.Response status
    */
-  private def publishDirtyPartKeys(updatedPartIds: Buffer[Int]): Future[Response] = {
+  private def publishDirtyPartKeys(updatedPartIds: ArrayBuffer[Int]): Future[Response] = {
     // Early exit if nothing is present to publish
     if (updatedPartIds.isEmpty) {
       return Future.successful(Success)
@@ -1678,7 +1679,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     // Finally, prune partitions and keyMap data structures
     logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
-    val intIt = partIdsToEvict.iterator()
+    val intIt = partIdsToEvict.iterator
     var numPartsEvicted = 0
     var numPartsAlreadyEvicted = 0
     var numPartsIngestingNotEvictable = 0
@@ -1722,8 +1723,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
   // scalastyle:on method.length
 
-  private def partitionsToEvict(numPartsToEvict: Int): debox.Buffer[Int] = {
-    val partIdsToEvict = debox.Buffer.ofSize[Int](numPartsToEvict)
+  private def partitionsToEvict(numPartsToEvict: Int): scala.collection.mutable.ArrayBuffer[Int] = {
+    val partIdsToEvict = new scala.collection.mutable.ArrayBuffer[Int](numPartsToEvict)
     evictableOdpPartIds.removeInto(numPartsToEvict, partIdsToEvict)
     if (partIdsToEvict.length < numPartsToEvict) {
       evictablePartIds.removeInto(numPartsToEvict - partIdsToEvict.length, partIdsToEvict)
@@ -1971,7 +1972,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
-      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
+      val skippedPartKeys = inMem.skippedPartIDs.iterator.map(partId => {
         convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
       (inMemPartKeys ++ skippedPartKeys)
     }
@@ -2063,13 +2064,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
       case SinglePartitionScan(partition, _) =>
-        val partIds = debox.Buffer.empty[Int]
+        val partIds = scala.collection.mutable.ArrayBuffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
           samplesScannedCtr   = querySession.queryStats.getSamplesScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
-        val partIds = debox.Buffer.empty[Int]
+        val partIds = scala.collection.mutable.ArrayBuffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter(),
@@ -2108,7 +2109,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         else {
           logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
             s"shard=$shardNum are in memory")
-          debox.Map.empty[Int, Long]
+          scala.collection.mutable.HashMap.empty[Int, Long]
         }
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged

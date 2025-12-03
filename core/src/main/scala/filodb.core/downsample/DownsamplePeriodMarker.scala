@@ -50,7 +50,7 @@ trait DownsamplePeriodMarker {
               chunkset: ChunkSetInfoReader,
               resMillis: Long,
               startRow: Int,
-              endRow: Int): debox.Set[Int]
+              endRow: Int): scala.collection.mutable.HashSet[Int]
 }
 
 /**
@@ -63,7 +63,7 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        chunkset: ChunkSetInfoReader,
                        resMillis: Long,
                        startRow: Int,
-                       endRow: Int): debox.Set[Int] = {
+                       endRow: Int): scala.collection.mutable.HashSet[Int] = {
     require(startRow <= endRow, s"startRow $startRow > endRow $endRow for " +
       s"chunkset ${chunkset.debugString} partKey=${part.hexPartKey}")
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
@@ -74,7 +74,7 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
     val endTime = tsReader.apply(tsAcc, tsPtr, endRow)
 
     // set to remove duplicates - it is possible for dupes in case there are no samples in the period
-    val result = debox.Set.empty[Int]
+    val result = scala.collection.mutable.HashSet.empty[Int]
     // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
     // Hence subtract - 1 below from chunk startTime to find the first downsample period.
     // + 1 is needed since the startTime is inclusive. We don't want pStart to be 4:55:00:000;
@@ -109,10 +109,10 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        chunkset: ChunkSetInfoReader,
                        resMillis: Long,
                        startRow: Int,
-                       endRow: Int): debox.Set[Int] = {
+                       endRow: Int): scala.collection.mutable.HashSet[Int] = {
     require(startRow <= endRow, s"startRow $startRow > endRow $endRow for " +
       s"chunkset ${chunkset.debugString} partKey=${part.hexPartKey}")
-    val result = debox.Set.empty[Int]
+    val result = scala.collection.mutable.HashSet.empty[Int]
     result += startRow // need to add start of every chunk
     if (startRow < endRow) { // there is more than 1 row
       DownsamplePeriodMarker.timeDownsamplePeriodMarker.periods(part, chunkset, resMillis, startRow + 1, endRow)

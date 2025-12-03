@@ -686,7 +686,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       "pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
       "namespace".utf8 -> "aci-telemetry-prod1".utf8,
       "res".utf8 -> "res-val".utf8))
-    result.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList() shouldEqual
+    result.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList shouldEqual
       List((4800,"4.0"), (4900,"4.0"), (5000,"4.0"), (5100,"4.0"), (5200,"NaN"), (5300,"NaN"),
         (5400,"NaN"), (5500,"NaN"), (5600,"NaN"), (5700,"4.0"), (5800,"4.0"), (5900,"4.0"), (6000,"4.0"))
   }

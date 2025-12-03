@@ -32,7 +32,7 @@ object TimeSeriesPartitionSpec {
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val bufferPools = scala.collection.mutable.HashMap(dataset.schema.schemaHash -> bufferPool)
     val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
     new TimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40)
   }
@@ -40,7 +40,7 @@ object TimeSeriesPartitionSpec {
   def tracingPart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val bufferPools = scala.collection.mutable.HashMap(dataset.schema.schemaHash -> bufferPool)
     val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
     new TracingTimeSeriesPartition(partNo, dataset.ref, dataset.schema, partKey, shardInfo, 40)
   }

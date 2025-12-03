@@ -194,7 +194,7 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
    * @return Option[PartKeyRecord]
    */
   def readPartKey(shard: Int, bucket: Int, pk: Array[Byte]) : Option[PartKeyRecord] = {
-    val iterator = session.execute(readCql.bind(shard: JInt, bucket: JInt, toBuffer(pk))).iterator()
+    val iterator = session.execute(readCql.bind(shard: JInt, bucket: JInt, toBuffer(pk))).iterator
     if (iterator.hasNext) {
       Some(PartitionKeysV2Table.rowToPartKeyRecord(iterator.next()))
     } else {

@@ -3,7 +3,7 @@ package filodb.query.exec.rangefn
 import java.lang.{Double => JLDouble}
 import java.util
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
@@ -416,7 +416,7 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[Trans
     require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
 
-    val values: Buffer[Double] = Buffer.ofSize(window.size)
+    val values: ArrayBuffer[Double] = new ArrayBuffer[Double](window.size)
     var i = 0;
     while (i < window.size) {
       val curValue = window.apply(i).getDouble(1)
@@ -426,7 +426,7 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[Trans
       i = i + 1
     }
     val counter = values.length
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    values.sortInPlace()(Ordering.Double.TotalOrdering)
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
     var quantileResult : Double = Double.NaN
     if (counter > 0) {
@@ -450,7 +450,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
                       queryConfig: QueryConfig
                     ): Unit = {
     val q = 0.5
-    val values: Buffer[Double] = Buffer.ofSize(window.size)
+    val values: ArrayBuffer[Double] = new ArrayBuffer[Double](window.size)
     for (i <- 0 until window.size) {
       val curValue = window.apply(i).getDouble(1)
       if (!curValue.isNaN) {
@@ -458,7 +458,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
       }
     }
     val size = values.length
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    values.sortInPlace()(Ordering.Double.TotalOrdering)
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
     var median : Double = Double.NaN
     if (size > 0) {
@@ -466,13 +466,13 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
     }
 
     var medianAbsoluteDeviationResult : Double = Double.NaN
-    val diffFromMedians: Buffer[Double] = Buffer.ofSize(window.size)
+    val diffFromMedians: ArrayBuffer[Double] = new ArrayBuffer[Double](window.size)
 
     for (i <- 0 until window.size) {
       val curValue = window.apply(i).getDouble(1)
       diffFromMedians.append(Math.abs(median - curValue))
     }
-    diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+    diffFromMedians.sortInPlace()(Ordering.Double.TotalOrdering)
     if (size > 0) {
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex)*(1-weight) + diffFromMedians(upperIndex)*weight
     }
@@ -508,26 +508,26 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
     if (size > 0) {
       // find median
       val q = 0.5
-      val values: Buffer[Double] = Buffer.ofSize(size)
+      val values: ArrayBuffer[Double] = new ArrayBuffer[Double](size)
       for (i <- 0 until size) {
         val curValue = window.apply(i).getDouble(1)
         if (!curValue.isNaN) {
           values.append(curValue)
         }
       }
-      values.sort(spire.algebra.Order.fromOrdering[Double])
+      values.sortInPlace()(Ordering.Double.TotalOrdering)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
       val median = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
 
       // distance from median
-      val distFromMedian: Buffer[Double] = Buffer.ofSize(size)
+      val distFromMedian: ArrayBuffer[Double] = new ArrayBuffer[Double](size)
       for (i <- 0 until size) {
         val curValue = window.apply(i).getDouble(1)
         distFromMedian.append(Math.abs(median - curValue))
       }
 
       // mad = median of absolute distances from median
-      distFromMedian.sort(spire.algebra.Order.fromOrdering[Double])
+      distFromMedian.sortInPlace()(Ordering.Double.TotalOrdering)
       val mad = distFromMedian(lowerIndex)*(1-weight) + distFromMedian(upperIndex)*weight
 
       // classify last point as anomaly if it's more than `tolerance * mad` away from median
@@ -1098,15 +1098,15 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
 
 abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
                                                var quantileResult: Double = Double.NaN,
-                                               var values: Buffer[Double] = Buffer.empty[Double])
+                                               var values: ArrayBuffer[Double] = ArrayBuffer.empty[Double])
   extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { quantileResult = Double.NaN; values = Buffer.empty[Double] }
+  override final def reset(): Unit = { quantileResult = Double.NaN; values = ArrayBuffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
       val counter = values.length
-      values.sort(spire.algebra.Order.fromOrdering[Double])
+      values.sortInPlace()(Ordering.Double.TotalOrdering)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
       if (counter > 0) {
         quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
@@ -1118,21 +1118,21 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
 }
 
 abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsoluteDeviationResult: Double = Double.NaN,
-                                                               var values: Buffer[Double] = Buffer.empty[Double])
+                                                               var values: ArrayBuffer[Double] = ArrayBuffer.empty[Double])
   extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { medianAbsoluteDeviationResult = Double.NaN; values = Buffer.empty[Double] }
+  override final def reset(): Unit = { medianAbsoluteDeviationResult = Double.NaN; values = ArrayBuffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val size = values.length
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, size)
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    values.sortInPlace()(Ordering.Double.TotalOrdering)
     var median: Double = Double.NaN
     if (size > 0) {
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
-      val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
+      val diffFromMedians: ArrayBuffer[Double] = new ArrayBuffer[Double](values.length)
       for (value <- values) {
         diffFromMedians.append(Math.abs(median - value))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      diffFromMedians.sortInPlace()(Ordering.Double.TotalOrdering)
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
     sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)

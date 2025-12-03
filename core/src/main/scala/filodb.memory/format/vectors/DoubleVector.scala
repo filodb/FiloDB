@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -162,8 +163,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Double] = {
-    val newBuf = Buffer.empty[Double]
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): ArrayBuffer[Double] = {
+    val newBuf = ArrayBuffer.empty[Double]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
@@ -207,7 +208,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   }
 
   // Default implementation with no drops detected
-  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int] = debox.Buffer.empty[Int]
+  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): scala.collection.mutable.ArrayBuffer[Int] =
+    scala.collection.mutable.ArrayBuffer.empty[Int]
 }
 
 /**
@@ -314,7 +316,7 @@ extends DoubleVectorDataReader {
     inner.changes(acc2, vector, start, end, prev)
 
   private var _correction = 0.0
-  private val _drops = debox.Buffer.empty[Int] // to track counter drop positions
+  private val _drops = scala.collection.mutable.ArrayBuffer.empty[Int] // to track counter drop positions
   // Lazily correct - not all queries want corrected data
   lazy val corrected = {
     // if asked, lazily create corrected values and resets list
@@ -335,7 +337,7 @@ extends DoubleVectorDataReader {
     _corrected
   }
 
-  override def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int] = {
+  override def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): scala.collection.mutable.ArrayBuffer[Int] = {
     assert(vector == vect && acc == acc2)
     corrected // access it since it is lazy
     _drops
@@ -437,7 +439,7 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
   private final val readVect = DoubleVector(nativePtrReader, addr)
   final def apply(index: Int): Double = readVect.apply(nativePtrReader, addr, index)
   def reader: VectorDataReader = readVect
-  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(nativePtrReader, addr)
+  final def copyToBuffer: ArrayBuffer[Double] = DoubleVectorDataReader64.toBuffer(nativePtrReader, addr)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
@@ -480,7 +482,7 @@ BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAp
   def nbits: Short = 64
 
   val subVect = new DoubleAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Double] = MaskedDoubleDataReader.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue

@@ -183,7 +183,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   def compareRangeResults(map1: Map[String, Array[Double]], map2: Map[String, Array[Double]]): Unit = {
     map1.keySet shouldEqual map2.keySet
     map1.foreach { case (key, samples) =>
-      samples.toList() shouldEqual map2(key).toList
+      samples.toList shouldEqual map2(key).toList
     }
   }
 

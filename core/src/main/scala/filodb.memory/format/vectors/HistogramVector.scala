@@ -2,8 +2,9 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
 import org.agrona.concurrent.UnsafeBuffer
 import spire.syntax.cfor._
@@ -415,7 +416,7 @@ class AppendableHistogramVector(factory: MemFactory,
   final def addNA(): AddResponse = Ack  // TODO: Add a 0 to every appender
 
   def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.blobAsBuffer(col))
-  def copyToBuffer: Buffer[DirectBuffer] = ???
+  def copyToBuffer: ArrayBuffer[DirectBuffer] = ???
   def apply(index: Int): DirectBuffer = ???
 
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
@@ -698,8 +699,9 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     correctionData
   }
 
-  def dropPositions(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): debox.Buffer[Int] = {
-    val res = debox.Buffer.empty[Int]
+  def dropPositions(accNotUsed: MemoryReader,
+                    vectorNotUsed: BinaryVectorPtr): scala.collection.mutable.ArrayBuffer[Int] = {
+    val res = scala.collection.mutable.ArrayBuffer.empty[Int]
     corrections.foreach { case (dropPos, hist) =>
       res += dropPos
     }

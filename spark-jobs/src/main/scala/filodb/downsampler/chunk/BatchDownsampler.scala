@@ -90,13 +90,13 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     * Chunk Downsamplers by Raw Schema Id
     */
   @transient lazy private val chunkDownsamplersByRawSchemaId = {
-    val map = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+    val map = scala.collection.mutable.HashMap.empty[Int, scala.Seq[ChunkDownsampler]]
     rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplers }
     map
   }
 
   @transient lazy private val downsamplePeriodMarkersByRawSchemaId = {
-    val map = debox.Map.empty[Int, DownsamplePeriodMarker]
+    val map = scala.collection.mutable.HashMap.empty[Int, DownsamplePeriodMarker]
     rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplePeriodMarker }
     map
   }
@@ -294,7 +294,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         val resMillis = resolution.toMillis
 
         val downsamplePeriods =
-          periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
+          periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray
         java.util.Arrays.sort(downsamplePeriods)
 
         if (shouldTrace)

@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
@@ -448,7 +448,7 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader],
+                            windowInfos: ArrayBuffer[ChunkSetInfoReader] = ArrayBuffer.empty[ChunkSetInfoReader],
                             isInclusiveRange: Boolean = true)
 extends Iterator[ChunkSetInfoReader] {
   require(step > 0, s"Adjusted step $step not > 0")

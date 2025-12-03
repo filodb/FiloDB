@@ -263,7 +263,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
   it("appropriate increase function is used for gauge type") {
@@ -310,7 +310,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
   it("appropriate increase function is used for untyped") {
@@ -357,7 +357,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults)
+    resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
   it("appropriate increase function is used for delta-counter and doesn't match with cumulative style results") {
@@ -451,6 +451,6 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
-    resultRows.foreach(_.toList() shouldEqual expectedResults) // increase functioncumulative
+    resultRows.foreach(_.toList shouldEqual expectedResults) // increase functioncumulative
   }
 }

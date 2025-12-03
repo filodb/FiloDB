@@ -28,7 +28,7 @@ class EncodingBenchmark {
   val numValues = 10000
   val memFactory = new NativeMemoryManager(100 * 1024 * 1024)
 
-  val randomInts = (0 until numValues).map(i => util.Random.nextInt)
+  val randomInts = (0 until numValues).map(i => util.Random.nextInt())
   val randomLongs = randomInts.map(_.toLong)
 
   // NOTE: results show that time spent is heavily influenced by ratio of unique strings...
@@ -118,6 +118,6 @@ class EncodingBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def newDictUtf8VectorEncoding(): Unit = {
     val hint = Encodings.AutoDictString(samplingRate = 0.5)
-    UTF8Vector(memFactory, utf8strings).optimize(memFactory, hint)
+    UTF8Vector(memFactory, utf8strings.toIndexedSeq).optimize(memFactory, hint)
   }
 }

@@ -468,7 +468,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     res.partsInMemory.length shouldEqual 2   // two partitions should match
     res.shard shouldEqual 0
     res.chunkMethod shouldEqual range
-    res.partIdsMemTimeGap shouldEqual debox.Map(7 -> 107000L)
+    res.partIdsMemTimeGap shouldEqual scala.collection.mutable.HashMap(7 -> 107000L)
     res.partIdsNotInMemory.isEmpty shouldEqual true
   }
 
@@ -705,7 +705,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
       store2.numPartitions(dataset1.ref, 0) shouldEqual numSeries
       shard.bufferPools.size shouldEqual 1
-      shard.bufferPools.valuesArray.head.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100
+      shard.bufferPools.values.toArray.head.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100
       val afterIngestFree = shard.bufferMemoryManager.numFreeBytes
 
       // Switch buffers, encode and release/return buffers for all partitions
@@ -716,7 +716,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       }
 
       // Ensure queue length does not get beyond 250, and some memory was freed (free bytes increases)
-      shard.bufferPools.valuesArray.head.poolSize shouldEqual 250
+      shard.bufferPools.values.toArray.head.poolSize shouldEqual 250
       val nowFree = shard.bufferMemoryManager.numFreeBytes
       nowFree should be > (afterIngestFree)
     } finally {

@@ -153,7 +153,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val rv2 = timeValueRVPk(resetChunk1 ++ resetChunk2)
     val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
                                          new ChunkedRateFunction, querySession)
-    it2.next.getDouble(1) shouldEqual expected +- errorOk
+    it2.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should return NaN for rate when window only contains one sample") {
@@ -309,7 +309,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val headTime = 100000L
     val headHist = data(0)(3).asInstanceOf[LongHistogram]
     val corrHist = data(6)(3).asInstanceOf[LongHistogram]
-    val lastHist = headHist.copy   // 8th sample == first sample + correction
+    val lastHist = headHist.copy()   // 8th sample == first sample + correction
     lastHist.add(corrHist)
     val expectedRates = (0 until headHist.numBuckets).map { b =>
       (lastHist.bucketValue(b) - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
@@ -395,7 +395,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // 3 resets at the beginning - so resets count should drop only by 3 (4 - 3 = 1) even though we are removing 5 items
     for (i <- 0 until 5) {
-      toEmit2 = q3.remove
+      toEmit2 = q3.remove()
       resetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)// old items being evicted for new window items
     }
     resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit2, queryConfig)
@@ -916,7 +916,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("IRatePeriodicFunctionH should handle empty histogram from LastSampleFunctionH") {
-    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val _ = bv.GeometricBuckets(2.0, 2.0, 3)
     val qHist = new IndexedArrayQueue[TransientHistRow]()
     
     // Add empty histogram

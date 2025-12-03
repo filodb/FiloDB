@@ -304,7 +304,7 @@ class HistogramVectorTest extends NativeVectorTest {
     val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
     reader.length shouldEqual bucketData.length
 
-    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual debox.Buffer(6, 10)
+    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual scala.collection.mutable.ArrayBuffer(6, 10)
 
     (0 until bucketData.length).foreach { i =>
       verifyHistogram(reader(i), i, bucketData, myBucketScheme)
@@ -322,7 +322,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     onHeapAcc.foreach { a =>
       val readerH = HistogramVector(a, 0).asInstanceOf[SectDeltaHistogramReader]
-      readerH.dropPositions(a, 0) shouldEqual debox.Buffer(6, 10)
+      readerH.dropPositions(a, 0) shouldEqual scala.collection.mutable.ArrayBuffer(6, 10)
       (0 until bucketData.length).foreach { i =>
         val h = readerH(i)
         verifyHistogram(h, i, bucketData, myBucketScheme)

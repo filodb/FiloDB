@@ -50,48 +50,48 @@ trait PartKeyIndexRawSpec {
 
       // Should get empty iterator when passing no filters
       val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
-      partNums1.toIterable() should contain theSameElementsAs List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+      partNums1.toSeq should contain theSameElementsAs List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
       // return only 4 partIds - empty filter
       val partNumsLimit = keyIndex.partIdsFromFilters(Nil, start, end, 4)
       partNumsLimit.length shouldEqual 4
       // It's not deterministic which 4 docs are returned, but we can check that a valid part ID is in the list
-      List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) should contain allElementsOf partNumsLimit.toIterable()
+      List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) should contain allElementsOf partNumsLimit.toSeq
 
       val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
       val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
-      partNums2.toIterable() should contain theSameElementsAs List(7, 8, 9)
+      partNums2.toSeq should contain theSameElementsAs List(7, 8, 9)
 
       // return only 2 partIds - with filter
       val partNumsLimitFilter = keyIndex.partIdsFromFilters(Seq(filter2), start, end, 2)
       partNumsLimitFilter.length shouldEqual  2
-      List(7,8,9) should contain allElementsOf partNumsLimitFilter.toIterable()
+      List(7,8,9) should contain allElementsOf partNumsLimitFilter.toSeq
 
       val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), start, end)
-      partNums3.toIterable() should contain theSameElementsAs List(8, 9)
+      partNums3.toSeq should contain theSameElementsAs List(8, 9)
 
       val filter4 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4), 10, start-1)
-      partNums4 shouldEqual debox.Buffer.empty[Int]
+      partNums4 shouldEqual scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter5 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5), end + 100, end + 100000)
-      partNums5 should not equal debox.Buffer.empty[Int]
+      partNums5 should not equal scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter6 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6), start - 10000, end )
-      partNums6 should not equal debox.Buffer.empty[Int]
+      partNums6 should not equal scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter7 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
-      partNums7 should not equal debox.Buffer.empty[Int]
+      partNums7 should not equal scala.collection.mutable.ArrayBuffer.empty[Int]
 
       // tests to validate schema ID filter
       val filter8 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
         ColumnFilter("_type_", Equals("schemaID:46894".utf8)))
       val partNums8 = keyIndex.partIdsFromFilters(filter8, start, end)
-      partNums8.toIterable() should contain theSameElementsAs List(7, 8, 9)
+      partNums8.toSeq should contain theSameElementsAs List(7, 8, 9)
 
       val filter9 = Seq( ColumnFilter("Actor2Code", Equals("GOV".utf8)),
         ColumnFilter("_type_", Equals("prom-counter".utf8)))
@@ -110,11 +110,11 @@ trait PartKeyIndexRawSpec {
 
       val filter2 = ColumnFilter("Actor2Name", Equals(UTF8Wrapper("REGIME".utf8)))
       val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), 0, Long.MaxValue)
-      partNums2.toIterable() should contain theSameElementsAs List(8, 9)
+      partNums2.toSeq should contain theSameElementsAs List(8, 9)
 
       val filter3 = ColumnFilter("Actor2Name", Equals("REGIME"))
       val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), 0, Long.MaxValue)
-      partNums3.toIterable() should contain theSameElementsAs List(8, 9)
+      partNums3.toSeq should contain theSameElementsAs List(8, 9)
     }
 
     it("should fetch part key records from filters correctly") {
@@ -265,7 +265,7 @@ trait PartKeyIndexRawSpec {
       keyIndex.refreshReadersBlocking()
 
       val pIds = keyIndex.partIdsEndedBefore(start + 200)
-      val pIdsList = pIds.toList()
+      val pIdsList = pIds.toList
       for { i <- 0 until numPartIds} {
         pIdsList.contains(i) shouldEqual (if (i <= 100) true else false)
       }
@@ -292,7 +292,7 @@ trait PartKeyIndexRawSpec {
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
         }
       keyIndex.refreshReadersBlocking()
-      val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+      val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList
       for { i <- 0 until numPartIds} {
         pIdsList.contains(i) shouldEqual (i <= 100)
       }
@@ -323,7 +323,7 @@ trait PartKeyIndexRawSpec {
           keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
         }
       keyIndex.refreshReadersBlocking()
-      val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+      val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList
       for { i <- 0 until numPartIds} {
         pIdsList.contains(i) shouldEqual (i <= 100)
       }
@@ -356,31 +356,31 @@ trait PartKeyIndexRawSpec {
 
       // Should get empty iterator when passing no filters
       val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
-      partNums1.toIterable() should contain theSameElementsAs List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+      partNums1.toSeq should contain theSameElementsAs List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
       val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
       val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
-      partNums2.toIterable() should contain theSameElementsAs  List(7, 8, 9)
+      partNums2.toSeq should contain theSameElementsAs  List(7, 8, 9)
 
       val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), start, end)
-      partNums3.toIterable() should contain theSameElementsAs List(8, 9)
+      partNums3.toSeq should contain theSameElementsAs List(8, 9)
 
       val filter4 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4), 10, start-1)
-      partNums4 shouldEqual debox.Buffer.empty[Int]
+      partNums4 shouldEqual scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter5 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5), end + 20000, end + 100000)
-      partNums5 shouldEqual debox.Buffer.empty[Int]
+      partNums5 shouldEqual scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter6 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6), start - 10000, end-1 )
-      partNums6 should not equal debox.Buffer.empty[Int]
+      partNums6 should not equal scala.collection.mutable.ArrayBuffer.empty[Int]
 
       val filter7 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
       val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
-      partNums7 should not equal debox.Buffer.empty[Int]
+      partNums7 should not equal scala.collection.mutable.ArrayBuffer.empty[Int]
     }
 
     it("should obtain indexed names and values") {
@@ -416,12 +416,12 @@ trait PartKeyIndexRawSpec {
       val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
         ColumnFilter("Actor2Name", Equals("REGIME".utf8)))
       val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
-      partNums1.toIterable() should contain theSameElementsAs List(8, 9)
+      partNums1.toSeq should contain theSameElementsAs List(8, 9)
 
       val filters2 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
         ColumnFilter("Actor2Name", Equals("CHINA".utf8)))
       val partNums2 = keyIndex.partIdsFromFilters(filters2, 0, Long.MaxValue)
-      partNums2 shouldEqual debox.Buffer.empty[Int]
+      partNums2 shouldEqual scala.collection.mutable.ArrayBuffer.empty[Int]
     }
 
     it("should be able to convert pipe regex to TermInSetQuery") {
@@ -434,7 +434,7 @@ trait PartKeyIndexRawSpec {
 
       val filters1 = Seq(ColumnFilter("Actor2Code", EqualsRegex("GOV|KHM|LAB|MED".utf8)))
       val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
-      partNums1.toIterable() should contain theSameElementsAs List(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 73, 81, 90)
+      partNums1.toSeq should contain theSameElementsAs List(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 73, 81, 90)
     }
 
     it("should be able to convert prefix regex to PrefixQuery") {
@@ -447,7 +447,7 @@ trait PartKeyIndexRawSpec {
 
       val filters1 = Seq(ColumnFilter("Actor2Name", EqualsRegex("C.*".utf8)))
       val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
-      partNums1.toIterable() should contain theSameElementsAs List(3, 12, 22, 23, 24, 31, 59, 60, 66, 69, 72, 78, 79, 80, 88, 89)
+      partNums1.toSeq should contain theSameElementsAs List(3, 12, 22, 23, 24, 31, 59, 60, 66, 69, 72, 78, 79, 80, 88, 89)
     }
 
 
@@ -460,7 +460,7 @@ trait PartKeyIndexRawSpec {
 
       val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)), ColumnFilter("Year", Equals(1979)))
       val partNums1 = index2.partIdsFromFilters(filters1, 0, Long.MaxValue)
-      partNums1 shouldEqual debox.Buffer.empty[Int]
+      partNums1 shouldEqual scala.collection.mutable.ArrayBuffer.empty[Int]
     }
 
     it("should be able to fetch partKey from partId and partId from partKey") {

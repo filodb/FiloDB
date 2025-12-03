@@ -71,10 +71,6 @@ object Dependencies {
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
-    // Note: debox 0.8.0 has no Scala 2.13 build, using 2.12 version but excluding all 2.12 transitive deps
-    "org.spire-math"       % "debox_2.12"        % "0.8.0" withJavadoc() excludeAll(
-      excludeSpire212, excludeCatsKernel212, excludeScalaTest212, excludeScalaCheck212
-    ),
     scalaLoggingDep
   )
 

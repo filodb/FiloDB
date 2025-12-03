@@ -9,7 +9,6 @@ import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
 import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
 import kamon.Kamon
 import org.apache.commons.lang3.SystemUtils
 import org.apache.lucene.util.BytesRef
@@ -113,11 +112,11 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     logger.debug(s"Tantivy index stats are published via flush thread for dataset=${ref.dataset} shard=$shardNum")
   }
 
-  override def partIdsEndedBefore(endedBefore: Long): Buffer[Int] = {
-    val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
+  override def partIdsEndedBefore(endedBefore: Long): ArrayBuffer[Int] = {
+    val result: scala.collection.mutable.ArrayBuffer[Int] = scala.collection.mutable.ArrayBuffer.empty[Int]
     val partIds = TantivyNativeMethods.partIdsEndedBefore(indexHandle, endedBefore)
 
-    result.extend(partIds)
+    result.appendAll(partIds)
 
     result
   }
@@ -126,9 +125,9 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     TantivyNativeMethods.removePartitionsEndedBefore(indexHandle, endedBefore, returnApproxDeletedCount)
   }
 
-  override def removePartKeys(partIds: Buffer[Int]): Unit = {
+  override def removePartKeys(partIds: ArrayBuffer[Int]): Unit = {
     if (!partIds.isEmpty) {
-      TantivyNativeMethods.removePartKeys(indexHandle, partIds.toArray())
+      TantivyNativeMethods.removePartKeys(indexHandle, partIds.toArray)
     }
   }
 
@@ -269,12 +268,12 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     TantivyNativeMethods.endTimeFromPartId(indexHandle, partId)
   }
 
-  override def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
+  override def startTimeFromPartIds(partIds: Iterator[Int]): scala.collection.mutable.HashMap[Int, Long] = {
     val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
     val partIdsArray = partIds.toArray
 
-    val result = debox.Map.empty[Int, Long]
+    val result = scala.collection.mutable.HashMap.empty[Int, Long]
     val rawResult = TantivyNativeMethods.startTimeFromPartIds(indexHandle, partIdsArray)
     var idx = 0
     while (idx < rawResult.length) {
@@ -329,12 +328,11 @@ class PartKeyTantivyIndex(ref: DatasetRef,
   }
 
   override def partIdsFromFilters(columnFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
-                                  limit: Int): Buffer[Int] = {
+                                  limit: Int): ArrayBuffer[Int] = {
     val results = searchFromFilters(columnFilters, startTime, endTime, limit, TantivyNativeMethods.queryPartIds)
 
-    // "unsafe" means you must not modify the array you're passing in after creating the buffer
-    // We don't, so this is more performant
-    debox.Buffer.unsafe(results)
+    // Convert array to ArrayBuffer
+    scala.collection.mutable.ArrayBuffer.from(results)
   }
 
   override def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,

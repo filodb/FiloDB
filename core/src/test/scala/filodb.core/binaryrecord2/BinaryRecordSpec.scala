@@ -1,6 +1,6 @@
 package filodb.core.binaryrecord2
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
@@ -158,7 +158,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val addrs = builder.allContainers.head.allOffsets
       addrs should have length (maxNumRecords)
       // check min value
-      addrs.map(recSchema1.getDouble(_, 1)) shouldEqual Buffer.fromIterable((1 to maxNumRecords).map(_.toDouble))
+      addrs.map(recSchema1.getDouble(_, 1)) shouldEqual ArrayBuffer.from((1 to maxNumRecords).map(_.toDouble))
       addrs.foreach { a =>
         recSchema1.partitionHash(a) should not be (0)
         RecordSchema.schemaID(a) shouldEqual schema1.schemaHash

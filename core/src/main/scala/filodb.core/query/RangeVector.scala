@@ -4,10 +4,11 @@ import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
-import org.joda.time.DateTime
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Using
+
+import com.typesafe.scalalogging.StrictLogging
+import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
@@ -591,8 +592,8 @@ final case class IteratorBackedRangeVector(key: RangeVectorKey,
 
 
 final case class BufferRangeVector(key: RangeVectorKey,
-                                   timestamps: Buffer[Long],
-                                   values: Buffer[Double],
+                                   timestamps: ArrayBuffer[Long],
+                                   values: ArrayBuffer[Double],
                                    override val outputRange: Option[RvRange]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 

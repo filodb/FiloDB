@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -290,8 +291,8 @@ trait IntVectorDataReader extends VectorDataReader {
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
-  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Int] = {
-    val newBuf = Buffer.empty[Int]
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): ArrayBuffer[Int] = {
+    val newBuf = ArrayBuffer.empty[Int]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
@@ -483,7 +484,7 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
   final def addNA(): AddResponse = addData(0)
   final def apply(index: Int): Int = reader.apply(nativePtrReader, addr, index)
   val reader = IntBinaryVector.simple(nativePtrReader, addr)
-  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Int] = reader.asIntReader.toBuffer(nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
@@ -518,7 +519,7 @@ BitmapMaskAppendableVector[Int](addr, maxElements) with OptimizingPrimitiveAppen
                                                     nbits, signed, dispose)
 
   def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
-  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Int] = MaskedIntBinaryVector.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Int, Int) = {
     var min = Int.MaxValue

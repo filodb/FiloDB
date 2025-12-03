@@ -419,9 +419,9 @@ object CountValuesSerDeser {
   val sampleSize = 12 // 8 for Double and 4 for Int
 
   // TODO can be serialized and compressed more efficiently by using histogram like type
-  def serialize(map: debox.Map[Double, Int], serializedMap: Array[Byte]): Array[Byte] = {
+  def serialize(map: scala.collection.mutable.HashMap[Double, Int], serializedMap: Array[Byte]): Array[Byte] = {
     var index = 0
-    map.foreach {(k, v) =>
+    map.foreach { case (k, v) =>
       UnsafeUtils.setDouble(serializedMap, UnsafeUtils.arayOffset + index, k)
       UnsafeUtils.setInt(serializedMap, UnsafeUtils.arayOffset + index + 8, v)
       index += sampleSize
@@ -429,8 +429,8 @@ object CountValuesSerDeser {
     serializedMap
   }
 
-  def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
-    val frequencyMap = debox.Map[Double, Int]()
+  def deserialize(buf: Any, size: Int, offset: Long): scala.collection.mutable.HashMap[Double, Int] = {
+    val frequencyMap = scala.collection.mutable.HashMap[Double, Int]()
     for (i <-0 until size/sampleSize) {
       val index = i * sampleSize
       val key = UnsafeUtils.getDouble(buf, offset + index)

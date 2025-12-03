@@ -26,7 +26,7 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-release", "17",  // Target JDK 17
+      "-release", "17",
       "-feature",
       "-Xfatal-warnings",
       "-Ywarn-dead-code",
@@ -38,7 +38,7 @@ object FiloSettings {
 
     javacOptions ++= Seq(
       "-encoding", "UTF-8",
-      "--release", "17"  // Target JDK 17
+      "--release", "11"  // Target JDK 11
     ))
 
   // Create a default Scala style task to run with tests

@@ -107,7 +107,7 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
     val partSchema = Schemas.fromConfig(sourceConfig).get.part
 
     chunksTable.readChunksNoAsync(partition, chunkInfos.toSeq)
-      .iterator()
+      .iterator
       .asScala
       .map(
         row => {

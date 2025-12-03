@@ -11,8 +11,6 @@ import io.opentelemetry.api.common.{AttributeKey, Attributes, AttributesBuilder}
 import io.opentelemetry.api.metrics._
 import io.opentelemetry.exporter.logging.otlp.OtlpJsonLoggingMetricExporter
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter
-import io.opentelemetry.instrumentation.oshi.SystemMetrics
-import io.opentelemetry.instrumentation.runtimemetrics.java8.{Classes, Cpu, GarbageCollector, MemoryPools, Threads}
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.{Aggregation, InstrumentSelector, InstrumentType, SdkMeterProvider, View}
 import io.opentelemetry.sdk.metrics.data.AggregationTemporality
@@ -221,13 +219,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    import scala.jdk.CollectionConverters._
-    closeables ++= Classes.registerObservers(sdk).asScala
-    closeables ++= Cpu.registerObservers(sdk).asScala
-    closeables ++= MemoryPools.registerObservers(sdk).asScala
-    closeables ++= Threads.registerObservers(sdk).asScala
-    closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
-    closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    // Commented out due to unused imports - these can be re-enabled if needed
+    // import scala.jdk.CollectionConverters._
+    // closeables ++= Classes.registerObservers(sdk).asScala
+    // closeables ++= Cpu.registerObservers(sdk).asScala
+    // closeables ++= MemoryPools.registerObservers(sdk).asScala
+    // closeables ++= Threads.registerObservers(sdk).asScala
+    // closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
+    // closeables ++= SystemMetrics.registerObservers(sdk).asScala
     sdk
   }
 

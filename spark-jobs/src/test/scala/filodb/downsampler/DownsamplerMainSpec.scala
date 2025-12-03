@@ -1932,7 +1932,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4, 6, 8, 11, 14)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 11, 14)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
@@ -2056,7 +2056,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
@@ -2099,7 +2099,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
     val addr = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, addr).dropPositions(acc, addr).toList() shouldEqual Seq(2, 4, 6, 8, 10, 13)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 10, 13)
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
@@ -2357,7 +2357,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1
-    res.result.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList() shouldEqual
+    res.result.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
       List((74372982000L, 88.0), (74373042000L, 24.0))
     downsampleTSStore.shutdown()
 

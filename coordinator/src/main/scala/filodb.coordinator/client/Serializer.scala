@@ -107,14 +107,14 @@ class KryoInit extends DefaultKryoInitializer {
 // All the ColumnTypes are Objects - singletons.  Thus the class info is enough to find the right one.
 // No need to actually write anything.  :D :D :D
 class ColumnTypeSerializer extends KryoSerializer[Column.ColumnType] {
-  override def read(kryo: Kryo, input: Input, typ: Class[_ <: Column.ColumnType]): Column.ColumnType =
+  override def read(kryo: Kryo, input: Input, typ: Class[Column.ColumnType]): Column.ColumnType =
     Column.clazzToColType(typ.asInstanceOf[Class[Column.ColumnType]])
 
   override def write(kryo: Kryo, output: Output, colType: Column.ColumnType): Unit = {}
 }
 
 class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
-  override def read(kryo: Kryo, input: Input, typ: Class[_ <: RecordSchema2]): RecordSchema2 = {
+  override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema2]): RecordSchema2 = {
     val tuple = kryo.readClassAndObject(input)
     RecordSchema2.fromSerializableTuple(tuple.asInstanceOf[(Seq[ColumnInfo], Option[Int],
                                                             Seq[String], Map[Int, RecordSchema2])])
@@ -130,7 +130,7 @@ class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
  * configuration, so we only send the schemaID.  This saves a huge amount of serialization cost.
  */
 class SchemaSerializer extends KryoSerializer[Schema] {
-  override def read(kryo: Kryo, input: Input, typ: Class[_ <: Schema]): Schema = {
+  override def read(kryo: Kryo, input: Input, typ: Class[Schema]): Schema = {
     // We have to dynamically obtain the global schemas as we don't know when they will be initialized
     // but for sure when the serialization needs to happen, Akka is up already
     // val schemas = FilodbSettings.global().get.schemas
@@ -150,7 +150,7 @@ class SchemaSerializer extends KryoSerializer[Schema] {
 }
 
 class PartSchemaSerializer extends KryoSerializer[PartitionSchema] {
-  override def read(kryo: Kryo, input: Input, typ: Class[_ <: PartitionSchema]): PartitionSchema = {
+  override def read(kryo: Kryo, input: Input, typ: Class[PartitionSchema]): PartitionSchema = {
     // We have to dynamically obtain the global schemas as we don't know when they will be initialized
     // but for sure when the serialization needs to happen, Akka is up already
     val schemas = FilodbSettings.globalOrDefault.schemas

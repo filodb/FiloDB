@@ -423,13 +423,13 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   override def hashCode: Int = ((columnTypes.hashCode * 31) + partitionFieldStart.hashCode) * 31 +
                                predefinedKeys.hashCode
 
-  import debox.{Map => DMap}   // An unboxed, fast Map
+  import scala.collection.mutable.HashMap
 
-  private def makePredefinedStructures(predefinedKeys: Seq[String]): (Array[Long], Array[Byte], DMap[Long, Int]) = {
+  private def makePredefinedStructures(predefinedKeys: Seq[String]): (Array[Long], Array[Byte], HashMap[Long, Int]) = {
     // Convert predefined keys to UTF8StringShorts.  First estimate size they would all take.
     val totalNumBytes = predefinedKeys.map(_.length + 1).sum
     val stringBytes = new Array[Byte](totalNumBytes)
-    val keyToNum = DMap.empty[Long, Int]
+    val keyToNum = HashMap.empty[Long, Int]
     var index = 0
     val offsets = predefinedKeys.scanLeft(UnsafeUtils.arayOffset.toLong) { case (offset, str) =>
                     val bytes = str.getBytes(StandardCharsets.UTF_8)

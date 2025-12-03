@@ -43,7 +43,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
       val ptr = intVect.optimize(memFactory)
       val reader = IntBinaryVector(acc, ptr)
       reader.length(acc, ptr) should equal (s.length)
-      reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
+      reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
     }
   }
 
@@ -58,7 +58,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
         val ptr = utf8vect.optimize(memFactory)
         val reader = UTF8Vector(acc, ptr)
         reader.length(acc, ptr) should equal (s.length)
-        reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
+        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }
@@ -74,7 +74,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
                                                             AutoDictString(spaceThreshold=0.8))
         val reader = UTF8Vector(acc, ptr)
         reader.length(acc, ptr) should equal (s.length)
-        reader.toBuffer(acc, ptr).toList() shouldEqual s.flatten
+        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }

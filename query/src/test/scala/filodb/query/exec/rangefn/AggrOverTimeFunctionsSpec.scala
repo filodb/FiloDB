@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -608,14 +608,14 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
     def mad(s: Seq[Double]) : Double = {
       val medianVal = median(s)
-      val diffFromMedians: Buffer[Double] = Buffer.ofSize(s.length)
+      val diffFromMedians: ArrayBuffer[Double] = new ArrayBuffer(s.length)
       var iter = s.iterator
       while (iter.hasNext) {
         diffFromMedians.append(Math.abs(iter.next()-medianVal))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      diffFromMedians.sortInPlace()(Ordering.Double.TotalOrdering)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
-      iter = diffFromMedians.iterator()
+      iter = diffFromMedians.iterator
       diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
 

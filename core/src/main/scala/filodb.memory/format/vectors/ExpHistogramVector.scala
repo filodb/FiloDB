@@ -1,6 +1,7 @@
 package filodb.memory.format.vectors
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import org.agrona.DirectBuffer
 import spire.syntax.cfor._
 
@@ -107,7 +108,7 @@ class AppendableExpHistogramVector(factory: MemFactory,
   final def addNA(): AddResponse = Ack  // TODO: Add a 0 to every appender
 
   def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.blobAsBuffer(col))
-  def copyToBuffer: Buffer[DirectBuffer] = ???
+  def copyToBuffer: ArrayBuffer[DirectBuffer] = ???
   def apply(index: Int): DirectBuffer = ???
 
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress

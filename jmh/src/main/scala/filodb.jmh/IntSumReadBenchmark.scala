@@ -15,7 +15,7 @@ import filodb.memory.format.MemoryReader._
 
 object IntSumReadBenchmark {
   val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), DatasetOptions.DefaultOptions)
-  val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row.toLong), Some(0)) }
+  val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt()), Some(row.toLong), Some(0)) }
   val partKey = NamesTestData.defaultPartKey
   val rowColumns = Seq("int", "rownum", "part")
 
@@ -65,8 +65,10 @@ class IntSumReadBenchmark {
   def iterateScan(): Int = {
     val it = intReader.iterate(acc, intVectAddr, 0)
     var sum = 0
-    cforRange { 0 until NumRows } { i =>
-      sum += it.next()
+    var i = 0
+    while (i < NumRows) {
+      sum = sum + it.next
+      i += 1
     }
     sum
   }
