@@ -62,8 +62,8 @@ object AbstractTestKit {
          |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitListClusterSeedDiscovery"
          |  http-seeds.base-url = "http://$host:8080/"
          |}
-         |akka.remote.netty.tcp.port = $port
-         |akka.remote.netty.tcp.hostname = $host
+         |akka.remote.artery.canonical.port = $port
+         |akka.remote.artery.canonical.hostname = $host
          |akka.jvm-exit-on-fatal-error = off
          |akka.loggers = ["akka.testkit.TestEventListener"]
          |akka.actor.provider = "cluster"
@@ -76,9 +76,9 @@ object AbstractTestKit {
       s"""
          |akka-bootstrapper{
          |  explicit-list.seeds = [
-         |   "akka.tcp://$name@$host:$port",
-         |   "akka.tcp://$name@$host:2553",
-         |   "akka.tcp://$name@$host:2554"
+         |   "akka://$name@$host:$port",
+         |   "akka://$name@$host:2553",
+         |   "akka://$name@$host:2554"
          |  ]
          |}
       """.stripMargin).withFallback(rootConfig)
@@ -88,9 +88,9 @@ object AbstractTestKit {
       s"""
          |akka-bootstrapper{
          |  explicit-list.seeds = [
-         |  "akka.tcp://$name@$host:2553",
-         |  "akka.tcp://$name@$host:2554",
-         |  "akka.tcp://$name@$host:$port" ]
+         |  "akka://$name@$host:2553",
+         |  "akka://$name@$host:2554",
+         |  "akka://$name@$host:$port" ]
          |}
       """.stripMargin).withFallback(rootConfig)
 

@@ -64,7 +64,7 @@ object Client {
                        host: String,
                        port: Int = 2552,
                        askTimeout: FiniteDuration = 30 seconds): LocalClient = {
-    val addr = Address("akka.tcp", "filo-standalone", host, port)
+    val addr = Address("akka", "filo-standalone", host, port)
     val refFuture = system.actorSelection(ActorName.nodeCoordinatorPath(addr, v2ClusterEnabled))
                           .resolveOne(askTimeout)
     val ref = Await.result(refFuture, askTimeout)

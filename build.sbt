@@ -25,6 +25,11 @@ ThisBuild / dependencyOverrides ++= Seq(
   "org.scala-lang.modules" %% "scala-parser-combinators" % "2.3.0"
 )
 
+// Globally exclude kryo-shaded to prevent conflicts with kryo 5.5.0
+ThisBuild / excludeDependencies ++= Seq(
+  ExclusionRule("com.esotericsoftware", "kryo-shaded")
+)
+
 enablePlugins(ProtobufPlugin)
 
 lazy val memory = Submodules.memory.disablePlugins(SonarPlugin)

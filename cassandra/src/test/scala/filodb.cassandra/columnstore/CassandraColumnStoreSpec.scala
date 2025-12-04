@@ -137,6 +137,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val infoPtr = UnsafeUtils.addressFromDirectBuffer(infoBuf)
     val info = ChunkSetInfo(infoPtr)
     try {
+      timeMillis = startTimeMillis
       for (i <- 1 to 20) {
         if (i == 10) {
           partKey = partKey2
@@ -149,7 +150,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
         ChunkSetInfo.setNumRows(infoPtr, 10) // fake
         ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-        val set = ChunkSet(info, partKey, Nil, chunks)
+        val set = ChunkSet(info, partKey, Nil, chunks.toSeq)
 
         colStore.write(dataset.ref, Observable.fromIterable(Iterable(set))).futureValue
 

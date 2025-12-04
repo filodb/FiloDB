@@ -41,7 +41,7 @@ trait FilodbClusterNodeSpec extends AbstractSpec with ScalaFutures with FilodbCl
   override protected lazy val roleConfig = ConfigFactory.parseString(
        s"""akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
           |akka.coordinated-shutdown.exit-jvm = off
-          |akka.remote.netty.tcp.port=$port
+          |akka.remote.artery.canonical.port=$port
         """.stripMargin)
 
   implicit abstract override val patienceConfig: PatienceConfig =
@@ -59,7 +59,6 @@ trait FilodbClusterNodeSpec extends AbstractSpec with ScalaFutures with FilodbCl
         cluster.isInitialized shouldEqual false
         cluster.join()
         val probe = TestProbe()(system)
-        val ca = cluster.clusterSingleton(role, Some(probe.ref))
         probe.expectMsgClass(classOf[NodeProtocol.PreStart])
         eventually(cluster.clusterActor.isDefined) shouldEqual true
         eventually(cluster.isInitialized) shouldEqual true

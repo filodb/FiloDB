@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.mutable
 
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}

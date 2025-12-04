@@ -82,7 +82,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val promQL = s"""$metricName{_ns_=$nameSpace,_ws_=$workSpace}"""
 
     val cliQuery =
-      s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +
+      s"""./filo-cli '-Dakka.remote.artery.canonical.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +
         s"""--promql '$promQL' --start $startQuery --end $endQuery --limit 15"""
     logger.info(s"CLI Query : \n$cliQuery")
 

@@ -1,8 +1,7 @@
 package filodb.cassandra.columnstore
 
 import scala.concurrent.Future
-
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
@@ -10,7 +9,6 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
@@ -27,11 +25,12 @@ import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 
 class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
+  val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
 
@@ -76,8 +75,8 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
     gaugePartKeyBytes = part.partKeyBytes
 
-    val rawSamples = Stream.from(0).map { i =>
-      Seq(firstSampleTime + i, i.toDouble, gaugeName, seriesTags)
+    val rawSamples = LazyList.from(0).map { i =>
+      Seq[Any](firstSampleTime + i, i.toDouble, gaugeName, seriesTags)
     }.take(numSamples)
 
     MachineMetricsData.records(dataset, rawSamples).records.foreach { case (base, offset) =>
@@ -102,7 +101,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples
+      rvs.result.head.rows().toList.size shouldEqual numSamples
     } finally {
       memStore.shutdown()
     }
@@ -123,7 +122,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples
+        rvs.result.head.rows().toList.size shouldEqual numSamples
       }
     } finally {
       memStore.shutdown()
@@ -139,15 +138,15 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       memStore.refreshIndexForTesting(dataset.ref)
 
       // ingrest some more samples to trigger partial odp
-      val rawSamples = Stream.from(0).map { i =>
-        Seq(firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
+      val rawSamples = LazyList.from(0).map { i =>
+        Seq[Any](firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
       }.take(numSamples)
 
       memStore.ingest(dataset.ref, 0, SomeData(MachineMetricsData.records(dataset, rawSamples).records, 300))
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+      rvs.result.head.rows().toList.size shouldEqual numSamples * 2
     } finally {
       memStore.shutdown()
     }
@@ -162,8 +161,8 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       memStore.refreshIndexForTesting(dataset.ref)
 
       // ingrest some more samples to trigger partial odp
-      val rawSamples = Stream.from(0).map { i =>
-        Seq(firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
+      val rawSamples = LazyList.from(0).map { i =>
+        Seq[Any](firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
       }.take(numSamples)
 
       memStore.ingest(dataset.ref, 0, SomeData(MachineMetricsData.records(dataset, rawSamples).records, 300))
@@ -175,7 +174,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+        rvs.result.head.rows().toList.size shouldEqual numSamples * 2
       }
     } finally {
       memStore.shutdown()

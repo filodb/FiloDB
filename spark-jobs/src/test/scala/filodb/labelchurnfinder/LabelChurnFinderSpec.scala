@@ -1,7 +1,6 @@
 package filodb.labelchurnfinder
 
-import com.typesafe.config.ConfigFactory
-
+import com.typesafe.config.{Config, ConfigFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.OffHeapMemory
 import filodb.core.metadata.{Dataset, Schemas}
@@ -17,25 +16,25 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import java.io.File
 import java.time.Instant
-
 import filodb.labelchurnfinder.LcfTask.{ActiveCountColName, ChurnColName, LabelColName, TotalCountColName, WsNsColName}
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
+  val baseConf: Config = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
 
   val now = 1752700000000L
-  val jobConfig = ConfigFactory.parseString(
+  val jobConfig: Config = ConfigFactory.parseString(
     s"""
        |filodb.labelchurnfinder.pk-filters.0._ws_ = bulk_ws
        |filodb.labelchurnfinder.since-time = "${Instant.ofEpochMilli(now).toString}"
        |filodb.labelchurnfinder.dataset = prometheus
        |""".stripMargin)
 
-  val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
+  val rawDataStoreConfig: StoreConfig = StoreConfig(ConfigFactory.parseString( """
                                                                     |flush-interval = 1h
                                                                     |shard-mem-size = 1MB
                 """.stripMargin))
@@ -46,7 +45,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     Schemas.otelExpDeltaHistogram),
     Map.empty, 100, rawDataStoreConfig)
 
-  val rawDataset = Dataset("prometheus", Schemas.promCounter)
+  val rawDataset: Dataset = Dataset("prometheus", Schemas.promCounter)
 
   val bulkSeriesTags = Map("_ws_".utf8 -> "bulk_ws".utf8, "_ns_".utf8 -> "bulk_ns".utf8)
 

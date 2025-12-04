@@ -15,8 +15,8 @@ final class AkkaBootstrapperSettings(val config: Config) extends StrictLogging {
   if (bootstrapper.getBoolean("log-config-debug")) {
     logger.debug("Loaded the following akka-bootstrapper config: \n: {}",
       bootstrapper.root().render())
-    logger.debug("Loaded the following akka.remote.netty.tcp config: \n: {}",
-      config.getConfig("akka.remote.netty.tcp").root().render())
+    logger.debug("Loaded the following akka.remote.artery config: \n: {}",
+      config.getConfig("akka.remote.artery").root().render())
   }
 
   val seedDiscoveryClass = bootstrapper.getString("seed-discovery.class")

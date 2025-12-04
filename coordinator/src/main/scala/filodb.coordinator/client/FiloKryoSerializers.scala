@@ -32,7 +32,7 @@ object BinaryRegionUtils extends StrictLogging {
 }
 
 class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVectorKey] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[PartitionRangeVectorKey]): PartitionRangeVectorKey = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: PartitionRangeVectorKey]): PartitionRangeVectorKey = {
     val partBytes = BinaryRegionUtils.readLargeRegion(input)
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val keyCols = kryo.readClassAndObject(input)
@@ -53,7 +53,7 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
 }
 
 class ZeroCopyUTF8StringSerializer extends KryoSerializer[ZeroCopyUTF8String] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[ZeroCopyUTF8String]): ZeroCopyUTF8String = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: ZeroCopyUTF8String]): ZeroCopyUTF8String = {
     val numBytes = input.readInt
     ZeroCopyUTF8String(input.readBytes(numBytes))
   }
@@ -67,7 +67,7 @@ class ZeroCopyUTF8StringSerializer extends KryoSerializer[ZeroCopyUTF8String] wi
 }
 
 class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
-  override def read(kryo: Kryo, input: Input, typ: Class[PartitionInfo]): PartitionInfo = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: PartitionInfo]): PartitionInfo = {
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val partBytes = BinaryRegionUtils.readLargeRegion(input)
     PartitionInfo(schema, partBytes, UnsafeUtils.arayOffset, input.readInt)

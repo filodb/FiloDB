@@ -103,6 +103,13 @@ object FiloSettings {
       evictionSettings ++
       consoleSettings
 
+  // JDK 17+ module system opens required for Kryo serialization of internal Java classes
+  lazy val jdk17ModuleOpens = List(
+    "--add-opens=java.base/java.util=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+  )
+
   lazy val testSettings = Seq(
     Test / parallelExecution := false,
     Test / fork := true,
@@ -110,7 +117,7 @@ object FiloSettings {
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
-    javaOptions ++= List("-Xmx2G", "-XX:+CMSClassUnloadingEnabled", "-Dakka.test.timefactor=3"),
+    javaOptions ++= List("-Xmx2G", "-XX:+CMSClassUnloadingEnabled", "-Dakka.test.timefactor=3") ++ jdk17ModuleOpens,
     // Needed to avoid cryptic EOFException crashes in forked tests
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
@@ -134,7 +141,7 @@ object FiloSettings {
       IntegrationTest / internalDependencyClasspath, Test / exportedProducts)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-    MultiJvm / javaOptions := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
+    MultiJvm / javaOptions := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk17ModuleOpens,
     MultiJvm / compile := ((MultiJvm / compile) triggeredBy (Test / compile)).value)
 
   lazy val testMultiJvmToo = Seq(

@@ -1,16 +1,14 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
-import scala.concurrent.duration._
 import akka.actor.ActorRef
-import akka.pattern.ask
 import akka.remote.testkit.MultiNodeConfig
-import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
-import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.{ColumnInfo, PlannerParams, QueryContext}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.concurrent.duration._
 
 object ClusterRecoverySpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -68,12 +66,11 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
  * NOTE: since we moved to static configs every startup is a "recovery".
  */
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
-  import akka.testkit._
-
   import ClusterRecoverySpecConfig._
-  import filodb.query._
   import GdeltTestData._
   import NodeClusterActor._
+  import akka.testkit._
+  import filodb.query._
 
   override def initialParticipants: Int = roles.size
 
@@ -85,9 +82,8 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   val address2 = node(second).address
 
   private lazy val coordinatorActor = cluster.coordinatorActor
-  private lazy val metaStore = cluster.metaStore
 
-  implicit val patience =   // make sure futureValue has long enough time
+  implicit val patience: PatienceConfig =   // make sure futureValue has long enough time
     PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
 
   var clusterActor: ActorRef = _
@@ -110,19 +106,11 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     enterBarrier("both-nodes-joined-cluster")
 
-    import scala.concurrent.ExecutionContext.Implicits.global
 
     // wait for dataset to get registered automatically
     // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
     Thread sleep 3000
-    implicit val timeout: Timeout = cluster.settings.InitializationTimeout * 2
-    def func: Future[Seq[DatasetRef]] = {
-      val refs = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
-      refs.map { r =>
-        println(s"Queried $clusterActor and got back [$refs]")
-        r
-      }
-    }
+
     // awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
     enterBarrier("cluster-actor-recovery-started")
 

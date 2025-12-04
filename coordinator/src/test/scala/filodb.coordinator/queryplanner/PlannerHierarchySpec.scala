@@ -2238,15 +2238,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   }
 
   it("Raw data export on RR cluster should be pushed down to rr cluster and others to raw cluster only") {
-    val lp = RawSeries(IntervalSelector(startSeconds, endSeconds),
-        Seq(ColumnFilter("__name__", Equals("foo:1m")), ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs")),
-        ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"), Some(300000), None)
-
-    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams))
-    val expectedPlan = """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1736228159],recordingRules)
-                         |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633613330,1634777330), filters=List(ColumnFilter(_metric_,Equals(foo:1m)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1))), colName=Some(job), schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1736228159],recordingRules)
-                         |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633613330,1634777330), filters=List(ColumnFilter(_metric_,Equals(foo:1m)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1))), colName=Some(job), schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1736228159],recordingRules)""".stripMargin
-
 
     val lp1 = RawSeries(IntervalSelector(startSeconds, endSeconds),
       Seq(ColumnFilter("__name__", Equals("bar")), ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs")),
@@ -3158,18 +3149,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     validatePlan(execPlan8, expectedPlan8)
     // Case 9: top k with regex, the resolved regex should all be one remote partition, using PromQLRemoteExec, should be supported BUT fails
-
-    val singleRemotePartitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        routingKey("_ns_") match {
-          case _ =>
-            List(PartitionAssignment("remotePartition", "remotePartition-url0",
-              TimeRange(timeRange.startMs, timeRange.endMs)))
-        }
-      }
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = ???
-    }
 
     val twoRemoteMpPlanner = new MultiPartitionPlanner(twoRemotePartitionLocationProvider, twoRemoteMultiPartitionPlanner,
       "localPartition", dataset, queryConfig)

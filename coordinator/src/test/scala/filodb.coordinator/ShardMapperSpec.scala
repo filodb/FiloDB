@@ -105,7 +105,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     val mapper1 = new ShardMapper(32)
     mapper1.numAssignedShards shouldEqual 0
     mapper1.activeOrRecoveringShards(Seq(1, 5, 10)) shouldEqual Nil
-    mapper1.notActiveShards.size shouldEqual 32
+    mapper1.notActiveShards().size shouldEqual 32
 
     mapper1.updateFromEvent(ShardAssignmentStarted(dataset, 2, ref1)).isSuccess shouldEqual true
     mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
@@ -113,20 +113,20 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.updateFromEvent(RecoveryInProgress(dataset, 4, ref1, 0)).isSuccess shouldEqual true
     mapper1.numAssignedShards shouldEqual 2
     mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 4)
-    mapper1.notActiveShards shouldEqual (Set(0,1) ++ (3 to 31).toSet  )
+    mapper1.notActiveShards() shouldEqual (Set(0,1) ++ (3 to 31).toSet  )
 
     mapper1.updateFromEvent(ShardAssignmentStarted(dataset, 3, ref2)).isSuccess shouldEqual true
     mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
     mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3, 4)
     mapper1.numAssignedShards shouldEqual 3
-    mapper1.notActiveShards.size shouldEqual 30
+    mapper1.notActiveShards().size shouldEqual 30
     println(mapper1.prettyPrint)
 
     mapper1.updateFromEvent(ShardDown(dataset, 4, ref1)).isSuccess shouldEqual true
     mapper1.activeOrRecoveringShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
     mapper1.numAssignedShards shouldEqual 2
     mapper1.coordForShard(4) shouldEqual ActorRef.noSender
-    mapper1.notActiveShards.size shouldEqual 30
+    mapper1.notActiveShards().size shouldEqual 30
   }
 
   it("can produce a minimal set of events to reproduce ShardMapper state") {
@@ -243,7 +243,6 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   it("should be idempotent for registerNode and assign/unassign/register/unregister as expected") {
     val coord1 = TestProbe().ref
     val coord2 = TestProbe().ref
-    val coord3 = TestProbe().ref
     val numShards = 32
     val map = new ShardMapper(numShards)
 

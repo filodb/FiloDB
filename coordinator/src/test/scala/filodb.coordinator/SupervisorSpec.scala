@@ -1,16 +1,13 @@
 package filodb.coordinator
 
 import akka.actor.{ActorPath, PoisonPill}
-import akka.cluster.Cluster
-import monix.execution.Scheduler
-
 import filodb.core.store.MetaStore
+import monix.execution.Scheduler
 
 class SupervisorSpec extends AkkaSpec {
 
   import NodeProtocol._
 
-  private val filoCluster = FilodbCluster(system)
   private val settings = new FilodbSettings(system.settings.config)
 
   /* Set all as lazy to test same startup as users. */
@@ -22,9 +19,7 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val metaStore: MetaStore = factory.metaStore
   private lazy val memStore = factory.memStore
   private lazy val assignmentStrategy = DefaultShardAssignmentStrategy
-  private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, settings)
   private lazy val guardianProps = NodeGuardian.props(settings, metaStore, memStore, assignmentStrategy)
-  private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {
     "create the coordinator actor" in {

@@ -9,6 +9,7 @@ object Dependencies {
   val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
   // The default minlog only logs to STDOUT.  We want to log to SLF4J.
   val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = "minlog")
+  val excludeKryoShaded = ExclusionRule(organization = "com.esotericsoftware", name = "kryo-shaded")
   val excludeOldLz4 = ExclusionRule(organization = "net.jpountz.lz4", name = "lz4")
   val excludeNetty  = ExclusionRule(organization = "io.netty", name = "netty-handler")
   val excludeXBean = ExclusionRule(organization = "org.apache.xbean", name = "xbean-asm6-shaded")
@@ -90,7 +91,7 @@ object Dependencies {
     "org.apache.lucene"            % "lucene-facet"       % "9.7.0" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.13.1",  // Updated for Scala 2.13
     "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
-    "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
+    "com.esotericsoftware"         % "kryo"               % "5.5.0" excludeAll(excludeMinlog, excludeKryoShaded),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
     "com.twitter"                  %% "chill"             % "0.10.0",  // Updated for Scala 2.13
@@ -125,13 +126,13 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "com.typesafe.akka"      %% "akka-cluster-tools"          % akkaVersion, // For ClusterSingleton support
-    "io.altoo"               %% "akka-kryo-serialization"     % "2.4.3" excludeAll(excludeMinlog, excludeOldLz4,excludeAkka), // Updated for Akka 2.6 and Scala 2.13
-    "de.javakaffee"          % "kryo-serializers"             % "0.45" excludeAll(excludeMinlog,excludeAkka), // Updated version
+    "io.altoo"               %% "akka-kryo-serialization"     % "2.4.3" excludeAll(excludeMinlog, excludeOldLz4, excludeAkka, excludeKryoShaded), // Updated for Akka 2.6 and Scala 2.13
+    "de.javakaffee"          % "kryo-serializers"             % "0.45" excludeAll(excludeMinlog, excludeAkka, excludeKryoShaded), // Updated version
     "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion  excludeAll(excludeOkHttp3),
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
-    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21" excludeAll(excludeAkka), // Downgraded to requested version
+    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.1.0" excludeAll(excludeAkka), // Updated to 0.1.0 for Akka 2.6.4 compatibility
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
     "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test,
     "org.apache.commons" % "commons-text" % "1.9"

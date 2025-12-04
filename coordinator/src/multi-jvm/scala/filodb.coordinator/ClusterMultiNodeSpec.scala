@@ -5,7 +5,7 @@ import akka.actor.{Actor, ActorRef, Address, Deploy, Props}
 import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.cluster.ClusterEvent._
 import akka.remote.testconductor.RoleName
-import akka.remote.testkit.{FlightRecordingSupport, MultiNodeSpec, MultiNodeSpecCallbacks}
+import akka.remote.testkit.{MultiNodeSpec, MultiNodeSpecCallbacks}
 import akka.testkit.{ImplicitSender, TestLatch, TestProbe}
 import com.typesafe.scalalogging.StrictLogging
 import org.scalatest._
@@ -22,7 +22,7 @@ trait ClusterMultiNodeSpec extends MultiNodeSpecCallbacks
 }
 
 trait MultiNodeClusterSpec extends Suite
-  with ClusterMultiNodeSpec with FlightRecordingSupport
+  with ClusterMultiNodeSpec
   with StrictLogging with ScalaFutures with ImplicitSender { self: MultiNodeSpec =>
 
   import NodeClusterActor.IngestionSource
@@ -115,7 +115,7 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec { self: MultiNodeSpe
   def awaitMembersUp(numberOfMembers: Int, timeout: FiniteDuration = defaultTimeout): Unit =
     within(timeout) {
       awaitAssert(cluster.state.members.size shouldEqual numberOfMembers)
-      awaitAssert(cluster.state.members.map(_.status) shouldEqual Set(MemberStatus.Up))
+      awaitAssert(cluster.state.members.iterator.map(_.status).toSet shouldEqual Set(MemberStatus.Up))
     }
 
   def awaitOnClusterLeave(on: RoleName,

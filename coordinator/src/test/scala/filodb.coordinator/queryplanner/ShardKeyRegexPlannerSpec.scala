@@ -10,7 +10,8 @@ import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId, PlanValidationSpec, SortFunctionId, TsCardinalities}
+import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId,
+  PlanValidationSpec, SortFunctionId, TsCardinalities}
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.{Equals, isRegex}
 import filodb.prometheus.parse.Parser
@@ -24,9 +25,8 @@ import scala.language.postfixOps
 class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
   private val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
-  private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
@@ -38,7 +38,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   private val localMapper = new ShardMapper(32)
-  for {i <- 0 until 32} localMapper.registerNode(Seq(i), node)
+  for {i <- 0 until 32} localMapper.registerNode(Seq(i).toSeq, node)
 
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, localMapper, earliestRetainedTimestampFn = 0,
@@ -408,7 +408,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it ("should generate Exec plan for Metadata Label values query") {
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq.empty
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
-    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo", _ns_=~".*" """),
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__""").toSeq, Some("""_ws_="demo", _ns_=~".*" """),
       TimeStepParams(1000, 20, 5000) )
 
     val promQlQueryParams = PromQlQueryParams(
@@ -423,7 +423,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it ("should generate ExecPlan for TsCardinalities") {
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Nil
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
-    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar").toSeq, 3)
     val promQlQueryParams = PromQlQueryParams(
       "", 1000, 20, 5000, Some("/api/v1/metering/cardinality/timeseries"))
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =

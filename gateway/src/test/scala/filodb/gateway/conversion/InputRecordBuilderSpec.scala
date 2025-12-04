@@ -130,7 +130,7 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     InputRecord.writeGaugeRecord(builder, metric, baseTags, 100000L, 5.5)
 
     // The empty histogram should have been skipped, so we should have only one record
-    builder.allContainers.head.countRecords shouldEqual 1
+    builder.allContainers.head.countRecords() shouldEqual 1
   }
 
   it("should skip empty histograms via writeDeltaHistRecord, and write subsequent records") {
@@ -139,6 +139,6 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     InputRecord.writeGaugeRecord(builder, metric, baseTags, 100000L, 5.5)
 
     // The empty histogram should have been skipped, so we should have only one record
-    builder.allContainers.head.countRecords shouldEqual 1
+    builder.allContainers.head.countRecords() shouldEqual 1
   }
 }

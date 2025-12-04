@@ -1,21 +1,19 @@
 package filodb.prom.downsample
 
-import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration._
-
 import akka.actor.{ActorSystem, CoordinatedShutdown}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpRequest, Uri}
 import akka.http.scaladsl.model.Uri.Query
+import akka.http.scaladsl.model.{HttpRequest, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.ActorMaterializer
+import akka.stream.Materializer
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-
-import filodb.query.PromCirceSupport
 import filodb.query.SuccessResponse
+
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
 
 /**
   * Use this tool to validate raw data against downsampled data for gauges.
@@ -37,9 +35,10 @@ import filodb.query.SuccessResponse
 object GaugeDownsampleValidator extends App with StrictLogging {
 
   import FailFastCirceSupport._
+  // TODO: Fix this
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
-  import PromCirceSupport._
+  // import PromCirceSupport._
   import io.circe.generic.auto._
 
   case class DownsampleValidation(name: String, rawQuery: String, dsQuery: String)
@@ -73,8 +72,8 @@ object GaugeDownsampleValidator extends App with StrictLogging {
 
   val urlPrefixRaw = s"$filodbHttpEndpoint/promql/prometheus/api"
 
-  implicit val as = ActorSystem()
-  implicit val materializer = ActorMaterializer()
+  implicit val as: ActorSystem = ActorSystem()
+  implicit val materializer: Materializer = akka.stream.SystemMaterializer(as).materializer
 
   // TODO configure dataset name etc.
   val downsampleLevels = Seq (

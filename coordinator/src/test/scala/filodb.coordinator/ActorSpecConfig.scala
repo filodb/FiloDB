@@ -67,7 +67,7 @@ object AkkaSpec extends SeedNodeConfig {
   val userConfig = ConfigFactory.parseString(
     s"""
       |filodb {
-      |  seed-nodes = ["akka.tcp://filo-standalone@$host:$port"]
+      |  seed-nodes = ["akka://filo-standalone@$host:$port"]
       |  dataset-definitions {
       |    prometheus {
       |      string-columns = []
@@ -87,8 +87,8 @@ object AkkaSpec extends SeedNodeConfig {
                                 .getOrElse("")
 
   val serverConfig = ConfigFactory.parseString(
-   s"""akka.remote.netty.tcp.port = $port
-      |akka.remote.netty.tcp.host = $host
+   s"""akka.remote.artery.canonical.port = $port
+      |akka.remote.artery.host = $host
       |akka.log-received-messages = on
       |akka.log-sent-messages = on
       |akka.debug.lifecycle = on
@@ -119,7 +119,7 @@ abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
 
 trait RunnableSpec extends AbstractSpec with SeedNodeConfig {
 
-  System.setProperty("filodb.seed-nodes", s"akka.tcp://filo-standalone@$host:$port")
+  System.setProperty("filodb.seed-nodes", s"akka://filo-standalone@$host:$port")
 
   override def afterAll(): Unit = {
     super.afterAll()

@@ -129,7 +129,6 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val now = System.currentTimeMillis()
     val numRawSamples = 1000
-    val limit = 900
     val reportingInterval = 10000
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
@@ -153,9 +152,9 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         override val key: RangeVectorKey = rvKey
         override def outputRange: Option[RvRange] = None
       }
-      val srv = SerializedRangeVector(rv, cols, QueryStats())
-      val observedTs = srv.rows.toSeq.map(_.getLong(0))
-      val observedVal = srv.rows.toSeq.map(_.getDouble(1))
+      val srv = SerializedRangeVector(rv, cols.toIndexedSeq, QueryStats())
+      val observedTs = srv.rows().toSeq.map(_.getLong(0))
+      val observedVal = srv.rows().toSeq.map(_.getDouble(1))
       observedTs shouldEqual tuples.map(_._1)
       observedVal shouldEqual tuples.map(_._2)
       srv
@@ -323,7 +322,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
     import filodb.core.query.NoCloseCursor._
     val ser = Seq(SerializedRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new UTF8MapIteratorRowReader(input.toIterator), None), cols, QueryStats()))
+      new UTF8MapIteratorRowReader(input.iterator), None), cols, QueryStats()))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
@@ -430,7 +429,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       UTF8Str("key2") -> UTF8Str("val2"))
     val rand = new scala.util.Random(0)
     val srvs = Range(0, 100).map( x => {
-      val keys = CustomRangeVectorKey(keysMap + (UTF8Str("key3") -> UTF8Str(x + "key3")))
+      val keys = CustomRangeVectorKey(keysMap + (UTF8Str("key3") -> UTF8Str(s"${x}key3")))
       val rv = toRv(Range(0, 10001, 100).map(x => (x.toLong, rand.nextDouble())), keys, RvRange(0, 100, 10000))
       val queryStats = QueryStats()
       SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)

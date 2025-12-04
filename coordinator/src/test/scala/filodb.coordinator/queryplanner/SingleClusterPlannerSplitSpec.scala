@@ -21,7 +21,7 @@ import filodb.query.exec.{MultiSchemaPartitionsExec, _}
 
 class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
-  implicit val system = ActorSystem()
+  implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)
@@ -30,7 +30,6 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   private def mapperRef = mapper
 
   private val dataset = MetricsTestData.timeseriesDataset
-  private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
   private val config = ConfigFactory.load("application_test.conf").resolve()
@@ -210,7 +209,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
   it("should generate SplitLocalPartitionDistConcatExec wrapper plan with appropriate splits," +
         "should generate child ExecPlans with appropriate shards for windows when there is a change in spread") {
-    var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
+    val filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
     filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
 
     val stepMs = 1000
@@ -555,7 +554,6 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   it ("should generate SplitExec wrapper with appropriate splits" +
         " and should replace __name__ with _metric_ in by and without in underlying execplans") {
     val dataset = MetricsTestData.timeseriesDatasetWithMetric
-    val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 
@@ -599,7 +597,6 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   it ("should generate SplitExec wrapper with appropriate splits" +
       " and should replace __name__ with _metric_ in ignoring and group_left/group_right in child execplans") {
     val dataset = MetricsTestData.timeseriesDatasetWithMetric
-    val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 

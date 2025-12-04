@@ -44,7 +44,7 @@ class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
     output.writeLong(card.childrenQuota, true)
   }
 
-  def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
+  def read(kryo: Kryo, input: Input, t: Class[_ <: CardinalityValue]): CardinalityValue = {
     CardinalityValue(input.readLong(true), input.readLong(true),
                     input.readLong(true), input.readLong(true))
   }
@@ -102,7 +102,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val kryo = new ThreadLocal[Kryo]() {
     override def initialValue(): Kryo = {
       val k = new Kryo()
-      k.addDefaultSerializer(classOf[CardinalityValue], classOf[CardinalityNodeSerializer])
+      k.register(classOf[CardinalityValue], new CardinalityNodeSerializer())
       k
     }
   }
