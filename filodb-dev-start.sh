@@ -43,7 +43,7 @@ if [ ! -f standalone/target/scala-2.13/standalone-assembly-*-SNAPSHOT.jar ]; the
 fi
 
 # JDK 17+ module system opens required for Kryo serialization of internal Java classes
-JDK17_OPTS="--add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+JDK17_OPTS="--add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED"
 
 FIXED_JAVA_OPTS="-Xmx2G $JDK17_OPTS -Dconfig.file=$CONFIG -Dlogback.configurationFile=conf/logback-dev.xml "
 

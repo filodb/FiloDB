@@ -107,7 +107,8 @@ object FiloSettings {
   lazy val jdk17ModuleOpens = List(
     "--add-opens=java.base/java.util=ALL-UNNAMED",
     "--add-opens=java.base/java.lang=ALL-UNNAMED",
-    "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+    "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED"
   )
 
   lazy val testSettings = Seq(
@@ -227,6 +228,8 @@ object FiloSettings {
       case "filodb-defaults.conf"  => MergeStrategy.concat
       case PathList("scala", "jdk", xs @ _*) => MergeStrategy.first
       case PathList("scala", "util", "control", "compat", xs @ _*) => MergeStrategy.first
+      // Handle protobuf conflicts between protobuf-java and akka-protobuf-v3
+      case PathList("google", "protobuf", xs @ _*) if xs.last.endsWith(".proto") => MergeStrategy.first
       case x =>
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
