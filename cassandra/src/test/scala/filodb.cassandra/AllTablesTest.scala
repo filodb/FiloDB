@@ -15,6 +15,7 @@ trait AllTablesTest extends AnyFunSpec with AsyncTest {
 
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val columnStore = new CassandraColumnStore(config, scheduler, session)
+  lazy val downsampleColumnStore = new CassandraColumnStore(config, scheduler, session, true)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
 
 }

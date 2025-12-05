@@ -53,7 +53,7 @@ object StoreFactory extends Instance with StrictLogging {
 class TimeSeriesNullStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
   implicit val ioSched = ioPool
   val metaStore = SingleJvmInMemoryStore.metaStore
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, metaStore)
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new NullColumnStore, metaStore)
 }
 
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
