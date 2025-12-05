@@ -18,7 +18,7 @@ import filodb.memory.format.UnsafeUtils
 class MemstoreCassandraSinkSpec extends AllTablesTest {
   import MachineMetricsData._
 
-  val memStore = new TimeSeriesMemStore(config, columnStore, metaStore)
+  val memStore = new TimeSeriesMemStore(config, columnStore, downsampleColumnStore, metaStore)
   val numShards = 4
 
   // First create the tables in C*

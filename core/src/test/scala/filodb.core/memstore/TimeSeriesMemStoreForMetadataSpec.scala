@@ -22,7 +22,9 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
 
   val metadataKeyLabelValues = Map("ignore" -> "ignore")
   val jobQueryResult1 = Map(("job".utf8, "myCoolService".utf8))

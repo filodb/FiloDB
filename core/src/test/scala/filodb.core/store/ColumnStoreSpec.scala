@@ -29,11 +29,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   def colStore: ColumnStore
+  def downsampleColStore: ColumnStore
   def metaStore: MetaStore
   val policy = new FixedMaxPartitionsEvictionPolicy(100)
   val schemas = Schemas(dataset.schema.partition,
                         Map(dataset.name -> dataset.schema))  // Since 99 GDELT rows, this will never evict
-  val memStore = new TimeSeriesMemStore(config, colStore, metaStore, Some(policy))
+  val memStore = new TimeSeriesMemStore(config, colStore, downsampleColStore, metaStore, Some(policy))
 
   // First create the tables in C*
   override def beforeAll(): Unit = {

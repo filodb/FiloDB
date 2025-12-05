@@ -40,7 +40,9 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
 
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
