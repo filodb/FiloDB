@@ -36,7 +36,7 @@ impl SharedDocSet {
 
     #[inline]
     fn word_count(&self) -> u32 {
-        (self.bits.max_value() + 63) / 64
+        self.bits.max_value().div_ceil(64)
     }
 }
 

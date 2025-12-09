@@ -83,7 +83,7 @@ mod tests {
         let explanation = weight.explain(reader, 1).expect("Should succeed");
 
         assert_eq!(
-            format!("{:?}", explanation),
+            format!("{explanation:?}"),
             "Explanation({\n  \"value\": 1.0,\n  \"description\": \"BitSetWeight\"\n})"
         );
     }

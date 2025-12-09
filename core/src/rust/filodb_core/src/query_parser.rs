@@ -377,7 +377,7 @@ mod tests {
         );
         assert_eq!(
             unboxed.term().value().as_str().unwrap(),
-            format!("{}\0s{}", JSON_ATTRIBUTE1_NAME, filter)
+            format!("{JSON_ATTRIBUTE1_NAME}\0s{filter}")
         );
 
         let collector = DocSetCollector;
@@ -597,7 +597,7 @@ mod tests {
         );
         assert_eq!(
             clause.term().value().as_str().unwrap(),
-            format!("{}\0s{}", JSON_ATTRIBUTE1_NAME, filter1)
+            format!("{JSON_ATTRIBUTE1_NAME}\0s{filter1}")
         );
 
         let (occur, clause) = unboxed.clauses().get(1).unwrap();
@@ -611,7 +611,7 @@ mod tests {
         );
         assert_eq!(
             clause.term().value().as_str().unwrap(),
-            format!("{}\0s{}", JSON_ATTRIBUTE2_NAME, filter2)
+            format!("{JSON_ATTRIBUTE2_NAME}\0s{filter2}")
         );
 
         let collector = DocSetCollector;
