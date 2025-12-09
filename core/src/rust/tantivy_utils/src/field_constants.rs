@@ -1,7 +1,7 @@
 //! Field names
 
 pub fn facet_field_name(name: &str) -> String {
-    format!("{}{}", FACET_FIELD_PREFIX, name)
+    format!("{FACET_FIELD_PREFIX}{name}")
 }
 
 // These should be kept in sync with the constants in  PartKeyIndex.scala
