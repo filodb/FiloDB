@@ -949,10 +949,12 @@ object LogicalPlan {
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
      case lp: TsCardinalities             => Seq(lp)
-     case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.toOption.get)
-                                                             else Nil
-                                             val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.toOption.get)
-                                                             else Nil
+     case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight)
+                                               findLeafLogicalPlans(lp.lhs.toOption.get)
+                                             else Nil
+                                             val rhsLeafs = if (lp.rhs.isRight)
+                                               findLeafLogicalPlans(lp.rhs.toOption.get)
+                                             else Nil
                                              lhsLeafs ++ rhsLeafs
      case lp: ScalarFixedDoublePlan       => Seq(lp)
      case lp: ScalarTimeBasedPlan         => Seq(lp)

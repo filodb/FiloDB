@@ -498,7 +498,8 @@ object RangeFunction {
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
-    case Some(other)                            => throw new UnsupportedOperationException(s"Function $other not supported for iterating windowing")
+    case Some(other)                            => throw new UnsupportedOperationException(
+      s"Function $other not supported for iterating windowing")
   }
 }
 

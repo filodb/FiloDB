@@ -4,7 +4,8 @@ import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 import filodb.query.RangeFunctionId.Timestamp
 
-case class Function(name: String, allParams: Seq[Expression]) extends Expression with filodb.prometheus.ast.PeriodicSeries {
+case class Function(name: String, allParams: Seq[Expression]) extends Expression
+  with filodb.prometheus.ast.PeriodicSeries {
   private val ignoreChecks = name.equalsIgnoreCase("vector") || name.equalsIgnoreCase("time")
 
   if (!ignoreChecks &&

@@ -164,9 +164,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    // Check values in an order-independent way by mapping mode label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("mode")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("idle") shouldEqual List(3)
+    resultMap("user") shouldEqual List(1)
   }
 
   it("should join many-to-one with ignoring ") {
@@ -201,9 +204,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    // Check values in an order-independent way by mapping mode label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("mode")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("idle") shouldEqual List(3)
+    resultMap("user") shouldEqual List(1)
   }
 
   it("should join many-to-one with by and grouping without arguments") {
@@ -252,10 +258,16 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    // Check values in an order-independent way by mapping (instance, mode) to value
+    val resultMap = result.map { rv =>
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      val mode = rv.key.labelValues(ZeroCopyUTF8String("mode")).toString
+      (instance, mode) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    resultMap(("abc", "idle")) shouldEqual List(0.75)
+    resultMap(("abc", "user")) shouldEqual List(0.25)
+    resultMap(("def", "idle")) shouldEqual List(0.8)
+    resultMap(("def", "user")) shouldEqual List(0.2)
   }
 
   it("copy sample role to node using group right ") {
@@ -336,10 +348,16 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    // Check values in an order-independent way by mapping (instance, mode) to value
+    val resultMap = result.map { rv =>
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      val mode = rv.key.labelValues(ZeroCopyUTF8String("mode")).toString
+      (instance, mode) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    resultMap(("abc", "idle")) shouldEqual List(0.75)
+    resultMap(("abc", "user")) shouldEqual List(0.25)
+    resultMap(("def", "idle")) shouldEqual List(0.8)
+    resultMap(("def", "user")) shouldEqual List(0.2)
   }
 
   it("should have metric name when operator is not MathOperator") {

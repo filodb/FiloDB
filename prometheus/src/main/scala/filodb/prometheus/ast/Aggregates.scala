@@ -13,7 +13,8 @@ case class By(labels: Seq[String]) extends AggregateGrouping
 
 case class AggregateExpression(name: String, params: Seq[Expression],
                                aggregateGrouping: Option[AggregateGrouping],
-                               altFunctionParams: Seq[Expression]) extends Expression with filodb.prometheus.ast.PeriodicSeries {
+                               altFunctionParams: Seq[Expression]) extends Expression
+  with filodb.prometheus.ast.PeriodicSeries {
 
   val aggOpOption: Option[AggregationOperator] = AggregationOperator.withNameInsensitiveOption(name)
 

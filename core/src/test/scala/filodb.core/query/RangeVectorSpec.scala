@@ -36,14 +36,18 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
   it("should be able to create and read from SerializedRangeVector") {
     val rv = new TuplesRangeVector(tuples)
     val srv = SerializedRangeVector(rv, cols.toIndexedSeq, queryStats)
-    val observedTs = srv.rows().toSeq.map(_.getLong(0))
-    val observedVal = srv.rows().toSeq.map(_.getDouble(1))
+    // Extract values during iteration since the underlying reader object is reused
+    val observed = srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toVector
+    val observedTs = observed.map(_._1)
+    val observedVal = observed.map(_._2)
     observedTs shouldEqual tuples.map(_._1)
     observedVal shouldEqual tuples.map(_._2)
 
     val srv2 = SerializedRangeVector(srv, cols.toIndexedSeq, queryStats)
-    val observedTs2 = srv2.rows().toSeq.map(_.getLong(0))
-    val observedVal2 = srv2.rows().toSeq.map(_.getDouble(1))
+    // Extract values during iteration since the underlying reader object is reused
+    val observed2 = srv2.rows().map(r => (r.getLong(0), r.getDouble(1))).toVector
+    val observedTs2 = observed2.map(_._1)
+    val observedVal2 = observed2.map(_._2)
     observedTs2 shouldEqual tuples.map(_._1)
     observedVal2 shouldEqual tuples.map(_._2)
   }
@@ -56,14 +60,16 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
     // Sharing one builder across multiple input RangeVectors
     val srvs = rvs.map(rv => SerializedRangeVector(rv, builder, schema, "RangeVectorSpec", queryStats))
 
-    // Now verify each of them
-    val observedTs = srvs(0).rows().toSeq.map(_.getLong(0))
-    val observedVal = srvs(0).rows().toSeq.map(_.getDouble(1))
+    // Now verify each of them - extract values during iteration since the underlying reader object is reused
+    val observed = srvs(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toVector
+    val observedTs = observed.map(_._1)
+    val observedVal = observed.map(_._2)
     observedTs shouldEqual tuples.take(400).map(_._1)
     observedVal shouldEqual tuples.take(400).map(_._2)
 
-    val observedTs2 = srvs(1).rows().toSeq.map(_.getLong(0))
-    val observedVal2 = srvs(1).rows().toSeq.map(_.getDouble(1))
+    val observed2 = srvs(1).rows().map(r => (r.getLong(0), r.getDouble(1))).toVector
+    val observedTs2 = observed2.map(_._1)
+    val observedVal2 = observed2.map(_._2)
     observedTs2 shouldEqual tuples.drop(400).map(_._1)
     observedVal2 shouldEqual tuples.drop(400).map(_._2)
   }

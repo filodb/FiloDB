@@ -321,7 +321,8 @@ case class VectorSpec() extends Vector{
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
                              offset: Option[Duration],
-                             atTimestamp: Option[AtTimestamp]) extends Vector with filodb.prometheus.ast.PeriodicSeries {
+                             atTimestamp: Option[AtTimestamp]) extends Vector
+  with filodb.prometheus.ast.PeriodicSeries {
 
   import WindowConstants._
 

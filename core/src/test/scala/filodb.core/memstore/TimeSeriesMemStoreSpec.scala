@@ -67,7 +67,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0), ("_type_",0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should contain theSameElementsAs Seq(("series", 0), ("_type_",0))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 0
 
     val minSet = rawData.map(_(1).asInstanceOf[Double]).toSet
@@ -523,7 +523,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore.refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0), ("_type_",0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should contain theSameElementsAs Seq(("series", 0), ("_type_",0))
 
     memStore.truncate(dataset1.ref, numShards = 4)
 

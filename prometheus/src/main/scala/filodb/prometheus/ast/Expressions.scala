@@ -3,7 +3,8 @@ package filodb.prometheus.ast
 import filodb.core.query.RangeParams
 import filodb.query._
 
-case class UnaryExpression(operator: Operator, operand: Expression) extends Expression with filodb.prometheus.ast.PeriodicSeries {
+case class UnaryExpression(operator: Operator, operand: Expression) extends Expression
+  with filodb.prometheus.ast.PeriodicSeries {
   //TODO Need to pass an operator to a series
   override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     if (operator != Add && operator != Sub) {
@@ -85,13 +86,16 @@ case class BinaryExpression(lhs: Expression,
         case (lh: ScalarExpression, rh: ScalarExpression) =>
           ScalarBinaryOperation(operator.getPlanOperator, Left(lh.toScalar), Left(rh.toScalar), rangeParams)
         // (2 + 3) + 5
-        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: ScalarExpression) =>
+          ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), Left(rh.toScalar), rangeParams)
         // 2 + (3 * 5)
-        case (lh: ScalarExpression, rh: filodb.prometheus.ast.PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: ScalarExpression, rh: filodb.prometheus.ast.PeriodicSeries) =>
+          ScalarBinaryOperation(operator.getPlanOperator,
           Left(lh.toScalar), Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
         // (2 + 3) + (5 - 6)
-        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: filodb.prometheus.ast.PeriodicSeries) => ScalarBinaryOperation(operator.getPlanOperator,
+        case (lh: filodb.prometheus.ast.PeriodicSeries, rh: filodb.prometheus.ast.PeriodicSeries) =>
+          ScalarBinaryOperation(operator.getPlanOperator,
           Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]),
           Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
       }

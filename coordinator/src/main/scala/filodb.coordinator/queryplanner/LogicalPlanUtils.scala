@@ -460,7 +460,8 @@ object LogicalPlanUtils extends StrictLogging {
         // The filters might contain pipe-concatenated EqualsRegex values.
         // Convert these into sets of single-valued Equals filters.
         val resolvedShardKeyFilters = rawShardKeyFilters.flatMap { filters =>
-          val equalsFilters: scala.collection.immutable.Seq[scala.collection.immutable.Seq[ColumnFilter]] = filters.toSeq.map { filter =>
+          val equalsFilters: scala.collection.immutable.Seq[scala.collection.immutable.Seq[ColumnFilter]] =
+            filters.toSeq.map { filter =>
             (filter.filter match {
               case EqualsRegex(values: String) if QueryUtils.containsPipeOnlyRegex(values) =>
                 QueryUtils.splitAtUnescapedPipes(values).map(value => ColumnFilter(filter.column, Equals(value)))
@@ -623,7 +624,8 @@ object LogicalPlanUtils extends StrictLogging {
                                              nonMetricShardKeyCols: Seq[String]): Seq[Seq[ColumnFilter]] = {
     LogicalPlan.getNonMetricShardKeyFilters(lp, nonMetricShardKeyCols.toSeq)
       .flatMap { group =>
-        val keyToValues: scala.collection.immutable.Map[String, scala.collection.immutable.Seq[String]] = group.map { filter =>
+        val keyToValues: scala.collection.immutable.Map[String, scala.collection.immutable.Seq[String]] =
+          group.map { filter =>
           val values: scala.collection.immutable.Seq[String] = filter match {
             case ColumnFilter(col, regex: EqualsRegex) if QueryUtils.containsPipeOnlyRegex(regex.value.toString) =>
               QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct

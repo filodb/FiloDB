@@ -88,7 +88,7 @@ object AkkaSpec extends SeedNodeConfig {
 
   val serverConfig = ConfigFactory.parseString(
    s"""akka.remote.artery.canonical.port = $port
-      |akka.remote.artery.host = $host
+      |akka.remote.artery.canonical.host = $host
       |akka.log-received-messages = on
       |akka.log-sent-messages = on
       |akka.debug.lifecycle = on

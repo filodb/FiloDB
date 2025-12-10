@@ -195,7 +195,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
         })
       }
     }
-    result.toArray shouldEqual jobQueryResult2
+    result.toArray.sorted shouldEqual jobQueryResult2.sorted
   }
 
   it ("empty response label values remote metadata exec") {

@@ -519,7 +519,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       if (hist.buckets != curScheme) {
         addNewBuckets(hist.buckets, buckets, timestamps.length)  // add new buckets, backfilling timestamps with NaN
         curScheme = hist.buckets
-        emptyBuckets = scala.collection.mutable.HashSet.from(buckets.keySet.diff(curScheme.bucketSet))   // All the buckets that need NaN filled going forward
+        emptyBuckets = scala.collection.mutable.HashSet.from(
+          buckets.keySet.diff(curScheme.bucketSet))   // All the buckets that need NaN filled going forward
       }
 
       timestamps += row.getLong(0)
@@ -530,7 +531,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
     }
 
     // Now create new RangeVectors for each bucket
-    // NOTE: scala.collection.mutable.HashMap methods sometimes has issues giving consistent results instead of duplicates.
+    // NOTE: scala.collection.mutable.HashMap methods sometimes has issues giving consistent results
+    //   instead of duplicates.
     buckets.map { case (le, bucketValues) =>
       promBucketRV(rv.key, le, timestamps, bucketValues, rv.outputRange)
     }.toArray.toSeq
@@ -542,7 +544,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   private def addNewBuckets(newScheme: HistogramBuckets,
-                            buckets: scala.collection.mutable.HashMap[Double, scala.collection.mutable.ArrayBuffer[Double]],
+                            buckets: scala.collection.mutable.HashMap[Double,
+                              scala.collection.mutable.ArrayBuffer[Double]],
                             elemsToPad: Int): Unit = {
     val bucketsToAdd = newScheme.bucketSet.diff(buckets.keySet)
     bucketsToAdd.foreach { buc =>
@@ -554,7 +557,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   // Create a Prometheus-compatible single bucket range vector
   private def promBucketRV(origKey: RangeVectorKey, le: Double,
-                           ts: scala.collection.mutable.ArrayBuffer[Long], values: scala.collection.mutable.ArrayBuffer[Double],
+                           ts: scala.collection.mutable.ArrayBuffer[Long],
+                           values: scala.collection.mutable.ArrayBuffer[Double],
                            period: Option[RvRange]): RangeVector = {
     // create new range vector key, appending _bucket to the metric name
     val labels2 = origKey.labelValues.map { case (k, v) =>

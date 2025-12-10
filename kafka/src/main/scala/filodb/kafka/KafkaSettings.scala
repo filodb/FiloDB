@@ -2,8 +2,8 @@ package filodb.kafka
 
 import java.util.{Properties => JProperties}
 
-import scala.jdk.CollectionConverters._
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 import com.typesafe.config.Config

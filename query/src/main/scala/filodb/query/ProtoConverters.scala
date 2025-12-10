@@ -892,7 +892,8 @@ object ProtoConverters {
 
   implicit class ScalarVaryingDoubleFromProtoConverter(svd: ProtoRangeVector.ScalarVaryingDouble) {
     def fromProto: ScalarVaryingDouble = ScalarVaryingDouble(
-      svd.getTimeValueMapMap.asScala.map{ case (k: java.lang.Long, v: java.lang.Double) => (k.toLong, v.toDouble)}.toMap,
+      svd.getTimeValueMapMap.asScala.map{ case (k: java.lang.Long, v: java.lang.Double) =>
+        (k.toLong, v.toDouble)}.toMap,
       if (svd.hasRvRange) Some(svd.getRvRange.fromProto) else None)
   }
 

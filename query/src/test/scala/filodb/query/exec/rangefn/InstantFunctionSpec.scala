@@ -180,6 +180,9 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   it ("should validate invalid function params") {
     // clamp_max
     the[IllegalArgumentException] thrownBy {
+      val instantVectorFnMapper1 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax)
+      val resultObs = instantVectorFnMapper1(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max."
 
    // clamp_min

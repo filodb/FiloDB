@@ -260,11 +260,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(2.1d, 4.6d), Set(4.4, 5.4d)).iterator)
     val result5b = resultObs5b.toListL.runToFuture.futureValue
     result5b.size shouldEqual 2
-    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-
-    compareIter(result5b(0).rows().map(_.getDouble(1)), Seq(4.6d, 4.4d).iterator)
-    compareIter(result5b(1).rows().map(_.getDouble(1)), Seq(2.1d, 5.4d).iterator)
+    // Check results in an order-independent way
+    val result5bMap = result5b.map(rv => rv.key -> rv.rows().map(_.getDouble(1)).toSeq).toMap
+    result5bMap(CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))) shouldEqual Seq(4.6d, 4.4d)
+    result5bMap(CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))) shouldEqual Seq(2.1d, 5.4d)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -278,13 +277,11 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(4.6d, 2.1d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runToFuture.futureValue
     result6b.size shouldEqual 3
-    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-    result6b(2).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
-
-    compareIter(result6b(0).rows().map(_.getDouble(1)), Seq(4.6d,Double.NaN).iterator)
-    compareIter(result6b(1).rows().map(_.getDouble(1)), Seq(2.1d,5.4d).iterator)
-    compareIter(result6b(2).rows().map(_.getDouble(1)), Seq(Double.NaN,5.6d).iterator)
+    // Check results in an order-independent way
+    val result6bMap = result6b.map(rv => rv.key -> rv.rows().map(_.getDouble(1)).toSeq).toMap
+    compareIter(result6bMap(CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))).iterator, Seq(4.6d,Double.NaN).iterator)
+    compareIter(result6bMap(CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).iterator, Seq(2.1d,5.4d).iterator)
+    compareIter(result6bMap(CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))).iterator, Seq(Double.NaN,5.6d).iterator)
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
@@ -467,11 +464,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2), queryStats)
     val result5b = resultObs5b.toListL.runToFuture.futureValue
     result5b.size shouldEqual 2
-    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-
-    compareIter(result5b(0).rows().map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
-    compareIter(result5b(1).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
+    // Check results in an order-independent way
+    val result5bMap = result5b.map(rv => rv.key -> rv.rows().map(_.getDouble(1)).toSeq).toMap
+    compareIter(result5bMap(CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))).iterator, Seq(Double.NaN, 4.4d).iterator)
+    compareIter(result5bMap(CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).iterator, Seq(Double.NaN, 5.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -485,11 +481,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(-1.7976931348623157E308d, -1.7976931348623157E308d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runToFuture.futureValue
     result6b.size shouldEqual 2
-    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
-
-    compareIter(result6b(0).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
-    compareIter(result6b(1).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.6d).iterator)
+    // Check results in an order-independent way
+    val result6bMap = result6b.map(rv => rv.key -> rv.rows().map(_.getDouble(1)).toSeq).toMap
+    compareIter(result6bMap(CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).iterator, Seq(Double.NaN, 5.4d).iterator)
+    compareIter(result6bMap(CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))).iterator, Seq(Double.NaN, 5.6d).iterator)
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
@@ -606,16 +601,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result = resultObsc.toListL.runToFuture.futureValue
 
     result.size shouldEqual 2
-    result(0).key shouldEqual ignoreKey2
-    result(1).key shouldEqual ignoreKey
-
-    result(0).rows().map(_.getLong(0)).
+    // Check results in an order-independent way
+    val resultMap = result.map(rv => rv.key -> rv).toMap
+    resultMap(ignoreKey2).rows().map(_.getLong(0)).
       sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).iterator) shouldEqual true
-    result(1).rows().map(_.getLong(0)).
+    resultMap(ignoreKey).rows().map(_.getLong(0)).
       sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).iterator) shouldEqual true
-    compareIter(result(0).rows().map(_.getDouble(1)).iterator,
+    compareIter(resultMap(ignoreKey2).rows().map(_.getDouble(1)).iterator,
       Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).iterator)
-    compareIter(result(1).rows().map(_.getDouble(1)).iterator,
+    compareIter(resultMap(ignoreKey).rows().map(_.getDouble(1)).iterator,
       Seq(Double.NaN, 5.1, Double.NaN, Double.NaN, Double.NaN, Double.NaN).iterator)
   }
 
@@ -664,8 +658,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000, RangeParams(0,1,0), queryStats )
     val result = resultObs2.toListL.runToFuture.futureValue
     result.size.shouldEqual(4)
-    result.map(_.key.labelValues).sameElements(expectedLabels) shouldEqual true
-    result.flatMap(_.rows().map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
+    // Check results in an order-independent way
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val resultTuples = result.flatMap(_.rows().map(x => (x.getLong(0), x.getDouble(1))).toList)
+    resultTuples.toSet shouldEqual expectedRows.toSet
 
   }
 

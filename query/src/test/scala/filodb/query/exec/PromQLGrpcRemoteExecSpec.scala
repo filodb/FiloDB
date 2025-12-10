@@ -236,12 +236,13 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val qres = Await.result(fut, Duration.Inf).asInstanceOf[QueryResult]
 
     // Convert the result back to simple key / time-value tuples.
+    // Extract values during iteration since the underlying reader object is reused
     qres.result.map { rv =>
       val key = rv.key.labelValues
-      val pairs = rv.rows().toSeq.map { r =>
+      val pairs = rv.rows().map { r =>
         // Subtract the diff from the result-- this should again equal the original data.
         (r.getLong(0), r.getDouble(1) - diff)
-      }
+      }.toSeq
       (key, pairs)
     } shouldEqual data.map { rv => (rv._1.labelValues, rv._2) }
   }

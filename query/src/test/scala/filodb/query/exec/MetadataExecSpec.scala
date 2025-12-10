@@ -480,9 +480,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
             data.group -> data.counts
           }.toSeq
 
-          resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
+          resultMap.toSet shouldEqual testSpec.exp.map { case (prefix, counts) =>
             prefixToGroupWithDataset(prefix, timeseriesDatasetMultipleShardKeys.ref.dataset) -> counts
-          }
+          }.toSet
       }
     }
   }

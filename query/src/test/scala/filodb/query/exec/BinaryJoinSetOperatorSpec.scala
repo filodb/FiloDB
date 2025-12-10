@@ -315,9 +315,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(300)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(700)
+    result.map(_.key.labelValues) should contain theSameElementsAs expectedLabels
+    // Check values in an order-independent way by mapping job label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("job")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("api-server") shouldEqual List(300)
+    resultMap("app-server") shouldEqual List(700)
   }
 
   it("should join many-to-many with and between vector having scalar operation ") {
@@ -351,10 +354,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues) should contain theSameElementsAs expectedLabels
+    // Check values in an order-independent way by mapping job label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("job")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("api-server") shouldEqual List(301)
+    resultMap("app-server") shouldEqual List(701)
   }
 
   it("should do LAND with on having multiple labels") {
@@ -388,9 +393,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues) should contain theSameElementsAs expectedLabels
+    // Check values in an order-independent way by mapping job label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("job")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("api-server") shouldEqual List(301)
+    resultMap("app-server") shouldEqual List(701)
 
   }
 
@@ -461,9 +469,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues) should contain theSameElementsAs expectedLabels
+    // Check values in an order-independent way by mapping job label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("job")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("api-server") shouldEqual List(301)
+    resultMap("app-server") shouldEqual List(701)
   }
 
   it("should do LAND with ignoring having multiple labels") {
@@ -861,10 +872,17 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    assertSingleNaN(result(0))
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(2))
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    // Check values in an order-independent way by mapping (job, instance) to value
+    val resultMap = result.map { rv =>
+      val job = rv.key.labelValues(ZeroCopyUTF8String("job")).toString
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      (job, instance) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    // instance=0 values should be NaN (they match RHS), instance=1 should have values
+    assertSingleNaNList(resultMap(("api-server", "0")))
+    assertSingleNaNList(resultMap(("app-server", "0")))
+    resultMap(("api-server", "1")) shouldEqual List(400)
+    resultMap(("app-server", "1")) shouldEqual List(800)
   }
 
   it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
@@ -936,10 +954,17 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     result.size shouldEqual 4
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
-    assertSingleNaN(result(1))
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(3))
+    // Check values in an order-independent way by mapping (job, instance) to value
+    val resultMap = result.map { rv =>
+      val job = rv.key.labelValues(ZeroCopyUTF8String("job")).toString
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      (job, instance) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    // instance=0 matches RHS so gets NaN, instance=1 doesn't match so keeps value
+    resultMap(("api-server", "1")) shouldEqual List(400)
+    resultMap(("app-server", "1")) shouldEqual List(800)
+    assertSingleNaNList(resultMap(("api-server", "0")))
+    assertSingleNaNList(resultMap(("app-server", "0")))
   }
 
   it("should not return any results when rhs has same vector on joining without ignoring labels with LUnless") {
@@ -1013,10 +1038,17 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
-    assertSingleNaN(result(1))
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(3))
+    // Check values in an order-independent way by mapping (job, instance) to value
+    val resultMap = result.map { rv =>
+      val job = rv.key.labelValues(ZeroCopyUTF8String("job")).toString
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      (job, instance) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    // instance=0 matches RHS so gets NaN, instance=1 doesn't match so keeps value
+    resultMap(("api-server", "1")) shouldEqual List(400)
+    resultMap(("app-server", "1")) shouldEqual List(800)
+    assertSingleNaNList(resultMap(("api-server", "0")))
+    assertSingleNaNList(resultMap(("app-server", "0")))
   }
 
   it("Unless should return same rv when RHS has only NaN") {
@@ -1060,10 +1092,16 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(300)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(700)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    // Check values in an order-independent way by mapping (job, instance) to value
+    val resultMap = result.map { rv =>
+      val job = rv.key.labelValues(ZeroCopyUTF8String("job")).toString
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      (job, instance) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    resultMap(("api-server", "0")) shouldEqual List(300)
+    resultMap(("app-server", "0")) shouldEqual List(700)
+    resultMap(("api-server", "1")) shouldEqual List(400)
+    resultMap(("app-server", "1")) shouldEqual List(800)
   }
 
   it("AND should not return rv's when RHS has only NaN") {
@@ -2145,6 +2183,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
   def assertSingleNaN(rv: RangeVector): Assertion = {
     val values = rv.rows().map(_.getDouble(1)).toList
+    values should have size 1
+    values.head.isNaN shouldBe true
+  }
+
+  def assertSingleNaNList(values: List[Double]): Assertion = {
     values should have size 1
     values.head.isNaN shouldBe true
   }

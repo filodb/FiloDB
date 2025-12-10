@@ -305,7 +305,8 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
           } else {
             val x = for ((key, sketchMap) <- metaDataMutableMap) yield {
               val labelSketchMapIterator =
-                Seq(sketchMap.map { case (k, cpcSketch) => k -> ZeroCopyUTF8String(cpcSketch.toByteArray) }.toMap).iterator
+                Seq(sketchMap.map { case (k, cpcSketch) =>
+                  k -> ZeroCopyUTF8String(cpcSketch.toByteArray) }.toMap).iterator
               IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(labelSketchMapIterator), None)
             }
             Observable.fromIterable(x)

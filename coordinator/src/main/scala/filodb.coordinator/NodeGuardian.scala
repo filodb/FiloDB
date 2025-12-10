@@ -3,7 +3,8 @@ package filodb.coordinator
 import scala.collection.mutable.{HashMap => MutableHashMap, Map => MMap}
 
 import akka.actor._
-import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings, ClusterSingletonProxy, ClusterSingletonProxySettings}
+import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings,
+  ClusterSingletonProxy, ClusterSingletonProxySettings}
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesStore
