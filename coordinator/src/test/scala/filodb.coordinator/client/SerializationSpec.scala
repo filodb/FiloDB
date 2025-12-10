@@ -32,6 +32,7 @@ object SerializationSpecConfig extends ActorSpecConfig {
                       |akka.loggers = ["akka.testkit.TestEventListener"]
                       |akka.actor.serialize-messages = on
                       |akka.actor.kryo.buffer-size = 2048
+                      |akka.actor.allow-java-serialization = on
                       """.stripMargin
 }
 
@@ -136,7 +137,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val rvKey = PartitionRangeVectorKey(Right((null, defaultPartKey)), dataset1.partKeySchema,
                                         Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100, dataset1.name)
 
-    val rowbuf = tuples.map { t =>
+    // Create rows as a function to ensure fresh data for each RangeVector (Scala 2.13 iterator handling)
+    def createRowBuf() = tuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))
     }.toBuffer
 
@@ -145,18 +147,17 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       new ColumnInfo("value", ColumnType.DoubleColumn))
     val srvs = for { i <- 0 to 9 } yield {
       val rv = new RangeVector {
-        override val rows: RangeVectorCursor = {
+        override def rows(): RangeVectorCursor = {
           import NoCloseCursor._
-          rowbuf.iterator
+          createRowBuf().iterator
         }
         override val key: RangeVectorKey = rvKey
         override def outputRange: Option[RvRange] = None
       }
       val srv = SerializedRangeVector(rv, cols.toIndexedSeq, QueryStats())
-      val observedTs = srv.rows().toSeq.map(_.getLong(0))
-      val observedVal = srv.rows().toSeq.map(_.getDouble(1))
-      observedTs shouldEqual tuples.map(_._1)
-      observedVal shouldEqual tuples.map(_._2)
+      // Extract values immediately during iteration - the underlying RowReader is mutable and reused
+      val observed = srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toSeq
+      observed shouldEqual tuples
       srv
     }
 
@@ -172,8 +173,10 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       roundTripResult.result(i)
         .asInstanceOf[query.SerializedRangeVector].schema shouldEqual result.result(i)
         .asInstanceOf[query.SerializedRangeVector].schema
-      roundTripResult.result(i).rows().map(_.getDouble(1)).toSeq shouldEqual
-        result.result(i).rows().map(_.getDouble(1)).toSeq
+      // Extract values immediately during iteration - the underlying RowReader is mutable and reused
+      val roundTripValues = roundTripResult.result(i).rows().map(r => r.getDouble(1)).toSeq
+      val originalValues = result.result(i).rows().map(r => r.getDouble(1)).toSeq
+      roundTripValues shouldEqual originalValues
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
       roundTripResult.result(i).key.sourceShards shouldEqual result.result(i).key.sourceShards
       roundTripResult.result(i).key.schemaNames shouldEqual result.result(i).key.schemaNames

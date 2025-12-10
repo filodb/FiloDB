@@ -154,7 +154,12 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
 
   override val role = ClusterRole.Server
 
-  override protected lazy val roleConfig: Config = AkkaSpec.settings.allConfig
+  // Reset FilodbSettings before this test to ensure fresh initialization
+  FilodbSettings.reset()
+
+  // Use a fresh port for this test to avoid conflicts with other tests
+  private val testPort = AkkaSpec.getFreePort
+  override protected lazy val roleConfig: Config = AkkaSpec.settings(testPort).allConfig
 
   private lazy val clusterActor = cluster.clusterSingleton(role, None)
   private lazy val client = new LocalClient(coordinatorActor)

@@ -328,7 +328,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgType[scala.collection.Seq[String]]
+      indexNames.toSet shouldEqual Set("series", "_type_")
 
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
       probe.expectMsg(Seq(("Series 0", 1), ("Series 1", 1), ("Series 2", 1), ("Series 3", 1)))
@@ -342,7 +343,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgType[scala.collection.Seq[String]]
+      indexNames.toSet shouldEqual Set("series", "_type_")
 
       //actor should restart and serve queries again
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))

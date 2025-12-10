@@ -13,10 +13,57 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
     line.segmentLength(c => c == '-')
   }
 
+  /**
+   * Normalizes filter lists in plan strings to have consistent ordering.
+   * This handles the Scala 2.13 Map iteration order changes that affect
+   * how ColumnFilters are printed in execution plans.
+   */
+  private def normalizeFilterLists(planString: String): String = {
+    // Pattern to match filters=List(...) content - need to handle nested parentheses
+    // ColumnFilter(name,Equals(value)) has nested parens
+    val filterListPattern = """filters=List\(((?:ColumnFilter\([^)]+\([^)]*\)\)[, ]*)*)\)""".r
+    filterListPattern.replaceAllIn(planString, m => {
+      val filtersContent = m.group(1)
+      if (filtersContent == null || filtersContent.trim.isEmpty) {
+        "filters=List()"
+      } else {
+        // Match each ColumnFilter including its nested parentheses
+        val filterPattern = """ColumnFilter\([^)]+\([^)]*\)\)""".r
+        val filters = filterPattern.findAllIn(filtersContent).toList.sorted
+        s"filters=List(${filters.mkString(", ")})"
+      }
+    })
+  }
+
+  /**
+   * Normalizes label selectors in PromQL query strings within plan output.
+   * Handles patterns like: test{_ns_="App-1",_ws_="demo",instance="Inst-1"}
+   * Sorts the labels alphabetically to ensure consistent ordering.
+   */
+  private def normalizeLabelSelectors(planString: String): String = {
+    // Pattern to match metric name followed by label selectors in curly braces
+    // e.g., test{label1="val1",label2="val2"} or just {label1="val1"}
+    val labelSelectorPattern = """(\w*)\{([^}]+)\}""".r
+    labelSelectorPattern.replaceAllIn(planString, m => {
+      val metricName = m.group(1)
+      val labelsContent = m.group(2)
+      if (labelsContent == null || labelsContent.trim.isEmpty) {
+        s"$metricName{}"
+      } else {
+        // Split by comma, but be careful with values that might contain commas (though unlikely here)
+        // Pattern for individual label: name="value" or name=~"value" or name!="value" etc.
+        val labelPattern = """([a-zA-Z_][a-zA-Z0-9_]*)(=~|!=|!~|=)("[^"]*")""".r
+        val labels = labelPattern.findAllIn(labelsContent).toList.sorted
+        s"$metricName{${labels.mkString(",")}}"
+      }
+    })
+  }
+
   private def removeNoise(planString: String): String = {
-    planString
+    val denoised = planString
       .replaceAll("testProbe-.*]", "testActor]")
       .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
+    normalizeLabelSelectors(normalizeFilterLists(denoised))
   }
 
   /**
