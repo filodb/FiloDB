@@ -57,14 +57,6 @@ class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers wit
       |      }
       |    }
       |  ]
-      |  cassandra {
-      |    hosts = localhost
-      |    hosts = ${?CASSANDRA_HOST}
-      |    port = 9042
-      |    port = ${?CASSANDRA_NATIVE_TRANSPORT_PORT}
-      |    partition-list-num-groups = 1
-      |    create-tables-enabled = true
-      |  }
       |  downsampler {
       |    chunk-downsampler-enabled = true
       |    write-downsample-index-by-raw-ingesting-store = true
