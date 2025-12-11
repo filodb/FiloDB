@@ -1,12 +1,8 @@
 package filodb.gateway
 
-// import java.net.InetSocketAddress // Unused - Netty TCP server removed
-// import java.nio.charset.Charset // Unused - Netty TCP server removed
-// import java.util.concurrent.Executors // Unused - Netty TCP server removed
-
-import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
@@ -17,13 +13,6 @@ import monix.execution.Scheduler
 import monix.kafka._
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
-// Netty 3.x imports commented out - deprecated JBoss Netty is not available for Scala 2.13
-// import org.jboss.netty.bootstrap.ServerBootstrap
-// import org.jboss.netty.buffer.ChannelBuffer
-// import org.jboss.netty.channel.{ChannelPipeline, ChannelPipelineFactory, Channels}
-// import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
-// import org.jboss.netty.handler.ssl.SslContext
-// import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
 import org.rogach.scallop.ArgType

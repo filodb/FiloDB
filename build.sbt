@@ -26,9 +26,8 @@ ThisBuild / dependencyOverrides ++= Seq(
 )
 
 // Globally exclude kryo-shaded to prevent conflicts with kryo 5.5.0
-ThisBuild / excludeDependencies ++= Seq(
-  ExclusionRule("com.esotericsoftware", "kryo-shaded")
-)
+// NOTE: sparkJobs needs kryo-shaded for Spark's KryoSerializer, so it's excluded from this rule
+// by explicitly adding kryo-shaded as a dependency in sparkJobsDeps
 
 enablePlugins(ProtobufPlugin)
 

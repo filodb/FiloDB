@@ -927,20 +927,20 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       Seq[Any](74372801500L, 4d, counterName, seriesTags),
       Seq[Any](74372802000L, 5d, counterName, seriesTags),
 
-      Seq[Any](7437282861000L, 9d, counterName, seriesTags),
-      Seq[Any](7437282861500L, 10d, counterName, seriesTags),
-      Seq[Any](7437282862000L, 11d, counterName, seriesTags),
+      Seq[Any](74372861000L, 9d, counterName, seriesTags),
+      Seq[Any](74372861500L, 10d, counterName, seriesTags),
+      Seq[Any](74372862000L, 11d, counterName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, counterName, seriesTags),
-      Seq[Any](7437282921500L, 7d, counterName, seriesTags),
-      Seq[Any](7437282922000L, 15d, counterName, seriesTags),
+      Seq[Any](74372921000L, 2d, counterName, seriesTags),
+      Seq[Any](74372921500L, 7d, counterName, seriesTags),
+      Seq[Any](74372922000L, 15d, counterName, seriesTags),
 
-      Seq[Any](7437282981000L, 17d, counterName, seriesTags),
-      Seq[Any](7437282981500L, 1d, counterName, seriesTags),
-      Seq[Any](7437282982000L, 15d, counterName, seriesTags),
+      Seq[Any](74372981000L, 17d, counterName, seriesTags),
+      Seq[Any](74372981500L, 1d, counterName, seriesTags),
+      Seq[Any](74372982000L, 15d, counterName, seriesTags),
 
-      Seq[Any](7437283041000L, 18d, counterName, seriesTags),
-      Seq[Any](7437283042000L, 20d, counterName, seriesTags)
+      Seq[Any](74373041000L, 18d, counterName, seriesTags),
+      Seq[Any](74373042000L, 20d, counterName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -968,24 +968,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     deltaCounterPartKeyBytes = part.partKeyBytes
 
     val rawSamples = LazyList(
-      Seq[Any](7437282801000L, 3d, deltaCounterName, seriesTags),
-      Seq[Any](7437282801500L, 1d, deltaCounterName, seriesTags),
-      Seq[Any](7437282802000L, 1d, deltaCounterName, seriesTags),
+      Seq[Any](74372801000L, 3d, deltaCounterName, seriesTags),
+      Seq[Any](74372801500L, 1d, deltaCounterName, seriesTags),
+      Seq[Any](74372802000L, 1d, deltaCounterName, seriesTags),
 
-      Seq[Any](7437282861000L, 4d, deltaCounterName, seriesTags),
-      Seq[Any](7437282861500L, 1d, deltaCounterName, seriesTags),
-      Seq[Any](7437282862000L, 1d, deltaCounterName, seriesTags),
+      Seq[Any](74372861000L, 4d, deltaCounterName, seriesTags),
+      Seq[Any](74372861500L, 1d, deltaCounterName, seriesTags),
+      Seq[Any](74372862000L, 1d, deltaCounterName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, deltaCounterName, seriesTags),
-      Seq[Any](7437282921500L, 5d, deltaCounterName, seriesTags),
-      Seq[Any](7437282922000L, 8d, deltaCounterName, seriesTags),
+      Seq[Any](74372921000L, 2d, deltaCounterName, seriesTags),
+      Seq[Any](74372921500L, 5d, deltaCounterName, seriesTags),
+      Seq[Any](74372922000L, 8d, deltaCounterName, seriesTags),
 
-      Seq[Any](7437282981000L, 2d, deltaCounterName, seriesTags),
-      Seq[Any](7437282981500L, 1d, deltaCounterName, seriesTags),
-      Seq[Any](7437282982000L, 14d, deltaCounterName, seriesTags),
+      Seq[Any](74372981000L, 2d, deltaCounterName, seriesTags),
+      Seq[Any](74372981500L, 1d, deltaCounterName, seriesTags),
+      Seq[Any](74372982000L, 14d, deltaCounterName, seriesTags),
 
-      Seq[Any](7437283041000L, 3d, deltaCounterName, seriesTags),
-      Seq[Any](7437283042000L, 2d, deltaCounterName, seriesTags)
+      Seq[Any](74373041000L, 3d, deltaCounterName, seriesTags),
+      Seq[Any](74373042000L, 2d, deltaCounterName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1029,24 +1029,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histName, seriesTags),
-      Seq[Any](7437282801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
-      Seq[Any](7437282802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histName, seriesTags),
+      Seq[Any](74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
+      Seq[Any](74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
 
-      Seq[Any](7437282861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histName, seriesTags),
-      Seq[Any](7437282861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
-      Seq[Any](7437282862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
+      Seq[Any](74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histName, seriesTags),
+      Seq[Any](74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
+      Seq[Any](74372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histName, seriesTags),
-      Seq[Any](7437282921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histName, seriesTags),
-      Seq[Any](7437282922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histName, seriesTags),
+      Seq[Any](74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histName, seriesTags),
+      Seq[Any](74372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
 
-      Seq[Any](7437282981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histName, seriesTags),
-      Seq[Any](7437282982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
+      Seq[Any](74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histName, seriesTags),
+      Seq[Any](74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
 
-      Seq[Any](7437283041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
-      Seq[Any](7437283042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histName, seriesTags)
+      Seq[Any](74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
+      Seq[Any](74373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1071,24 +1071,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), deltaHistName, seriesTags),
-      Seq[Any](7437282801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), deltaHistName, seriesTags),
-      Seq[Any](7437282802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), deltaHistName, seriesTags),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), deltaHistName, seriesTags),
+      Seq[Any](74372801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), deltaHistName, seriesTags),
+      Seq[Any](74372802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), deltaHistName, seriesTags),
 
-      Seq[Any](7437282861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), deltaHistName, seriesTags),
-      Seq[Any](7437282861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), deltaHistName, seriesTags),
-      Seq[Any](7437282862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), deltaHistName, seriesTags),
+      Seq[Any](74372861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), deltaHistName, seriesTags),
+      Seq[Any](74372861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), deltaHistName, seriesTags),
+      Seq[Any](74372862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), deltaHistName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), deltaHistName, seriesTags),
-      Seq[Any](7437282921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), deltaHistName, seriesTags),
-      Seq[Any](7437282922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), deltaHistName, seriesTags),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), deltaHistName, seriesTags),
+      Seq[Any](74372921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), deltaHistName, seriesTags),
+      Seq[Any](74372922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), deltaHistName, seriesTags),
 
-      Seq[Any](7437282981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), deltaHistName, seriesTags),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), deltaHistName, seriesTags),
-      Seq[Any](7437282982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), deltaHistName, seriesTags),
+      Seq[Any](74372981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), deltaHistName, seriesTags),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), deltaHistName, seriesTags),
+      Seq[Any](74372982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), deltaHistName, seriesTags),
 
-      Seq[Any](7437283041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), deltaHistName, seriesTags),
-      Seq[Any](7437283042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), deltaHistName, seriesTags)
+      Seq[Any](74373041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), deltaHistName, seriesTags),
+      Seq[Any](74373042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), deltaHistName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1113,24 +1113,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = LazyList( // time, sum, count, hist, min, max, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), 0d, 20d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), 1d, 30d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), 0d, 20d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), 1d, 30d, otelCummulativeHistName, seriesTags),
 
-      Seq[Any](7437282861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), 2d, 15d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), 1d, 10d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), 1d, 18d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), 2d, 15d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), 1d, 10d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), 1d, 18d, otelCummulativeHistName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 10d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), 1d, 20d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), 1d, 30d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 10d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), 1d, 20d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), 1d, 30d, otelCummulativeHistName, seriesTags),
 
-      Seq[Any](7437282981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), 2d, 25d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437282982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), 0d, 15d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), 2d, 25d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), 0d, 15d, otelCummulativeHistName, seriesTags),
 
-      Seq[Any](7437283041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), 1d, 30d, otelCummulativeHistName, seriesTags),
-      Seq[Any](7437283042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), 2d, 40d, otelCummulativeHistName, seriesTags)
+      Seq[Any](74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), 1d, 30d, otelCummulativeHistName, seriesTags),
+      Seq[Any](74373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), 2d, 40d, otelCummulativeHistName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1155,24 +1155,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = LazyList( // time, sum, count, hist, min, max, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), 2d, 15d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), 2d, 15d, otelDeltaHistName, seriesTags),
 
-      Seq[Any](7437282861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), 1d, 16d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), 0d, 30d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), 1d, 16d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), 0d, 30d, otelDeltaHistName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 11d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), 3d, 20d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), 6d, 25d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 11d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), 3d, 20d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), 6d, 25d, otelDeltaHistName, seriesTags),
 
-      Seq[Any](7437282981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437282982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), 3d, 25d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), 1d, 20d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, otelDeltaHistName, seriesTags),
+      Seq[Any](74372982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), 3d, 25d, otelDeltaHistName, seriesTags),
 
-      Seq[Any](7437283041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), 1d, 30d, otelDeltaHistName, seriesTags),
-      Seq[Any](7437283042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), 1d, 22d, otelDeltaHistName, seriesTags)
+      Seq[Any](74373041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), 1d, 30d, otelDeltaHistName, seriesTags),
+      Seq[Any](74373042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), 1d, 22d, otelDeltaHistName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1197,13 +1197,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey, shardInfo, 1)
     histMixedSchemaCumulativePartKeyBytes_legacy = part.partKeyBytes
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437282861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin)
+      Seq[Any](74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin)
     )
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.promHistogram.ingestionSchema, base, offset)
@@ -1224,16 +1224,16 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val part2 = new TimeSeriesPartition(0, Schemas.otelCumulativeHistogram, partKey2, shardInfo, 1)
     histMixedSchemaCumulativePartKeyBytes_otel = part2.partKeyBytes
     val rawSamples2 = LazyList( // time, sum, count, hist, min, max, name, tags
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 1d, 10d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), 3d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), 4d, 30d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 1d, 10d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), 3d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), 4d, 30d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437282981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), 5d, 30d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), 4d, 32d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), 5d, 30d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), 4d, 32d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437283041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), 0d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437283042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), 5d, 25d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin)
+      Seq[Any](74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), 0d, 20d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin),
+      Seq[Any](74373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), 5d, 25d, histMixedSchemaCumulativeName, seriesTagsDisabledMaxMin)
     )
     MachineMetricsData.records(rawDataset2, rawSamples2).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.otelCumulativeHistogram.ingestionSchema, base, offset)
@@ -1256,13 +1256,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val part = new TimeSeriesPartition(0, Schemas.deltaHistogram, partKey, shardInfo, 1)
     histMixedSchemaDeltaPartKeyBytes_legacy = part.partKeyBytes
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372801500L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 2, 2)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372802000L, 3d, 3d, LongHistogram(bucketScheme, Array(2L, 3, 3)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437282861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372861000L, 4d, 3d, LongHistogram(bucketScheme, Array(0L, 0, 3)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372861500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372862000L, 1d, 4d, LongHistogram(bucketScheme, Array(0L, 3, 4)), histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
     )
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.deltaHistogram.ingestionSchema, base, offset)
@@ -1283,16 +1283,16 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val part2 = new TimeSeriesPartition(0, Schemas.otelDeltaHistogram, partKey2, shardInfo, 1)
     histMixedSchemaDeltaPartKeyBytes_otel = part2.partKeyBytes
     val rawSamples2 = LazyList( // time, sum, count, hist, min, max, name, tags
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 11d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), 3d, 20d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), 6d, 25d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), 0d, 11d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372921500L, 5d, 7d, LongHistogram(bucketScheme, Array(1L, 1, 7)), 3d, 20d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372922000L, 8d, 10d, LongHistogram(bucketScheme, Array(0L, 8, 10)), 6d, 25d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437282981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), 1d, 20d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437282982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), 3d, 25d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372981000L, 2d, 2d, LongHistogram(bucketScheme, Array(1L, 1, 2)), 1d, 20d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), 0d, 10d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74372982000L, 14d, 14d, LongHistogram(bucketScheme, Array(0L, 14, 14)), 3d, 25d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
 
-      Seq[Any](7437283041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), 1d, 30d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
-      Seq[Any](7437283042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), 1d, 22d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin)
+      Seq[Any](74373041000L, 3d, 4d, LongHistogram(bucketScheme, Array(1L, 1, 4)), 1d, 30d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin),
+      Seq[Any](74373042000L, 2d, 6d, LongHistogram(bucketScheme, Array(3L, 4, 6)), 1d, 22d, histMixedSchemaDeltaName, seriesTagsDisabledMaxMin)
     )
     MachineMetricsData.records(rawDataset2, rawSamples2).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.otelDeltaHistogram.ingestionSchema, base, offset)
@@ -1320,24 +1320,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val bucketScheme1 = Base2ExpHistogramBuckets(3, -1, 3)
     val bucketScheme2 = Base2ExpHistogramBuckets(2, -1, 3)
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 1)), 3d, 5d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282801500L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 2, 2)), 4d, 6d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282802000L, 3d, 3d, LongHistogram(bucketScheme2, Array(0L, 2L, 3, 3)), 5d, 7d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 1)), 3d, 5d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372801500L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 2, 2)), 4d, 6d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372802000L, 3d, 3d, LongHistogram(bucketScheme2, Array(0L, 2L, 3, 3)), 5d, 7d, otelExpDeltaHistName, seriesTags),
 
-      Seq[Any](7437282861000L, 4d, 3d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 3)), 3d, 4d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282861500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 1)), 3d, 4d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282862000L, 1d, 4d, LongHistogram(bucketScheme2, Array(0L, 0L, 3, 4)), 3d, 4d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372861000L, 4d, 3d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 3)), 3d, 4d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372861500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 0, 1)), 3d, 4d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372862000L, 1d, 4d, LongHistogram(bucketScheme2, Array(0L, 0L, 3, 4)), 3d, 4d, otelExpDeltaHistName, seriesTags),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 2)), 43d, 134d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282921500L, 5d, 7d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 7)), 63d, 214d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282922000L, 8d, 10d, LongHistogram(bucketScheme2, Array(0L, 0L, 8, 10)), 13d, 384d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme1, Array(0L, 0L, 0, 2)), 43d, 134d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372921500L, 5d, 7d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 7)), 63d, 214d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372922000L, 8d, 10d, LongHistogram(bucketScheme2, Array(0L, 0L, 8, 10)), 13d, 384d, otelExpDeltaHistName, seriesTags),
 
-      Seq[Any](7437282981000L, 2d, 2d, LongHistogram(bucketScheme2, Array(0L, 1L, 1, 2)), 53d, 74d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 1, 1)), 23d, 64d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437282982000L, 14d, 14d, LongHistogram(bucketScheme2, Array(0L, 0L, 14, 14)), 63d, 94d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372981000L, 2d, 2d, LongHistogram(bucketScheme2, Array(0L, 1L, 1, 2)), 53d, 74d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme2, Array(0L, 0L, 1, 1)), 23d, 64d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74372982000L, 14d, 14d, LongHistogram(bucketScheme2, Array(0L, 0L, 14, 14)), 63d, 94d, otelExpDeltaHistName, seriesTags),
 
-      Seq[Any](7437283041000L, 3d, 4d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 4)), 13d, 334d, otelExpDeltaHistName, seriesTags),
-      Seq[Any](7437283042000L, 2d, 6d, LongHistogram(bucketScheme1, Array(0L, 3L, 4, 6)), 13d, 94d, otelExpDeltaHistName, seriesTags)
+      Seq[Any](74373041000L, 3d, 4d, LongHistogram(bucketScheme1, Array(0L, 1L, 1, 4)), 13d, 334d, otelExpDeltaHistName, seriesTags),
+      Seq[Any](74373042000L, 2d, 6d, LongHistogram(bucketScheme1, Array(0L, 3L, 4, 6)), 13d, 94d, otelExpDeltaHistName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -1366,28 +1366,28 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = LazyList( // time, sum, count, hist, name, tags
-      Seq[Any](7437282801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282802500L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372802500L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
 
-      Seq[Any](7437282861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282862000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282862500L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372862000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372862500L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histNameNaN, seriesTagsNaN),
 
-      Seq[Any](7437282921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282922000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282922500L, 4d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372922000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372922500L, 4d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
 
-      Seq[Any](7437282981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437282982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histNameNaN, seriesTagsNaN),
 
-      Seq[Any](7437283041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437283041500L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histNameNaN, seriesTagsNaN),
-      Seq[Any](7437283042000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN)
+      Seq[Any](74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74373041500L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histNameNaN, seriesTagsNaN),
+      Seq[Any](74373042000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>

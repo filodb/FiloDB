@@ -102,7 +102,13 @@ object Dependencies {
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty, excludeXBean),
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
+    // Cassandra driver 3.7.1 requires com.codahale.metrics.JmxReporter which only exists in metrics-core 3.x
+    // Spark 3.5.x uses metrics 4.x where JmxReporter was moved to metrics-jmx and package renamed to io.dropwizard.metrics
+    "io.dropwizard.metrics"  %       "metrics-core" % "3.2.2" % Test,
+    // Spark's KryoSerializer (via chill) requires kryo-shaded 4.0.2 which contains KryoPool
+    // This is needed because kryo 5.x removed KryoPool
+    "com.esotericsoftware"   %       "kryo-shaded" % "4.0.2" % Test
   )
 
   lazy val cassDeps = commonDeps ++ Seq(

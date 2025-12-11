@@ -141,7 +141,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      @scala.annotation.unused val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
@@ -180,7 +181,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      @scala.annotation.unused val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
 
@@ -253,7 +255,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numTimeSeries + instanceBase
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      @scala.annotation.unused val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       // reset buckets for delta histograms

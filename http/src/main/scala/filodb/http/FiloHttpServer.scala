@@ -1,8 +1,8 @@
 package filodb.http
 
-import scala.jdk.CollectionConverters._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http

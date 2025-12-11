@@ -2,9 +2,9 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
-import scala.jdk.CollectionConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
+import scala.jdk.CollectionConverters._
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http

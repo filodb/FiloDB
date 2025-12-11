@@ -22,7 +22,8 @@ import java.time.Instant
 import filodb.labelchurnfinder.LcfTask.{ActiveCountColName, ChurnColName, LabelColName, TotalCountColName, WsNsColName}
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val baseConf: Config = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
 
