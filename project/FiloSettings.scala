@@ -26,7 +26,7 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-release", "17",
+      "-release", "21",  // Target JDK 21
       "-feature",
       "-Xfatal-warnings",
       "-Ywarn-dead-code",
@@ -38,7 +38,7 @@ object FiloSettings {
 
     javacOptions ++= Seq(
       "-encoding", "UTF-8",
-      "--release", "11"  // Target JDK 11
+      "--release", "21"  // Target JDK 21
     ))
 
   // Create a default Scala style task to run with tests
@@ -103,12 +103,26 @@ object FiloSettings {
       evictionSettings ++
       consoleSettings
 
-  // JDK 17+ module system opens required for Kryo serialization of internal Java classes
-  lazy val jdk17ModuleOpens = List(
+  // JDK 21 module system opens required for Kryo serialization and other internal Java class access
+  lazy val jdk21ModuleOpens = List(
     "--add-opens=java.base/java.util=ALL-UNNAMED",
     "--add-opens=java.base/java.lang=ALL-UNNAMED",
     "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
-    "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED"
+    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+    "--add-opens=java.base/java.io=ALL-UNNAMED",
+    "--add-opens=java.base/java.net=ALL-UNNAMED",
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+    "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+    "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+    "--add-opens=java.base/java.math=ALL-UNNAMED",
+    "--add-opens=java.base/java.text=ALL-UNNAMED",
+    "--add-opens=java.base/java.time=ALL-UNNAMED",
+    "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED",
+    "-Djdk.reflect.useDirectMethodHandle=false"
   )
 
   lazy val testSettings = Seq(
@@ -118,7 +132,7 @@ object FiloSettings {
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
-    javaOptions ++= List("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk17ModuleOpens,
+    javaOptions ++= List("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
     // Needed to avoid cryptic EOFException crashes in forked tests
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
@@ -142,7 +156,7 @@ object FiloSettings {
       IntegrationTest / internalDependencyClasspath, Test / exportedProducts)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-    MultiJvm / javaOptions := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk17ModuleOpens,
+    MultiJvm / javaOptions := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
     MultiJvm / compile := ((MultiJvm / compile) triggeredBy (Test / compile)).value)
 
   lazy val testMultiJvmToo = Seq(

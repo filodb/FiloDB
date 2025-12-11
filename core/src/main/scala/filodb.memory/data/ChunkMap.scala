@@ -45,6 +45,9 @@ import filodb.memory.format.UnsafeUtils
 object ChunkMap extends StrictLogging {
   private val _logger = logger
 
+  // Using deprecated objectFieldOffset(Field) API - still functional in JDK 21+
+  // Suppressing the deprecation warning since there's no direct VarHandle equivalent for this lock use case
+  @scala.annotation.nowarn("msg=method objectFieldOffset in class Unsafe is deprecated")
   private val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(
     classOf[ChunkMap].getDeclaredField("lockState"))
 

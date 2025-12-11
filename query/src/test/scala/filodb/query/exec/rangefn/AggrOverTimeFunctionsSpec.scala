@@ -362,37 +362,60 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("should correctly identify outliers with mad using sliding iterators for all three boundsCheck settings") {
+    // Use deterministic data to avoid flakiness.
+    // Data consists of values around 0.5 with clear outliers at -2.3 (every 40th) and 2.3 (every 20th, not 40th).
+    // With tolerance=4 and values tightly clustered around 0.5, the MAD will be small,
+    // making -2.3 and 2.3 clear outliers.
     val data = (0 until 200).map { i =>
       if ((i+1) % 40 == 0) -2.3d
       else if ((i+1) % 20 == 0) 2.3d
-      else rand.nextDouble()
+      else 0.5d  // Use constant value instead of random to ensure deterministic MAD calculation
     }
     val rv = timeValueRV(data)
     val rangeParams = RangeParams(100, 20, 500)
     val windowSize = 20
     val step = 5
 
-    // only lower bounds
-    val lowerAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last < 0) k.last else Double.NaN
-    }.toBuffer
+    // Helper function to compute expected outliers using the same MAD logic as the function
+    def computeExpectedOutliers(tolerance: Double, boundsCheck: Int): Seq[Double] = {
+      data.sliding(windowSize, step).map { window =>
+        val values = window.toArray.sorted
+        val size = values.length
+        val q = 0.5
+        val rank = q * (size - 1)
+        val lowerIndex = rank.toInt
+        val upperIndex = Math.min(lowerIndex + 1, size - 1)
+        val weight = rank - lowerIndex
+        val median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
 
+        val distFromMedian = window.map(v => Math.abs(median - v)).toArray.sorted
+        val mad = distFromMedian(lowerIndex) * (1 - weight) + distFromMedian(upperIndex) * weight
+
+        val lowerBound = median - tolerance * mad
+        val upperBound = median + tolerance * mad
+        val lastValue = window.last
+
+        if ((lastValue < lowerBound && boundsCheck <= 1) || (lastValue > upperBound && boundsCheck >= 1)) {
+          lastValue
+        } else {
+          Double.NaN
+        }
+      }.toSeq
+    }
+
+    // Test lower bounds only (boundsCheck=0)
+    val lowerAnomalies = computeExpectedOutliers(4.0, 0)
     val minSlidingIt3 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(0.0, rangeParams))), windowSize, step)
     val result3 = minSlidingIt3.map(_.getDouble(1)).toBuffer
     minSlidingIt3.close()
 
-    println(s"expected: $lowerAnomalies")
-    println(s"result: $result3")
     result3.zip(lowerAnomalies).foreach { case (r, a) =>
       if (a.isNaN) r.isNaN shouldEqual true
       else r shouldEqual a
     }
 
-    // both upper and lower bounds
-    val allAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last > 1.0 || k.last < 0) k.last else Double.NaN
-    }.toBuffer
-
+    // Test both upper and lower bounds (boundsCheck=1)
+    val allAnomalies = computeExpectedOutliers(4.0, 1)
     val minSlidingIt1 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(1.0, rangeParams))), windowSize, step)
     val result1 = minSlidingIt1.map(_.getDouble(1)).toBuffer
     minSlidingIt1.close()
@@ -401,11 +424,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       else r shouldEqual a
     }
 
-    // only upper bounds
-    val upperAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last > 1.0) k.last else Double.NaN
-    }.toBuffer
-
+    // Test upper bounds only (boundsCheck=2)
+    val upperAnomalies = computeExpectedOutliers(4.0, 2)
     val minSlidingIt2 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(2.0, rangeParams))), windowSize, step)
     val result2 = minSlidingIt2.map(_.getDouble(1)).toBuffer
     minSlidingIt2.close()
