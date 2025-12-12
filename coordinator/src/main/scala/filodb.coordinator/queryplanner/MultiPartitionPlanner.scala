@@ -690,8 +690,9 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
 
   /**
-   * check if the plan has join or aggregation clause.
+   * check if the plan has join or aggregation clause after the plan is materialized to Exec Plan.
    * This is a helper function to decide if a plan should be pushed down.
+   * We need to check after materialized case to decide how and where to exec the plan.
    * For binary join and aggregation they cannot be pushed down when they have on or by clauses.
    * sum(foo) by(label) + sum(bar) by(label) cannot be pushed down
    * because label can be distributed in different partitions.
@@ -699,13 +700,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * @param logicalPlan the logic plan.
    * @return true if the binary join or aggregation has clauses.
    */
-  private def hasJoinOrAggClause(logicalPlan: LogicalPlan): Boolean = {
+  private def hasJoinOrAggClauseAfterMaterialized(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin => binaryJoin.on.nonEmpty || binaryJoin.ignoring.nonEmpty
-      case aggregate: Aggregate => hasJoinOrAggClause(aggregate.vectors)
+      case aggregate: Aggregate => hasJoinOrAggClauseAfterMaterialized(aggregate.vectors)
       // AbsentOverTime is a special case that is converted to aggregation.
       case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime => true
-      case nonLeaf: NonLeafLogicalPlan => nonLeaf.children.exists(hasJoinOrAggClause)
+      case nonLeaf: NonLeafLogicalPlan => nonLeaf.children.exists(hasJoinOrAggClauseAfterMaterialized)
       case _ => false
     }
   }
@@ -717,7 +718,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClauseAfterMaterialized(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(
