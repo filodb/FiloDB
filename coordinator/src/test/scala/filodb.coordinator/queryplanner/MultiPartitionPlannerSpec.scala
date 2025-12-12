@@ -165,6 +165,83 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
       PlannerParams(processMultiPartition = true)))
+
+    // With PartitionAssignmentV2 (multiple partitions, same time range), the plan structure should be:
+    // LocalPartitionReduceAggregateExec (aggregates results from multiple partitions)
+    //   |- Children: one exec plan per partition (local + remote)
+    // The absent_over_time is converted to Last + Sum + AbsentFunctionMapper
+
+    // Top level should be LocalPartitionReduceAggregateExec with AbsentFunctionMapper
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.nonEmpty shouldBe true
+
+    // AbsentFunctionMapper should include the column filters from the query
+    val expectedFilters = List(
+      ColumnFilter("job", Equals("app1")),
+      ColumnFilter("__name__", Equals("test"))
+    )
+    execPlan.rangeVectorTransformers.head shouldBe AbsentFunctionMapper(
+      expectedFilters,
+      RangeParams(1000, 100, 10000),
+      "__name__"
+    )
+
+    // Should have children for both local and remote partitions
+    val reduceExec = execPlan.asInstanceOf[LocalPartitionReduceAggregateExec]
+    reduceExec.children.nonEmpty shouldBe true
+
+    // The structure is:
+    // LocalPartitionReduceAggregateExec (Sum aggregation)
+    //   |- MultiPartitionDistConcatExec (wraps local partition execution)
+    //   |- PromQlRemoteExec (remote partition with converted query)
+
+    // Find the PromQlRemoteExec child (may be nested)
+    def findRemoteExec(plan: ExecPlan): Option[PromQlRemoteExec] = {
+      plan match {
+        case remote: PromQlRemoteExec => Some(remote)
+        case parent if parent.children.nonEmpty => parent.children.flatMap(findRemoteExec).headOption
+        case _ => None
+      }
+    }
+
+    val remoteExec = findRemoteExec(reduceExec)
+    remoteExec shouldBe defined
+
+    // Verify the query sent to remote partition uses "last" instead of "absent_over_time"
+    val remoteQuery = remoteExec.get.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl
+    remoteQuery should include("last")
+    remoteQuery should not include "absent_over_time"
+  }
+
+  it("should generate correct plan for multi-partition absent_over_time with the plan") {
+    // Setup: Use PartitionAssignmentV2 with multiple partitions covering the same time range
+    // This tests the scenario where data is distributed across partitions but not split across time
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = {
+        if (routingKey.equals(Map("job" -> "app1"))) {
+          List(PartitionAssignmentV2(
+            Map(
+              "local" -> PartitionDetails("local", "local-url", None, 0.5f),
+              "remote" -> PartitionDetails("remote", "remote-url", None, 0.5f)
+            ),
+            TimeRange(1000 * 1000, 10000 * 1000)
+          ))
+        } else Nil
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = Nil
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(test{job = "app1"}[10m])""",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("""absent_over_time(test{job = "app1"}[10m])""", 1000, 100, 10000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
     val expectedPlanTree =
       s"""T~AbsentFunctionMapper(columnFilter=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test))) rangeParams=RangeParams(1000,100,10000) metricColumn=__name__)
          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
@@ -178,7 +255,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
          |----E~PromQlRemoteExec(PromQlQueryParams(last(test{job="app1"}[600s]),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
     validatePlan(execPlan, expectedPlanTree)
   }
-
 
   it ("should generate simple plan for one local partition for TopLevelSubquery") {
     val p1StartSecs = 1000
