@@ -141,6 +141,8 @@ object Submodules {
       // Force metrics-core 3.2.2 for Cassandra driver compatibility
       // Cassandra driver 3.7.1 requires com.codahale.metrics.JmxReporter which only exists in metrics-core 3.x
       dependencyOverrides += "io.dropwizard.metrics" % "metrics-core" % "3.2.2",
+      // Override global kryo-shaded exclusion - Spark's KryoSerializer needs KryoPool from kryo-shaded
+      excludeDependencies -= ExclusionRule("com.esotericsoftware", "kryo-shaded"),
       // JDK 17+ requires --add-opens for Spark to access internal Java APIs
       Test / javaOptions ++= Seq(
         "--add-opens=java.base/java.lang=ALL-UNNAMED",

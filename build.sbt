@@ -31,8 +31,13 @@ ThisBuild / dependencyOverrides ++= Seq(
 )
 
 // Globally exclude kryo-shaded to prevent conflicts with kryo 5.5.0
-// NOTE: sparkJobs needs kryo-shaded for Spark's KryoSerializer, so it's excluded from this rule
-// by explicitly adding kryo-shaded as a dependency in sparkJobsDeps
+// kryo-shaded contains com.esotericsoftware.kryo.Kryo$DefaultInstantiatorStrategy (old location)
+// kryo 5.x has it in com.esotericsoftware.kryo.util.DefaultInstantiatorStrategy (new location)
+// Having both on classpath causes ClassCastException
+// NOTE: sparkJobs needs kryo-shaded for Spark's KryoSerializer (KryoPool), so it overrides this exclusion
+ThisBuild / excludeDependencies ++= Seq(
+  ExclusionRule("com.esotericsoftware", "kryo-shaded")
+)
 
 enablePlugins(ProtobufPlugin)
 
