@@ -10,7 +10,7 @@ addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.10.0-RC1")
 
 addSbtPlugin("io.kamon" % "sbt-kanela-runner" % "2.0.6")
 
-addSbtPlugin("io.gatling" % "gatling-sbt" % "3.2.2")
+addSbtPlugin("io.gatling" % "gatling-sbt" % "4.17.9")  // Updated for Scala 2.13 support
 
 addSbtPlugin("com.github.sbt" % "sbt-protobuf" % "0.7.2")
 

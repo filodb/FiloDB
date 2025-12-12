@@ -224,8 +224,8 @@ object Dependencies {
   )
 
   lazy val gatlingDeps = Seq(
-      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.2.0" % "test,it",
-      "io.gatling"            % "gatling-test-framework"    % "3.2.0" % "test,it"
+      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.11.5" % "test,it",  // Updated for Scala 2.13
+      "io.gatling"            % "gatling-test-framework"    % "3.11.5" % "test,it"   // Updated for Scala 2.13
   )
 
   //  lazy val stressDeps = Seq(
