@@ -90,10 +90,10 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 ## Pre-requisites
 
-1. [Java 17](https://adoptium.net/) or [Java 21](https://adoptium.net/) (recommended)
-   - FiloDB has been upgraded to support JDK 17 and JDK 21
-   - JDK 21 is recommended for optimal performance and latest features
-   - JDK 11 is no longer supported as of the Scala 2.13 upgrade
+1. [Java 21](https://adoptium.net/) (required)
+   - FiloDB has been upgraded to require JDK 21 LTS
+   - JDK 21 provides optimal performance and latest features
+   - Previous JDK versions (11, 17) are no longer supported due to Scala 2.13 compatibility requirements
 2. [SBT](http://www.scala-sbt.org/) to build
    - The project uses Scala 2.13.12
 3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
