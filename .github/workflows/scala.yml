@@ -4,21 +4,25 @@ on:
   push:
     branches: [ develop ]
   pull_request:
-    branches: [ develop, integration, main, feat-index-rust ]
+    branches: [ develop, integration, main, feat-index-rust, scala2_13 ]
 
 jobs:
   test:
 
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        java-version: ['17', '21']
+      fail-fast: false
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
-    - name: Set up JDK 11
-      uses: actions/setup-java@v2
+      uses: actions/checkout@v4
+    - name: Set up JDK ${{ matrix.java-version }}
+      uses: actions/setup-java@v4
       with:
-        java-version: '11'
-        distribution: 'adopt'
+        java-version: ${{ matrix.java-version }}
+        distribution: 'temurin'
     - name: Install Rust Toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
@@ -28,10 +32,27 @@ jobs:
         toolchain: 1.83.0
     - name: Install cargo-zigbuild
       run: pip install cargo-zigbuild
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.coursier/cache
+        key: ${{ runner.os }}-jdk${{ matrix.java-version }}-sbt-${{ hashFiles('**/*.sbt', 'project/build.properties', 'project/**/*.scala') }}
+        restore-keys: |
+          ${{ runner.os }}-jdk${{ matrix.java-version }}-sbt-
+          ${{ runner.os }}-sbt-
+    - name: Verify Java version and Scala version
+      run: |
+        echo "Java version:"
+        java -version
+        echo "SBT and Scala version:"
+        sbt "show scalaVersion"
     - name: Run tests
       run: .github/workflows/runtests.sh
     - name: Coverage Reports
       uses: actions/upload-artifact@v4
       with:
-        name: scoverage-report
+        name: scoverage-report-jdk${{ matrix.java-version }}
         path: target/scala-*/scoverage-report/**
