@@ -278,9 +278,9 @@ object MachineMetricsData {
   def groupedRecords(ds: Dataset, stream: LazyList[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
                      offset: Int = 0): Seq[SomeData] = {
-    val i : Iterator[Stream[Seq[Any]]] = stream.take(n).grouped(groupSize)
+    val i : Iterator[LazyList[Seq[Any]]] = stream.take(n).grouped(groupSize)
     i.toSeq.zipWithIndex.map {
-      case (group: Stream[Seq[Any]], i: Int) =>
+      case (group: LazyList[Seq[Any]], i: Int) =>
         records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
   }

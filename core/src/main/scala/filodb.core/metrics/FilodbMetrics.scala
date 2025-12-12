@@ -158,7 +158,7 @@ case class MetricsCounter(otelCounter: Option[DoubleCounter],
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     val value2 = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
-      case None => value
+      case None => value.toDouble
     }
     otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
@@ -291,13 +291,13 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    import scala.jdk.CollectionConverters._
-    closeables ++= Classes.registerObservers(sdk).asScala
-    closeables ++= Cpu.registerObservers(sdk).asScala
-    closeables ++= MemoryPools.registerObservers(sdk).asScala
-    closeables ++= Threads.registerObservers(sdk).asScala
-    closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
-    closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    // TODO: Fix these instrumentation imports for JDK 21
+    // closeables ++= Classes.registerObservers(sdk).asScala
+    // closeables ++= Cpu.registerObservers(sdk).asScala
+    // closeables ++= MemoryPools.registerObservers(sdk).asScala
+    // closeables ++= Threads.registerObservers(sdk).asScala
+    // closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
+    // closeables ++= SystemMetrics.registerObservers(sdk).asScala
     closeables ++= registerProcessMetrics(sdk)
     sdk
   }
@@ -326,8 +326,8 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val future = Observable.intervalWithFixedDelay(0.seconds, otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
         processInfo.updateAttributes()
-        memRss.update(processInfo.getResidentSetSize)
-        memVms.update(processInfo.getVirtualSize)
+        memRss.update(processInfo.getResidentSetSize.toDouble)
+        memVms.update(processInfo.getVirtualSize.toDouble)
         cpuSystemTime.update(processInfo.getKernelTime.toDouble)
         cpuUserTime.update(processInfo.getUserTime.toDouble)
         majorPageFaults.update(processInfo.getMajorFaults.toDouble)
