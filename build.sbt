@@ -22,7 +22,8 @@ ThisBuild / dependencyOverrides ++= Seq(
   "io.circe" %% "circe-generic" % "0.12.3",
   "io.circe" %% "circe-parser" % "0.12.3",
   "io.circe" %% "circe-jawn" % "0.12.3",
-  "org.scala-lang.modules" %% "scala-parser-combinators" % "2.3.0"
+  "org.scala-lang.modules" %% "scala-parser-combinators" % "2.3.0",
+  "org.scala-lang.modules" %% "scala-xml" % "2.1.0"
 )
 
 // Globally exclude kryo-shaded to prevent conflicts with kryo 5.5.0
