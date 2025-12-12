@@ -1,12 +1,15 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.concurrent.{Map => ConcurrentMap}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
+
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
@@ -1033,7 +1036,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // Step 2: Materialize with Last function across partitions
     val seriesResult = materializePeriodicAndRawSeries(pswWithLast, qContext)
 
-    // Step 3: Create Sum aggregate with by("job") clause
+    // Step 3: Create Sum aggregate clause
     val aggregate = Aggregate(AggregationOperator.Sum, psw, Nil)
     // Add sum aggregator to aggregate all partition responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
