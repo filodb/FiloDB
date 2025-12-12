@@ -133,7 +133,7 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "com.typesafe.akka"      %% "akka-cluster-tools"          % akkaVersion, // For ClusterSingleton support
     "io.altoo"               %% "akka-kryo-serialization"     % "2.5.2" excludeAll(excludeMinlog, excludeOldLz4, excludeAkka, excludeKryoShaded), // Updated for JDK 21 compatibility
-    "de.javakaffee"          % "kryo-serializers"             % "0.45" excludeAll(excludeMinlog, excludeAkka, excludeKryoShaded), // Updated version
+    "de.javakaffee"          % "kryo-serializers"             % "0.45" excludeAll(excludeMinlog, excludeAkka, excludeKryoShaded, ExclusionRule(organization = "com.esotericsoftware")), // Exclude kryo to use our version
     "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion  excludeAll(excludeOkHttp3),
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
