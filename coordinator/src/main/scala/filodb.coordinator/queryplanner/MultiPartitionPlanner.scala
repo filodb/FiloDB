@@ -1,15 +1,12 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ConcurrentHashMap
-
 import scala.collection.concurrent.{Map => ConcurrentMap}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
-
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
@@ -19,6 +16,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._
+import filodb.query.RangeFunctionId.AbsentOverTime
 import filodb.query.exec._
 
 //scalastyle:off file.size.limit
@@ -698,11 +696,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * @param logicalPlan the logic plan.
    * @return true if the binary join or aggregation has clauses.
    */
-  private def hasJoinClause(logicalPlan: LogicalPlan): Boolean = {
+  private def hasJoinOrAggClause(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin => binaryJoin.on.nonEmpty || binaryJoin.ignoring.nonEmpty
-      case aggregate: Aggregate => hasJoinClause(aggregate.vectors)
-      case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasJoinClause)
+      case aggregate: Aggregate => hasJoinOrAggClause(aggregate.vectors)
+      // AbsentOverTime is a special case that is converted to aggregation.
+      case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime => true
+      case nonLeaf: NonLeafLogicalPlan => nonLeaf.children.exists(hasJoinOrAggClause)
       case _ => false
     }
   }
@@ -714,7 +714,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
     // TODO have a more accurate pushdown after location rule is define.
     // Right now do not push down any multi-partition namespace plans when on clause exists.
-    val canPushdown = !(hasMultiPartitionNamespace && hasJoinClause(aggregate)) &&
+    val canPushdown = !(hasMultiPartitionNamespace && hasJoinOrAggClause(aggregate)) &&
       canPushdownAggregate(aggregate, tschemaLabels, queryContext)
     val plan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors, queryContext.copy(
@@ -765,7 +765,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     } else { logicalPlan match {
       case agg: Aggregate => materializeAggregate(agg, qContext,
         assignments.flatMap(_.map(_.proportionMap)).exists(_.size > 1))
-      case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
+      case psw: PeriodicSeriesWithWindowing if psw.function != AbsentOverTime
+          => materializePeriodicAndRawSeries(psw, qContext)
+      case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime
+          => materializeAbsentOverTimeMultiPartition(psw, qContext)
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
@@ -1012,6 +1015,34 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     PlanResult(execPlan :: Nil)
+  }
+
+  /**
+   * Materialize absent_over_time for multi-partition queries.
+   * Following the pattern from DefaultPlanner/SingleClusterPlanner:
+   * 1. Use Last function to get last value from each partition
+   * 2. Create Sum aggregate with by("job") to aggregate across partitions
+   * 3. Add AbsentFunctionMapper - if all values are NaN, sum yields NaN and mapper returns 1
+   */
+  private def materializeAbsentOverTimeMultiPartition(psw: PeriodicSeriesWithWindowing,
+                                                      qContext: QueryContext): PlanResult = {
+    // Step 1: Use Last function instead of AbsentOverTime
+    // This gets the last value from the range window
+    val pswWithLast = psw.copy(function = RangeFunctionId.Last)
+
+    // Step 2: Materialize with Last function across partitions
+    val seriesResult = materializePeriodicAndRawSeries(pswWithLast, qContext)
+
+    // Step 3: Create Sum aggregate with by("job") clause
+    val aggregate = Aggregate(AggregationOperator.Sum, psw, Nil)
+    // Add sum aggregator to aggregate all partition responses
+    // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+    val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+      qContext.plannerParams.copy(skipAggregatePresent = true)), seriesResult)))
+
+    // Step 4: Add AbsentFunctionMapper
+    addAbsentFunctionMapper(aggregatePlanResult, psw.columnFilters,
+      RangeParams(psw.startMs / 1000, psw.stepMs / 1000, psw.endMs / 1000), qContext)
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
