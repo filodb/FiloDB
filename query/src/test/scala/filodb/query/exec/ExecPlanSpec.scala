@@ -30,7 +30,9 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
 
   def makeSetOperatorExecPlan(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan],
                               binOp: BinaryOperator,

@@ -351,6 +351,7 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.PerQueryLimits = {
       val quotaBuilder = GrpcMultiPartitionQueryService.PerQueryLimits.newBuilder()
       quotaBuilder.setExecPlanSamples(sq.execPlanSamples)
+      quotaBuilder.setExecPlanLeafSamples(sq.execPlanLeafSamples)
       quotaBuilder.setExecPlanResultBytes(sq.execPlanResultBytes)
       quotaBuilder.setGroupByCardinality(sq.groupByCardinality)
       quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
@@ -372,6 +373,11 @@ object ProtoConverters {
             giq.getExecPlanSamples
           else
             defaultQ.execPlanSamples,
+        execPlanLeafSamples =
+          if (giq.hasExecPlanLeafSamples)
+            giq.getExecPlanLeafSamples
+          else
+            defaultQ.execPlanLeafSamples,
         execPlanResultBytes =
           if (giq.hasExecPlanResultBytes)
             giq.getExecPlanResultBytes
@@ -453,6 +459,7 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.QueryWarnings = {
       val builder = GrpcMultiPartitionQueryService.QueryWarnings.newBuilder()
       builder.setExecPlanSamples(w.execPlanSamples.get())
+      builder.setExecPlanLeafSamples(w.execPlanLeafSamples.get())
       builder.setExecPlanResultBytes(w.execPlanResultBytes.get())
       builder.setGroupByCardinality(w.groupByCardinality.get())
       builder.setJoinQueryCardinality(w.joinQueryCardinality.get())
@@ -467,6 +474,7 @@ object ProtoConverters {
     def fromProto: QueryWarnings = {
       val ws = QueryWarnings(
         new AtomicInteger(wGrpc.getExecPlanSamples()),
+        new AtomicInteger(wGrpc.getExecPlanLeafSamples()),
         new AtomicLong(wGrpc.getExecPlanResultBytes()),
         new AtomicInteger(wGrpc.getGroupByCardinality()),
         new AtomicInteger(wGrpc.getJoinQueryCardinality()),

@@ -59,7 +59,9 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
 
   val metric = "http_req_total"
   val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787", "host" -> "host-1")

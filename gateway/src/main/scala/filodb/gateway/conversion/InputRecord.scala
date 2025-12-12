@@ -231,6 +231,60 @@ object InputRecord {
   }
 
   /**
+   * Writes a delta non-decreasing histogram record along with the sum, count, min, max
+   * and an additional column for last observed value.
+   */
+  def writeLastDeltaHistRecord(builder: RecordBuilder,
+                               metric: String,
+                               tags: Map[String, String],
+                               timestamp: Long,
+                               kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+    var sumLast = Double.NaN
+
+    // Filter out column values, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+        false
+      case ("count", v) => count = v
+        false
+      case ("min", v) => min = v
+        false
+      case ("max", v) => max = v
+        false
+      case ("sumLast", v) => sumLast = v
+        false
+      case other => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+
+    if (sortedBuckets.nonEmpty) {
+      // Built up custom histogram objects and scheme, then encode
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+      // Now, write out histogram
+      builder.startNewRecord(lastDeltaHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addDouble(sumLast)
+
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
+  }
+
+  /**
    * Writes a non-decreasing histogram record, along with the sum, count, min and max
    */
   //scalastyle:off method.length

@@ -364,8 +364,20 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitLiteral(ctx: PromQLParser.LiteralContext): Expression = {
     val num = ctx.NUMBER()
+    val inf = ctx.INF()
+    val nan = ctx.NAN()
+
     if (num != null) {
       Scalar(java.lang.Double.parseDouble(num.getSymbol().getText()))
+    } else if (inf != null) {
+      val text = inf.getSymbol().getText()
+      if (text.startsWith("-")) {
+        Scalar(Double.NegativeInfinity)
+      } else {
+        Scalar(Double.PositiveInfinity)
+      }
+    } else if (nan != null) {
+      Scalar(Double.NaN)
     } else {
       StringLiteral(dequote(ctx.STRING()))
     }

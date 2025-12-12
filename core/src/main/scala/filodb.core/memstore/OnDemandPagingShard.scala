@@ -198,7 +198,16 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
             rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods.toSeq))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
-              .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .mapEval { rawPart =>
+                partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
+                  // Check if any chunks were skipped and update QuerySession
+                  if (result.isPartialResult) {
+                    throw QueryLimitException("The result is too large" +
+                      " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId);
+                  }
+                  result.partition
+                }
+              }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
               .guarantee(Task.eval {
                 span.finish()
@@ -222,7 +231,16 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapParallelUnordered(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(ref, maxChunkTime, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .mapEval { rawPart =>
+                    partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
+                      // Check if any chunks were skipped and update QuerySession
+                      if (result.isPartialResult) {
+                        throw QueryLimitException("The result is too large" +
+                          " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId)
+                      }
+                      result.partition
+                    }
+                  }
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL

@@ -2,7 +2,11 @@ package filodb.core.metrics
 
 import java.nio.file.{Files, Paths}
 import java.time.Duration
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.{ConcurrentHashMap, ExecutorService, TimeUnit}
+
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.DurationInt
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -17,11 +21,16 @@ import io.opentelemetry.sdk.metrics.data.AggregationTemporality
 import io.opentelemetry.sdk.metrics.export.{AggregationTemporalitySelector, MetricExporter, PeriodicMetricReader}
 import io.opentelemetry.sdk.resources.Resource
 import kamon.Kamon
+import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
+import monix.execution.Scheduler
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
+import oshi.SystemInfo
 
 import filodb.core.GlobalConfig
+
 
 /**
  * Configuration for OpenTelemetry metrics
@@ -29,23 +38,92 @@ import filodb.core.GlobalConfig
 case class OTelMetricsConfig(exportIntervalSeconds: Int = 60,
                              resourceAttributes: Map[String, String],
                              otlpHeaders: Map[String, String],
-                             exporterType: String, // "otlp" or "log"
+                             exporterFactoryClassName: String, // Fully qualified class name of MetricExporterFactory
                              exponentialHistogram: Boolean,
                              customHistogramBucketsTime: List[Double], // used only if exponentialHistogram=false
                              customHistogramBuckets: List[Double], // used only if exponentialHistogram=false
                              otlpEndpoint: Option[String],
                              otlpTrustedCertsPath: Option[String],
+                             // one of client cert/key or p12 keystore must be provided for mTLS
                              otlpClientCertPath: Option[String],
-                             otlpClientKeyPath: Option[String])
+                             otlpClientKeyPath: Option[String],
+                             otlpClientP12KeystorePath: Option[String])
+
+/**
+ * Factory interface for creating MetricExporter instances
+ */
+trait MetricExporterFactory {
+  /**
+   * Creates a MetricExporter instance
+   * @param config The OTelMetricsConfig to use for configuration
+   * @return A configured MetricExporter
+   */
+  def create(config: OTelMetricsConfig): MetricExporter
+}
+
+/**
+ * Factory for creating OtlpGrpcMetricExporter instances
+ */
+class OtlpGrpcMetricExporterFactory extends MetricExporterFactory {
+  override def create(config: OTelMetricsConfig): MetricExporter = {
+    val b = OtlpGrpcMetricExporter.builder()
+      .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
+      .setEndpoint(config.otlpEndpoint.getOrElse(
+        throw new IllegalArgumentException("otlp-endpoint must be configured when using OTLP exporter")))
+
+    if (config.otlpTrustedCertsPath.isDefined &&
+        config.otlpClientKeyPath.isDefined &&
+        config.otlpClientCertPath.isDefined) {
+      b.setTrustedCertificates(Files.readAllBytes(Paths.get(config.otlpTrustedCertsPath.get)))
+      b.setClientTls(Files.readAllBytes(Paths.get(config.otlpClientKeyPath.get)),
+        Files.readAllBytes(Paths.get(config.otlpClientCertPath.get)))
+    } else if (config.otlpTrustedCertsPath.isDefined && config.otlpClientP12KeystorePath.isDefined) {
+      // TODO support later
+    }
+    config.otlpHeaders.foreach { case (key, value) =>
+      b.addHeader(key, value)
+    }
+    b.build()
+  }
+}
+
+/**
+ * Factory for creating OtlpJsonLoggingMetricExporter instances
+ */
+class LogMetricExporterFactory extends MetricExporterFactory {
+  override def create(config: OTelMetricsConfig): MetricExporter = {
+    OtlpJsonLoggingMetricExporter.create(AggregationTemporality.DELTA)
+  }
+}
 
 object OTelMetricsConfig {
-  def fromConfig(metricsConfig: Config): OTelMetricsConfig = {
 
+  /**
+   * Creates a MetricExporterFactory instance using reflection
+   * @param className Fully qualified class name of the factory
+   * @return Instance of MetricExporterFactory
+   */
+  def instantiateExporterFactory(className: String): MetricExporterFactory = {
+    try {
+      val clazz = Class.forName(className)
+      clazz.getDeclaredConstructor().newInstance().asInstanceOf[MetricExporterFactory]
+    } catch {
+      case e: ClassNotFoundException =>
+        throw new IllegalArgumentException(s"Factory class not found: $className", e)
+      case e: ClassCastException =>
+        throw new IllegalArgumentException(
+          s"Class $className does not implement MetricExporterFactory trait", e)
+      case e: Exception =>
+        throw new IllegalArgumentException(s"Failed to instantiate factory: $className", e)
+    }
+  }
+
+  def fromConfig(metricsConfig: Config): OTelMetricsConfig = {
     OTelMetricsConfig(
       otlpEndpoint = metricsConfig.as[Option[String]]("otlp-endpoint"),
       exportIntervalSeconds = metricsConfig.as[Int]("export-interval-seconds"),
       resourceAttributes = metricsConfig.as[Map[String, String]]("resource-attributes"),
-      exporterType = metricsConfig.as[String]("exporter-type"),
+      exporterFactoryClassName = metricsConfig.as[String]("exporter-factory-class-name"),
       exponentialHistogram = metricsConfig.as[Boolean]("exponential-histogram"),
       customHistogramBucketsTime = metricsConfig.as[List[Double]]("custom-histogram-buckets-time").sorted,
       customHistogramBuckets = metricsConfig.as[List[Double]]("custom-histogram-buckets").sorted,
@@ -53,7 +131,9 @@ object OTelMetricsConfig {
       otlpHeaders = metricsConfig.as[Map[String, String]]("otlp-headers"),
       otlpTrustedCertsPath = metricsConfig.as[Option[String]]("otlp-trusted-certs-path"),
       otlpClientCertPath = metricsConfig.as[Option[String]]("otlp-client-cert-path"),
-      otlpClientKeyPath = metricsConfig.as[Option[String]]("otlp-client-key-path")
+      otlpClientKeyPath = metricsConfig.as[Option[String]]("otlp-client-key-path"),
+      otlpClientP12KeystorePath = metricsConfig.as[Option[String]]("otlp-client-p12-keystore-path")
+      // TODO add support for passwords if needed later
     )
   }
 }
@@ -71,11 +151,16 @@ sealed trait MetricsInstrument {
   }
 }
 
-case class MetricsCounter(otelCounter: Option[LongCounter],
+case class MetricsCounter(otelCounter: Option[DoubleCounter],
                           kamonCounter: Option[kamon.metric.Counter],
+                          timeUnit: Option[TimeUnit],
                           baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
+    val value2 = timeUnit match {
+      case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
+      case None => value
+    }
+    otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
@@ -99,11 +184,18 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
   }
 }
 
-case class MetricsGauge(otelGauge: Option[DoubleGauge],
+case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], Double]],
                         kamonGauge: Option[kamon.metric.Gauge],
-                        baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
+                        timeUnit: Option[TimeUnit],
+                        baseAttributes: Map[String, String]
+                        ) extends MetricsInstrument {
+  val baseAttributesBuilder: AttributesBuilder = Attributes.builder() // not used
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    otelGauge.foreach(_.set(value, withAttributes(additionalAttributes)))
+    val value2 = timeUnit match {
+      case Some(unit) => unit.toNanos(value.toLong).toDouble / 1e9 // convert to seconds as double
+      case None => value
+    }
+    otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributes, value2))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
@@ -140,6 +232,8 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   private val kamonEnabled = filodbMetricsConfig.as[Boolean]("kamon-enabled")
   private val closeables = scala.collection.mutable.ListBuffer.empty[AutoCloseable]
 
+  val otelConfig: OTelMetricsConfig = OTelMetricsConfig.fromConfig(filodbMetricsConfig.getConfig("otel"))
+
   // TODO for some reason, enabling this line fails DownsamplerMainSpec
   // Kamon.init() // intialize anyway until tracing is migrated to otel as well
   private val openTelemetry: OpenTelemetry = if (otelEnabled) {
@@ -155,8 +249,6 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
   // scalastyle:off method.length
   private def initializeOpenTelemetry(): OpenTelemetry = {
 
-    val otelConfig: OTelMetricsConfig = OTelMetricsConfig.fromConfig(filodbMetricsConfig.getConfig("otel"))
-
     // Create resource with configured attributes
     val resourceBuilder = Resource.getDefault().toBuilder
     // TODO use standard resource attribute detectors so semconv is automatically followed
@@ -165,30 +257,10 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     }
     val resource = resourceBuilder.build()
 
-    // Create exporter based on configuration
-    val metricExporter: MetricExporter = otelConfig.exporterType.toLowerCase match {
-      case "log" =>
-        logger.info("Using log-based metrics exporter")
-        OtlpJsonLoggingMetricExporter.create(AggregationTemporality.DELTA)
-      case "otlp" =>
-        logger.info(s"Using OTLP metrics exporter with endpoint: ${otelConfig.otlpEndpoint}")
-        val b = OtlpGrpcMetricExporter.builder()
-          .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
-          .setEndpoint(otelConfig.otlpEndpoint.get)
-
-        if (otelConfig.otlpTrustedCertsPath.isDefined) {
-          b.setTrustedCertificates(Files.readAllBytes(Paths.get(otelConfig.otlpTrustedCertsPath.get)))
-        }
-        if (otelConfig.otlpClientKeyPath.isDefined && otelConfig.otlpClientCertPath.isDefined) {
-          b.setClientTls(Files.readAllBytes(Paths.get(otelConfig.otlpClientKeyPath.get)),
-                         Files.readAllBytes(Paths.get(otelConfig.otlpClientCertPath.get)))
-        }
-        otelConfig.otlpHeaders.foreach { case (key, value) =>
-          b.addHeader(key, value)
-        }
-        b.build()
-      case _ => throw new IllegalArgumentException(s"Unknown exporter type: ${otelConfig.exporterType}")
-    }
+    // Create exporter using the configured factory
+    logger.info(s"Using ${otelConfig.exporterFactoryClassName} metrics exporter")
+    val metricExporter: MetricExporter =
+        OTelMetricsConfig.instantiateExporterFactory(otelConfig.exporterFactoryClassName).create(otelConfig)
 
     // Create periodic metric reader with delta aggregation
     val metricReader = PeriodicMetricReader.builder(metricExporter)
@@ -219,15 +291,80 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    // Commented out due to unused imports - these can be re-enabled if needed
-    // import scala.jdk.CollectionConverters._
-    // closeables ++= Classes.registerObservers(sdk).asScala
-    // closeables ++= Cpu.registerObservers(sdk).asScala
-    // closeables ++= MemoryPools.registerObservers(sdk).asScala
-    // closeables ++= Threads.registerObservers(sdk).asScala
-    // closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
-    // closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    import scala.jdk.CollectionConverters._
+    closeables ++= Classes.registerObservers(sdk).asScala
+    closeables ++= Cpu.registerObservers(sdk).asScala
+    closeables ++= MemoryPools.registerObservers(sdk).asScala
+    closeables ++= Threads.registerObservers(sdk).asScala
+    closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
+    closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    closeables ++= registerProcessMetrics(sdk)
     sdk
+  }
+
+  private def registerProcessMetrics(sdk: OpenTelemetrySdk) = {
+    val systemInfo = new SystemInfo
+    val osInfo = systemInfo.getOperatingSystem
+    val processInfo = osInfo.getProcess(osInfo.getProcessId)
+
+    implicit val sch: Scheduler = monix.execution.Scheduler.global
+    val observables = new ListBuffer[AutoCloseable]()
+    val strMem = "process_memory_bytes"
+    val strCpu = "process_cpu_time_total_seconds"
+    val strMajorFaults = "process_major_page_faults_total"
+    val strMinorFaults = "process_minor_page_faults_total"
+    val strContextSwitches = "process_context_switches_total"
+
+    if (kamonEnabled) {
+      val memRss = Kamon.gauge(strMem).withTag("type", "rss")
+      val memVms = Kamon.gauge(strMem).withTag("type", "vms")
+      val cpuUserTime = Kamon.gauge(strMem, MeasurementUnit.time.milliseconds).withTag("type", "user")
+      val cpuSystemTime = Kamon.gauge(strMem, MeasurementUnit.time.milliseconds).withTag("type", "system")
+      val majorPageFaults = Kamon.gauge(strMajorFaults).withoutTags()
+      val minorPageFaults = Kamon.gauge(strMinorFaults).withoutTags()
+      val contextSwitches = Kamon.gauge(strContextSwitches).withoutTags()
+
+      val future = Observable.intervalWithFixedDelay(0.seconds, otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
+        processInfo.updateAttributes()
+        memRss.update(processInfo.getResidentSetSize)
+        memVms.update(processInfo.getVirtualSize)
+        cpuSystemTime.update(processInfo.getKernelTime.toDouble)
+        cpuUserTime.update(processInfo.getUserTime.toDouble)
+        majorPageFaults.update(processInfo.getMajorFaults.toDouble)
+        minorPageFaults.update(processInfo.getMinorFaults.toDouble)
+        contextSwitches.update(processInfo.getContextSwitches.toDouble)
+      }
+      observables.append(() => future.cancel())
+    }
+
+    if (otelEnabled) {
+      val meter = sdk.getMeter("filodb-process-metrics")
+      observables.append(meter.gaugeBuilder(strMem).ofLongs().buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getResidentSetSize, Attributes.builder().put("type", "rss").build())
+          r.record(processInfo.getVirtualSize, Attributes.builder().put("type", "vms").build())
+        }))
+      observables.append(meter.counterBuilder(strCpu).ofDoubles()
+        .buildWithCallback((r: ObservableDoubleMeasurement) => {
+          processInfo.updateAttributes()
+          // convert ms to seconds
+          r.record(processInfo.getUserTime.toDouble / 1000, Attributes.builder().put("type", "user").build())
+          r.record(processInfo.getKernelTime.toDouble / 1000, Attributes.builder().put("type", "system").build())
+        }))
+      observables.append(meter.counterBuilder(strMajorFaults).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getMajorFaults)
+        }))
+      observables.append(meter.counterBuilder(strMinorFaults).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getMinorFaults)
+        }))
+      observables.append(meter.counterBuilder(strContextSwitches).buildWithCallback((r: ObservableLongMeasurement) => {
+          processInfo.updateAttributes()
+          r.record(processInfo.getContextSwitches)
+        }))
+    }
+    observables
   }
 
   /**
@@ -248,7 +385,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val otelCounter = if (!otelEnabled) None else {
         val n = normalizeMetricName(name, isBytes, isCounter = true, timeUnit)
-        Some(meter.counterBuilder(n).build())
+        Some(meter.counterBuilder(n).ofDoubles().build())
       }
 
       val kamonCounter = if (!kamonEnabled) None else {
@@ -266,7 +403,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       }
 
       val attributes = createAttributesBuilder(baseAttributes)
-      MetricsCounter(otelCounter, kamonCounter, attributes)
+      MetricsCounter(otelCounter, kamonCounter, timeUnit, attributes)
     }).asInstanceOf[MetricsCounter]
   }
 
@@ -320,7 +457,17 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val otelGauge = if (!otelEnabled) None else {
         val n = normalizeMetricName(name, isBytes, isCounter = false, timeUnit)
-        Some(meter.gaugeBuilder(n).build())
+        // There is no synchronous gauge in OTel that hold set values like the one in Kamon,
+        // so we need to use a callback to report values. We use a mutable map to hold the recorded values
+        // for different attribute combinations and report all the values to the instrument in the callback.
+        val valueHolder = mutable.HashMap.empty[Map[String, String], Double]
+        closeables += meter.gaugeBuilder(n).buildWithCallback { r: ObservableDoubleMeasurement =>
+          valueHolder.foreach { case (attrMap, value) =>
+            val attributes = createAttributesBuilder(attrMap).build()
+            r.record(value, attributes)
+          }
+        }
+        Some(valueHolder)
       }
 
       val kamonGauge = if (!kamonEnabled) None else {
@@ -337,8 +484,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
         }
       }
 
-      val attributes = createAttributesBuilder(baseAttributes)
-      MetricsGauge(otelGauge, kamonGauge, attributes)
+      MetricsGauge(otelGauge, kamonGauge, timeUnit, baseAttributes)
     }).asInstanceOf[MetricsGauge]
   }
 
@@ -427,6 +573,17 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       Kamon.stop()
     }
   }
+
+  def instrumentExecutor(ex: ExecutorService, name: String): ExecutorService = {
+    var newEx = ex
+    if (otelEnabled) {
+      newEx = new InstrumentedExecutorService(newEx, name, this)
+    }
+    if (kamonEnabled) {
+      newEx = ExecutorInstrumentation.instrument(newEx, name)
+    }
+    newEx
+  }
 }
 
 /**
@@ -496,5 +653,9 @@ object FilodbMetrics {
 
   def shutdown(): Unit = {
     instance.shutdown()
+  }
+
+  def instrumentExecutor(ex: ExecutorService, name: String): ExecutorService = {
+    instance.instrumentExecutor(ex, name)
   }
 }

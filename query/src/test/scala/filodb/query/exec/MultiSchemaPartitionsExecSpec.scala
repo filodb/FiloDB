@@ -54,7 +54,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val metric = "http_req_total"
   val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787", "host" -> "host-1")
@@ -82,6 +83,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData = MMD.linearHistSeries().take(100)
+  val histAggData = MMD.linearHistSeries(metricNameSuffix = ":::agg").take(100)
   val histMaxMinData = MMD.histMaxMin(histData)
 
   val histDataDisabledWS = MMD.linearHistSeries(ws = GlobalConfig.workspacesDisabledForMaxMin.get.head).take(100)
@@ -93,6 +95,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
     memStore.ingest(dsRef, 0, SomeData(container, 0))
     memStore.ingest(dsRef, 0, MMD.records(MMD.histDataset, histData))
+    memStore.ingest(dsRef, 0, MMD.records(MMD.histDataset, histAggData))
 
     // set up shard, but do not ingest data to simulate an empty shard
     memStore.setup(dsRef, schemas, 1, TestData.storeConf, 2)
@@ -595,6 +598,20 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
   }
 
+  it ("should return rangevector for prom query to get sum timeseries with agg suffix") {
+    import ZeroCopyUTF8String._
+
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
+      ColumnFilter("_metric_", Filter.Equals("request-latency_sum:::agg".utf8)))
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0,
+      filters, TimeRangeChunkScan(100000L, 150000L), "_metric_")
+
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.head.key.labelValues.get(ZeroCopyUTF8String("metric")).get.toString shouldEqual "request-latency:::agg"
+    result.result.size shouldEqual 1
+  }
+
   it ("should return rangevector for prom query to get count timeseries") {
     import ZeroCopyUTF8String._
 
@@ -605,7 +622,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
-    result.result.head.key.labelValues.get(ZeroCopyUTF8String("metric")).get equals("request-latency")
+    result.result.head.key.labelValues.get(ZeroCopyUTF8String("metric")).get.toString shouldEqual "request-latency"
     result.result.size shouldEqual 1
   }
 }

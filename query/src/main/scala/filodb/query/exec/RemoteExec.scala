@@ -141,6 +141,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     val qws = queryWarningsResponse.getOrElse(QueryWarningsResponse())
     val queryWarnings = QueryWarnings(
       new AtomicInteger(qws.execPlanSamples),
+      new AtomicInteger(qws.execPlanLeafSamples),
       new AtomicLong(qws.execPlanResultBytes),
       new AtomicInteger(qws.groupByCardinality),
       new AtomicInteger(qws.joinQueryCardinality),

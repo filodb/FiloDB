@@ -5,6 +5,7 @@ import scala.concurrent.duration.DurationInt
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.GlobalConfig
+import filodb.core.metadata.Schemas
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
@@ -18,8 +19,14 @@ import filodb.query.util.{AggRule, ExcludeAggRule, HierarchicalQueryExperience, 
  */
 object AggLpOptimization extends StrictLogging{
 
+  // GOTCHA for LP Optimization:
+  // If raw data is 10-secondly, and pre-aggregated data is 1-minutely, then query results won't match exactly.
+  // We optimize the query anyway since we do not have pre-agg use cases that publish 10s data yet.
+  // To support query equivalence, we would need to have pre-aggregated data at same frequency as raw data.
+  // If there is a use case that should not optimize for such scenarios prior to pre-agg supporting 10s data,
+  // instruct users to the no_optimize promql function to bypass the optimization.
+
   // configure if needed later
-  private val aggTimeWindow = 1.minutes.toMillis // pre-aggregated data is at 1m resolution
   private val aggDelay  = 1.minutes.toMillis // pre-aggregated data is delayed by 1m
 
   private val numAggLpOptimized = FilodbMetrics.counter(s"num_agg_lps_optimized")
@@ -139,7 +146,7 @@ object AggLpOptimization extends StrictLogging{
       case Aggregate(AggregationOperator.Sum,
                     PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Rate, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(increase(foo))
@@ -148,41 +155,41 @@ object AggLpOptimization extends StrictLogging{
       // sum(increase(foo:::agg::count))
       // sum(increase(foo:::agg::sum))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.Increase, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.Increase, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption, None)
 
       // sum(sum_over_time(foo))
       // sum(sum_over_time(foo:::agg::sum))
       // sum(sum_over_time(foo:::agg::count))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.SumOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.SumOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("sum", "count"))
+                    _) if rs.columns().toSet.subsetOf(Set("sum", "count"))
           => makeResult(rs, rs.columns().headOption.orElse(Some("sum")), None)
 
       // sum(count_over_time(foo))
       case Aggregate(AggregationOperator.Sum,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.CountOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.CountOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().isEmpty
+                    _) if rs.columns().isEmpty
           => makeResult(rs, Some("count"), Some(SumOverTime))
 
       // min(min_over_time(foo))
       // min(min_over_time(foo:::agg::min))
       case Aggregate(AggregationOperator.Min,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MinOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MinOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("min"))
+                    _) if rs.columns().toSet.subsetOf(Set("min"))
           => makeResult(rs, Some("min"), None)
 
       // max(max_over_time(foo))
       // max(max_over_time(foo:::agg::max))
       case Aggregate(AggregationOperator.Max,
-                    PeriodicSeriesWithWindowing(rs, _, _, _, window, RangeFunctionId.MaxOverTime, _, _, _, _),
+                    PeriodicSeriesWithWindowing(rs, _, _, _, _, RangeFunctionId.MaxOverTime, _, _, _, _),
                     _,
-                    _) if aggTimeWindow <= window && rs.columns().toSet.subsetOf(Set("max"))
+                    _) if rs.columns().toSet.subsetOf(Set("max"))
           => makeResult(rs, Some("max"), None)
 
       /*
@@ -210,14 +217,22 @@ object AggLpOptimization extends StrictLogging{
     } else {
       // if the query column is not the same as the suggested aggregation column, it is a wierd case, so don't optimize
       val queryColumnOpt = ret.get.rawSeriesColumn
-      if (queryColumnOpt.isEmpty || queryColumnOpt == ret.get.aggColumnToUse) ret else None
+      val typeFilterCanBeTranslated = ret.get.rawSeriesFilters.find(_.column == Schemas.TypeLabel) match {
+        case Some(ColumnFilter(_, Equals(value))) =>
+          // only optimize if the type filter is querying pre-aggregated schema
+          Schemas.preAggSchema.contains(value.toString)
+        case Some(_) => false // if there are other operators on type filter, cannot optimize
+        case None => true // can optimize if there is no type filter
+      }
+      if ((queryColumnOpt.isEmpty || queryColumnOpt == ret.get.aggColumnToUse) && typeFilterCanBeTranslated) ret
+      else None
     }
   }
 
   private def replaceMetricNameInQuery(agg: Aggregate, aggMetricName: String,
                                        col: Seq[String], rf: Option[RangeFunctionId]): Aggregate = {
     agg.copy(vectors = agg.vectors.asInstanceOf[PeriodicSeriesWithWindowing]
-      .replaceRFFiltersAndColumn(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
+       .updateRawSeriesForAggOptimize(Seq(ColumnFilter(GlobalConfig.PromMetricLabel, Equals(aggMetricName))), col, rf))
   }
 
   private def metricNameWithoutSuffix(metricNameStr: String): String = metricNameStr.split(":::").head

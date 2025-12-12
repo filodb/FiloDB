@@ -1,17 +1,15 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicLong
-
 import scala.concurrent.duration._
 import scala.io.Source
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
-
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
@@ -50,10 +48,15 @@ object TestData {
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
     }
+    downsample {
+      resolutions = [ 1 minute, 5 minutes ]
+      ttls = [ 32 days, 183 days ]
+    }
   """
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
+  val downsampleConf = DownsampleConfig(sourceConf.getConfig("downsample"))
   val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
 
   val optionsString = """
@@ -274,10 +277,13 @@ object MachineMetricsData {
     */
   def groupedRecords(ds: Dataset, stream: LazyList[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
-                     offset: Int = 0): Seq[SomeData] =
-    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
-      case (group, i) => records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
+                     offset: Int = 0): Seq[SomeData] = {
+    val i : Iterator[Stream[Seq[Any]]] = stream.take(n).grouped(groupSize)
+    i.toSeq.zipWithIndex.map {
+      case (group: Stream[Seq[Any]], i: Int) =>
+        records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
+  }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
@@ -362,7 +368,7 @@ object MachineMetricsData {
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
-                       infBucket: Boolean = false, ws: String = "demo"):
+                       infBucket: Boolean = false, ws: String = "demo", metricNameSuffix: String = ""):
   LazyList[Seq[Any]] = {
     val scheme = if (infBucket) {
                    // Custom geometric buckets, with top bucket being +Inf
@@ -382,7 +388,7 @@ object MachineMetricsData {
           (1 + n).toLong,
           buckets.sum.toLong,
           bv.LongHistogram(scheme, buckets.map(x => x)),
-          "request-latency",
+          "request-latency" + metricNameSuffix,
           extraTags ++ Map("_ws_".utf8 -> ws.utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }

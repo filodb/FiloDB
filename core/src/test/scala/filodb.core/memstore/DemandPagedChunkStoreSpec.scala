@@ -19,7 +19,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(config, colStore, colStore, new InMemoryMetaStore(), Some(policy))
   // implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   val sourceConf = ConfigFactory.parseString("""flush-interval = 1h
@@ -52,7 +52,8 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
     for { partNo <- 0 to 9 } {
       val chunkStream = filterByPartAndMakeStream(rawData, partNo)
       val rawPartition = TestData.toRawPartData(chunkStream).runToFuture.futureValue
-      val tsPartition = onDemandPartMaker.populateRawChunks(rawPartition).runToFuture.futureValue
+      val result = onDemandPartMaker.populateRawChunks(rawPartition).runToFuture.futureValue
+      val tsPartition = result.partition
 
       tsPartition.appendingChunkLen shouldEqual 2   // 2 samples ingested into write buffers
       tsPartition.numChunks shouldEqual 10          // write buffers + 9 chunks above
@@ -64,6 +65,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
     val data2 = linearMultiSeries(start - 2.hours.toMillis, timeStep=100000).take(20)
     val stream2 = filterByPartAndMakeStream(data2, 0)
     val rawPart2 = TestData.toRawPartData(stream2).runToFuture.futureValue
-    @scala.annotation.unused val tsPart2 = onDemandPartMaker.populateRawChunks(rawPart2).runToFuture.futureValue
+    val result2 = onDemandPartMaker.populateRawChunks(rawPart2).runToFuture.futureValue
+    val tsPart2 = result2.partition
   }
 }

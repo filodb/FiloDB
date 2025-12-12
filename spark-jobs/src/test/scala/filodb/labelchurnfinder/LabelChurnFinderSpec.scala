@@ -19,7 +19,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.io.File
 import java.time.Instant
-import filodb.labelchurnfinder.LcfTask.{ActiveCountColName, ChurnColName, LabelColName, TotalCountColName, WsNsColName}
+import LabelChurnFinder._
 
 class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience: PatienceConfig =
@@ -52,7 +52,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   val settings = new DownsamplerSettings(jobConfig.withFallback(baseConf))
   val numShards = settings.numShards
-  val colStore = new LcfTask(settings).colStore
+  val colStore = new LabelChurnFinder(settings).colStore
 
   val numPods = 30
   val numInstances = 10
@@ -111,19 +111,19 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .config(sparkConf)
       .getOrCreate()
 
-    val result = lcf.computeChurn(spark).collect()
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
     result.length shouldEqual 6
-    val cards = result.map { row => (row.getAs[List[String]](WsNsColName),
-                                     row.getAs[List[String]](LabelColName),
-                                     row.getAs[Long](ActiveCountColName),
-                                     row.getAs[Long](TotalCountColName)) }
-    cards shouldEqual Array(
-      (List("bulk_ws", "bulk_ns0"), "_ns_", 1, 1),
-      (List("bulk_ws", "bulk_ns0"), "_ws_", 1, 1),
-      (List("bulk_ws", "bulk_ns0"), "instance", numInstances/2, numInstances/2),
-      (List("bulk_ws", "bulk_ns0"), "container", 10075, 10075),
-      (List("bulk_ws", "bulk_ns0"), "_metric_", 1, 1),
-      (List("bulk_ws", "bulk_ns0"), "pod", numPods/2, numPods/2),
+    val cards = result.map { row => (row.getAs[String](WsCol),
+                                     row.getAs[String](LabelCol),
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
+    cards shouldEqual Set(
+      ("bulk_ws", "_ns_", 1, 1),
+      ("bulk_ws", "_ws_", 1, 1),
+      ("bulk_ws", "instance", numInstances/2, numInstances/2),
+      ("bulk_ws", "container", 10207, 10207),
+      ("bulk_ws", "_metric_", 1, 1),
+      ("bulk_ws", "pod", numPods/2, numPods/2),
     )
     spark.stop()
   }
@@ -143,25 +143,19 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.computeChurn(spark).collect()
-    result.length shouldEqual 12
-    val cards = result.map { row => (row.getAs[List[String]](WsNsColName),
-                                      row.getAs[List[String]](LabelColName),
-                                      row.getAs[Long](ActiveCountColName),
-                                      row.getAs[Long](TotalCountColName)) }
-    cards shouldEqual Array(
-      (List("bulk_ws", "bulk_ns0"), "_ns_", 1, 1),
-      (List("bulk_ws", "bulk_ns0"), "_ws_", 1, 1),
-      (List("bulk_ws", "bulk_ns1"), "_ns_", 0, 1),
-      (List("bulk_ws", "bulk_ns0"), "instance", numInstances/2, numInstances/2),
-      (List("bulk_ws", "bulk_ns1"), "_metric_", 0, 1),
-      (List("bulk_ws", "bulk_ns1"), "container", 0, 10182),
-      (List("bulk_ws", "bulk_ns0"), "container", 10075, 10075),
-      (List("bulk_ws", "bulk_ns1"), "_ws_", 0, 1),
-      (List("bulk_ws", "bulk_ns0"), "_metric_", 1, 1),
-      (List("bulk_ws", "bulk_ns1"), "instance", 0, numInstances/2),
-      (List("bulk_ws", "bulk_ns0"), "pod", numPods/2, numPods/2),
-      (List("bulk_ws", "bulk_ns1"), "pod", 0, numPods/2)
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
+    result.length shouldEqual 6
+    val cards = result.map { row => (row.getAs[String](WsCol),
+                                     row.getAs[String](LabelCol),
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
+    cards shouldEqual Set(
+      ("bulk_ws", "_ns_", 1, 1),
+      ("bulk_ws", "_ws_", 1, 1),
+      ("bulk_ws", "instance", numInstances/2, numInstances/2),
+      ("bulk_ws", "container", 10207, 10207),
+      ("bulk_ws", "_metric_", 1, 1),
+      ("bulk_ws", "pod", numPods/2, numPods/2),
     )
     spark.stop()
   }
@@ -182,55 +176,21 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.computeChurn(spark).collect()
-    result.length shouldEqual 12
-    val cards = result.map { row => (row.getAs[List[String]](WsNsColName),
-                                      row.getAs[List[String]](LabelColName),
-                                      row.getAs[Long](ActiveCountColName),
-                                      row.getAs[Long](TotalCountColName)) }
-    cards shouldEqual Array(
-      (List("bulk_ws", "bulk_ns0"), "_ns_", 1, 1),
-      (List("bulk_ws", "bulk_ns0"), "_ws_", 1, 1),
-      (List("bulk_ws", "bulk_ns1"), "_ns_", 0, 1),
-      (List("bulk_ws", "bulk_ns0"), "instance", numInstances/2, numInstances/2),
-      (List("bulk_ws", "bulk_ns1"), "_metric_", 0, 1),
-      (List("bulk_ws", "bulk_ns1"), "container", 0, 7901), // reduced from 9922 above
-      (List("bulk_ws", "bulk_ns0"), "container", 10075, 10075),
-      (List("bulk_ws", "bulk_ns1"), "_ws_", 0, 1),
-      (List("bulk_ws", "bulk_ns0"), "_metric_", 1, 1),
-      (List("bulk_ws", "bulk_ns1"), "instance", 0, numInstances/2),
-      (List("bulk_ws", "bulk_ns0"), "pod", numPods/2, numPods/2),
-      (List("bulk_ws", "bulk_ns1"), "pod", 0, 15))
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
+    result.length shouldEqual 6
+    val cards = result.map { row => (row.getAs[String](WsCol),
+                                     row.getAs[String](LabelCol),
+                                     row.getAs[Long](LabelCard1h),
+                                     row.getAs[Long](LabelCard7d)) }.toSet
+    cards shouldEqual Set(
+      ("bulk_ws", "_ns_", 1, 1),
+      ("bulk_ws", "_ws_", 1, 1),
+      ("bulk_ws", "instance", numInstances/2, numInstances/2),
+      ("bulk_ws", "container", 10207, 10207),
+      ("bulk_ws", "_metric_", 1, 1),
+      ("bulk_ws", "pod", numPods/2, numPods/2)
+    )
     spark.stop()
   }
 
-  it ("should identify high churn labels for taking actions on them") {
-    // simulate a result DataFrame and check high churn labels
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
-    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    val spark = SparkSession.builder()
-      .appName("LabelChurnFinder")
-      .config(sparkConf)
-      .getOrCreate()
-    val settings2 = new DownsamplerSettings(jobConfig.withFallback(baseConf))
-    val lcf = new LabelChurnFinder(settings2)
-    val data = Seq(
-      (List("bulk_ws", "bulk_ns0"), "_ns_", 1L, 1L, 1.0),
-      (List("bulk_ws", "bulk_ns0"), "_ws_", 1L, 1L, 1.0),
-      (List("bulk_ws", "bulk_ns1"), "_ns_", 0L, 1L, Double.PositiveInfinity),
-      (List("bulk_ws", "bulk_ns0"), "instance", 5000L, 5000L, 1.0),
-      (List("bulk_ws", "bulk_ns1"), "_metric_", 0L, 1L, Double.PositiveInfinity),
-      (List("bulk_ws", "bulk_ns1"), "container", 8000L, 16000L, 2.0),        // should be picked as HC
-      (List("bulk_ws", "bulk_ns0"), "container", 10075L, 10075L, 1.0),
-      (List("bulk_ws", "bulk_ns1"), "_ws_", 0L, 1L, Double.PositiveInfinity),
-      (List("bulk_ws", "bulk_ns0"), "_metric_", 1L, 1L, 1.0),
-      (List("bulk_ws", "bulk_ns1"), "instance", 5000L, 15000L, 3.0),         // should be picked as HC
-      (List("bulk_ws", "bulk_ns0"), "pod", 15000L, 15000L, 1.0),
-      (List("bulk_ws", "bulk_ns1"), "pod", 15L, 30L, 2.0)                    // should not be picked as HC (active < minAtsThreshold of 1000)
-    )
-    val df = spark.createDataFrame(data).toDF(WsNsColName, LabelColName, ActiveCountColName, TotalCountColName, ChurnColName)
-    val highChurnLabels = lcf.computeHighChurnLabels(df)
-    highChurnLabels.collect().length shouldEqual 2
-  }
 }

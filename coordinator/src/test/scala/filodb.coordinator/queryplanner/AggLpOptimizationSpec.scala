@@ -45,13 +45,23 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
     testOptimization(excludeRules1, testCases)
   }
 
-  it ("[exclude rules] should not optimize if window less than 60s") {
+  it ("[exclude rules] should change type label when optimizing queries") {
     val testCases = Seq(
-      // should use rule 1 level 1 since container is needed
-      """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
-        -> """sum(rate(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
-      """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)"""
-        -> """sum(increase(foo{_ws_="demo",_ns_="localNs"}[30s])) by (container)""",
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="gauge"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-gauge-v2"}[300s])) by (container)""",
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="delta-counter"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-delta-counter"}[300s])) by (container)""",
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="otel-delta-histogram"}[300s])) by (container)"""
+        -> """sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs",_type_="preagg-otel-delta-histogram"}[300s])) by (container)""",
+
+      // do not optimize prom-counter since it is not pre-aggregated
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="prom-counter"}[300s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_="prom-counter"}[300s])) by (container)""",
+
+      // do not optimize queries with type filter that is not equals
+      """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_=~"gaug.*"}[300s])) by (container)"""
+        -> """sum(rate(foo{_ws_="demo",_ns_="localNs",_type_=~"gaug.*"}[300s])) by (container)"""
+
     )
     testOptimization(excludeRules1, testCases)
   }
@@ -70,9 +80,9 @@ class AggLpOptimizationSpec extends AnyFunSpec with Matchers {
       """sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s]))"""
         -> """(sum(rate(foo:::agg1_1{_ws_="demo",_ns_="localNs"}[300s])) by (container) + sum(rate(foo:::agg1_2{_ws_="demo",_ns_="localNs"}[300s])))""",
 
-      // this one cannot be optimized since one side has window < 60s. Optimize join only if both sides can be optimized
-      """(sum(rate(foo{_ws_="demo",_ns_="localNs"}[10s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))"""
-        -> """(sum(rate(foo{_ws_="demo",_ns_="localNs"}[10s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))""",
+      // this one cannot be optimized since one side has excluded label. Optimize join only if both sides can be optimized
+      """(sum(rate(foo{_ws_="demo",_ns_="localNs",pod="foo"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))"""
+        -> """(sum(rate(foo{_ws_="demo",_ns_="localNs",pod="foo"}[300s])) by (container) + sum(rate(foo{_ws_="demo",_ns_="localNs"}[300s])))""",
     )
     testOptimization(excludeRules1, testCases)
   }

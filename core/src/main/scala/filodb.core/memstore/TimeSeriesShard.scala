@@ -59,8 +59,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val flushesSuccessful = FilodbMetrics.counter("memstore-flushes-success", tags)
   val flushesFailedChunkWrite = FilodbMetrics.counter("memstore-flushes-failed-chunk", tags)
   val flushesFailedOther = FilodbMetrics.counter("memstore-flushes-failed-other", tags)
-
   val numDirtyPartKeysFlushed = FilodbMetrics.counter("memstore-index-num-dirty-keys-flushed", tags)
+  val numDirtyDownsamplePartKeysFlushed = FilodbMetrics.counter(
+    "memstore-downsample-index-num-dirty-keys-flushed", tags
+  )
   val indexRecoveryNumRecordsProcessed = FilodbMetrics.counter("memstore-index-recovery-partkeys-processed", tags)
   val indexPartkeyLookups = FilodbMetrics.counter("memstore-index-partkey-lookups", tags)
   val partkeyLabelScans = FilodbMetrics.counter("memstore-labels-partkeys-scanned", tags)
@@ -88,6 +90,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numActivelyIngestingParts = FilodbMetrics.gauge("num-ingesting-partitions", tags)
 
   val numChunksPagedIn = FilodbMetrics.counter("chunks-paged-in", tags)
+  val odpMemoryInsufficientBlockCount = FilodbMetrics.counter("odp-memory-insufficient-block-count", tags)
   val partitionsPagedFromColStore = FilodbMetrics.counter("memstore-partitions-paged-in", tags)
   val partitionsQueried = FilodbMetrics.counter("memstore-partitions-queried", tags)
   val purgedPartitions = FilodbMetrics.counter("memstore-partitions-purged", tags)
@@ -270,7 +273,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                       quotaSource: QuotaSource,
                       val shardNum: Int,
                       val bufferMemoryManager: NativeMemoryManager,
-                      colStore: ColumnStore,
+                      val colStore: ColumnStore,
                       metastore: MetaStore,
                       evictionPolicy: PartitionEvictionPolicy,
                       filodbConfig: Config)
@@ -1407,7 +1410,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     bufferMemoryManager.updateStats()
   }
 
-  private def toPartKeyRecord(p: TimeSeriesPartition): PartKeyRecord = {
+  def toPartKeyRecord(p: TimeSeriesPartition): PartKeyRecord = {
     assertThreadName(IOSchedName)
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
@@ -1575,7 +1578,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   // scalastyle:off method.length
-  private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
+  def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     assertThreadName(IOSchedName)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60

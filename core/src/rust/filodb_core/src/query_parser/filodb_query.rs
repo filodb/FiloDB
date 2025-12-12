@@ -57,7 +57,7 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
         match self {
             FiloDBQuery::Complex(query_bytes) => {
                 let (_, query) = parse_query(query_bytes, schema, default_field)
-                    .map_err(|e| TantivyError::InternalError(format!("{:#}", e)))?;
+                    .map_err(|e| TantivyError::InternalError(format!("{e:#}")))?;
 
                 Ok(query)
             }

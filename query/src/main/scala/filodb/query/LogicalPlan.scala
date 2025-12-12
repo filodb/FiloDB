@@ -1,6 +1,7 @@
 package filodb.query
 
 import filodb.core.GlobalConfig
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 import filodb.query.MiscellaneousFunctionId.{NoOptimize, OptimizeWithAgg}
@@ -128,7 +129,11 @@ sealed trait RawSeriesLikePlan extends LogicalPlan {
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 
-  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan
+  /**
+   * Used by logical plan optimization logic in AggLpOptimization to replace metric name, type filter and columns
+   * with those for the pre-agg metric
+   */
+  def updateRawSeriesForAggOptimize(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan
 
   /**
    * Optimizes the plan to use aggregated metric where possible
@@ -239,11 +244,22 @@ case class RawSeries(rangeSelector: RangeSelector,
     this.copy(filters = updatedFilters)
   }
 
-  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = {
-    val filterColumns = newFilters.map(_.column)
-    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
+  def updateRawSeriesForAggOptimize(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = {
+    val typeValue = this.filters.find(_.column == Schemas.TypeLabel) match {
+      case Some(ColumnFilter(_, Equals(value))) => Some(value.toString)
+      case Some(c) => throw new IllegalStateException(s"Should not be optimizing query with type " +
+                                                      s"filter which is not equals: $c")
+      case None => None
+    }
+    val filtersToReplace = typeValue.flatMap(t => Schemas.preAggSchema.get(t)) match {
+      case Some(preAggType) => newFilters :+ ColumnFilter(Schemas.TypeLabel, Equals(preAggType))
+      case _ => newFilters
+    }
+    val filterColumns = filtersToReplace.map(_.column)
+    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ filtersToReplace
     this.copy(filters = updatedFilters, columns = columns)
   }
+
   def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // RawSeries queries are not optimized for higher level aggregation
   }
@@ -550,10 +566,9 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
     this.copy(series = series.useAggregatedMetricIfApplicable(aggRuleProvider))
   }
 
-  def replaceRFFiltersAndColumn(filters: Seq[ColumnFilter], col: Seq[String],
-                                       rf: Option[RangeFunctionId]): PeriodicSeriesWithWindowing = {
-    this.copy(series = series.replaceRawSeriesFiltersAndColumn(filters, col),
-      function = rf.getOrElse(function))
+  def updateRawSeriesForAggOptimize(filters: Seq[ColumnFilter], col: Seq[String],
+                                    rf: Option[RangeFunctionId]): PeriodicSeriesWithWindowing = {
+    this.copy(series = series.updateRawSeriesForAggOptimize(filters, col), function = rf.getOrElse(function))
   }
 }
 
@@ -720,7 +735,7 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
     functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
 
   // Should not be called. ApplyInstantFunctionRaw is not optimized for higher level aggregation
-  def replaceRawSeriesFiltersAndColumn(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = ???
+  def updateRawSeriesForAggOptimize(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = ???
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): RawSeriesLikePlan = {
     this // this plan is not optimized for higher level aggregation
