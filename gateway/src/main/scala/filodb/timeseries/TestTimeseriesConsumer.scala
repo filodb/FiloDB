@@ -2,6 +2,8 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
+import scala.collection.JavaConverters._
+
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
@@ -15,11 +17,11 @@ object TestTimeseriesConsumer extends StrictLogging {
   implicit val io = Scheduler.io("kafka-consumer")
 
   def main(args: Array[String]): Unit = {
-    val sourceConfig = ConfigFactory.parseFile(new java.io.File(args(0)))
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(args(0))).resolve()
     val topicName = sourceConfig.getString("sourceconfig.filo-topic-name")
 
     val consumerCfg = KafkaConsumerConfig.default.copy(
-      bootstrapServers = sourceConfig.getString("sourceconfig.bootstrap.servers").split(',').toList,
+      bootstrapServers = sourceConfig.getStringList("sourceconfig.bootstrap.servers").asScala.toList,
       groupId = "timeseries-source-consumer",
       autoOffsetReset = AutoOffsetReset.Latest
     )

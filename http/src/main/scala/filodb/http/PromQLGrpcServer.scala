@@ -12,7 +12,6 @@ import io.grpc.ServerCall.Listener
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import kamon.trace.{Identifier, Span, Trace}
 import kamon.trace.Trace.SamplingDecision
 import monix.execution.Scheduler
@@ -20,6 +19,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
+import filodb.core.metrics.{FilodbMetrics, MetricsHistogram}
 import filodb.core.query.{IteratorBackedRangeVector, QueryConfig, QueryContext, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
@@ -67,8 +67,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
   private val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")
 
-  private val queryResponseLatency = Kamon.histogram("grpc-query-latency", MeasurementUnit.time.nanoseconds)
-                              .withoutTags()
+  private val queryResponseLatency = FilodbMetrics.timeHistogram("grpc-query-latency", TimeUnit.NANOSECONDS)
 
   private class PromQLGrpcService extends RemoteExecImplBase {
 
@@ -96,20 +95,14 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                   span.mark("Received the footer of streaming response")
                   span.finish()
                   val endNs = System.nanoTime()
-                  queryResponseLatency
-                    .withTag("status", "success")
-                    .withTag("dataset", dataset)
-                    .record(endNs - startNs)
+                  queryResponseLatency.record(endNs - startNs, Map("status" -> "success", "dataset" -> dataset))
                   responseObserver.onCompleted()
                 case error: StreamQueryError =>
                   responseObserver.onNext(error.toProto)
                   span.fail(error.t)
                   span.finish()
                   val endNs = System.nanoTime()
-                  queryResponseLatency
-                    .withTag("status", "error")
-                    .withTag("dataset", dataset)
-                    .record(endNs - startNs)
+                  queryResponseLatency.record(endNs - startNs, Map("status" -> "error", "dataset" -> dataset))
                   responseObserver.onCompleted()
                 case header: StreamQueryResultHeader =>
                   responseObserver.onNext(header.toProto)
@@ -144,7 +137,8 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           val responseObserver: StreamObserver[GrpcMultiPartitionQueryService.Response],
           val span: Span,
           val startNs: Long,
-          val hist: kamon.metric.Histogram
+          val hist: MetricsHistogram,
+          val metricTags: Map[String, String]
         ) extends QueryResponseProcessor {
           def processQueryResponse(qr: QueryResponse): Unit = {
             import filodb.query.ProtoConverters._
@@ -169,11 +163,11 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                 logger.error("Caught failure while executing query", t)
                 span.fail(t)
                 span.finish()
-                hist.withTag("status", "error").record(System.nanoTime() - startNs)
+                hist.record(System.nanoTime() - startNs, metricTags ++ Map("status" -> "error"))
                 responseObserver.onError(t)
               case Success(_) =>
                 span.finish()
-                hist.withTag("status", "success").record(System.nanoTime() - startNs)
+                hist.record(System.nanoTime() - startNs, metricTags ++ Map("status" -> "success"))
                 responseObserver.onCompleted()
             }
           }
@@ -226,8 +220,8 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.Response]): Unit = {
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
-          val hist = queryResponseLatency.withTag("dataset", request.getDataset)
-          val rp = new ResponseProcessor(responseObserver, span, startNs, hist)
+          val rp = new ResponseProcessor(responseObserver, span, startNs, queryResponseLatency,
+            Map("dataset" -> request.getDataset))
           executeQuery(request, rp)
         }
 

@@ -2,7 +2,6 @@ package filodb.core.memstore.synchronization
 
 import scala.concurrent.Future
 
-import kamon.tag.TagSet
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Response}
@@ -18,7 +17,7 @@ import filodb.core.store.{ColumnStore, PartKeyRecord}
 class CassandraPartKeyUpdatesPublisher(override val shard: Int,
                                        ref: DatasetRef,
                                        colStore: ColumnStore,
-                                       tagSet: TagSet) extends PartKeyUpdatesPublisher {
+                                       tags: Map[String, String]) extends PartKeyUpdatesPublisher {
   /**
    * NOTE: DO-NOT change the time bucket without considering the consuming pattern of the downstream applications.
    * */
@@ -29,6 +28,6 @@ class CassandraPartKeyUpdatesPublisher(override val shard: Int,
     val currentTime = System.currentTimeMillis()
     val epoch5mBucket = currentTime / timeBucket5mInMillis
     colStore.writePartKeyUpdates(
-      ref, epoch5mBucket, currentTime, offset, tagSet, Observable.fromIteratorUnsafe(partKeyRecords))
+      ref, epoch5mBucket, currentTime, offset, tags, Observable.fromIteratorUnsafe(partKeyRecords))
   }
 }

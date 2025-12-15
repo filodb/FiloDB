@@ -7,11 +7,11 @@ import scala.jdk.CollectionConverters._
 
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
-import kamon.Kamon
 
 import filodb.coordinator.GrpcPlanDispatcher
 import filodb.coordinator.ShardMapper
 import filodb.core.DatasetRef
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ActiveShardMapper, DownPartition, LegacyFailoverMode, PlannerParams, ShardLevelFailoverMode}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.grpc.GrpcCommonUtils
@@ -54,21 +54,18 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
   // legacy failover counter captures failovers when we send a PromQL to the buddy
   // cluster
-  val legacyFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
-    .withTag("cluster", clusterName)
-    .withTag("type", "legacy")
+  val legacyFailoverCounter = FilodbMetrics.counter(HighAvailabilityPlanner.FailoverCounterName,
+                                                    Map("cluster" -> clusterName, "type" -> "legacy"))
 
   // full failover counter captures failovers when we materialize a plan locally and
   // send an entire plan to the buddy cluster for execution
-  val fullFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
-    .withTag("cluster", clusterName)
-    .withTag("type", "full")
+  val fullFailoverCounter = FilodbMetrics.counter(HighAvailabilityPlanner.FailoverCounterName,
+                                                  Map("cluster" -> clusterName, "type" -> "full"))
 
   // partial failover counter captures failovers when we materialize a plan locally and
   // send some parts of it for execution to the buddy cluster
-  val partialFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
-    .withTag("cluster", clusterName)
-    .withTag("type", "partial")
+  val partialFailoverCounter = FilodbMetrics.counter(HighAvailabilityPlanner.FailoverCounterName,
+                                                     Map("cluster" -> clusterName, "type" -> "partial"))
 
   // HTTP endpoint is still mandatory as metadata queries still use it.
   val remoteHttpEndpoint: String = queryConfig.remoteHttpEndpoint

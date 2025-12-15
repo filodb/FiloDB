@@ -5,12 +5,12 @@ import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.instrumentation.executor.ExecutorInstrumentation
 import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
 
 import filodb.core.GlobalConfig
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.metrics.FilodbMetrics
 import filodb.memory.data.Shutdown
 
 object QueryScheduler extends StrictLogging {
@@ -57,7 +57,7 @@ object QueryScheduler extends StrictLogging {
     }
     val executor = new ForkJoinPool(numSchedThreads, threadFactory, exceptionHandler, true)
 
-    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
+    Scheduler.apply(FilodbMetrics.instrumentExecutor(executor, schedName))
   }
 
 }

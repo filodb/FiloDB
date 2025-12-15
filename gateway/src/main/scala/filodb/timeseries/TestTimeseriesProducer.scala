@@ -64,21 +64,22 @@ object TestTimeseriesProducer extends StrictLogging {
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
                    genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
-                   genPromCounter: Boolean, genOtelCumulativeHistData: Boolean,
+                   genGaugeMetric: String, genPromCounter: Boolean,
+                   genCounterMetric: String, genOtelCumulativeHistData: Boolean,
                    genOtelDeltaHistData: Boolean, genOtelExpDeltaHistData: Boolean,
-                   publishIntervalSec: Int): Unit = {
+                   publishIntervalSec: Int, nameSpace: String, workSpace: String): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
 
-    val metricName = if (genGauge) "heap_usage0"
+    val metricName = if (genGauge) genGaugeMetric
                       else if (genHist || genOtelCumulativeHistData) "http_request_latency"
                       else if (genDeltaHist || genOtelDeltaHistData || genOtelExpDeltaHistData)
                         "http_request_latency_delta"
-                      else if (genPromCounter) "heap_usage_counter0"
+                      else if (genPromCounter) genCounterMetric
                       else "heap_usage_delta0"
 
-    val promQL = s"""$metricName{_ns_="App-0",_ws_="demo"}"""
+    val promQL = s"""$metricName{_ns_=$nameSpace,_ws_=$workSpace}"""
 
     val cliQuery =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +
@@ -129,9 +130,13 @@ object TestTimeseriesProducer extends StrictLogging {
                      numTimeSeries: Int,
                      numMetricNames: Int,
                      publishIntervalSec: Int,
-                     schema: Schema): Stream[InputRecord] = {
+                     schema: Schema,
+                     namespace: String = "App-0",
+                     workspace: String = "demo",
+                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
+    val metricName = metricNameOverride.getOrElse("heap_usage")
     Stream.from(0).flatMap { n =>
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
@@ -142,8 +147,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"         -> s"DC$dc",
-                     "_ws_"       -> "demo",
-                     "_ns_"       -> s"App-$app",
+                     "_ws_" -> workspace,
+                     "_ns_" -> namespace,
                      "partition"  -> s"partition-$partition",
                      "partitionAl"-> s"partition-$partition",
                      "longTag"    -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",
@@ -153,9 +158,9 @@ object TestTimeseriesProducer extends StrictLogging {
 
       (0 until numMetricNames).map { i =>
         if (schema == Schemas.deltaCounter)
-          DeltaCounterRecord(tags, "heap_usage_delta" + i, timestamp, value)
+          DeltaCounterRecord(tags, metricName + "_delta" + i, timestamp, value)
         else
-          PrometheusGaugeRecord(tags, "heap_usage" + i, timestamp, value)
+          PrometheusGaugeRecord(tags, metricName + i, timestamp, value)
       }
     }
   }
@@ -163,9 +168,13 @@ object TestTimeseriesProducer extends StrictLogging {
   def timeSeriesCounterData(startTime: Long,
                      numTimeSeries: Int,
                      numMetricNames: Int,
-                     publishIntervalSec: Int): Stream[InputRecord] = {
+                     publishIntervalSec: Int,
+                     namespace: String = "App-0",
+                     workspace: String = "demo",
+                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
+    val metricName = metricNameOverride.getOrElse("heap_usage_counter")
     val valMap: mutable.HashMap[Map[String, String], Double] = mutable.HashMap.empty[Map[String, String], Double]
     Stream.from(0).flatMap { n =>
       val instance = n % numTimeSeries
@@ -176,8 +185,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
 
       val tags = Map("dc" -> s"DC$dc",
-        "_ws_" -> "demo",
-        "_ns_" -> s"App-$app",
+        "_ws_" -> workspace,
+        "_ns_" -> namespace,
         "partition" -> s"partition-$partition",
         "partitionAl" -> s"partition-$partition",
         "longTag" -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",
@@ -188,7 +197,7 @@ object TestTimeseriesProducer extends StrictLogging {
       value += (15 + Math.sin(n + 1) + rand.nextGaussian())
       valMap(tags) = value
       (0 until numMetricNames).map { i =>
-        PrometheusCounterRecord(tags, "heap_usage_counter" + i, timestamp, value)
+        PrometheusCounterRecord(tags, metricName + i, timestamp, value)
       }
     }
   }
@@ -210,17 +219,26 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
-                       numBuckets : Int = 20): Stream[InputRecord] = {
+                       numBuckets : Int = 20, metricNameOverride: Option[String] = None,
+                       namespace: String = "App-0", workspace: String = "demo"): Stream[InputRecord] = {
+
+    val metricName: String = metricNameOverride.getOrElse("http_request_latency")
     val histBucketScheme = if (Schemas.otelExpDeltaHistogram == histSchema)
                                 bv.Base2ExpHistogramBuckets(3, -numBuckets/2, numBuckets)
-                           else
-                                bv.GeometricBuckets(2.0, 3.0, numBuckets)
+                           else {
+                             // Create custom buckets that include +Inf as the last bucket
+                             val finiteBuckets = (0 until numBuckets-1).map { i =>
+                               2.0 * Math.pow(3.0, i)
+                             }.toArray
+                             val allBuckets = finiteBuckets :+ Double.PositiveInfinity
+                             bv.CustomBuckets(allBuckets)
+                           }
     var buckets = new Array[Long](histBucketScheme.numBuckets)
     val metric = if (Schemas.deltaHistogram == histSchema || Schemas.otelDeltaHistogram == histSchema
                      || Schemas.otelExpDeltaHistogram == histSchema) {
-                  "http_request_latency_delta"
+                  metricName + "_delta"
                  } else {
-                  "http_request_latency"
+                  metricName
                  }
 
     def updateBuckets(bucketNo: Int): Unit = {
@@ -251,8 +269,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val sum = buckets.sum.toDouble
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
-                     wsUTF8   -> "demo".utf8,
-                     nsUTF8   -> s"App-$app".utf8,
+                     wsUTF8   -> workspace.utf8,
+                     nsUTF8   -> namespace.utf8,
                      partUTF8 -> s"partition-$partition".utf8,
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)

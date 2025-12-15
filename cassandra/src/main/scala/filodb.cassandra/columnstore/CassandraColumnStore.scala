@@ -13,9 +13,6 @@ import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -23,6 +20,7 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 
@@ -80,12 +78,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   val sinkStats = new ChunkSinkStats
 
-  val writeChunksetLatency = Kamon.histogram("cass-write-chunkset-latency", MeasurementUnit.time.milliseconds)
-                                              .withoutTags()
-  val writePksLatency = Kamon.histogram("cass-write-part-keys-latency", MeasurementUnit.time.milliseconds)
-                                              .withoutTags()
-  val readChunksBatchLatency = Kamon.histogram("cassandra-per-batch-chunk-read-latency",
-                            MeasurementUnit.time.milliseconds).withoutTags()
+  val writeChunksetLatency = FilodbMetrics.timeHistogram("cass-write-chunkset-latency", TimeUnit.MILLISECONDS)
+  val writePksLatency = FilodbMetrics.timeHistogram("cass-write-part-keys-latency", TimeUnit.MILLISECONDS)
+  val readChunksBatchLatency = FilodbMetrics.timeHistogram("cassandra-per-batch-chunk-read-latency",
+                                                           TimeUnit.MILLISECONDS)
 
   def initialize(dataset: DatasetRef, numShards: Int, resources: Config): Future[Response] = {
     // Initialize clusterConnector with dataset specific keyspaces if provided
@@ -580,7 +576,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    * @param updatedTimeMs Current epoch time when the updates are being published.
    * @param offset Value of "IngestConsumer._offset" when the flushTask was triggered. This is expected to be
    *               monotonically increasing. Downstream consumers can de-dup updates based on this.
-   * @param tagSet Labels for publishing metrics.
+   * @param tags Labels for publishing metrics.
    * @param partKeys List of PartKeyRecord, which have been updated in the flush window.
    * @return Response i.e., Success or Error like DataDropped, NotApplied etc.
    */
@@ -588,7 +584,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                           epoch5mBucket: Long,
                           updatedTimeMs: Long,
                           offset: Long,
-                          tagSet: TagSet,
+                          tags: Map[String, String],
                           partKeys: Observable[PartKeyRecord]): Future[Response] = {
     val start = System.currentTimeMillis()
     val updatesTable = getOrCreatePartKeyPublishedUpdatesTableCache(ref)
@@ -598,15 +594,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       Task.fromFuture(updateFut).map { resp =>
         // Track metrics for observability
         resp match {
-          case Success => sinkStats.partKeyUpdatesSuccess(1, tagSet)
+          case Success => sinkStats.partKeyUpdatesSuccess(1, tags)
           // Failed for any other case
-          case _ => sinkStats.partKeyUpdatesFailed(1, tagSet)
+          case _ => sinkStats.partKeyUpdatesFailed(1, tags)
         }
         resp
       }
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runToFuture
     ret.onComplete { _ =>
-      sinkStats.partKeyUpdatesLatency(System.currentTimeMillis() - start, tagSet)
+      sinkStats.partKeyUpdatesLatency(System.currentTimeMillis() - start, tags)
     }
     ret
   }

@@ -67,7 +67,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val config = ConfigFactory.load("application_test.conf")
+  private val config = ConfigFactory.load("application_test.conf").resolve()
   private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,

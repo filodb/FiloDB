@@ -17,8 +17,6 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import debox.{Buffer, Map => DMap}
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
@@ -26,11 +24,12 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import spire.syntax.cfor._
 
-import filodb.core.{ErrorResponse, Success, _}
+import filodb.core._
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
@@ -42,37 +41,35 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
-  val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
-  val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
-  val unknownSchemaDropped = Kamon.counter("memstore-unknown-schema-dropped").withTags(TagSet.from(tags))
-  val oldContainers = Kamon.counter("memstore-incompatible-containers").withTags(TagSet.from(tags))
-  val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").withTags(TagSet.from(tags))
-  val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").withTags(TagSet.from(tags))
-  val outOfOrderDroppedTenant = Kamon.counter("tenant-out-of-order-samples") //per tenant need not include shard/dataset
-  val rowsSkipped  = Kamon.counter("recovery-row-skipped").withTags(TagSet.from(tags))
-  val rowsPerContainer = Kamon.histogram("num-samples-per-container").withoutTags()
-  val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").withTags(TagSet.from(tags))
-  val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes)
-    .withTags(TagSet.from(tags))
-  val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes)
-    .withTags(TagSet.from(tags))
-  val flushesSuccessful = Kamon.counter("memstore-flushes-success").withTags(TagSet.from(tags))
-  val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").withTags(TagSet.from(tags))
-  val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").withTags(TagSet.from(tags))
+  val shardTotalRecoveryTime = FilodbMetrics.timeGauge("memstore-total-shard-recovery-time",
+                                                      TimeUnit.MILLISECONDS, tags)
+  val rowsIngested = FilodbMetrics.counter("memstore-rows-ingested", tags)
+  val partitionsCreated = FilodbMetrics.counter("memstore-partitions-created", tags)
+  val dataDropped = FilodbMetrics.counter("memstore-data-dropped", tags)
+  val unknownSchemaDropped = FilodbMetrics.counter("memstore-unknown-schema-dropped", tags)
+  val oldContainers = FilodbMetrics.counter("memstore-incompatible-containers", tags)
+  val offsetsNotRecovered = FilodbMetrics.counter("memstore-offsets-not-recovered", tags)
+  val outOfOrderDropped = FilodbMetrics.counter("memstore-out-of-order-samples", tags)
+  //per tenant need not include shard/dataset
+  val outOfOrderDroppedTenant = FilodbMetrics.counter("tenant-out-of-order-samples")
+  val rowsSkipped  = FilodbMetrics.counter("recovery-row-skipped", tags)
+  val rowsPerContainer = FilodbMetrics.histogram("num-samples-per-container")
+  val numSamplesEncoded = FilodbMetrics.counter("memstore-samples-encoded", tags)
+  val encodedBytes  = FilodbMetrics.bytesCounter("memstore-encoded-bytes-allocated", tags)
+  val encodedHistBytes = FilodbMetrics.bytesCounter("memstore-hist-encoded-bytes", tags)
+  val flushesSuccessful = FilodbMetrics.counter("memstore-flushes-success", tags)
+  val flushesFailedChunkWrite = FilodbMetrics.counter("memstore-flushes-failed-chunk", tags)
+  val flushesFailedOther = FilodbMetrics.counter("memstore-flushes-failed-other", tags)
 
-  val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").withTags(TagSet.from(tags))
-  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").
-    withTags(TagSet.from(tags))
-  val indexPartkeyLookups = Kamon.counter("memstore-index-partkey-lookups").withTags(TagSet.from(tags))
-  val partkeyLabelScans = Kamon.counter("memstore-labels-partkeys-scanned").withTags(TagSet.from(tags))
-  val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").withTags(TagSet.from(tags))
+  val numDirtyPartKeysFlushed = FilodbMetrics.counter("memstore-index-num-dirty-keys-flushed", tags)
+  val indexRecoveryNumRecordsProcessed = FilodbMetrics.counter("memstore-index-recovery-partkeys-processed", tags)
+  val indexPartkeyLookups = FilodbMetrics.counter("memstore-index-partkey-lookups", tags)
+  val partkeyLabelScans = FilodbMetrics.counter("memstore-labels-partkeys-scanned", tags)
+  val downsampleRecordsCreated = FilodbMetrics.counter("memstore-downsample-records-created", tags)
 
   // Tracking the index adds and updates during active kafka ingestion.
-  val partKeyIndexAdded = Kamon.counter("partkey-index-added").withTags(TagSet.from(tags))
-  val partKeyIndexUpdated = Kamon.counter("partkey-index-updated").withTags(TagSet.from(tags))
+  val partKeyIndexAdded = FilodbMetrics.counter("partkey-index-added", tags)
+  val partKeyIndexUpdated = FilodbMetrics.counter("partkey-index-updated", tags)
 
   /**
     * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
@@ -85,34 +82,34 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * negative numbers either.
     * The "latest" vs "earliest" flushed reflects that there are really n offsets, one per flush group.
     */
-  val offsetLatestInMem = Kamon.gauge("shard-offset-latest-inmemory").withTags(TagSet.from(tags))
-  val offsetLatestFlushed = Kamon.gauge("shard-offset-flushed-latest").withTags(TagSet.from(tags))
-  val offsetEarliestFlushed = Kamon.gauge("shard-offset-flushed-earliest").withTags(TagSet.from(tags))
-  val numPartitions = Kamon.gauge("num-partitions").withTags(TagSet.from(tags))
-  val numActivelyIngestingParts = Kamon.gauge("num-ingesting-partitions").withTags(TagSet.from(tags))
+  val offsetLatestInMem = FilodbMetrics.gauge("shard-offset-latest-inmemory", tags)
+  val offsetLatestFlushed = FilodbMetrics.gauge("shard-offset-flushed-latest", tags)
+  val offsetEarliestFlushed = FilodbMetrics.gauge("shard-offset-flushed-earliest", tags)
+  val numPartitions = FilodbMetrics.gauge("num-partitions", tags)
+  val numActivelyIngestingParts = FilodbMetrics.gauge("num-ingesting-partitions", tags)
 
-  val numChunksPagedIn = Kamon.counter("chunks-paged-in").withTags(TagSet.from(tags))
-  val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").withTags(TagSet.from(tags))
-  val partitionsQueried = Kamon.counter("memstore-partitions-queried").withTags(TagSet.from(tags))
-  val purgedPartitions = Kamon.counter("memstore-partitions-purged").withTags(TagSet.from(tags))
-  val purgedPartitionsFromIndex = Kamon.counter("memstore-partitions-purged-index").withTags(TagSet.from(tags))
-  val purgePartitionTimeMs = Kamon.counter("memstore-partitions-purge-time-ms", MeasurementUnit.time.milliseconds)
-                                              .withTags(TagSet.from(tags))
-  val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").withTags(TagSet.from(tags))
-  val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").withTags(TagSet.from(tags))
-  val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").withTags(TagSet.from(tags))
-  val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
-  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
+  val numChunksPagedIn = FilodbMetrics.counter("chunks-paged-in", tags)
+  val odpMemoryInsufficientBlockCount = FilodbMetrics.counter("odp-memory-insufficient-block-count", tags)
+  val partitionsPagedFromColStore = FilodbMetrics.counter("memstore-partitions-paged-in", tags)
+  val partitionsQueried = FilodbMetrics.counter("memstore-partitions-queried", tags)
+  val purgedPartitions = FilodbMetrics.counter("memstore-partitions-purged", tags)
+  val purgedPartitionsFromIndex = FilodbMetrics.counter("memstore-partitions-purged-index", tags)
+  val purgePartitionTimeMs = FilodbMetrics.timeCounter("memstore-partitions-purge-time-ms", TimeUnit.MILLISECONDS, tags)
+  val partitionsRestored = FilodbMetrics.counter("memstore-partitions-paged-restored", tags)
+  val chunkIdsEvicted = FilodbMetrics.counter("memstore-chunkids-evicted", tags)
+  val partitionsEvicted = FilodbMetrics.counter("memstore-partitions-evicted", tags)
+  val queryTimeRangeMins = FilodbMetrics.histogram("query-time-range-minutes", tags)
+  val queriesBySchema = FilodbMetrics.counter("leaf-queries-by-schema", tags)
   val memoryStats = new MemoryStats(tags)
 
-  val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").withTags(TagSet.from(tags))
-  val indexEntries = Kamon.gauge("memstore-index-entries").withTags(TagSet.from(tags))
-  val indexBytes   = Kamon.gauge("memstore-index-ram-bytes").withTags(TagSet.from(tags))
+  val bufferPoolSize = FilodbMetrics.gauge("memstore-writebuffer-pool-size", tags)
+  val indexEntries = FilodbMetrics.gauge("memstore-index-entries", tags)
+  val indexBytes   = FilodbMetrics.bytesGauge("memstore-index-ram-bytes", tags)
 
-  val evictedPartKeyBloomFilterQueries = Kamon.counter("evicted-pk-bloom-filter-queries").withTags(TagSet.from(tags))
-  val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").withTags(TagSet.from(tags))
-  val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").withTags(TagSet.from(tags))
-  val evictedPartIdLookupMultiMatch = Kamon.counter("evicted-partId-lookup-multi-match").withTags(TagSet.from(tags))
+  val evictedPartKeyBloomFilterQueries = FilodbMetrics.counter("evicted-pk-bloom-filter-queries", tags)
+  val evictedPartKeyBloomFilterFalsePositives = FilodbMetrics.counter("evicted-pk-bloom-filter-fp", tags)
+  val evictedPkBloomFilterSize = FilodbMetrics.gauge("evicted-pk-bloom-filter-approx-size", tags)
+  val evictedPartIdLookupMultiMatch = FilodbMetrics.counter("evicted-partId-lookup-multi-match", tags)
 
   /**
     * Difference between the local clock and the received ingestion timestamps, in milliseconds.
@@ -121,32 +118,30 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * expected), then the delay reflects the delay between the generation of the samples and
     * receiving them, assuming that the clocks are in sync.
     */
-  val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val ingestionClockDelay = FilodbMetrics.timeGauge("ingestion-clock-delay", TimeUnit.MILLISECONDS, tags)
 
   /**
    *  This measures the time from Message Queue to when the data is stored.
    */
-  val ingestionPipelineLatency = Kamon.histogram("ingestion-pipeline-latency",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val ingestionPipelineLatency = FilodbMetrics.timeHistogram("ingestion-pipeline-latency",
+    TimeUnit.MILLISECONDS, tags)
 
   /**
    * Records the absolute value of otherwise-negative ingestion pipeline latencies.
    */
-  val negativeIngestionPipelineLatency = Kamon.histogram("negative-ingestion-pipeline-latency",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val negativeIngestionPipelineLatency = FilodbMetrics.timeHistogram("negative-ingestion-pipeline-latency",
+    TimeUnit.MILLISECONDS, tags)
 
-  val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
-    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val chunkFlushTaskLatency = FilodbMetrics.timeHistogram("chunk-flush-task-latency-after-retries",
+    TimeUnit.MILLISECONDS, tags)
 
   /**
    * How much time a thread was potentially stalled while attempting to ensure
    * free space. Unit is nanoseconds.
    */
-  val memstoreEvictionStall = Kamon.counter("memstore-eviction-stall",
-                           MeasurementUnit.time.nanoseconds).withTags(TagSet.from(tags))
-  val evictablePartKeysSize = Kamon.gauge("memstore-num-evictable-partkeys").withTags(TagSet.from(tags))
-  val missedEviction = Kamon.counter("memstore-missed-eviction").withTags(TagSet.from(tags))
+  val memstoreEvictionStall = FilodbMetrics.timeCounter("memstore-eviction-stall", TimeUnit.NANOSECONDS, tags)
+  val evictablePartKeysSize = FilodbMetrics.gauge("memstore-num-evictable-partkeys", tags)
+  val missedEviction = FilodbMetrics.counter("memstore-missed-eviction", tags)
 
 }
 
@@ -305,6 +300,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val tantivyQueryCacheEstimatedItemSize =
     filodbConfig.getMemorySize("memstore.tantivy.query-cache-estimated-item-size")
   private val tantivyDeletedDocMergeThreshold = filodbConfig.getDouble("memstore.tantivy.deleted-doc-merge-threshold")
+
+  // Lucene configuration
+  private val luceneRamBufferSizeMB = filodbConfig.getDouble("memstore.lucene.ram-buffer-size-mb")
+  private val luceneMaxBufferedDocs = filodbConfig.getInt("memstore.lucene.max-buffered-docs")
+  private val luceneUseCompoundFile = filodbConfig.getBoolean("memstore.lucene.use-compound-file")
+
   // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
   private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
@@ -341,7 +342,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     case "lucene" => new PartKeyLuceneIndex(ref, schemas.part,
       indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
       storeConfig.diskTTLSeconds * 1000, disableIndexCaching = disableIndexCaching,
-      addMetricTypeField = typeFieldIndexingEnabled)
+      ramBufferSizeMB = luceneRamBufferSizeMB, maxBufferedDocs = luceneMaxBufferedDocs,
+      useCompoundFile = luceneUseCompoundFile, addMetricTypeField = typeFieldIndexingEnabled)
     case "tantivy" => new PartKeyTantivyIndex(ref, schemas.part,
       shardNum, storeConfig.diskTTLSeconds * 1000, columnCacheCount = tantivyColumnCacheCount,
       queryCacheMaxSize = tantivyQueryCacheSize.toBytes,
@@ -489,7 +491,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final val updatedPartIdsForPublishing: Option[PartKeyUpdatesPublisher] =
     if (partKeyUpdatesPublishingEnabled) {
       logger.info(s"[PKUpdatePublisher] Initializing partKey updates publisher for shard=${shardNum}")
-      Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore, TagSet.from(shardStats.tags)))
+      Some(new CassandraPartKeyUpdatesPublisher(shardNum, ref, colStore, shardStats.tags))
     }
     else None
 
@@ -766,8 +768,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       }.runToFuture(ingestSched)
   }
 
-  def startFlushingIndex(): Unit =
+  def startFlushingIndex(): Unit = {
     partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
+    partKeyIndex.startStatsThread()
+  }
 
   /**
    * Handles actions to be performed for the shard upon bootstrapping
@@ -1008,7 +1012,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     } else {
       evictablePartIds.put(p.partID)
     }
-    shardStats.evictablePartKeysSize.increment()
+    shardStats.evictablePartKeysSize.update(evictableOdpPartIds.size + evictablePartIds.size)
   }
 
   private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
@@ -2088,7 +2092,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
         val _schema = firstPartId.map(schemaIDFromPartID)
         _schema.foreach { s =>
-          shardStats.queriesBySchema.withTag("schema", schemas(s).name).increment()
+          shardStats.queriesBySchema.increment(1, Map("schema" -> schemas(s).name))
         }
         val it1 = InMemPartitionIterator2(matches)
         val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)

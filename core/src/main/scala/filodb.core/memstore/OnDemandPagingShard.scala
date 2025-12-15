@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
@@ -15,9 +17,11 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, QueryWarnings, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
+
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
@@ -44,6 +48,9 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
     Scheduler.singleThread(s"${FiloSchedulers.PopulateChunksSched}-$ref-$shardNum")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
+
+  private val odpLatency = FilodbMetrics.timeHistogram("odp-cassandra-latency", TimeUnit.MILLISECONDS,
+                                        Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
   private def startODPSpan(): Span = Kamon.spanBuilder(s"odp-cassandra-latency")
     .asChildOf(Kamon.currentSpan())
@@ -188,12 +195,25 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
+            val startTime = System.currentTimeMillis()
             rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
-              .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .mapEval { rawPart =>
+                partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
+                  // Check if any chunks were skipped and update QuerySession
+                  if (result.isPartialResult) {
+                    throw QueryLimitException("The result is too large" +
+                      " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId);
+                  }
+                  result.partition
+                }
+              }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .guarantee(Task.eval(span.finish())) // not async
+              .guarantee(Task.eval {
+                span.finish()
+                odpLatency.record(System.currentTimeMillis() - startTime)
+              }) // not async
           } else { Observable.empty }
         }
       } else {
@@ -208,16 +228,29 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
           }
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
+            val startTime = System.currentTimeMillis()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapParallelUnordered(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(ref, maxChunkTime, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .mapEval { rawPart =>
+                    partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).map { result =>
+                      // Check if any chunks were skipped and update QuerySession
+                      if (result.isPartialResult) {
+                        throw QueryLimitException("The result is too large" +
+                          " to fit in memory. Please try reducing the query ranges.", querySession.qContext.queryId)
+                      }
+                      result.partition
+                    }
+                  }
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .guarantee(Task.eval(span.finish())) // not async
+              .guarantee(Task.eval {
+                span.finish()
+                odpLatency.record(System.currentTimeMillis() - startTime)
+              }) // not async
           } else {
             Observable.empty
           }

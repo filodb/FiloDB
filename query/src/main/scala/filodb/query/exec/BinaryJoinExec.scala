@@ -1,13 +1,15 @@
 package filodb.query.exec
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core.Utils
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -113,9 +115,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       val startNs = Utils.currentThreadCpuTimeNanos
       try {
         span.mark("binary-join-child-results-available")
-        Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
-          MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
+        FilodbMetrics.timeHistogram("query-execute-time-elapsed-step1-child-results-available", TimeUnit.MILLISECONDS,
+          Map("plan" -> getClass.getSimpleName))
           .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
         // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
         //       filter returns empty results.  The reason is that the schema will be undefined.

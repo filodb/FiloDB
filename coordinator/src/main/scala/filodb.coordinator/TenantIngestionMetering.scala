@@ -7,13 +7,12 @@ import scala.util.{Failure, Success}
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.tag.TagSet
 import monix.execution.Scheduler.Implicits.{global => scheduler}
 
 import filodb.coordinator.client.Client
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.QueryContext
 import filodb.query.{QueryError, QueryResult, TsCardinalities}
 import filodb.query.exec.TsCardExec._
@@ -93,11 +92,11 @@ case class TenantIngestionMetering(settings: FilodbSettings,
                            "cluster_type" -> CLUSTER_TYPE)
 
             if (CLUSTER_TYPE == "downsample") {
-              Kamon.gauge(METRIC_LONGTERM).withTags(TagSet.from(tags)).update(data.counts.longTerm.toDouble)
+              FilodbMetrics.gauge(METRIC_LONGTERM, tags).update(data.counts.longTerm.toDouble)
             }
             else {
-              Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
-              Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.shortTerm.toDouble)
+              FilodbMetrics.gauge(METRIC_ACTIVE, tags).update(data.counts.active.toDouble)
+              FilodbMetrics.gauge(METRIC_TOTAL, tags).update(data.counts.shortTerm.toDouble)
             }
           })
         case Success(QueryError(_, _, t)) => logger.warn("QueryError: " + t.getMessage)
