@@ -2,15 +2,11 @@ package filodb.cassandra.columnstore
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
-import kamon.tag.TagSet
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -21,6 +17,7 @@ import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -80,7 +77,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val timeBucket = 20
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
-    colStore.writePartKeyUpdates(dataset, timeBucket, System.currentTimeMillis(), 1, TagSet.Empty,
+    colStore.writePartKeyUpdates(dataset, timeBucket, System.currentTimeMillis(), 1, Map.empty,
         Observable.fromIterable(pks)).futureValue shouldEqual Success
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8))
@@ -108,8 +105,12 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.truncate(dataset.ref, 1).futureValue
 
     val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
-    val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
-      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb"))
+  // resolve() replaces all substitutions (like ${...}) with actual values from env or fallback configs.
+  // getConfig("filodb") retrieves only the "filodb" subtree, preserving top-level definitions like `dataset-prometheus`.
+    val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath))
+      .withFallback(GlobalConfig.systemConfig)
+      .resolve()
+      .getConfig("filodb")
     val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
     val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
@@ -238,7 +239,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   }
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")
-                                             .withFallback(config)
+                                             .withFallback(config).resolve()
   val compressSession = new DefaultFiloSessionProvider(configWithChunkCompress.getConfig("cassandra")).session
   val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s, compressSession)
 

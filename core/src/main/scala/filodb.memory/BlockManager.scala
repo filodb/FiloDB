@@ -1,14 +1,13 @@
 package filodb.memory
 
+import java.util
 import java.util.concurrent.locks.ReentrantLock
 import javax.naming.ServiceUnavailableException
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
-import java.util
-import kamon.Kamon
-import kamon.metric.{Counter, Gauge}
-import kamon.tag.TagSet
+
+import filodb.core.metrics.{FilodbMetrics, MetricsCounter, MetricsGauge}
 
 /**
   * Allows requesting blocks.
@@ -89,20 +88,18 @@ trait BlockManager {
 }
 
 class MemoryStats(tags: Map[String, String]) {
-  val usedIngestionBlocksMetric = Kamon.gauge("blockstore-used-ingestion-blocks").withTags(TagSet.from(tags))
-  val freeBlocksMetric = Kamon.gauge("blockstore-free-blocks").withTags(TagSet.from(tags))
-  val requestedBlocksMetric = Kamon.counter("blockstore-blocks-requested").withTags(TagSet.from(tags))
-  val usedOdpBlocksMetric = Kamon.gauge("blockstore-used-odp-blocks").withTags(TagSet.from(tags))
-  val odpBlocksReclaimedMetric = Kamon.counter("blockstore-odp-blocks-reclaimed")
-                                            .withTags(TagSet.from(tags))
-  val ingestionBlocksReclaimedMetric = Kamon.counter("blockstore-ingestion-blocks-reclaimed")
-                                            .withTags(TagSet.from(tags))
+  val usedIngestionBlocksMetric = FilodbMetrics.gauge("blockstore-used-ingestion-blocks", tags)
+  val freeBlocksMetric = FilodbMetrics.gauge("blockstore-free-blocks", tags)
+  val requestedBlocksMetric = FilodbMetrics.counter("blockstore-blocks-requested", tags)
+  val usedOdpBlocksMetric = FilodbMetrics.gauge("blockstore-used-odp-blocks", tags)
+  val odpBlocksReclaimedMetric = FilodbMetrics.counter("blockstore-odp-blocks-reclaimed", tags)
+  val ingestionBlocksReclaimedMetric = FilodbMetrics.counter("blockstore-ingestion-blocks-reclaimed", tags)
 
   /**
     * How much time a thread was stalled while attempting to acquire the reclaim lock.
     * Unit is nanoseconds.
     */
-  val blockReclaimStall = Kamon.counter("blockstore-reclaim-stall-nanos").withTags(TagSet.from(tags))
+  val blockReclaimStall = FilodbMetrics.counter("blockstore-reclaim-stall-nanos", tags)
 }
 
 final case class ReclaimEvent(block: Block, reclaimTime: Long, oldOwner: Option[BlockMemFactory], remaining: Long)
@@ -324,8 +321,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
 
     def reclaimFrom(list: util.ArrayDeque[Block],
-                    reclaimedCounter: Counter,
-                    usedBlocksStats: Gauge): Seq[Block] = {
+                    reclaimedCounter: MetricsCounter,
+                    usedBlocksStats: MetricsGauge): Seq[Block] = {
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {

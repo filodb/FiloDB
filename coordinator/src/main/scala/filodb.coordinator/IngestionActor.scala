@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -10,8 +11,6 @@ import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.execution.schedulers.SchedulerService
@@ -22,6 +21,7 @@ import filodb.core.{DatasetRef, GlobalConfig, Iterators}
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.StoreConfig
 import filodb.memory.data.Shutdown
 
@@ -357,9 +357,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   private def doRecoveryWithShardRecoveryLatencyTracking(params: RecoveryParams,
                                                          ingestionScheduler: SchedulerService): Future[Option[Long]] = {
     implicit val futureMapDispatcher: ExecutionContext = ingestionScheduler
-    val ingestionRecoveryLatency = Kamon.histogram("ingestion-recovery-latency", MeasurementUnit.time.milliseconds)
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", params.shard)
+    val ingestionRecoveryLatency = FilodbMetrics.timeHistogram("ingestion-recovery-latency", TimeUnit.MILLISECONDS,
+      Map("dataset" -> ref.dataset, "shard" -> params.shard.toString))
     val recoveryStart = System.currentTimeMillis()
     statusActor ! RecoveryInProgress(ref, params.shard, nodeCoord, 0)
     val fut = doRecoveryRecursive(params, ingestionScheduler)
@@ -489,9 +488,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                          checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
 
-      val ingestionRecoveryLatency = Kamon.histogram("ingestion-recovery-latency", MeasurementUnit.time.milliseconds)
-                                                  .withTag("dataset", ref.dataset)
-                                                  .withTag("shard", shard)
+      val ingestionRecoveryLatency = FilodbMetrics.timeHistogram("ingestion-recovery-latency", TimeUnit.MILLISECONDS,
+                                                  Map("dataset" -> ref.dataset, "shard" -> shard.toString))
 
       val recoveryStart = System.currentTimeMillis()
       val stream = ingestionStream.get

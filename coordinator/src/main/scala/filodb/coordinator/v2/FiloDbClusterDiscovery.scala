@@ -7,7 +7,6 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import scala.collection.mutable
@@ -16,6 +15,7 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import filodb.coordinator.{ActorName, CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
+import filodb.core.metrics.FilodbMetrics
 
 class FiloDbClusterDiscovery(settings: FilodbSettings,
                              system: ActorSystem,
@@ -26,11 +26,11 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
 
   // Metric to track actor resolve failures
-  val actorResolvedFailedCounter = Kamon.counter("actor-resolve-failed")
+  val actorResolvedFailedCounter = FilodbMetrics.counter("actor-resolve-failed")
   // Metric to track cluster discovery runs
-  val clusterDiscoveryCounter = Kamon.counter("filodb-cluster-discovery")
+  val clusterDiscoveryCounter = FilodbMetrics.counter("filodb-cluster-discovery")
   // Metric to track if we have unassigned shards on a given pod
-  val unassignedShardsGauge = Kamon.gauge("v2-unassigned-shards")
+  val unassignedShardsGauge = FilodbMetrics.gauge("v2-unassigned-shards")
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -129,10 +129,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
           case e =>
             // log the exception we got while trying to resolve and emit metric
             logger.error(s"[ClusterV2] Actor Resolve Failed ! actor: ${nca.toString()}", e)
-            actorResolvedFailedCounter
-              .withTag("dataset", ref.dataset)
-              .withTag("actor", nca.toString())
-              .increment()
+            actorResolvedFailedCounter.increment(1, Map("dataset" -> ref.dataset, "actor" -> nca.toString()))
             ActorRef.noSender
         })
       if ncaRef != ActorRef.noSender
@@ -153,13 +150,13 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
       mapper <- reduceMappersFromAllNodes(dataset, numShards, failureDetectionInterval - 5.seconds)
     } {
       datasetToMapper.put(dataset, mapper)
-      clusterDiscoveryCounter.withTag("dataset", dataset.dataset).increment()
+      clusterDiscoveryCounter.increment(1, Map("dataset" -> dataset.dataset))
       val unassignedShardsCount = mapper.unassignedShards.length.toDouble
       if (unassignedShardsCount > 0.0) {
         logger.error(s"[ClusterV2] Unassigned Shards > 0 !! Dataset: ${dataset.dataset} " +
           s"Shards Mapping is: ${mapper.prettyPrint} ")
       }
-      unassignedShardsGauge.withTag("dataset", dataset.dataset).update(unassignedShardsCount)
+      unassignedShardsGauge.update(unassignedShardsCount, Map("dataset" -> dataset.dataset))
     }
     discoveryJobs += (dataset -> fut)
   }

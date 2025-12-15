@@ -32,7 +32,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val allConfig = ConfigFactory.parseString("filodb.query.streaming-query-results-enabled = true")
-    .withFallback(ConfigFactory.load("application_test.conf"))
+    .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
   val filodbConfig = allConfig.getConfig("filodb")
   val queryConfig = QueryConfig(filodbConfig.getConfig("query"))

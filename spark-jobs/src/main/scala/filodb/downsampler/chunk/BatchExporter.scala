@@ -3,7 +3,6 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.time.{Instant, ZoneId}
 
-import kamon.Kamon
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
 import org.apache.spark.sql.types.StructType
@@ -12,6 +11,7 @@ import scala.collection.mutable
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
@@ -53,11 +53,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
 
-  @transient lazy val numPartitionsExportPrepped = Kamon.counter("num-partitions-export-prepped").withoutTags()
+  @transient lazy val numPartitionsExportPrepped = FilodbMetrics.counter("num-partitions-export-prepped")
 
-  @transient lazy val numRowsExportPrepped = Kamon.counter("num-rows-export-prepped").withoutTags()
+  @transient lazy val numRowsExportPrepped = FilodbMetrics.counter("num-rows-export-prepped")
 
-  @transient lazy val numRowExportPrepErrors = Kamon.counter("num-row-export-prep-errors").withoutTags()
+  @transient lazy val numRowExportPrepErrors = FilodbMetrics.counter("num-row-export-prep-errors")
 
   /**
    * Returns the index of a column in the export schema.
