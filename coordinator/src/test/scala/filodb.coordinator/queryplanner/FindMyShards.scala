@@ -45,7 +45,6 @@ object FindMyShards extends StrictLogging {
     def mapperRef = mapper
 
     val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
-    val dsRef = dataset.ref
     val schemas = Schemas (dataset.schema)
 
     val config = ConfigFactory.load ("application_test.conf").resolve()

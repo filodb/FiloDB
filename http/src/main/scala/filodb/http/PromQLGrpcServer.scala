@@ -275,7 +275,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
     server.start()
     logger.info("Server started, listening on " + this.port)
     Runtime.getRuntime.addShutdownHook(new Thread() {
-      () => PromQLGrpcServer.this.stop()
+      override def run(): Unit = PromQLGrpcServer.this.stop()
     })
   }
 

@@ -216,7 +216,7 @@ trait SectionReader { self: HistogramReader =>
   def iterateSections: Iterator[Section] = new Iterator[Section] {
     var curSect = Section.fromPtr(acc, firstSectionAddr)
     final def hasNext: Boolean = curSect.endAddr(acc).addr <= endAddr.addr
-    final def next: Section = {
+    final def next(): Section = {
       val sect = curSect
       curSect = Section.fromPtr(acc, curSect.endAddr(acc))
       sect

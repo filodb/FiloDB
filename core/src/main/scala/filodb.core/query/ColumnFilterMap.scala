@@ -253,13 +253,12 @@ class FastColumnFilterMap[T](equalsLabel: String,
    */
   override def get(labels: collection.Map[String, String]): Option[T] = {
     val filteredValue = labels(filteredLabel)
-    for ((filter, elt) <- fastFilterEltPairs) {
-      if (filter(filteredValue)) {
-        return Some(elt)
-      }
+    fastFilterEltPairs.find(x => x._1(filteredValue)) match {
+      case Some((_, elt)) => Some(elt)
+      case None =>
+        val equalsValue = labels(equalsLabel)
+        equalsValuesToElts.get(equalsValue)
     }
-    val equalsValue = labels(equalsLabel)
-    equalsValuesToElts.get(equalsValue)
   }
 
   override def toString(): String = {

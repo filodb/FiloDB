@@ -16,7 +16,7 @@ class EvictablePartIdQueueSet(initSize: Int) {
 
   // package private for unit test validation. Dont access
   private[memstore] val arr = new IntArrayQueue(initSize)
-  private[memstore] val set = debox.Set.ofSize[Int](initSize)
+  private[memstore] val set = new scala.collection.mutable.HashSet[Int]()
 
   def put(partId: Int): Unit = synchronized {
     if (!set(partId)) {
@@ -30,7 +30,7 @@ class EvictablePartIdQueueSet(initSize: Int) {
    * The sink may not have requested number of items if collection did not have
    * that many in the first place.
    */
-  def removeInto(numItemsToRemove: Int, sink: debox.Buffer[Int]): Unit = synchronized {
+  def removeInto(numItemsToRemove: Int, sink: scala.collection.mutable.ArrayBuffer[Int]): Unit = synchronized {
     var numRemoved = 0
     while (numRemoved < numItemsToRemove && !set.isEmpty) {
       val partId = arr.remove()

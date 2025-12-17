@@ -127,15 +127,15 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     blockManager.usedBlocksTimeOrdered.size shouldEqual 0
 
     // first allocate non-time ordered block
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(None).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.usedBlocks.size shouldEqual 1
 
-    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable()).isDefined shouldEqual true
+    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.requestBlock(Some(1000L)).isDefined shouldEqual true
     blockManager.usedBlocksTimeOrdered.get(1000L).size() shouldEqual 3
 
-    blockManager.requestBlock(Some(9000L)).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(Some(9000L)).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.usedBlocksTimeOrdered.get(9000L).size() shouldEqual 1
 
     blockManager.numTimeOrderedBlocks shouldEqual 4
@@ -195,7 +195,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     // reclaim should fail now because none of the blocks are reclaimable
     intercept[ServiceUnavailableException] {
       blockManager.requestBlock(true)
-      fail
+      fail()
     }
 
     blockManager.releaseBlocks()
@@ -227,7 +227,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
 
     // Mark as reclaimable the blockMemFactory's block.  Then request more blocks, that one will be reclaimed.
     // Check ownership is now cleared.
-    factory.currentBlock.markReclaimable
+    factory.currentBlock.markReclaimable()
     blockManager.ensureFreeBlocks(1)
 
     factory.currentBlock.owner shouldEqual None  // new requestor did not have owner
@@ -242,23 +242,23 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 5
 
-    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 4
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 4
 
-    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 3
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 3
 
-    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 2
     blockManager.ensureFreePercent(50)
     // Should actually have done something this time.
     blockManager.numFreeBlocks shouldEqual 3
 
-    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable()).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 2
     blockManager.ensureFreePercent(90)
     // Should reclaim multiple blocks.

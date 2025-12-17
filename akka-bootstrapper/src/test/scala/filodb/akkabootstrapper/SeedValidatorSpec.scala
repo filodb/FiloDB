@@ -19,7 +19,7 @@ class InvalidSeedValidatorSpec extends AbstractTestKit(
   ConfigFactory.parseString(
     s"""
        |akka-bootstrapper.explicit-list.seeds = [
-       |  "akka.tcp://test@127.0.0.1:0", "akka://test:127.0.0.1:0", "akka.tcp://test@localhost" ]
+       |  "akka://test@127.0.0.1:0", "akka://test:127.0.0.1:0", "akka://test@localhost" ]
       """.stripMargin).withFallback(AbstractTestKit.rootConfig))
   with AnyWordSpecLike {
 

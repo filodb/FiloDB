@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -127,8 +128,8 @@ trait UTF8VectorDataReader extends VectorDataReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[ZeroCopyUTF8String] = {
-    val newBuf = Buffer.empty[ZeroCopyUTF8String]
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): ArrayBuffer[ZeroCopyUTF8String] = {
+    val newBuf = ArrayBuffer.empty[ZeroCopyUTF8String]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
@@ -248,7 +249,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     UTF8FlexibleVectorDataReader.apply(nativePtrReader, addr, n)
   final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
-  def copyToBuffer: Buffer[ZeroCopyUTF8String] =
+  def copyToBuffer: ArrayBuffer[ZeroCopyUTF8String] =
     UTF8FlexibleVectorDataReader.toBuffer(nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))

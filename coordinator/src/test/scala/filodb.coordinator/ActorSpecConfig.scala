@@ -14,10 +14,15 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
 
 object ActorSpecConfig {
+  // Use a random available port for each test to avoid port conflicts
+  def getFreePort: Int = {
+    val socket = new java.net.ServerSocket(0)
+    val port = socket.getLocalPort
+    socket.close()
+    port
+  }
+
   def getNewSystem(name: String, config: Config): ActorSystem = {
-    // Delay between each test, to provide some allowance for the port binding to succeed.
-    // Ideally the port binding should automatically retry, but this is a simpler fix.
-    Thread.sleep(5000)
     ActorSystem(name, config)
   }
 }
@@ -39,6 +44,7 @@ trait ActorSpecConfig {
     .withFallback(ConfigFactory.load("filodb-defaults.conf")).resolve()
 
   def getNewSystem = {
+    FilodbSettings.reset()  // Reset to ensure fresh initialization
     FilodbSettings.initialize(config)
     ActorSpecConfig.getNewSystem("test", config)
   }
@@ -46,7 +52,8 @@ trait ActorSpecConfig {
 
 trait SeedNodeConfig {
   val host = InetAddress.getLocalHost.getHostAddress
-  val port = 2552
+  // Use a random port within a range to avoid conflicts between tests
+  val port = 25520 + util.Random.nextInt(1000)
 }
 
 abstract class AbstractTestKit(system: ActorSystem) extends TestKit(system)
@@ -62,12 +69,15 @@ abstract class AbstractTestKit(system: ActorSystem) extends TestKit(system)
 
 abstract class ActorTest(system: ActorSystem) extends AbstractTestKit(system) with AnyFunSpecLike
 
-object AkkaSpec extends SeedNodeConfig {
+object AkkaSpec {
+  val host = InetAddress.getLocalHost.getHostAddress
 
-  val userConfig = ConfigFactory.parseString(
+  def getFreePort: Int = 25520 + util.Random.nextInt(10000)
+
+  def userConfig(port: Int) = ConfigFactory.parseString(
     s"""
       |filodb {
-      |  seed-nodes = ["akka.tcp://filo-standalone@$host:$port"]
+      |  seed-nodes = ["akka://filo-standalone@$host:$port"]
       |  dataset-definitions {
       |    prometheus {
       |      string-columns = []
@@ -86,9 +96,9 @@ object AkkaSpec extends SeedNodeConfig {
                                 .map(x => s"""\nakka.loggers = ["akka.testkit.TestEventListener"]""")
                                 .getOrElse("")
 
-  val serverConfig = ConfigFactory.parseString(
-   s"""akka.remote.netty.tcp.port = $port
-      |akka.remote.netty.tcp.host = $host
+  def serverConfig(port: Int) = ConfigFactory.parseString(
+   s"""akka.remote.artery.canonical.port = $port
+      |akka.remote.artery.canonical.host = $host
       |akka.log-received-messages = on
       |akka.log-sent-messages = on
       |akka.debug.lifecycle = on
@@ -96,7 +106,11 @@ object AkkaSpec extends SeedNodeConfig {
     """.stripMargin + logAkkaToConsole)
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
-  val settings = new FilodbSettings(userConfig.withFallback(serverConfig))
+  def settings(port: Int) = new FilodbSettings(userConfig(port).withFallback(serverConfig(port)))
+
+  // Keep a default settings for backward compatibility
+  lazy val defaultPort: Int = getFreePort
+  lazy val settings: FilodbSettings = settings(defaultPort)
 
   def getNewSystem(c: Option[Config] = None): ActorSystem = {
     ActorSpecConfig.getNewSystem("test", c.map(_.withFallback(settings.allConfig)) getOrElse settings.allConfig)
@@ -111,15 +125,21 @@ abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
   with Matchers
   with ScalaFutures {
 
-  def this() = this(ActorSpecConfig.getNewSystem("akka-test", AkkaSpec.settings.allConfig))
-  def this(config: Config) =
-    this(ActorSpecConfig.getNewSystem("akka-test", config.withFallback(AkkaSpec.settings.allConfig)))
+  // Use a fresh port for each test instance to avoid conflicts
+  def this() = this({
+    val port = AkkaSpec.getFreePort
+    ActorSpecConfig.getNewSystem("akka-test", AkkaSpec.settings(port).allConfig)
+  })
+  def this(config: Config) = this({
+    val port = AkkaSpec.getFreePort
+    ActorSpecConfig.getNewSystem("akka-test", config.withFallback(AkkaSpec.settings(port).allConfig))
+  })
 
 }
 
 trait RunnableSpec extends AbstractSpec with SeedNodeConfig {
 
-  System.setProperty("filodb.seed-nodes", s"akka.tcp://filo-standalone@$host:$port")
+  System.setProperty("filodb.seed-nodes", s"akka://filo-standalone@$host:$port")
 
   override def afterAll(): Unit = {
     super.afterAll()

@@ -95,7 +95,7 @@ class PlannerBenchmark {
   @throws[Exception]
   def benchmarkMaterializePlan(): Unit = {
 
-    var i = 0;
+    @scala.annotation.unused var i = 0;
     // Materialize the query every hour for past 5 days
     for (endTime <- (now - 3.hour.toMillis) to  now by 1.hour.toMillis) {
         val endSecs = endTime / 1000;

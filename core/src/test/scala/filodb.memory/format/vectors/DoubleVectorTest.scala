@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.memory.format._
 
@@ -11,7 +11,7 @@ class DoubleVectorTest extends NativeVectorTest {
   describe("DoubleMaskedAppendableVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = DoubleVector.appendingVector(memFactory, 100)
-      builder.addNA
+      builder.addNA()
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
       val sc = builder.freeze(memFactory)
@@ -19,16 +19,16 @@ class DoubleVectorTest extends NativeVectorTest {
       // Just to make sure this does not throw an exception
       DoubleVector(acc, sc)(acc, sc, 0)
       DoubleVector(acc, sc)
-        .toBuffer(acc, sc) shouldEqual Buffer.empty[Double]
+        .toBuffer(acc, sc) shouldEqual ArrayBuffer.empty[Double]
     }
 
     it("should encode a mix of NAs and Doubles and decode iterate and skip NAs") {
       val cb = DoubleVector.appendingVector(memFactory, 5)
-      cb.addNA
+      cb.addNA()
       cb.addData(101)
       cb.addData(102.5)
       cb.addData(103)
-      cb.addNA
+      cb.addNA()
       cb.isAllNA should be (false)
       cb.noNAs should be (false)
       val sc = cb.freeze(memFactory)
@@ -37,7 +37,7 @@ class DoubleVectorTest extends NativeVectorTest {
         .length(acc, sc) shouldEqual 5
       DoubleVector(acc, sc)(acc, sc, 1) shouldEqual 101.0
       DoubleVector(acc, sc)
-        .toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 103)
+        .toBuffer(acc, sc) shouldEqual ArrayBuffer(101, 102.5, 103)
     }
 
     it("should be able to append lots of Doubles off-heap and grow vector") {
@@ -51,11 +51,11 @@ class DoubleVectorTest extends NativeVectorTest {
 
     it("should be able to return minMax accurately with NAs") {
       val cb = DoubleVector.appendingVector(memFactory, 5)
-      cb.addNA
+      cb.addNA()
       cb.addData(10.1)
       cb.addData(102)
       cb.addData(1.03E9)
-      cb.addNA
+      cb.addNA()
       val inner = cb.asInstanceOf[GrowableVector[Double]].inner.asInstanceOf[MaskedDoubleAppendingVector]
       inner.minMax should equal ((10.1, 1.03E9))
     }
@@ -71,7 +71,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       DoubleVector(acc, frozen).length(acc, frozen) shouldEqual 5
       DoubleVector(acc, frozen)
-        .toBuffer(acc, frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toDouble))
+        .toBuffer(acc, frozen) shouldEqual ArrayBuffer.from((0 to 4).map(_.toDouble))
     }
 
     it("should be able to optimize all integral vector to DeltaDeltaVector") {
@@ -164,7 +164,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       DoubleVector(acc, optimized).length(acc, optimized) shouldEqual 5
       DoubleVector(acc, optimized)
-        .toBuffer(acc, optimized) shouldEqual Buffer.fromIterable((100000 to 100004).map(_.toDouble))
+        .toBuffer(acc, optimized) shouldEqual ArrayBuffer.from((100000 to 100004).map(_.toDouble))
       DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 100002.0
       // Const DeltaDeltaVector (since this is linearly increasing)
       BinaryVector.totalBytes(acc, optimized) shouldEqual 24
@@ -237,7 +237,7 @@ class DoubleVectorTest extends NativeVectorTest {
   describe("bugs") {
     it("should enumerate same samples regardless of where start enumeration from") {
       val data = scala.io.Source.fromURL(getClass.getResource("/timeseries_bug1.txt"))
-                      .getLines.map(_.split(' '))
+                      .getLines().map(_.split(' '))
                       .map(ArrayStringRowReader).toSeq
       val origValues = data.map(_.getDouble(1))
       val timestampAppender = LongBinaryVector.appendingVectorNoNA(memFactory, data.length)
@@ -249,7 +249,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       val tsEncoded = timestampAppender.optimize(memFactory)
       val valuesEncoded = valuesAppender.optimize(memFactory)
-      val tsReader = LongBinaryVector(acc, tsEncoded)
+      @scala.annotation.unused val tsReader = LongBinaryVector(acc, tsEncoded)
       val dReader = DoubleVector(acc, valuesEncoded)
 
       val samples = new collection.mutable.ArrayBuffer[Double]
@@ -317,7 +317,7 @@ class DoubleVectorTest extends NativeVectorTest {
       val sc = cb.optimize(memFactory)
       PrimitiveVectorReader.dropped(acc, sc) shouldEqual true
 
-      DoubleVector(acc, sc).toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 9, 13.3, 21.1)
+      DoubleVector(acc, sc).toBuffer(acc, sc) shouldEqual ArrayBuffer(101, 102.5, 9, 13.3, 21.1)
 
       // Make sure return correcting version of reader as well
       cb.reader shouldBe a[CorrectingDoubleVectorReader]

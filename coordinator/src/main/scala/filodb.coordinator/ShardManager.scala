@@ -37,11 +37,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private val _coordinators = new mutable.LinkedHashMap[Address, ActorRef]
   private val _errorShardReassignedAt = new mutable.HashMap[DatasetRef, mutable.HashMap[Int, Long]]
 
+  @scala.annotation.unused
   private val _tenantIngestionMeteringOpt =
     if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
       val inst = TenantIngestionMetering(
                    settings,
-                   () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
+                   () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.iterator },
                    () => { _coordinators.head._2 })
       inst.schedulePeriodicPublishJob()
       Some(inst)
@@ -116,6 +117,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     *
     * INTERNAL API. Read-only.
     */
+  @scala.annotation.unused
   private def getSubscribers(ds: DatasetRef): Set[ActorRef] =
     _subscriptions.subscribers(ds)
 
@@ -378,7 +380,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   private def removeCoordinator(coordinator: ActorRef): Unit = {
     for ((dataset, resources, mapper) <- datasetShardMaps) {
-      var shardsToDown = mapper.shardsForCoord(coordinator)
+      val shardsToDown = mapper.shardsForCoord(coordinator)
       doUnassignShards(dataset, coordinator, shardsToDown)
       // try to reassign shards that were unassigned to other nodes that have room.
       assignShardsToNodes(dataset, mapper, resources)

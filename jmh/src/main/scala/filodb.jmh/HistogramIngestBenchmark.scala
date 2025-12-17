@@ -58,9 +58,9 @@ class HistogramIngestBenchmark {
   val promContainers = promBuilder.allContainers.toArray
 
   println(s"DONE generating.\nHistSchema container size=${histContainers.head.numBytes} " +
-          s"# records=${histContainers.head.countRecords}")
+          s"# records=${histContainers.head.countRecords()}")
   println(s"Prom schema container size=${promContainers.head.numBytes} " +
-          s"# records=${promContainers.head.countRecords}")
+          s"# records=${promContainers.head.countRecords()}")
 
   import monix.execution.Scheduler.Implicits.global
 

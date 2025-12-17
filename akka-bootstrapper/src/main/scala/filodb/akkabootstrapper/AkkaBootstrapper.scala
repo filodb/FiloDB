@@ -32,7 +32,7 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging {
   import FailFastCirceSupport._
   import io.circe.generic.auto._
 
-  private implicit val system = cluster.system
+  private implicit val system: akka.actor.ExtendedActorSystem = cluster.system
   private[filodb] val settings = new AkkaBootstrapperSettings(cluster.system.settings.config)
 
   /**
@@ -74,7 +74,7 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging {
     */
   def getAkkaHttpRoute(membershipActor: Option[ActorRef] = None): Route = {
     val clusterMembershipTracker = membershipActor.getOrElse(
-      system.actorOf(Props[ClusterMembershipTracker], name = "clusterListener"))
+      system.actorOf(Props[ClusterMembershipTracker](), name = "clusterListener"))
 
     import AkkaBootstrapperMessages._
 

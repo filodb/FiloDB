@@ -10,7 +10,7 @@ object GlobalScheduler extends StrictLogging {
     * Should not use Scala or Monix's default Global Implicit since it does
     * not have a configurable uncaught exception handler.
     */
-  implicit lazy val globalImplicitScheduler = Scheduler.computation(
+  implicit lazy val globalImplicitScheduler: monix.execution.schedulers.SchedulerService = Scheduler.computation(
     name = "global-implicit",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalScheduler", _)))
 }

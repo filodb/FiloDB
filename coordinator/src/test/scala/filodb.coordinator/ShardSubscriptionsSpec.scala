@@ -6,8 +6,6 @@ import filodb.core.DatasetRef
 
 class ShardSubscriptionsSpec extends AkkaSpec {
 
-  private val extension = FilodbCluster(system)
-
   private val dataset1 = DatasetRef("one")
   private val dataset2 = DatasetRef("two")
 

@@ -55,7 +55,8 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(
@@ -93,7 +94,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
   val histDataDisabledWS = MMD.linearHistSeries(ws = GlobalConfig.workspacesDisabledForMaxMin.get.head).take(100)
   val histMaxMinDataDisabledWS = MMD.histMaxMin(histDataDisabledWS)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
@@ -128,9 +129,9 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     leafExecPlan.addRangeVectorTransformer(transformer)
 
     val topK = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
-      Array[ExecPlan](leafExecPlan), AggregationOperator.TopK, Seq(1.0))
+      Array[ExecPlan](leafExecPlan).toIndexedSeq, AggregationOperator.TopK, Seq(1.0))
     val sum = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
-      Array[ExecPlan](leafExecPlan), AggregationOperator.Sum, Seq(0))
+      Array[ExecPlan](leafExecPlan).toIndexedSeq, AggregationOperator.Sum, Seq(0))
     val binaryjoin1 = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Seq(topK), Seq(sum), BinaryOperator.ADD, Cardinality.OneToOne,
       None, Nil, Nil, "__name__", Some(RvRange(startMs = 0, endMs = 19, stepMs = 1)))
@@ -159,9 +160,9 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
     leafExecPlan.addRangeVectorTransformer(transformer)
 
     val count = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
-      Array[ExecPlan](leafExecPlan), AggregationOperator.Count, Seq(1.0))
+      Array[ExecPlan](leafExecPlan).toIndexedSeq, AggregationOperator.Count, Seq(1.0))
     val sum = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
-      Array[ExecPlan](leafExecPlan), AggregationOperator.Sum, Seq(0))
+      Array[ExecPlan](leafExecPlan).toIndexedSeq, AggregationOperator.Sum, Seq(0))
     val binaryjoin1 = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Seq(count), Seq(sum), BinaryOperator.ADD, Cardinality.OneToOne,
       None, Nil, Nil, "__name__", Some(RvRange(startMs = 0, endMs = 19, stepMs = 1)))
@@ -188,7 +189,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
       Some(RvRange(0, 10, 100)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
 
     val exec = LocalPartitionReduceAggregateExec(QueryContext(), dummyDispatcher,
-      Array[ExecPlan](exec1, exec2), AggregationOperator.Sum, Seq(0))
+      Array[ExecPlan](exec1, exec2).toIndexedSeq, AggregationOperator.Sum, Seq(0))
 
     val rs1 = exec1.reduceSchemas(ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1)),

@@ -433,88 +433,77 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager2.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord1.ref)
       shardManager2.datasetInfo.size shouldBe 2
 
-      // dataset2: reassign shards 8-16 to coord2.
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset2 =>
-        s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
-        s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
-        s.map.shardsForCoord(coord3.ref) shouldEqual Nil
-        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-      }
+      // Collect both subscriber messages and validate them in any order (Scala 2.13 compatibility)
+      val subscriberSnapshots = (1 to 2).map(_ => subscriber.expectMsgType[CurrentShardSnapshot])
+
+      // dataset2: reassign shards 8-16 to coord2
+      val dataset2Snapshot = subscriberSnapshots.find(_.ref == dataset2).get
+      dataset2Snapshot.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+      dataset2Snapshot.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+      dataset2Snapshot.map.shardsForCoord(coord3.ref) shouldEqual Nil
+      dataset2Snapshot.map.shardsForCoord(coord4.ref) shouldEqual Nil
 
       // dataset1: reassign shards 3,4,5 to coord2 and coord3
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
-        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
-        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
-        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
-        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-      }
+      val dataset1Snapshot = subscriberSnapshots.find(_.ref == dataset1).get
+      dataset1Snapshot.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+      dataset1Snapshot.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+      dataset1Snapshot.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+      dataset1Snapshot.map.shardsForCoord(coord4.ref) shouldEqual Nil
 
       expectNoMessage(subscriber)
 
       // ingestion should be stopped on downed node for 8 + 3 shards
 
-      { // coord1
-        coord1.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset2
-            s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
-            s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Nil
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+      { // coord1 - collect both messages and validate in any order (Scala 2.13 compatibility)
+        val coord1States = (1 to 2).map(_ => coord1.expectMsgType[ShardIngestionState])
 
-        coord1.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset1
-            s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
-            s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+        val coord1Dataset2State = coord1States.find(_.ref == dataset2).get
+        coord1Dataset2State.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+        coord1Dataset2State.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+        coord1Dataset2State.map.shardsForCoord(coord3.ref) shouldEqual Nil
+        coord1Dataset2State.map.shardsForCoord(coord4.ref) shouldEqual Nil
+
+        val coord1Dataset1State = coord1States.find(_.ref == dataset1).get
+        coord1Dataset1State.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        coord1Dataset1State.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        coord1Dataset1State.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+        coord1Dataset1State.map.shardsForCoord(coord4.ref) shouldEqual Nil
 
         expectNoMessage(coord1)
       }
 
-      { // coord2
-        coord2.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset2
-            s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
-            s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Nil
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+      { // coord2 - collect both messages and validate in any order (Scala 2.13 compatibility)
+        val coord2States = (1 to 2).map(_ => coord2.expectMsgType[ShardIngestionState])
 
-        coord2.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset1
-            s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
-            s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+        val coord2Dataset2State = coord2States.find(_.ref == dataset2).get
+        coord2Dataset2State.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+        coord2Dataset2State.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+        coord2Dataset2State.map.shardsForCoord(coord3.ref) shouldEqual Nil
+        coord2Dataset2State.map.shardsForCoord(coord4.ref) shouldEqual Nil
+
+        val coord2Dataset1State = coord2States.find(_.ref == dataset1).get
+        coord2Dataset1State.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        coord2Dataset1State.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        coord2Dataset1State.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+        coord2Dataset1State.map.shardsForCoord(coord4.ref) shouldEqual Nil
 
         expectNoMessage(coord2)
       }
 
-      { // coord3
-        coord3.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset2
-            s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
-            s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Nil
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+      { // coord3 - collect both messages and validate in any order (Scala 2.13 compatibility)
+        val coord3States = (1 to 2).map(_ => coord3.expectMsgType[ShardIngestionState])
 
-        coord3.expectMsgPF() {
-          case s: ShardIngestionState =>
-            s.ref shouldEqual dataset1
-            s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
-            s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
-            s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
-            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-        }
+        val coord3Dataset2State = coord3States.find(_.ref == dataset2).get
+        coord3Dataset2State.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+        coord3Dataset2State.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+        coord3Dataset2State.map.shardsForCoord(coord3.ref) shouldEqual Nil
+        coord3Dataset2State.map.shardsForCoord(coord4.ref) shouldEqual Nil
+
+        val coord3Dataset1State = coord3States.find(_.ref == dataset1).get
+        coord3Dataset1State.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        coord3Dataset1State.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        coord3Dataset1State.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+        coord3Dataset1State.map.shardsForCoord(coord4.ref) shouldEqual Nil
 
         expectNoMessage(coord3)
       }

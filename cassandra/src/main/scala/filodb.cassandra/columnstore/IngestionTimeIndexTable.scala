@@ -22,8 +22,8 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                      val connector: FiloCassandraConnector,
                                      writeConsistencyLevel: ConsistencyLevel,
                                      readConsistencyLevel: ConsistencyLevel)
-                                    (implicit ec: ExecutionContext) extends BaseDatasetTable {
-  import scala.collection.JavaConverters._
+                                    (implicit @scala.annotation.unused ec: ExecutionContext) extends BaseDatasetTable {
+  import scala.jdk.CollectionConverters._
 
   import filodb.cassandra.Util._
 
@@ -122,7 +122,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                          .setFetchSize(fetchSize)
       new RetryWithExpBackOffIterator(session.execute(stmt).iterator.asScala)
         .map { row => row.getBytes("partition") }
-        .toStream.distinct // removes duplicate consecutive partKeys
+        .to(LazyList).distinct // removes duplicate consecutive partKeys
     }
   }
 

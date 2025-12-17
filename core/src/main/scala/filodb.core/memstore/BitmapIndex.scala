@@ -16,7 +16,7 @@ import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
  * Suitable for multithreaded adds and queries.
  */
 class BitmapIndex[K](indexName: UTF8Str) {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   import Filter._
   import KeyFilter.decode

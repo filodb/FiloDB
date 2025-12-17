@@ -28,13 +28,13 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
   val tagsWithMetric = baseTags + ("__name__" -> "num_partitions")
 
   it("should parse from TimeSeries proto and write to RecordBuilder") {
-    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("_ns_" -> "filodb", "_ws_" -> "demo"))
+    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric ++ Map("_ns_" -> "filodb", "_ws_" -> "demo"))
     val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
     val records = PrometheusInputRecord(proto1)
     records should have length (1)
     val record1 = records.head
-    record1.tags shouldEqual (baseTags + ("_ns_" -> "filodb", "_ws_" -> "demo"))
+    record1.tags shouldEqual (baseTags ++ Map("_ns_" -> "filodb", "_ws_" -> "demo"))
     record1.getMetric shouldEqual "num_partitions"
     record1.nonMetricShardValues shouldEqual Seq("filodb", "demo")
 
@@ -49,7 +49,7 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
 
       val consumer = new StringifyMapItemConsumer()
       schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
-      consumer.stringPairs.toMap shouldEqual (baseTags + ("_ns_" -> "filodb", "_ws_" -> "demo"))
+      consumer.stringPairs.toMap shouldEqual (baseTags ++ Map("_ns_" -> "filodb", "_ws_" -> "demo"))
     }
   }
 
@@ -95,7 +95,7 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
 
   it("should copy tags from another key if copyTags defined and original key missing") {
     // add exporter and see if it gets renamed
-    val tagsWithExporter = tagsWithMetric + ("exporter" -> "gateway", "_ws_" -> "demo")
+    val tagsWithExporter = tagsWithMetric ++ Map("exporter" -> "gateway", "_ws_" -> "demo")
     val proto1 = TimeSeriesFixture.timeseries(0, tagsWithExporter)
     val records = PrometheusInputRecord(proto1)
     records should have length (1)

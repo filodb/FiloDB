@@ -44,7 +44,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
         if (response.body.isLeft) {
-          parser.decode[ErrorResponse](response.body.left.get) match {
+          parser.decode[ErrorResponse](response.body.swap.toOption.get) match {
             case Right(errorResponse) =>
               QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
                 RemoteQueryFailureException(response.code, errorResponse.status, errorResponse.errorType,
@@ -105,7 +105,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
           val key = CustomRangeVectorKey(lc.metric.map{case (k, v) => (k.utf8, v.utf8)})
           val data = Seq(lc.cardinality.map(k => (k.getOrElse(lcLabelNameField, "").utf8,
                                                   k.getOrElse(lcLabelCountField, "").utf8)).toMap)
-          val rv = IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(data.toIterator), None)
+          val rv = IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(data.iterator), None)
           // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
           SerializedRangeVector(rv, builder, recordSchema, queryWithPlanName(queryContext), dummyQueryStats)
         }
@@ -135,7 +135,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
       import NoCloseCursor._
       val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
+        UTF8MapIteratorRowReader(iteratorMap.iterator), None)
 
       // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,

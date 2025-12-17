@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.memory.{BlockMemFactory, EvictionLock, MemoryStats, PageAlignedBlockManager}
 import filodb.memory.format._
@@ -114,7 +114,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
     }
 
     it("should append correctly when memory has previous values / was not zeroed") {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val evictionLock = new EvictionLock
       val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024,
         new MemoryStats(Map("test"-> "test")), null, 16, evictionLock) {
@@ -153,24 +153,24 @@ class IntBinaryVectorTest extends NativeVectorTest {
   describe("MaskedIntAppendingVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = IntBinaryVector.appendingVector(memFactory, 100)
-      builder.addNA shouldEqual Ack
+      builder.addNA() shouldEqual Ack
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
       val sc = builder.optimize(memFactory)
       IntBinaryVector(acc, sc).length(acc, sc) should equal (1)
       IntBinaryVector(acc, sc)(acc, sc, 0)   // Just to make sure this does not throw an exception
       // IntBinaryVector(sc).isAvailable(0) should equal (false)
-      IntBinaryVector(acc, sc).toBuffer(acc, sc) shouldEqual Buffer.empty[Int]
+      IntBinaryVector(acc, sc).toBuffer(acc, sc) shouldEqual ArrayBuffer.empty[Int]
       // IntBinaryVector(sc).optionIterator.toSeq should equal (Seq(None))
     }
 
     it("should encode a mix of NAs and Ints and decode iterate and skip NAs") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.isAllNA should be (false)
       cb.noNAs should be (false)
       val sc = cb.optimize(memFactory)
@@ -184,7 +184,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       // reader.get(0) should equal (None)
       // reader.get(-1) should equal (None)
       // reader.get(2) should equal (Some(102))
-      reader.toBuffer(acc, sc) shouldEqual Buffer(101, 102, 103)
+      reader.toBuffer(acc, sc) shouldEqual ArrayBuffer(101, 102, 103)
     }
 
     it("should be able to append lots of ints off-heap and grow vector") {
@@ -200,7 +200,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val numInts = 1000
       val builder = IntBinaryVector.appendingVector(memFactory, numInts / 2)
       builder shouldBe a[GrowableVector[_]]
-      (0 until numInts).foreach(i => builder.addNA shouldEqual Ack)
+      (0 until numInts).foreach(i => builder.addNA() shouldEqual Ack)
       builder.length should equal (numInts)
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
@@ -208,11 +208,11 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
     it("should be able to return minMax accurately with NAs") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       val inner = cb.asInstanceOf[GrowableVector[Int]].inner.asInstanceOf[MaskedIntAppendingVector]
       inner.minMax should equal ((101, 103))
     }
@@ -232,14 +232,14 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
     it("should optimize and parse back using IntBinaryVector.apply") {
       val cb = IntBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       cb.addData(101) shouldEqual Ack
       cb.addData(102) shouldEqual Ack
       cb.addData(103) shouldEqual Ack
-      cb.addNA shouldEqual Ack
+      cb.addNA() shouldEqual Ack
       val buffer = cb.optimize(memFactory)
       val readVect = IntBinaryVector(acc, buffer)
-      readVect.toBuffer(acc, buffer) shouldEqual Buffer(101, 102, 103)
+      readVect.toBuffer(acc, buffer) shouldEqual ArrayBuffer(101, 102, 103)
     }
 
     it("should support resetting and optimizing AppendableVector multiple times") {
@@ -254,7 +254,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       readVect1.toBuffer(acc, optimized).toList shouldEqual orig
 
       // Now the optimize should not have damaged original vector
-      cb.copyToBuffer shouldEqual Buffer.fromIterable(orig)
+      cb.copyToBuffer shouldEqual ArrayBuffer.from(orig)
       cb.reset()
       val orig2 = orig.map(_ * 2)
       orig2.foreach(x => cb.addData(x) shouldEqual Ack)
@@ -269,7 +269,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       (0 to 4).foreach(x => builder.addData(x) shouldEqual Ack)
       val optimized = builder.optimize(memFactory)
       IntBinaryVector(acc, optimized).length(acc, optimized) shouldEqual 5
-      IntBinaryVector(acc, optimized).toBuffer(acc, optimized) shouldEqual Buffer.fromIterable(0 to 4)
+      IntBinaryVector(acc, optimized).toBuffer(acc, optimized) shouldEqual ArrayBuffer.from(0 to 4)
       BinaryVector.totalBytes(acc, optimized) shouldEqual (8 + 3)   // nbits=4, so only 3 extra bytes
     }
 
@@ -279,7 +279,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val buf = builder.optimize(memFactory)
       val readVect = IntBinaryVector(acc, buf)
       readVect shouldEqual IntConstVector
-      readVect.toBuffer(acc, buf) shouldEqual Buffer(999, 999, 999, 999, 999)
+      readVect.toBuffer(acc, buf) shouldEqual ArrayBuffer(999, 999, 999, 999, 999)
     }
   }
 }

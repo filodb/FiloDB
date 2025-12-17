@@ -66,7 +66,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should compute rate correctly when reset occurs at chunk boundaries") {
@@ -88,7 +88,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should be able to handle NAN at the beginning") {
@@ -147,13 +147,13 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
 
     // Two drops in one chunk
     val rv2 = timeValueRVPk(resetChunk1 ++ resetChunk2)
     val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
                                          new ChunkedRateFunction, querySession)
-    it2.next.getDouble(1) shouldEqual expected +- errorOk
+    it2.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it("should return NaN for rate when window only contains one sample") {
@@ -162,7 +162,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1).isNaN shouldEqual true
+    it.next().getDouble(1).isNaN shouldEqual true
   }
 
   it("should return rate of 0 when counter samples do not increase") {
@@ -174,7 +174,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, querySession)
-    it.next.getDouble(1) shouldEqual 0.0
+    it.next().getDouble(1) shouldEqual 0.0
   }
 
   // Also ensures that chunked rate works across chunk boundaries
@@ -280,7 +280,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
                                         new HistRateFunction, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -309,7 +309,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val headTime = 100000L
     val headHist = data(0)(3).asInstanceOf[LongHistogram]
     val corrHist = data(6)(3).asInstanceOf[LongHistogram]
-    val lastHist = headHist.copy   // 8th sample == first sample + correction
+    val lastHist = headHist.copy()   // 8th sample == first sample + correction
     lastHist.add(corrHist)
     val expectedRates = (0 until headHist.numBuckets).map { b =>
       (lastHist.bucketValue(b) - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
@@ -320,7 +320,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, endTs - startTs,
                                         new HistRateFunction, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -395,7 +395,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // 3 resets at the beginning - so resets count should drop only by 3 (4 - 3 = 1) even though we are removing 5 items
     for (i <- 0 until 5) {
-      toEmit2 = q3.remove
+      toEmit2 = q3.remove()
       resetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)// old items being evicted for new window items
     }
     resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit2, queryConfig)
@@ -463,7 +463,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedIncreaseFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("delta should work when start and end are outside window") {
@@ -478,7 +478,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val gaugeRV = timeValueRVPk(gaugeSamples)
     val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedDeltaFunction, querySession)
-    it.next.getDouble(1) shouldEqual expected +- errorOk
+    it.next().getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("idelta should work when start and end are outside window") {
@@ -916,7 +916,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("IRatePeriodicFunctionH should handle empty histogram from LastSampleFunctionH") {
-    val buckets = bv.GeometricBuckets(2.0, 2.0, 3)
+    val _ = bv.GeometricBuckets(2.0, 2.0, 3)
     val qHist = new IndexedArrayQueue[TransientHistRow]()
     
     // Add empty histogram

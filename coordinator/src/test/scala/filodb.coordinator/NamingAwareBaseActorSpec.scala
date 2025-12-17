@@ -10,8 +10,8 @@ class Parent extends NamingAwareBaseActor {
 
   override def receive: Actor.Receive = {
     case Parent.Create(dataset) =>
-      context.actorOf(Props[Child], s"$Ingestion-$dataset")
-      context.actorOf(Props[Child], s"$Query-$dataset")
+      context.actorOf(Props[Child](), s"$Ingestion-$dataset")
+      context.actorOf(Props[Child](), s"$Query-$dataset")
     case Parent.GetAllCreated(prefix) =>
       sender() ! Parent.Created(childrenForType(prefix))
     case Parent.GetCreated(prefix, ds) =>
@@ -41,9 +41,8 @@ class NamingAwareBaseActorSpec extends AkkaSpec {
 
   "NamingAwareBaseActor" must {
     val datasets = Set(DatasetRef("one"), DatasetRef("two"), DatasetRef("three"))
-    val arr = datasets.toArray
 
-    val parent = system.actorOf(Props[Parent], CoordinatorName)
+    val parent = system.actorOf(Props[Parent](), CoordinatorName)
     datasets foreach (parent ! Parent.Create(_))
 
     "get the unique child on the node for the specified dataset and type by naming convention" in {

@@ -1,6 +1,6 @@
 package filodb.memory.data
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.memory.BinaryRegion.NativePointer
 
@@ -15,8 +15,8 @@ trait ElementIterator {
   def hasNext: Boolean
   def next: NativePointer
 
-  def toBuffer: Buffer[NativePointer] = {
-    val buf = Buffer.empty[NativePointer]
+  def toBuffer: ArrayBuffer[NativePointer] = {
+    val buf = ArrayBuffer.empty[NativePointer]
     while (hasNext) buf += next
     buf
   }

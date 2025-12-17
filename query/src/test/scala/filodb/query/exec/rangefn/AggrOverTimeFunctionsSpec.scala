@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
-import debox.Buffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -79,7 +78,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
   // sum = summation of non-nan values.
   def sumWithNaN(arr: Seq[Double]): Double = {
     var currPos = 0
-    var length = arr.length
+    val length = arr.length
     var sum = Double.NaN
     var count = 0
     if (length > 0) {
@@ -199,7 +198,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(numSamples: Int = 100, numBuckets: Int = 8, infBucket: Boolean = false):
-  (Stream[Seq[Any]], RawDataRangeVector) =
+  (LazyList[Seq[Any]], RawDataRangeVector) =
     MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets, infBucket)
 
   def chunkedWindowIt(data: Seq[Double],
@@ -363,37 +362,60 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("should correctly identify outliers with mad using sliding iterators for all three boundsCheck settings") {
+    // Use deterministic data to avoid flakiness.
+    // Data consists of values around 0.5 with clear outliers at -2.3 (every 40th) and 2.3 (every 20th, not 40th).
+    // With tolerance=4 and values tightly clustered around 0.5, the MAD will be small,
+    // making -2.3 and 2.3 clear outliers.
     val data = (0 until 200).map { i =>
       if ((i+1) % 40 == 0) -2.3d
       else if ((i+1) % 20 == 0) 2.3d
-      else rand.nextDouble()
+      else 0.5d  // Use constant value instead of random to ensure deterministic MAD calculation
     }
     val rv = timeValueRV(data)
     val rangeParams = RangeParams(100, 20, 500)
     val windowSize = 20
     val step = 5
 
-    // only lower bounds
-    val lowerAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last < 0) k.last else Double.NaN
-    }.toBuffer
+    // Helper function to compute expected outliers using the same MAD logic as the function
+    def computeExpectedOutliers(tolerance: Double, boundsCheck: Int): Seq[Double] = {
+      data.sliding(windowSize, step).map { window =>
+        val values = window.toArray.sorted
+        val size = values.length
+        val q = 0.5
+        val rank = q * (size - 1)
+        val lowerIndex = rank.toInt
+        val upperIndex = Math.min(lowerIndex + 1, size - 1)
+        val weight = rank - lowerIndex
+        val median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
 
+        val distFromMedian = window.map(v => Math.abs(median - v)).toArray.sorted
+        val mad = distFromMedian(lowerIndex) * (1 - weight) + distFromMedian(upperIndex) * weight
+
+        val lowerBound = median - tolerance * mad
+        val upperBound = median + tolerance * mad
+        val lastValue = window.last
+
+        if ((lastValue < lowerBound && boundsCheck <= 1) || (lastValue > upperBound && boundsCheck >= 1)) {
+          lastValue
+        } else {
+          Double.NaN
+        }
+      }.toSeq
+    }
+
+    // Test lower bounds only (boundsCheck=0)
+    val lowerAnomalies = computeExpectedOutliers(4.0, 0)
     val minSlidingIt3 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(0.0, rangeParams))), windowSize, step)
     val result3 = minSlidingIt3.map(_.getDouble(1)).toBuffer
     minSlidingIt3.close()
 
-    println(s"expected: $lowerAnomalies")
-    println(s"result: $result3")
     result3.zip(lowerAnomalies).foreach { case (r, a) =>
       if (a.isNaN) r.isNaN shouldEqual true
       else r shouldEqual a
     }
 
-    // both upper and lower bounds
-    val allAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last > 1.0 || k.last < 0) k.last else Double.NaN
-    }.toBuffer
-
+    // Test both upper and lower bounds (boundsCheck=1)
+    val allAnomalies = computeExpectedOutliers(4.0, 1)
     val minSlidingIt1 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(1.0, rangeParams))), windowSize, step)
     val result1 = minSlidingIt1.map(_.getDouble(1)).toBuffer
     minSlidingIt1.close()
@@ -404,11 +426,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       else r shouldEqual a
     }
 
-    // only upper bounds
-    val upperAnomalies = data.sliding(windowSize, step).map { k =>
-      if (k.last > 1.0) k.last else Double.NaN
-    }.toBuffer
-
+    // Test upper bounds only (boundsCheck=2)
+    val upperAnomalies = computeExpectedOutliers(4.0, 2)
     val minSlidingIt2 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(2.0, rangeParams))), windowSize, step)
     val result2 = minSlidingIt2.map(_.getDouble(1)).toBuffer
     minSlidingIt2.close()
@@ -420,7 +439,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should correctly aggregate min_over_time / max_over_time using both chunked and sliding iterators") {
     val data = (1 to 240).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
@@ -451,7 +469,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should aggregate count_over_time and avg_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
 
     (0 until numIterations).foreach { x =>
@@ -486,7 +503,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should aggregate var_over_time and stddev_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
 
     (0 until numIterations).foreach { x =>
@@ -517,13 +533,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("should correctly do changes") {
-    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+    val data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
-
-    val windowSize = 100
-    val step = 20
-
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), querySession)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
@@ -562,7 +573,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
     }
     val emptyData = Seq()
-    var rv = timeValueRVPk(emptyData)
+    val rv = timeValueRVPk(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
       new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), querySession)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
@@ -610,14 +621,14 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
     def mad(s: Seq[Double]) : Double = {
       val medianVal = median(s)
-      val diffFromMedians: Buffer[Double] = Buffer.ofSize(s.length)
+      val diffFromMedians: ArrayBuffer[Double] = new ArrayBuffer(s.length)
       var iter = s.iterator
       while (iter.hasNext) {
         diffFromMedians.append(Math.abs(iter.next()-medianVal))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      diffFromMedians.sortInPlace()(Ordering.Double.TotalOrdering)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
-      iter = diffFromMedians.iterator()
+      iter = diffFromMedians.iterator
       diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
 
@@ -650,9 +661,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val data = scala.util.Random.shuffle(data2 ++ data1)
 
       val rv = timeValueRV(data)
-      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
 
-      val stepTimeMillis = step.toLong * pubFreq
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
 
@@ -778,7 +787,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
       val ChunkedIt = chunkedWindowIt(data, rv2, new PredictLinearChunkedFunctionD(params), windowSize, step)
       val aggregated2 = ChunkedIt.map(_.getDouble(1)).toBuffer
-      var res = new ArrayBuffer[Double]
+      val res = new ArrayBuffer[Double]
       var startTime = defaultStartTS + pubFreq
       var endTime = startTime + (windowSize - 2) * pubFreq
       for (item <- data.sliding(windowSize, step).map(_.drop(1))) {

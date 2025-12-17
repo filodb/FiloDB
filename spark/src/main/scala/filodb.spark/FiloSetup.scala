@@ -38,8 +38,8 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
     val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
     val host = MetaStoreSync.sparkHost
     ConfigFactory.parseString(s"""
-      akka.remote.netty.tcp.hostname=$host
-      akka.remote.netty.tcp.port=$port""")
+      akka.remote.artery.canonical.hostname=$host
+      akka.remote.artery.canonical.port=$port""")
   }
 
   var _config: Option[Config] = None

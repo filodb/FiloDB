@@ -5,14 +5,14 @@ import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
 import akka.testkit.TestProbe
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-
-import scala.concurrent.duration._
 import filodb.coordinator._
-import filodb.core.{AsyncTest, DatasetRef, TestData}
 import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.{AsyncTest, DatasetRef, TestData}
 import filodb.query.{ExplainPlanResponse, HistSampl, Sampl, SuccessResponse}
 import org.scalatest.Ignore
 import org.scalatest.funspec.AnyFunSpec
+
+import scala.concurrent.duration._
 
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
@@ -40,8 +40,8 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
 class PrometheusApiRouteSpec(ignore: String) extends AnyFunSpec with ScalatestRouteTest with AsyncTest {
 
   import FailFastCirceSupport._
-  import io.circe.generic.auto._
   import filodb.core.{MachineMetricsData => MMD}
+  import io.circe.generic.auto._
 
   // Use our own ActorSystem with our test config so we can init cluster properly
   // Dataset will be created and ingestion started
@@ -54,7 +54,7 @@ class PrometheusApiRouteSpec(ignore: String) extends AnyFunSpec with ScalatestRo
 
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
-  implicit val timeout = RouteTestTimeout(20.minute)
+  implicit val timeout: RouteTestTimeout = RouteTestTimeout(20.minute)
   cluster.coordinatorActor
   cluster.join()
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)

@@ -24,7 +24,7 @@ import filodb.http.{FiloHttpServer, PromQLGrpcServer}
  *
  * ## Configuration ##
  * {{{
- *   seed-nodes = ["akka.tcp://filo-standalone@hostname_or_ip:2552"]
+ *   seed-nodes = ["akka://filo-standalone@hostname_or_ip:2552"]
  *   dataset-definitions {
  *     sample-timeseries {
  *       partition-columns = ["metricName:string", "tags:map"]

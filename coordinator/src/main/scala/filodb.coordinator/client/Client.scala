@@ -8,12 +8,13 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem, Address}
 import akka.pattern.ask
 import akka.util.Timeout
+import monix.execution.schedulers.SchedulerService
 
 import filodb.coordinator.ActorName
 import filodb.core._
 
 object Client {
-  implicit val context = GlobalScheduler.globalImplicitScheduler
+  implicit val context: SchedulerService = GlobalScheduler.globalImplicitScheduler
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 30 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
@@ -47,6 +48,7 @@ object Client {
   def actorsAsk[B](actors: Seq[ActorRef], msg: Any,
                    askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): Seq[B] = {
     implicit val timeout = Timeout(askTimeout)
+    @scala.annotation.unused implicit val ec: scala.concurrent.ExecutionContext = context
     val fut = Future.sequence(actors.map(_ ? msg))
     Await.result(fut, askTimeout).map(f)
   }
@@ -62,7 +64,7 @@ object Client {
                        host: String,
                        port: Int = 2552,
                        askTimeout: FiniteDuration = 30 seconds): LocalClient = {
-    val addr = Address("akka.tcp", "filo-standalone", host, port)
+    val addr = Address("akka", "filo-standalone", host, port)
     val refFuture = system.actorSelection(ActorName.nodeCoordinatorPath(addr, v2ClusterEnabled))
                           .resolveOne(askTimeout)
     val ref = Await.result(refFuture, askTimeout)

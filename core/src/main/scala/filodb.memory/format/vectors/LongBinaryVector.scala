@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -173,8 +174,8 @@ trait LongVectorDataReader extends VectorDataReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
-    val newBuf = Buffer.empty[Long]
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): ArrayBuffer[Long] = {
+    val newBuf = ArrayBuffer.empty[Long]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
@@ -308,7 +309,7 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
   private final val readVect = LongBinaryVector(nativePtrReader, addr)
   final def apply(index: Int): Long = readVect.apply(nativePtrReader, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64
-  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Long] = LongVectorDataReader64.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -350,7 +351,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   def nbits: Short = 64
 
   val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Long] = MaskedLongDataReader.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue

@@ -12,9 +12,9 @@ class EvictablePartIdQueueSetSpec  extends AnyFunSpec with Matchers  {
     cforRange ( 0 until 8 ) { i =>
       q.put(i)
     }
-    val sink = debox.Buffer.ofSize[Int](10)
+    val sink = new scala.collection.mutable.ArrayBuffer[Int](10)
     q.removeInto(10, sink)
-    sink.toList() shouldEqual (0 until 8)
+    sink.toList shouldEqual (0 until 8)
 
   }
 
@@ -24,9 +24,9 @@ class EvictablePartIdQueueSetSpec  extends AnyFunSpec with Matchers  {
       q.put(i)
       q.put(i)
     }
-    val sink = debox.Buffer.ofSize[Int](10)
+    val sink = new scala.collection.mutable.ArrayBuffer[Int](10)
     q.removeInto(10, sink)
-    sink.toList() shouldEqual (0 until 8)
+    sink.toList shouldEqual (0 until 8)
   }
 
   it("should resize as needed") {
@@ -39,9 +39,9 @@ class EvictablePartIdQueueSetSpec  extends AnyFunSpec with Matchers  {
     }
     q.size shouldEqual 16
     q.arr.items.length shouldEqual 32 // size of re-sized array
-    val sink = debox.Buffer.ofSize[Int](20)
+    val sink = new scala.collection.mutable.ArrayBuffer[Int](20)
     q.removeInto(20, sink)
-    sink.toList() shouldEqual (0 until 16)
+    sink.toList shouldEqual (0 until 16)
     q.size shouldEqual 0
     q.arr.items.length shouldEqual 32 // size of array does not reduce
   }

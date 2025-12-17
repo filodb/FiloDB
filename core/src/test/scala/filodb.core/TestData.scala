@@ -130,13 +130,13 @@ object NamesTestData {
  */
 object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
-                         .getLines.toSeq.drop(1)     // drop the header line
+                         .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltUniqueLines = Source.fromURL(getClass.getResource("/GDELT-unique-samples.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltLines3 = Source.fromURL(getClass.getResource("/GDELT-sample-test3.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val schema = Seq("GLOBALEVENTID:long",
                    "SQLDATE:long",
@@ -238,8 +238,8 @@ object MachineMetricsData {
   val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
-                       incr: Long = 1000): Stream[Product] = {
-    Stream.from(0).map { n =>
+                       incr: Long = 1000): LazyList[Product] = {
+    LazyList.from(0).map { n =>
       (Some(initTs + n * incr),
        Some((45 + nextInt(10)).toDouble),
        Some((60 + nextInt(25)).toDouble),
@@ -248,7 +248,7 @@ object MachineMetricsData {
     }
   }
 
-  def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
+  def singleSeriesReaders(): LazyList[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
   val options = DatasetOptions.DefaultOptions.copy(metricColumn = "series")
@@ -258,7 +258,7 @@ object MachineMetricsData {
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
-  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0,
+  def records(ds: Dataset, stream: LazyList[Seq[Any]], offset: Int = 0,
               ingestionTimeMillis: Long = System.currentTimeMillis()): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory) {
       override def currentTimeMillis: Long = ingestionTimeMillis
@@ -272,15 +272,15 @@ object MachineMetricsData {
   }
 
   /**
-   * @param ingestionTimeStep defines the ingestion time increment for each generated
-   * RecordContainer
-   */
-  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
+    * @param ingestionTimeStep defines the ingestion time increment for each generated
+    * RecordContainer
+    */
+  def groupedRecords(ds: Dataset, stream: LazyList[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
                      offset: Int = 0): Seq[SomeData] = {
-    val i : Iterator[Stream[Seq[Any]]] = stream.take(n).grouped(groupSize)
+    val i : Iterator[LazyList[Seq[Any]]] = stream.take(n).grouped(groupSize)
     i.toSeq.zipWithIndex.map {
-      case (group: Stream[Seq[Any]], i: Int) =>
+      case (group: LazyList[Seq[Any]], i: Int) =>
         records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
   }
@@ -288,15 +288,15 @@ object MachineMetricsData {
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
   // Works with linearMultiSeries() or multiSeriesData()
-  def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
+  def filterByPartAndMakeStream(stream: LazyList[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
     val rawPartKey = stream(keyRecord)(5)
     val partKey = partKeyBuilder.partKeyFromObjects(schema1, rawPartKey)
     TestData.toChunkSetStream(schema1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
   }
 
-  def multiSeriesData(): Stream[Seq[Any]] = {
+  def multiSeriesData(): LazyList[Seq[Any]] = {
     val initTs = System.currentTimeMillis
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       Seq(initTs + n * 1000,
          (45 + nextInt(10)).toDouble,
          (60 + nextInt(25)).toDouble,
@@ -308,8 +308,8 @@ object MachineMetricsData {
 
   // Everything increments by 1 for simple predictability and testing
   def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
-                        seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
-    Stream.from(0).map { n =>
+                        seriesPrefix: String = "Series "): LazyList[Seq[Any]] = {
+    LazyList.from(0).map { n =>
       Seq(startTs + n * timeStep,
          (1 + n).toDouble,
          (20 + n).toDouble,
@@ -344,7 +344,7 @@ object MachineMetricsData {
     options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
   val schema2 = dataset2.schema
 
-  def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
+  def withMap(data: LazyList[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): LazyList[Seq[Any]] =
     data.zipWithIndex.map { case (row, idx) => row :+ (Map("n".utf8 -> (idx % n).toString.utf8) ++ extraTags) }
 
   val uuidString = java.util.UUID.randomUUID.toString
@@ -369,7 +369,7 @@ object MachineMetricsData {
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
                        infBucket: Boolean = false, ws: String = "demo", metricNameSuffix: String = ""):
-  Stream[Seq[Any]] = {
+  LazyList[Seq[Any]] = {
     val scheme = if (infBucket) {
                    // Custom geometric buckets, with top bucket being +Inf
                    val buckets = (0 to numBuckets - 2).map(n => Math.pow(2.0, n + 1)) ++ Seq(Double.PositiveInfinity)
@@ -382,7 +382,7 @@ object MachineMetricsData {
         buckets(b) += 1
       }
     }
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
           (1 + n).toLong,
@@ -395,7 +395,7 @@ object MachineMetricsData {
 
   def otelDeltaExponentialHistSeries(startTs: Long = 100000L, numSeries: Int = 10,
                                      timeStep: Int = 10000, numBuckets: Int = 160, ws: String = "demo"):
-  Stream[Seq[Any]] = {
+  LazyList[Seq[Any]] = {
     histBucketScheme = bv.Base2ExpHistogramBuckets(3, -20, numBuckets - 1)
     val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
@@ -403,7 +403,7 @@ object MachineMetricsData {
         buckets(b) += 1
       }
     }
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
         (1 + n).toLong,
@@ -418,7 +418,7 @@ object MachineMetricsData {
 
   // Data usable with prom-histogram schema
   def linearPromHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
-  Stream[Seq[Any]] = linearHistSeries(startTs, numSeries, timeStep, numBuckets).map { d =>
+  LazyList[Seq[Any]] = linearHistSeries(startTs, numSeries, timeStep, numBuckets).map { d =>
     d.updated(1, d(1).asInstanceOf[Long].toDouble).updated(2, d(2).asInstanceOf[Long].toDouble)
   }
 
@@ -433,7 +433,7 @@ object MachineMetricsData {
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max and min column before h/hist
-  def histMaxMin(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
+  def histMaxMin(histStream: LazyList[Seq[Any]]): LazyList[Seq[Any]] =
     histStream.map { row =>
       val hist = row(3).asInstanceOf[bv.LongHistogram]
       // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
@@ -458,7 +458,7 @@ object MachineMetricsData {
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
                   infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
-  (Stream[Seq[Any]], RawDataRangeVector) = {
+  (LazyList[Seq[Any]], RawDataRangeVector) = {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
@@ -473,7 +473,7 @@ object MachineMetricsData {
 
   // Designed explicitly to work with histMaxMin(linearHistSeries) records
   def histMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
-  (Stream[Seq[Any]], RawDataRangeVector) = {
+  (LazyList[Seq[Any]], RawDataRangeVector) = {
     val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxMinDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxMinDS, partKey=histPartKey, bufferPool=histMaxBP)
@@ -569,7 +569,7 @@ object MetricsTestData {
   // Takes the output of linearHistSeries and transforms them into Prometheus-schema histograms.
   // Each bucket becomes its own time series with _bucket appended and an le value
   def promHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
-  Stream[Seq[Any]] =
+  LazyList[Seq[Any]] =
     MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
       .flatMap { record =>
         val timestamp = record(0)

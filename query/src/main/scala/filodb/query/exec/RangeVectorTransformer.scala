@@ -69,13 +69,13 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         val instantFunction = InstantFunction.histogram(function, sourceSchema)
         if (instantFunction.isHToDoubleFunc) {
           source.map { rv =>
-            IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
+            IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows(), instantFunction.asHToDouble,
               scalarRangeVector), rv.outputRange)
           }
         } else if (instantFunction.isHMaxMinToDoubleFunc && sourceSchema.isHistMaxMin) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key,
-              new HMaxMin2DoubleInstantFuncIterator(rv.rows, instantFunction.asHMinMaxToDouble,
+              new HMaxMin2DoubleInstantFuncIterator(rv.rows(), instantFunction.asHMinMaxToDouble,
               scalarRangeVector), rv.outputRange)
           }
         } else {
@@ -89,7 +89,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         } else {
           val instantFunction = InstantFunction.double(function)
           val result = source.map { rv =>
-            IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
+            IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows(), instantFunction,
               scalarRangeVector), rv.outputRange)
           }
 
@@ -224,8 +224,8 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
                        scalarRangeVector: ScalarRangeVector,
                        sourceSchema: ResultSchema) = {
     source.map { rv =>
-      val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
-        private val rows = rv.rows
+      val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows()) {
+        private val rows = rv.rows()
         private val result = valueColumnType(sourceSchema) match {
           // Initialize with a new MutableHistogram when we have more information about a row.
           case ColumnType.HistogramColumn => new TransientHistRow()
@@ -316,7 +316,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
       val resultRv = source.toListL.map { rvs =>
          rvs.map(SerializedRangeVector(_, builder, recSchema,
            s"SortRangeVectorTransformer: $args", querySession.queryStats)).
-           sortBy { rv => if (rv.rows.hasNext) rv.rows.next().getDouble(1) else Double.NaN
+           sortBy { rv => if (rv.rows().hasNext) rv.rows().next().getDouble(1) else Double.NaN
         }(ordering)
 
       }.map(Observable.fromIterable)
@@ -359,7 +359,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
       if (rvs.size > 1) {
         Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
-        Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap,
+        Seq(ScalarVaryingDouble(rvs.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toMap,
           Some(RvRange(timeStepParams.startSecs * 1000, timeStepParams.stepSecs * 1000,
                        timeStepParams.endSecs * 1000))))
       }
@@ -392,7 +392,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
     source.map { rv =>
       new RangeVector {
         override def key: RangeVectorKey = rv.key
-        override def rows(): RangeVectorCursor = rv.rows
+        override def rows(): RangeVectorCursor = rv.rows()
         override def outputRange: Option[RvRange] = rv.outputRange
       }
     }
@@ -434,7 +434,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     def addNonNanTimestamps(res: List[Long], cur: RangeVector): List[Long]  = {
-      res ++ cur.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
+      res ++ cur.rows().filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
     }
     val nonNanTimestamps = source.foldLeftL(List[Long]())(addNonNanTimestamps)
 
@@ -473,7 +473,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
 }
 
 final case class BucketValues(schema: HistogramBuckets,
-                              buckets: debox.Buffer[Array[Double]])
+                              buckets: scala.collection.mutable.ArrayBuffer[Array[Double]])
 
 /**
  * Expands a Histogram RV to the equivalent Prometheus
@@ -508,18 +508,19 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   def expandVector(rv: RangeVector): Seq[RangeVector] = {
     // Data structures to hold bucket values for each possible bucket.
-    val timestamps = debox.Buffer.empty[Long]
-    val buckets    = debox.Map.empty[Double, debox.Buffer[Double]]
+    val timestamps = scala.collection.mutable.ArrayBuffer.empty[Long]
+    val buckets    = scala.collection.mutable.HashMap.empty[Double, scala.collection.mutable.ArrayBuffer[Double]]
     var curScheme: HistogramBuckets = HistogramBuckets.emptyBuckets
-    var emptyBuckets = debox.Set.empty[Double]
+    var emptyBuckets = scala.collection.mutable.HashSet.empty[Double]
 
-    rv.rows.foreach { row =>
+    rv.rows().foreach { row =>
       val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
 
       if (hist.buckets != curScheme) {
         addNewBuckets(hist.buckets, buckets, timestamps.length)  // add new buckets, backfilling timestamps with NaN
         curScheme = hist.buckets
-        emptyBuckets = buckets.keysSet -- curScheme.bucketSet   // All the buckets that need NaN filled going forward
+        emptyBuckets = scala.collection.mutable.HashSet.from(
+          buckets.keySet.diff(curScheme.bucketSet))   // All the buckets that need NaN filled going forward
       }
 
       timestamps += row.getLong(0)
@@ -530,10 +531,11 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
     }
 
     // Now create new RangeVectors for each bucket
-    // NOTE: debox.Map methods sometimes has issues giving consistent results instead of duplicates.
-    buckets.mapToArray { case (le, bucketValues) =>
+    // NOTE: scala.collection.mutable.HashMap methods sometimes has issues giving consistent results
+    //   instead of duplicates.
+    buckets.map { case (le, bucketValues) =>
       promBucketRV(rv.key, le, timestamps, bucketValues, rv.outputRange)
-    }.toSeq
+    }.toArray.toSeq
   }
 
   override def schema(source: ResultSchema): ResultSchema =
@@ -542,11 +544,12 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   private def addNewBuckets(newScheme: HistogramBuckets,
-                            buckets: debox.Map[Double, debox.Buffer[Double]],
+                            buckets: scala.collection.mutable.HashMap[Double,
+                              scala.collection.mutable.ArrayBuffer[Double]],
                             elemsToPad: Int): Unit = {
-    val bucketsToAdd = newScheme.bucketSet -- buckets.keysSet
+    val bucketsToAdd = newScheme.bucketSet.diff(buckets.keySet)
     bucketsToAdd.foreach { buc =>
-      buckets(buc) = debox.Buffer.fill(elemsToPad)(Double.NaN)
+      buckets(buc) = scala.collection.mutable.ArrayBuffer.fill(elemsToPad)(Double.NaN)
     }
   }
 
@@ -554,7 +557,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   // Create a Prometheus-compatible single bucket range vector
   private def promBucketRV(origKey: RangeVectorKey, le: Double,
-                           ts: debox.Buffer[Long], values: debox.Buffer[Double],
+                           ts: scala.collection.mutable.ArrayBuffer[Long],
+                           values: scala.collection.mutable.ArrayBuffer[Double],
                            period: Option[RvRange]): RangeVector = {
     // create new range vector key, appending _bucket to the metric name
     val labels2 = origKey.labelValues.map { case (k, v) =>

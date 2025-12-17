@@ -2,7 +2,8 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -187,7 +188,7 @@ trait CounterVectorReader extends VectorDataReader {
   /**
     * Identifies row numbers at which histogram or counter has dropped
     */
-  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int]
+  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): scala.collection.mutable.ArrayBuffer[Int]
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
@@ -310,7 +311,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
   def reader: VectorDataReader
 
   /** Copies the data out of this appendable vector to an on-heap Buffer */
-  def copyToBuffer: Buffer[A]
+  def copyToBuffer: ArrayBuffer[A]
 
   /**
    * Returns the value at index A.  TODO: maybe deprecate this?
@@ -477,7 +478,7 @@ trait AppendableVectorWrapper[@specialized(Int, Long, Double, Boolean) A, I] ext
   final def addr: BinaryRegion.NativePointer = inner.addr
   final override def length: Int = inner.length
   final def reader: VectorDataReader = inner.reader
-  final def copyToBuffer: Buffer[A] = inner.copyToBuffer.asInstanceOf[Buffer[A]]
+  final def copyToBuffer: ArrayBuffer[A] = inner.copyToBuffer.asInstanceOf[ArrayBuffer[A]]
 
   final def maxBytes: Int = inner.maxBytes
   def isAllNA: Boolean = inner.isAllNA

@@ -117,9 +117,9 @@ case class VectorMatch(matching: Option[JoinMatching],
 }
 
 case class SubqueryExpression(
-    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration],
+    subquery: filodb.prometheus.ast.PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration],
     atTimestamp: Option[AtTimestamp], limit: Option[Int]
-) extends Expression with PeriodicSeries {
+) extends Expression with filodb.prometheus.ast.PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // There are only two places for the subquery to be defined in the abstract syntax tree:
@@ -321,7 +321,8 @@ case class VectorSpec() extends Vector{
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
                              offset: Option[Duration],
-                             atTimestamp: Option[AtTimestamp]) extends Vector with PeriodicSeries {
+                             atTimestamp: Option[AtTimestamp]) extends Vector
+  with filodb.prometheus.ast.PeriodicSeries {
 
   import WindowConstants._
 
@@ -410,7 +411,7 @@ case class RangeExpression(metricName: Option[String],
                            labelSelection: Seq[LabelMatch],
                            window: Duration,
                            offset: Option[Duration],
-                           atTimestamp: Option[AtTimestamp]) extends Vector with SimpleSeries {
+                           atTimestamp: Option[AtTimestamp]) extends Vector with filodb.prometheus.ast.SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 

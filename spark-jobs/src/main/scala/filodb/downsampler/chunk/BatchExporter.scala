@@ -73,6 +73,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   // Unused, but keeping here for convenience if needed later.
+  @scala.annotation.unused
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
       .digest(bytes)
@@ -169,7 +170,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       dataSeq.append(result)
     }
     // append all fixed column values
-    dataSeq.append(
+    dataSeq.appendAll(Seq(
       exportData.metric,
       exportData.labels,
       exportData.epoch_timestamp,
@@ -179,8 +180,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       exportData.month,
       exportData.day,
       exportData.hour
-    )
-    Row.fromSeq(dataSeq)
+    ))
+    Row.fromSeq(dataSeq.toSeq)
   }
 
   def writeDataToIcebergTable(spark: SparkSession,

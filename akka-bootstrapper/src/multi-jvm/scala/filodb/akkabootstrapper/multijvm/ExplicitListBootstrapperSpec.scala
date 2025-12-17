@@ -11,9 +11,9 @@ object ExplicitListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNode
        |akka-bootstrapper {
        |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitListClusterSeedDiscovery"
        |  explicit-list.seeds = [
-       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2552"
-       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2562"
-       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2572"
+       |                          "akka://ExplicitListBootstrapperSpec@127.0.0.1:2552"
+       |                          "akka://ExplicitListBootstrapperSpec@127.0.0.1:2562"
+       |                          "akka://ExplicitListBootstrapperSpec@127.0.0.1:2572"
        |                    ]
        |}
      """.stripMargin).withFallback(super.baseConfig)
@@ -22,19 +22,19 @@ object ExplicitListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNode
 
   nodeConfig(node1)(ConfigFactory.parseString(
     s"""
-       |akka.remote.netty.tcp.port = 2552
+       |akka.remote.artery.canonical.port = 2552
        |multijvmtest.http.port = 8070
      """.stripMargin))
 
   nodeConfig(node2)(ConfigFactory.parseString(
     s"""
-       |akka.remote.netty.tcp.port = 2562
+       |akka.remote.artery.canonical.port = 2562
        |multijvmtest.http.port = 8080
      """.stripMargin))
 
   nodeConfig(node3)(ConfigFactory.parseString(
     s"""
-       |akka.remote.netty.tcp.port = 2572
+       |akka.remote.artery.canonical.port = 2572
        |multijvmtest.http.port = 8090
      """.stripMargin))
 

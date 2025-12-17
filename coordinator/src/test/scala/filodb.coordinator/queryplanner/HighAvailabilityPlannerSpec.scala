@@ -17,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
 
 class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)
@@ -517,7 +517,6 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
   it("should generate PromQlExec for metadata queries") {
     val to = 10000
     val from = 100
-    val intervalSelector = IntervalSelector(from, to)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
       TimeStepParams(from, 20, to))
 

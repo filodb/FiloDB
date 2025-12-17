@@ -3,9 +3,9 @@ package filodb.coordinator
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
@@ -585,7 +585,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   private def removeAndReleaseResources(ref: DatasetRef, shardNum: Int): Unit = {
     // TODO: Wait for all the queries to stop
-    streamSubscriptions.remove(shardNum).foreach(_.cancel)
+    streamSubscriptions.remove(shardNum).foreach(_.cancel())
     streams.remove(shardNum).foreach(_.teardown())
     // Release memory for shard in MemStore
 

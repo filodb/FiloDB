@@ -120,7 +120,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
             fields.append(StructField(pair._2, StringType, true))
         }
         // append all fixed columns
-        fields.append(
+        fields.appendAll(Seq(
           StructField(COL_METRIC, StringType, false),
           StructField(COL_LABELS, MapType(StringType, StringType)),
           StructField(COL_EPOCH_TIMESTAMP, LongType, false),
@@ -130,8 +130,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
           StructField(COL_MONTH, IntegerType, false),
           StructField(COL_DAY, IntegerType, false),
           StructField(COL_HOUR, IntegerType, false)
-        )
-        StructType(fields)
+        ))
+        StructType(fields.toSeq)
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>

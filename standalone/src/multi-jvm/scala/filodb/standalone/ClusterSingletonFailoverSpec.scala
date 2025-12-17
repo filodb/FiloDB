@@ -90,7 +90,6 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       colStore.initialize(dataset, numShards, ConfigFactory.empty).futureValue shouldBe Success
       colStore.truncate(dataset, numShards).futureValue shouldBe Success
 
-      val datasetObj = TestTimeseriesProducer.dataset
       colStore.initialize(dataset, 4, ConfigFactory.empty).futureValue shouldBe Success
       logger.info("Dataset created")
     }

@@ -405,7 +405,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
                                  value: Double) extends InputRecord {
   import filodb.core.metadata.Schemas.promCounter
   import PrometheusInputRecord._
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
@@ -429,7 +429,7 @@ case class PrometheusGaugeRecord(tags: Map[String, String],
                                  value: Double) extends InputRecord {
   import filodb.core.metadata.Schemas.promCounter
   import PrometheusInputRecord._
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
@@ -454,7 +454,7 @@ case class PrometheusCounterRecord(val tags: Map[String, String],
 
   import filodb.core.metadata.Schemas.promCounter
   import PrometheusInputRecord._
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
@@ -480,7 +480,7 @@ case class DeltaCounterRecord(val tags: Map[String, String],
 
   import filodb.core.metadata.Schemas.promCounter
   import PrometheusInputRecord._
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)

@@ -91,8 +91,8 @@ object FilodbClusterStateSpecMultiNodeConfig extends MultiNodeConfig {
        |}
        |
        |# Don't terminate ActorSystem via CoordinatedShutdown in tests
-       |# TODO: Remove during 2.4 cleanup
        |akka.coordinated-shutdown.terminate-actor-system = off
+       |akka.coordinated-shutdown.run-by-actor-system-terminate = off
        |akka.coordinated-shutdown.run-by-jvm-shutdown-hook = off
        |akka.cluster.run-coordinated-shutdown-when-down = off
        |

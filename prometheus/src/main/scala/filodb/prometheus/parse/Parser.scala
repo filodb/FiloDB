@@ -53,7 +53,7 @@ object Parser extends StrictLogging {
   }
 
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
-  private def parseQueryWithPrecedence(query: String, modeParam: Mode = mode): Expression = {
+  private def parseQueryWithPrecedence(query: String, modeParam: Mode): Expression = {
     modeParam match {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)

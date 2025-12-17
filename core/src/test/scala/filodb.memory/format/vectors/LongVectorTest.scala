@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 import filodb.memory.format.{BinaryVector, GrowableVector, MemoryReader, WireFormat}
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
@@ -12,23 +12,23 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
   describe("LongMaskedAppendableVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
-      builder.addNA
+      builder.addNA()
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
       val ptr = builder.freeze(memFactory)
       LongBinaryVector(acc, ptr).length(acc, ptr) shouldEqual 1
       LongBinaryVector(acc, ptr)(acc, ptr, 0)   // Just to make sure this does not throw an exception
       // LongBinaryVector(ptr).isAvailable(0) should equal (false)
-      LongBinaryVector(acc, ptr).toBuffer(acc, ptr) shouldEqual Buffer.empty[Long]
+      LongBinaryVector(acc, ptr).toBuffer(acc, ptr) shouldEqual ArrayBuffer.empty[Long]
     }
 
     it("should encode a mix of NAs and Longs and decode iterate and skip NAs") {
       val cb = LongBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA
+      cb.addNA()
       cb.addData(101)
       cb.addData(maxPlus(102))
       cb.addData(103)
-      cb.addNA
+      cb.addNA()
       cb.isAllNA should be (false)
       cb.noNAs should be (false)
       val ptr = cb.freeze(memFactory)
@@ -39,7 +39,7 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
       // reader.isAvailable(1) should equal (true)
       // reader.isAvailable(4) should equal (false)
       reader(acc, ptr, 1) shouldEqual 101
-      reader.toBuffer(acc, ptr) shouldEqual Buffer(101L, maxPlus(102), 103L)
+      reader.toBuffer(acc, ptr) shouldEqual ArrayBuffer(101L, maxPlus(102), 103L)
     }
 
     it("should be able to append lots of longs off-heap and grow vector") {
@@ -73,11 +73,11 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
 
     it("should be able to return minMax accurately with NAs") {
       val cb = LongBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA
+      cb.addNA()
       cb.addData(-maxPlus(100))
       cb.addData(102)
       cb.addData(maxPlus(103))
-      cb.addNA
+      cb.addNA()
       val inner = cb.asInstanceOf[GrowableVector[Long]].inner.asInstanceOf[MaskedLongAppendingVector]
       inner.minMax should equal ((-maxPlus(100), maxPlus(103)))
     }
@@ -92,7 +92,7 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
       BinaryVector.totalBytes(acc, frozen) should equal (12 + 8 + 8 + 40)  // bitmask truncated
 
       LongBinaryVector(acc, frozen).length(acc, frozen) shouldEqual 5
-      LongBinaryVector(acc, frozen).toBuffer(acc, frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toLong))
+      LongBinaryVector(acc, frozen).toBuffer(acc, frozen) shouldEqual ArrayBuffer.from((0 to 4).map(_.toLong))
     }
 
     it("should be able to optimize longs with fewer nbits off-heap to DeltaDeltaVector") {
@@ -307,12 +307,12 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
       // Only 2 items, don't use DDV
       val opt1 = builder.optimize(memFactory)
       BinaryVector.majorVectorType(acc, opt1) shouldEqual WireFormat.VECTORTYPE_BINSIMPLE
-      LongBinaryVector(acc, opt1).toBuffer(acc, opt1) shouldEqual Buffer(1L, 5L)
+      LongBinaryVector(acc, opt1).toBuffer(acc, opt1) shouldEqual ArrayBuffer(1L, 5L)
 
       builder.addNA()   // add NA(), now should not use DDV
       val opt2 = builder.optimize(memFactory)
       BinaryVector.majorVectorType(acc, opt2) shouldEqual WireFormat.VECTORTYPE_BINSIMPLE
-      LongBinaryVector(acc, opt2).toBuffer(acc, opt2) shouldEqual Buffer(1L, 5L)
+      LongBinaryVector(acc, opt2).toBuffer(acc, opt2) shouldEqual ArrayBuffer(1L, 5L)
     }
 
     it("should be able to optimize constant longs to a DeltaDeltaConstVector") {
@@ -324,7 +324,7 @@ class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
       val readVect = LongBinaryVector(acc, ptr)
       readVect shouldEqual DeltaDeltaConstDataReader
       BinaryVector.totalBytes(acc, ptr) shouldEqual 24   // DeltaDeltaConstVector
-      readVect.toBuffer(acc, ptr) shouldEqual Buffer(longVal, longVal, longVal, longVal, longVal)
+      readVect.toBuffer(acc, ptr) shouldEqual ArrayBuffer(longVal, longVal, longVal, longVal, longVal)
     }
 
     it("should support resetting and optimizing AppendableVector multiple times") {

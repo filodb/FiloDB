@@ -118,7 +118,7 @@ trait  DefaultPlanner {
                                                      lp: PeriodicSeriesWithWindowing,
                                                      forceInProcess: Boolean): PlanResult = {
     val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
-      removeBucket(Right(lp))._3.right.get
+      removeBucket(Right(lp))._3.toOption.get
     } else lp
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
@@ -178,9 +178,9 @@ trait  DefaultPlanner {
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
-                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
               else
-                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
           }
         }
@@ -198,7 +198,7 @@ trait  DefaultPlanner {
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
     if (queryConfig.translatePromToFilodbHistogram) {
       val result = removeBucket(Left(lp))
-      (result._1, result._2, result._3.left.get)
+      (result._1, result._2, result._3.swap.toOption.get)
 
     } else (None, None, lp)
 
@@ -551,14 +551,14 @@ trait  DefaultPlanner {
                                         forceInProcess: Boolean = false): PlanResult = {
     val lhs = if (lp.lhs.isRight) {
       // Materialize as lhs is a logical plan
-      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext, forceInProcess)
+      val lhsExec = walkLogicalPlanTree(lp.lhs.toOption.get, qContext, forceInProcess)
       Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.lhs.left.get)
+    } else Left(lp.lhs.swap.toOption.get)
 
     val rhs = if (lp.rhs.isRight) {
-      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext, forceInProcess)
+      val rhsExec = walkLogicalPlanTree(lp.rhs.toOption.get, qContext, forceInProcess)
       Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.rhs.left.get)
+    } else Left(lp.rhs.swap.toOption.get)
 
     val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref,
       lp.rangeParams, lhs, rhs, lp.operator, inProcessPlanDispatcher)
@@ -700,7 +700,7 @@ object PlannerUtil extends StrictLogging {
       // Above list can contain duplicate dispatchers, and we don't make them distinct.
       // Those with more shards must be weighed higher
       val rnd = ThreadLocalRandom.current()
-      childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
+      childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next()
     }
 
   }
@@ -728,7 +728,7 @@ object PlannerUtil extends StrictLogging {
         // The very fact that a non leaf plan has no children
         // assigned to an active local shard means that it probably has to be a target
         // schema case of some sort. //TODO verify this is the only explanation
-        val ep = children.iterator.next
+        val ep = children.iterator.next()
         val clusterName = ep.dispatcher.clusterName
         val localShardMapper = ep.queryContext.plannerParams.localShardMapper.get
         val activeShards = localShardMapper.activeShards
@@ -742,7 +742,7 @@ object PlannerUtil extends StrictLogging {
         dispatcher
       } else {
         val dispatcher =
-          localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
+          localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next()
         dispatcher
       }
    }

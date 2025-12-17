@@ -104,9 +104,9 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   }
 
   def getLimitsMap(): Map[String, String] = {
-    var w = queryContext.plannerParams.warnLimits;
-    var e = queryContext.plannerParams.enforcedLimits;
-    var limitParams = Map(
+    val w = queryContext.plannerParams.warnLimits
+    val e = queryContext.plannerParams.enforcedLimits
+    val limitParams = Map(
       "warnExecPlanSamples" -> w.execPlanSamples.toString,
       "warnResultByteLimit" -> w.execPlanResultBytes.toString,
       "warnGroupByCardinality" -> w.groupByCardinality.toString,
@@ -229,7 +229,7 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig)
 
 object RemoteHttpClient {
 
-  import scala.collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   /**
    * A default prom remote http client backend from DefaultPromRemoteHttpClientFactory.

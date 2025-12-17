@@ -2,9 +2,9 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
+import scala.jdk.CollectionConverters._
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -175,7 +175,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
       }
     })
 
-    metrics
+    metrics.toSeq
   }
 
   private def pushToPrometheus(batch: Seq[TimeSeries]): Future[HttpResponse] = {
@@ -183,7 +183,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
     val serialized = writeRequest.toByteArray
     val compressed = Snappy.compress(serialized)
 
-    val entity = HttpEntity(ContentType.parse("application/x-protobuf").right.get, ByteString(compressed))
+    val entity = HttpEntity(ContentType.parse("application/x-protobuf").toOption.get, ByteString(compressed))
 
     val request = HttpRequest(
       method = HttpMethods.POST,

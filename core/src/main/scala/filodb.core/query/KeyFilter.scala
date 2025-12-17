@@ -13,7 +13,7 @@ sealed trait Filter {
 
 object Filter {
   final case class Equals(value: Any) extends Filter {
-    override def filterFunc: Any => Boolean = (item: Any) => value.equals(item)
+    override def filterFunc: Any => Boolean = (item: Any) => value == item
     val operatorString: String = "="
     def valuesStrings: Set[Any] = Set(value)
   }
@@ -33,7 +33,7 @@ object Filter {
   }
 
   final case class NotEquals(value: Any) extends Filter {
-    override def filterFunc: (Any) => Boolean = (item: Any) => !value.equals(item)
+    override def filterFunc: (Any) => Boolean = (item: Any) => value != item
     val operatorString: String = "!="
     def valuesStrings: Set[Any] = Set(value)
   }
@@ -107,7 +107,7 @@ object KeyFilter {
                  columnNames: Seq[String]): Map[String, (Int, Column)] = {
     columns.zipWithIndex.collect {
       case d @ (DataColumn(_, name, _, _), idx)           => name -> (idx -> d._1)
-    }.toMap.filterKeys { name => columnNames.contains(name) }
+    }.toMap.view.filterKeys { name => columnNames.contains(name) }.toMap
   }
 
   // NOTE: With Lucene indexing coming, partition filter func is really not needed anymore
@@ -118,6 +118,7 @@ object KeyFilter {
    * @param filters one ColumnFilter per column to filter on.  If multiple filters are desired on that
    *                column they should be combined using And.
    */
+  @scala.annotation.nowarn("msg=never used")
   private def needSomethingHereForDocNotToComplain(): Unit = ???
 
   // def makePartitionFilterFunc(dataset: Dataset,

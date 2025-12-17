@@ -38,23 +38,23 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
                              estimatedIngestResolutionMillis: Int) {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
   def toConfig: Config =
-    ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
+    ConfigFactory.parseMap(Map[String, Any]("flush-interval" -> s"${flushInterval.toSeconds}s",
                                "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
-                               "disk-time-to-live" -> (diskTTLSeconds + "s"),
+                               "disk-time-to-live" -> s"${diskTTLSeconds}s",
                                "max-chunks-size" -> maxChunksSize,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
                                "shard-mem-percent" -> shardMemPercent,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
                                "groups-per-shard" -> groupsPerShard,
-                               "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
+                               "max-chunk-time" -> s"${maxChunkTime.toSeconds}s",
                                "num-block-pages" -> numPagesPerBlock,
                                "failure-retries" -> failureRetries,
-                               "retry-delay" -> (retryDelay.toSeconds + "s"),
-                               "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
-                               "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
+                               "retry-delay" -> s"${retryDelay.toSeconds}s",
+                               "part-index-flush-max-delay" -> s"${partIndexFlushMaxDelaySeconds}s",
+                               "part-index-flush-min-delay" -> s"${partIndexFlushMinDelaySeconds}s",
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,

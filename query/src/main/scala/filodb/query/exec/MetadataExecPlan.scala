@@ -63,7 +63,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan with MetadataExecPlan {
         }
       }
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        UTF8MapIteratorRowReader(metadataResult.toIterator), None)
+        UTF8MapIteratorRowReader(metadataResult.iterator), None)
     }
     Observable.fromTask(taskOfResults)
   }
@@ -154,7 +154,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
             .asInstanceOf[Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]]
         }
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-          UTF8MapIteratorRowReader(metadataResult.toIterator), None)
+          UTF8MapIteratorRowReader(metadataResult.iterator), None)
       } else {
         val metadataResult = scala.collection.mutable.Set.empty[String]
         resp.foreach { result =>
@@ -170,7 +170,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
   }
 
   private def transformRVs(rv: RangeVector, colType: ColumnType): Iterator[Any] = {
-    val metadataResult = rv.rows.map { rowReader =>
+    val metadataResult = rv.rows().map { rowReader =>
       val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
       rv match {
         case srv: SerializedRangeVector if colType == MapColumn =>
@@ -199,9 +199,9 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
       val x = rv.rows().next()
       // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
       val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-          val sketchMapIterator = (sketchMap.mapValues {
-            sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
-            :: Nil).toIterator
+          val sketchMapIterator = (sketchMap.map { case (k, sketch) =>
+            k -> ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
+            :: Nil).iterator
       IteratorBackedRangeVector(rv.key, UTF8MapIteratorRowReader(sketchMapIterator), None)
       })
   }
@@ -301,11 +301,12 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
           // using heap data structures or get a clean oneliner to achieve it.
           if (metaDataMutableMap.isEmpty) {
             Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-              UTF8MapIteratorRowReader(List.empty.toIterator), None))
+              UTF8MapIteratorRowReader(List.empty.iterator), None))
           } else {
             val x = for ((key, sketchMap) <- metaDataMutableMap) yield {
               val labelSketchMapIterator =
-                Seq(sketchMap.mapValues(cpcSketch => ZeroCopyUTF8String(cpcSketch.toByteArray)).toMap).toIterator
+                Seq(sketchMap.map { case (k, cpcSketch) =>
+                  k -> ZeroCopyUTF8String(cpcSketch.toByteArray) }.toMap).iterator
               IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(labelSketchMapIterator), None)
             }
             Observable.fromIterable(x)
@@ -445,7 +446,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
               Seq(sketchMap.map {
                 case (label, cpcSketch) =>
                   (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
-              }.toMap).toIterator),
+              }.toMap).iterator),
             None)
           Observable.now(rv)
         } else {

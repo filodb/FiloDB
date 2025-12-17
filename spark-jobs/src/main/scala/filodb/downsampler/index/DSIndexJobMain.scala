@@ -122,7 +122,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     if (!doFullMigration) {
       val downsampleHourStartGauge = FilodbMetrics.gauge("index-downsampler-period-start-hour",
         Map("downsamplePeriod" -> downsamplePeriodStr))
-      downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
+      downsampleHourStartGauge.update((userTimeStart / 1000 / 60 / 60).toDouble)
     }
     if (dsSettings.shouldSleepForMetricsFlush)
       Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published

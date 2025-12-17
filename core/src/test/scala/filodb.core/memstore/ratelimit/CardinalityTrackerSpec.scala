@@ -78,7 +78,7 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     val qp = new MyQEP
     val t = new CardinalityTracker(ref, 0, 3, Seq(1, 1, 1, 1), newCardStore, qp)
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
-    val ex = intercept[QuotaReachedException] {
+    @scala.annotation.unused val ex = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
     }
     qp.breachedQuota shouldEqual 1

@@ -32,7 +32,7 @@ object TimeSeriesPartitionSpec {
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val bufferPools = scala.collection.mutable.HashMap(dataset.schema.schemaHash -> bufferPool)
     val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
     new TimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40)
   }
@@ -40,7 +40,7 @@ object TimeSeriesPartitionSpec {
   def tracingPart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val bufferPools = scala.collection.mutable.HashMap(dataset.schema.schemaHash -> bufferPool)
     val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
     new TracingTimeSeriesPartition(partNo, dataset.ref, dataset.schema, partKey, shardInfo, 40)
   }
@@ -57,7 +57,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   import MachineMetricsData._
   import TimeSeriesPartitionSpec._
 
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -70,7 +70,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   val reclaimer = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
       assert(numBytes == schema1.data.blockMetaSize)
-      val partID = UnsafeUtils.getInt(metaAddr)
+      @scala.annotation.unused val partID = UnsafeUtils.getInt(metaAddr)
       val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       part.removeChunksAt(chunkID)
     }
@@ -219,7 +219,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
   it("should enforce write-buffer-switching/chunk-creation at flush boundary when the functionality is enabled") {
     val currentTIme = System.currentTimeMillis()
-    def timeAlignedSeriesReaders(): Stream[RowReader] =
+    def timeAlignedSeriesReaders(): LazyList[RowReader] =
       singleSeriesData(initTs = currentTIme - currentTIme%(1 minutes).toMillis).map(TupleRowReader)
     part = makePart(0, dataset1)
     // chunk creation on crossing flush boundary is not enforced, so will create 1 chunk
@@ -269,7 +269,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     val blockHolder = new BlockMemFactory(blockStore, schema1.data.blockMetaSize, dummyContext)
     // Task needs to fully iterate over the chunks, to release the shared lock.
-    val flushFut = Future(part.makeFlushChunks(blockHolder).toBuffer)
+    @scala.annotation.unused val flushFut = Future(part.makeFlushChunks(blockHolder).toBuffer)
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(0, r, ingestBlockHolder,
       flushIntervalMillis = flushIntervalMillis, createChunkAtFlushBoundary = timeAlignedChunksEnabled,
       acceptDuplicateSamples = acceptDuplicateSamples) }
@@ -536,8 +536,8 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       acceptDuplicateSamples = acceptDuplicateSamples)
     // 8 of first 10 ingested, 2 should be dropped.  Switch buffers, and try ingesting out of order again.
     part.appendingChunkLen shouldEqual 8
-    part.infoLast.numRows shouldEqual 8
-    part.infoLast.endTime shouldEqual data(9).getLong(0)
+    part.infoLast().numRows shouldEqual 8
+    part.infoLast().endTime shouldEqual data(9).getLong(0)
 
     part.switchBuffers(ingestBlockHolder)
     part.appendingChunkLen shouldEqual 0
@@ -602,8 +602,8 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       acceptDuplicateSamples = allowDuplicates)
     // 10 of 12 ingested including duplicates, 2 should be dropped. Switch buffers, and try ingesting out of order again.
     part.appendingChunkLen shouldEqual 10
-    part.infoLast.numRows shouldEqual 10
-    part.infoLast.endTime shouldEqual data(9).getLong(0)
+    part.infoLast().numRows shouldEqual 10
+    part.infoLast().endTime shouldEqual data(9).getLong(0)
 
     part.switchBuffers(ingestBlockHolder)
     part.appendingChunkLen shouldEqual 0

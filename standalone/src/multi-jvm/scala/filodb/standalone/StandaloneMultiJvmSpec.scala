@@ -1,33 +1,34 @@
 package filodb.standalone
 
-import scala.collection.JavaConverters._
-import scala.concurrent.duration._
 import akka.actor.ActorRef
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
+import akka.stream.scaladsl.Source
 import akka.testkit.ImplicitSender
+import akka.util.ByteString
 import com.softwaremill.sttp._
 import com.softwaremill.sttp.akkahttp.AkkaHttpBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import net.ceedubs.ficus.Ficus._
-import org.scalatest._
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
-import org.xerial.snappy.Snappy
-import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
-import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
+import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
 import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError, Sampl, QueryResult => QueryResult2}
-import filodb.query.PromCirceSupport
-import filodb.query.Sampl
-import filodb.query.SuccessResponse
+import filodb.query.{QueryError, Sampl, SuccessResponse, QueryResult => QueryResult2}
+import net.ceedubs.ficus.Ficus._
+import org.scalatest._
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.flatspec.AnyFlatSpecLike
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.xerial.snappy.Snappy
+import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
+
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config
@@ -41,7 +42,8 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   import akka.testkit._
 
-  override implicit val patienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  override implicit val patienceConfig: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   lazy val watcher = TestProbe()
 
@@ -150,7 +152,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val curTime = System.currentTimeMillis
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
-        val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
+        val vals = r.result.flatMap(_.rows().map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
         // info(s"result values were $vals")
         vals.length should be > 0
         vals.map(_._2).sum
@@ -170,7 +172,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
       case r: QueryResult2 =>
         // Transform range query vectors
         val map = r.result.map { rv =>
-          val sampleArray = rv.rows.map(_.getDouble(1)).toArray
+          val sampleArray = rv.rows().map(_.getDouble(1)).toArray
           totalSamples += sampleArray.size
           rv.key.toString -> sampleArray
         }.toMap
@@ -198,13 +200,14 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   def runHttpQuery(queryTimestamp: Long): Double = {
 
+    // TODO: Fix this
+    //import PromCirceSupport._
     import io.circe.generic.auto._
-    import PromCirceSupport._
 
-    implicit val sttpBackend = AkkaHttpBackend()
+    implicit val sttpBackend: SttpBackend[Future, Source[ByteString, Any]] = AkkaHttpBackend()
     val url = uri"http://localhost:8080/promql/prometheus/api/v1/query?query=$query&time=${queryTimestamp/1000}"
     info(s"Querying: $url")
-    val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
+    val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.toOption.get.data.result
     val result = result1.flatMap(_.values.get.collect { case d: Sampl => (d.timestamp, d.value) })
     info(s"result values were $result")
     result.length should be > 0
@@ -217,7 +220,6 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
     implicit val sttpBackend = AkkaHttpBackend()
     val start = queryTimestamp / 1000 * 1000 - 1.minutes.toMillis // needed to make it equivalent to http/cli queries
-    val end = queryTimestamp / 1000 * 1000
     val nameMatcher = LabelMatcher.newBuilder().setName("__name__").setValue("heap_usage")
     val dcMatcher = LabelMatcher.newBuilder().setName("dc").setValue("DC0")
     val wsMatcher = LabelMatcher.newBuilder().setName("_ws_").setValue("demo")

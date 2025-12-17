@@ -6,7 +6,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
 import com.typesafe.config.Config
-import debox.Buffer
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -161,7 +160,7 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
     // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val pagingMethods = new ArrayBuffer[ChunkScanMethod]
-    val inMemOdp = debox.Set.empty[Int]
+    val inMemOdp = scala.collection.mutable.HashSet.empty[Int]
 
     partLookupRes.partIdsMemTimeGap.foreach { case (pId, startTime) =>
       val p = partitions.get(pId)
@@ -192,11 +191,11 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
       if (storeConfig.multiPartitionODP) {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
-          val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
+          val multiPart = MultiPartitionScan(partKeyBytesToPage.toSeq, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             val startTime = System.currentTimeMillis()
-            rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods))
+            rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods.toSeq))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapEval { rawPart =>
@@ -265,7 +264,7 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
 
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
-  private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
+  private def odpPartTask(partIdsNotInMemory: ArrayBuffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
                           pagingMethods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
   if (partIdsNotInMemory.nonEmpty) {
     createODPPartitionsTask(partIdsNotInMemory, { case (pId, pkBytes) =>
@@ -285,7 +284,7 @@ TimeSeriesShard(ref, schemas, storeConfig, numShards, quotaSource, shardNum, buf
    * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
-  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte]) => Unit):
+  private def createODPPartitionsTask(partIDs: ArrayBuffer[Int], callback: (Int, Array[Byte]) => Unit):
                                                                   Task[Seq[TimeSeriesPartition]] = Task.evalAsync {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)

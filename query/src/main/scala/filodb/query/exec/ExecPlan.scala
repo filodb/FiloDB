@@ -3,7 +3,6 @@ package filodb.query.exec
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 import kamon.Kamon
@@ -117,13 +116,13 @@ trait ExecPlan extends QueryCommand {
     * can be used to perform data transformations closer to the
     * source node and minimize data movement over the wire.
     */
-  val rangeVectorTransformers = new ArrayBuffer[RangeVectorTransformer]()
+  val rangeVectorTransformers = new scala.collection.mutable.ArrayBuffer[RangeVectorTransformer]()
 
   def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
     rangeVectorTransformers += mapper
   }
 
-  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
+  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers.toSeq
 
   /**
    * Facade for the execution orchestration of the plan sub-tree
@@ -552,7 +551,7 @@ trait ExecPlan extends QueryCommand {
     s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
-    val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n"))
+    val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n")).toSeq
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
@@ -584,7 +583,7 @@ trait ExecPlan extends QueryCommand {
 
     new Iterator[RowReader] {
       val listSize = srvsList.size
-      val rowIteratorList = srvsList.map(srvs => srvs(0).rows)
+      val rowIteratorList = srvsList.map(srvs => srvs(0).rows())
       private var curIterIndex = 0
       override def hasNext: Boolean = rowIteratorList(curIterIndex).hasNext ||
         (curIterIndex < listSize - 1

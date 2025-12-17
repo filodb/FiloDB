@@ -3,7 +3,6 @@ package filodb.repair
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -12,9 +11,9 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
@@ -25,11 +24,13 @@ import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.core.store.{PartKeyRecord, StoreConfig}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
+import monix.execution.Scheduler
 
 class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience = PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
 
   val sourceConfigPath = "conf/timeseries-filodb-server.conf"
   val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
@@ -229,7 +230,6 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       for (pkr <- partKeyRecords) {
         // verify all the records fall in the copier time period.
         // either pkr.startTime or pkr.endTime should fall in the startTime:endTime window
-        var metric = getPartKeyMap(pkr).get("_metric_").get
         val startTimeFallsInWindow = pkr.startTime >= startTime && pkr.startTime <= endTime
         val endTimeFallsInWindow = pkr.endTime >= startTime && pkr.endTime <= endTime
         if (startTimeFallsInWindow || endTimeFallsInWindow) {
@@ -250,7 +250,6 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
         for (pkr <- partKeyRecords) {
           // verify all the records fall in the copier time period.
           // either pkr.startTime or pkr.endTime should fall in the startTime:endTime window
-          var metric = getPartKeyMap(pkr).get("_metric_").get
           val startTimeFallsInWindow = pkr.startTime >= startTime && pkr.startTime <= endTime
           val endTimeFallsInWindow = pkr.endTime >= startTime && pkr.endTime <= endTime
           if (startTimeFallsInWindow || endTimeFallsInWindow) {

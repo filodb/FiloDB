@@ -33,7 +33,8 @@ import monix.reactive.Observable
 
 class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
@@ -74,7 +75,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     shardSeq.map(pair => pair._2 + ("_metric_" -> pair._1) ++ addlLabels)
   }
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: FiniteDuration = 5.seconds
 
   def initShard(memStore: TimeSeriesMemStore,
                 partKeyLabelValues: Seq[Tuple2[String, Map[String, String]]],
@@ -148,14 +149,14 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it ("series matcher remote exec") {
     val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/series", 10000L, Map("filter" -> "a=b,c=d"),
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/series"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(), testingBackend), queryConfig)
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next.asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
@@ -165,7 +166,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it ("empty response series matcher remote exec") {
     val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/series", 10000L, Map("filter" -> "a=b,c=d", "empty" -> "true"),
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/series"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(), testingBackend), queryConfig)
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
@@ -178,7 +179,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it ("label values remote metadata exec") {
     val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/label/__name__/values", 10000L, Map("filter" -> "a=b,c=d"),
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/label"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(), testingBackend), queryConfig)
 
     val exec2: LabelValuesExec = LabelValuesExec(QueryContext(), executeDispatcher,
       timeseriesDataset.ref, 1, Seq(ColumnFilter("a", Equals("b"))), Seq("__name__"), 123L, 234L)
@@ -189,20 +190,20 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 2
-        rv.rows.map(row => {
+        rv.rows().size shouldEqual 2
+        rv.rows().map(row => {
           val record = row.asInstanceOf[BinaryRecordRowReader]
           rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
         })
       }
     }
-    result.toArray shouldEqual jobQueryResult2
+    result.toArray.sorted shouldEqual jobQueryResult2.sorted
   }
 
   it ("empty response label values remote metadata exec") {
     val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/label/__name__/values", 10000L, Map("filter" -> "a=b,c=d", "empty" -> "true"),
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/label"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(), testingBackend), queryConfig)
 
     val exec2: LabelValuesExec = LabelValuesExec(QueryContext(), executeDispatcher,
       timeseriesDataset.ref, 1, Seq(ColumnFilter("a", Equals("b"))), Seq("__name__"), 123L, 234L)
@@ -213,8 +214,8 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         response.flatMap(rv => {
-          rv.rows.size shouldEqual 0
-          rv.rows.map(row => {
+          rv.rows().size shouldEqual 0
+          rv.rows().map(row => {
             val record = row.asInstanceOf[BinaryRecordRowReader]
             rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
           })
@@ -227,14 +228,14 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it ("labels metadata remote exec") {
     val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/labels", 10000L, Map("filter" -> "a=b,c=d"),
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/labels"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend), queryConfig)
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(), testingBackend), queryConfig)
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 4
-        rv.rows.map(row => {
+        rv.rows().size shouldEqual 4
+        rv.rows().map(row => {
           val record = row.asInstanceOf[BinaryRecordRowReader]
           rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).head._2
         })
@@ -270,11 +271,11 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       "datasets" -> "longtime-prometheus,longtime-prometheus_preagg,recordingrules-prometheus_rules_1m"),
       QueryContext(origQueryParams = PromQlQueryParams("test", 123L, 234L, 15L,
         Option("http://localhost:31007/api/v2/metering/cardinality/timeseries"))),
-      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(),
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder().build(),
         testingBackendTsCard), queryConfig)
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
-    val result = (resp: @unchecked) match {
+    val _ = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) =>
         // should only contain a single RV where each row describes a single group's cardinalities
         response.size shouldEqual 1

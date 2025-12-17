@@ -24,7 +24,7 @@ object BinaryRegionUtils extends StrictLogging {
   def readLargeRegion(input: Input): Array[Byte] = {
     val regionLen = input.readInt
     val bytes = new Array[Byte](regionLen + 4)
-    val bytesRead = input.read(bytes, 4, regionLen)
+    @scala.annotation.unused val bytesRead = input.read(bytes, 4, regionLen)
     UnsafeUtils.setInt(bytes, UnsafeUtils.arayOffset, regionLen)
     logger.trace(s"Read large region of $regionLen bytes: ${bytes.toSeq.take(20)}")
     bytes
@@ -32,7 +32,7 @@ object BinaryRegionUtils extends StrictLogging {
 }
 
 class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVectorKey] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[PartitionRangeVectorKey]): PartitionRangeVectorKey = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: PartitionRangeVectorKey]): PartitionRangeVectorKey = {
     val partBytes = BinaryRegionUtils.readLargeRegion(input)
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val keyCols = kryo.readClassAndObject(input)
@@ -49,10 +49,11 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
     output.writeInt(key.partId)
     output.writeString(key.schemaName)
   }
+
 }
 
 class ZeroCopyUTF8StringSerializer extends KryoSerializer[ZeroCopyUTF8String] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[ZeroCopyUTF8String]): ZeroCopyUTF8String = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: ZeroCopyUTF8String]): ZeroCopyUTF8String = {
     val numBytes = input.readInt
     ZeroCopyUTF8String(input.readBytes(numBytes))
   }
@@ -66,7 +67,7 @@ class ZeroCopyUTF8StringSerializer extends KryoSerializer[ZeroCopyUTF8String] wi
 }
 
 class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
-  override def read(kryo: Kryo, input: Input, typ: Class[PartitionInfo]): PartitionInfo = {
+  override def read(kryo: Kryo, input: Input, typ: Class[_ <: PartitionInfo]): PartitionInfo = {
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val partBytes = BinaryRegionUtils.readLargeRegion(input)
     PartitionInfo(schema, partBytes, UnsafeUtils.arayOffset, input.readInt)

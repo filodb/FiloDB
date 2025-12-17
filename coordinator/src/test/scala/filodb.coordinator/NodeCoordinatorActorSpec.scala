@@ -1,14 +1,8 @@
 package filodb.coordinator
 
-import java.net.InetAddress
-import scala.concurrent.duration._
 import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
-import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
@@ -16,6 +10,13 @@ import filodb.core.query.Filter.NotEquals
 import filodb.core.query._
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
+import monix.execution.schedulers.SchedulerService
+import org.scalatest.BeforeAndAfterEach
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import java.net.InetAddress
+import scala.concurrent.duration._
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -24,17 +25,16 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
 
+  import Column.ColumnType._
+  import GdeltTestData._
+  import NodeClusterActor._
   import akka.testkit._
-
   import client.DatasetCommands._
   import client.IngestionCommands._
   import client.QueryCommands._
-  import Column.ColumnType._
   import filodb.query._
-  import GdeltTestData._
-  import NodeClusterActor._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.parseString(
@@ -47,12 +47,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                             .getConfig("filodb")
 
   private val host = InetAddress.getLocalHost.getHostAddress
-  private val selfAddress = AddressFromURIString(s"akka.tcp://${system.name}@$host:2552")
+  private val selfAddress = AddressFromURIString(s"akka://${system.name}@$host:2552")
   private val cluster = FilodbCluster(system)
   private lazy val memStore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   private lazy val metaStore = cluster.metaStore
 
-  implicit val ec = cluster.ec
+  implicit val ec: SchedulerService = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
   protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
@@ -155,18 +155,18 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         Seq("min"), Some(300000), None), qOpt)
 
       probe.send(coordinatorActor, q1)
-      val info1 = probe.expectMsgPF(3.seconds.dilated) {
+      val _ = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs, _, _, _, _) =>
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (1)
-          srvs(0).rows.toSeq should have length (2)   // 2 samples per series
+          srvs(0).rows().toSeq should have length (2)   // 2 samples per series
       }
 
       // Query nonexisting partition
       val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "NotSeries"),
         Seq("min"), Some(300000), None), qOpt)
       probe.send(coordinatorActor, q2)
-      val info2 = probe.expectMsgPF(3.seconds.dilated) {
+      val _ = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, Nil, _, _, _, _) =>
           schema.columns shouldEqual Nil
       }
@@ -182,7 +182,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       val to = System.currentTimeMillis() / 1000
-      val from = to - 50
       val qParams = TimeStepParams(0, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, {__name__=\"Series 1\"})", qParams)
       val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
@@ -206,7 +205,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
 
       // Query the "count" long column, validate schema.  Should be able to translate everything
@@ -219,7 +218,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
 
       // What if filter returns no results?
@@ -258,7 +257,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           case QueryResult(_, schema, vectors, _, _, _, _) =>
             schema.columns shouldEqual valueSchema.columns
             vectors should have length (1)
-            vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+            vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
       }
     }
@@ -288,7 +287,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
       }
     }
 
@@ -308,19 +307,18 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min"), Some(300000), None),
         queryOpt)
       probe.send(coordinatorActor, q2)
-      val info1 = probe.expectMsgPF(3.seconds.dilated) {
+      val _ = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs, _, _, _, _) =>
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
           groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
-          val lengths = srvs.map(_.rows.toSeq.length)
+          val lengths = srvs.map(_.rows().toSeq.length)
           lengths.min shouldEqual 2
           lengths.max shouldEqual 3
       }
     }
 
-    implicit val askTimeout = Timeout(5.seconds)
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
@@ -330,7 +328,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgType[scala.collection.Seq[String]]
+      indexNames.toSet shouldEqual Set("series", "_type_")
 
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
       probe.expectMsg(Seq(("Series 0", 1), ("Series 1", 1), ("Series 2", 1), ("Series 3", 1)))
@@ -344,7 +343,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgType[scala.collection.Seq[String]]
+      indexNames.toSet shouldEqual Set("series", "_type_")
 
       //actor should restart and serve queries again
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
@@ -385,9 +385,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn, false),
                                        ColumnInfo("value", DoubleColumn, true))
         vectors should have length (1)
-        // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
+        // vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
-        vectors(0).rows.map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
+        vectors(0).rows().map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
     }
   }
 

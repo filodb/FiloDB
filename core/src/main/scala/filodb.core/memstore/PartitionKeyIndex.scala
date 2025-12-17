@@ -28,7 +28,7 @@ object NoOpIndexer extends Indexer {
  * A high performance index using BitmapIndex for partition keys.
  */
 class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   import filodb.core._
   import Column.ColumnType._

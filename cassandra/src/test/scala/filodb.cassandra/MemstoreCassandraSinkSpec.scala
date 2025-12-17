@@ -60,7 +60,6 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     val splits2 = columnStore.getScanSplits(dataset1.ref, 1)
     val rawParts = columnStore.readRawPartitions(dataset1.ref, 1.hour.toMillis, FilteredPartitionScan(splits2.head))
                               .toListL.runToFuture.futureValue
-    val writtenNums = (5 to 95 by 10) ++ (6 to 96 by 10) ++ (8 to 98 by 10)
     // Cannot check the result, because FilteredPartitionScan() will be broken until indices are implemented
     // agg2.result should equal (Array(writtenNums.map(_.toDouble).sum))
 

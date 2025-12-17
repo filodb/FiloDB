@@ -25,8 +25,12 @@ object UnsafeUtils {
 
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
 
-  // These are specific to JDK8, definitely not guaranteed for other versions
+  // These are specific to JDK8+, using deprecated objectFieldOffset(Field) API
+  // The deprecated method is still functional in JDK 21+, just marked for future removal
+  // Suppressing the deprecation warning since there's no direct VarHandle equivalent for this use case
+  @scala.annotation.nowarn("msg=method objectFieldOffset in class Unsafe is deprecated")
   val byteBufArrayField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("hb"))
+  @scala.annotation.nowarn("msg=method objectFieldOffset in class Unsafe is deprecated")
   val byteBufOffsetField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("offset"))
 
   /** Translate ByteBuffer into base, offset, numBytes */

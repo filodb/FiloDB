@@ -1,1 +1,1 @@
--Dmultijvm.node=node4 -Dlogback.configurationFile=logback-multijvm-test.xml
+-Dmultijvm.node=node4 -Dlogback.configurationFile=logback-multijvm-test.xml --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED

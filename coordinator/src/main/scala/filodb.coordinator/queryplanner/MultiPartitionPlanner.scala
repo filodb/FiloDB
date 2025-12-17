@@ -433,7 +433,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   private def materializeForBinaryJoinAssignment(binaryJoin: BinaryJoin,
                                                  assignment: PartitionAssignmentTrait,
                                                  queryContext: QueryContext,
-                                                 timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+                                                 timeRangeOverride: Option[TimeRange]): ExecPlan = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val proportionMap = assignment.proportionMap
     val leftContext = queryContext.copy(origQueryParams =
@@ -467,7 +467,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   private def materializeForAggregateAssignment(aggregate: Aggregate,
                                                 assignment: PartitionAssignmentTrait,
                                                 queryContext: QueryContext,
-                                                timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+                                                timeRangeOverride: Option[TimeRange]): ExecPlan = {
     val proportionMap = assignment.proportionMap
     val childQueryContext = queryContext.copy(
       plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
@@ -504,7 +504,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   private def materializeForAssignment(logicalPlan: LogicalPlan,
                                        assignment: PartitionAssignmentTrait,
                                        queryContext: QueryContext,
-                                       timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+                                       timeRangeOverride: Option[TimeRange]): ExecPlan = {
     assignment match {
       case PartitionAssignment(partitionName, httpEndPoint, _, grpcEndPoint) =>
         materializeForPartition(logicalPlan, partitionName, grpcEndPoint, httpEndPoint, queryContext, timeRangeOverride)
@@ -537,10 +537,11 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * @param timeRangeOverride : if given, the plan will be materialized to this range. Otherwise, the
    *                          range is computed from the PromQlQueryParams.
    */
+  @scala.annotation.unused
   private def materializeForPartition(logicalPlan: LogicalPlan,
                                       partition: PartitionDetails,
                                       queryContext: QueryContext,
-                                      timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+                                      timeRangeOverride: Option[TimeRange]): ExecPlan = {
     val qContextWithOverride = timeRangeOverride.map { r =>
       val oldParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val newParams = oldParams.copy(startSecs = r.startMs / 1000, endSecs = r.endMs / 1000)
@@ -628,8 +629,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    *                  (i.e. all range start times (except the first) should be snapped to a step)
    */
   private def getAssignmentQueryRanges(assignments: Seq[PartitionAssignmentTrait], queryRange: TimeRange,
-                               lookbackMs: Long = 0L, offsetMs: Seq[Long] = Seq(0L),
-                               stepMsOpt: Option[Long] = None): Seq[(PartitionAssignmentTrait, TimeRange)] = {
+                               lookbackMs: Long, offsetMs: Seq[Long],
+                               stepMsOpt: Option[Long]): Seq[(PartitionAssignmentTrait, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
     val filteredAssignments = assignments
@@ -685,7 +686,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       rs => LogicalPlanUtils.resolvePipeConcatenatedShardKeyFilters(rs, nonMetricShardKeyCols)).isDefined
     if (canTschemaPushdown) {
       LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext),
-        rs => LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns))
+        rs => LogicalPlan.getNonMetricShardKeyFilters(rs, dataset.options.nonMetricShardColumns)).map(_.toSeq)
     } else None
   }
 
@@ -728,7 +729,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val (assignments, _, _, _) = resolveAssignmentsAndRoutingKeys(aggregate, queryParams)
       val execPlans = assignments.map(
-        assignment => materializeForAggregateAssignment(aggregate, assignment, queryContext)
+        assignment => materializeForAggregateAssignment(aggregate, assignment, queryContext, None)
       )
       val exec = if (execPlans.size == 1) execPlans.head
       else {
@@ -803,7 +804,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
     require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
     val assignmentRanges = getAssignmentQueryRanges(partitions, timeRange,
-        lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
+        lookbackMs = lookbackMs, offsetMs = offsetMs.toSeq, stepMsOpt = stepMsOpt)
     val supportRemoteStitch = supportRemoteRawExport(logicalPlan)
     val execPlans = if (assignmentRanges.isEmpty) {
       // Assignment ranges empty means we cant run this query fully on one partition and needs
@@ -937,10 +938,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
 
       if (partitions.length > 1 && supportRemoteStitch) {
         // Here we check if the assignment ranges cover the entire query duration
-        val (_, lastTimeRange) = assignmentRanges.last
+        val (_, lastTimeRange): (PartitionAssignmentTrait, TimeRange) = assignmentRanges.last
         if (lastTimeRange.endMs < timeRange.endMs) {
           // this means we need to add the missing time range to the end to execute the bit on Query service
-          val (gapStartTimeMs, gapEndTimeMs) = stepMsOpt match {
+          val (gapStartTimeMs: Long, gapEndTimeMs: Long) = stepMsOpt match {
             case Some(step)   =>   (snapToStep(lastTimeRange.endMs + 1, step, timeRange.startMs),
               timeRange.endMs)
             case None           => (lastTimeRange.endMs, timeRange.endMs)
@@ -954,27 +955,29 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             val newLp = rewritePlanWithRemoteRawExport(logicalPlan,
               IntervalSelector(gapStartTimeMs, gapEndTimeMs),
               additionalLookbackMs = 0L.max(gapStartTimeMs - lastTimeRange.startMs))
-            execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans
+            (execPlans ++ walkLogicalPlanTree(newLp, newContext, forceInProcess = true).plans).toSeq
           } else {
-            execPlans
+            execPlans.toSeq
           }
         } else {
-          execPlans
+          execPlans.toSeq
         }
       } else {
-        execPlans
+        execPlans.toSeq
       }
     }
 
+    val finalExecPlans = execPlans
+
     // stitch if necessary
-    val resPlan = if (execPlans.size == 1) {
-      execPlans.head
+    val resPlan = if (finalExecPlans.size == 1) {
+      finalExecPlans.head
     } else {
       // returns NaNs for missing timestamps
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans,
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), finalExecPlans,
         enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
     }
     PlanResult(Seq(resPlan))

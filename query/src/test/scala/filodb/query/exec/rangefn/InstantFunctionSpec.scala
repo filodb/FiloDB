@@ -45,7 +45,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
-      val data: Stream[TransientRow] = Stream.from(0).map { n =>
+      val data: LazyList[TransientRow] = LazyList.from(0).map { n =>
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
 
@@ -118,37 +118,37 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   private def fireInstantFunctionTests(samples: Array[RangeVector]): Unit = {
     // Abs
-    val expected = samples.map(_.rows.map(v => scala.math.abs(v.getDouble(1))))
+    val expected = samples.map(_.rows().map(v => scala.math.abs(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected, InstantFunctionId.Abs)
     // Ceil
-    val expected2 = samples.map(_.rows.map(v => scala.math.ceil(v.getDouble(1))))
+    val expected2 = samples.map(_.rows().map(v => scala.math.ceil(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected2, InstantFunctionId.Ceil)
     // ClampMax
-    val expected3 = samples.map(_.rows.map(v => scala.math.min(v.getDouble(1), 4)))
+    val expected3 = samples.map(_.rows().map(v => scala.math.min(v.getDouble(1), 4)))
     applyFunctionAndAssertResult(samples, expected3, InstantFunctionId.ClampMax, Seq(4.toDouble))
     // ClampMin
-    val expected4 = samples.map(_.rows.map(v => scala.math.max(v.getDouble(1), 4.toDouble)))
+    val expected4 = samples.map(_.rows().map(v => scala.math.max(v.getDouble(1), 4.toDouble)))
     applyFunctionAndAssertResult(samples, expected4, InstantFunctionId.ClampMin, Seq(4))
     // Floor
-    val expected5 = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expected5 = samples.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected5, InstantFunctionId.Floor)
     // Log
-    val expected6 = samples.map(_.rows.map(v => scala.math.log(v.getDouble(1))))
+    val expected6 = samples.map(_.rows().map(v => scala.math.log(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected6, InstantFunctionId.Ln)
     // Log10
-    val expected7 = samples.map(_.rows.map(v => scala.math.log10(v.getDouble(1))))
+    val expected7 = samples.map(_.rows().map(v => scala.math.log10(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected7, InstantFunctionId.Log10)
     // Log2
-    val expected8 = samples.map(_.rows.map(v => scala.math.log10(v.getDouble(1)) / scala.math.log10(2.0)))
+    val expected8 = samples.map(_.rows().map(v => scala.math.log10(v.getDouble(1)) / scala.math.log10(2.0)))
     applyFunctionAndAssertResult(samples, expected8, InstantFunctionId.Log2)
     // Sqrt
-    val expected10 = samples.map(_.rows.map(v => scala.math.sqrt(v.getDouble(1))))
+    val expected10 = samples.map(_.rows().map(v => scala.math.sqrt(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected10, InstantFunctionId.Sqrt)
     // Exp
-    val expected11 = samples.map(_.rows.map(v => scala.math.exp(v.getDouble(1))))
+    val expected11 = samples.map(_.rows().map(v => scala.math.exp(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected11, InstantFunctionId.Exp)
     // Sgn
-    val expected12 = samples.map(_.rows.map(v => scala.math.signum(v.getDouble(1))))
+    val expected12 = samples.map(_.rows().map(v => scala.math.signum(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected12, InstantFunctionId.Sgn)
     // Round
     testRoundFunction(samples)
@@ -156,7 +156,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   private def testRoundFunction(samples: Array[RangeVector]): Unit = {
     // Round
-    val expected9 = samples.map(_.rows.map(v => {
+    val expected9 = samples.map(_.rows().map(v => {
       val value = v.getDouble(1)
       val toNearestInverse = 1.0
       if (value.isNaN || value.isInfinite)
@@ -166,7 +166,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     }))
     applyFunctionAndAssertResult(samples, expected9, InstantFunctionId.Round)
     // Round with param
-    val expected10 = samples.map(_.rows.map(v => {
+    val expected10 = samples.map(_.rows().map(v => {
       val value = v.getDouble(1)
       val toNearestInverse = 1.0 / 10
       if (value.isNaN || value.isInfinite)
@@ -182,14 +182,14 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper1 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax)
       val resultObs = instantVectorFnMapper1(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-      val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max."
 
    // clamp_min
     the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper3 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin)
       val resultObs = instantVectorFnMapper3(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min."
 
     // sgn
@@ -197,7 +197,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sgn,
         Seq(StaticFuncArgs(1, rangeParams)))
       val resultObs = instantVectorFnMapper5(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: No additional parameters required for the instant function."
 
     // sqrt
@@ -205,7 +205,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sqrt,
         Seq(StaticFuncArgs(1, rangeParams)))
       val resultObs = instantVectorFnMapper5(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: No additional parameters required for the instant function."
 
     // round
@@ -213,7 +213,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round,
         Seq(StaticFuncArgs(1, rangeParams), StaticFuncArgs(2, rangeParams)))
       val resultObs = instantVectorFnMapper5(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Only one optional parameters allowed for Round."
 
     // histogram quantile
@@ -221,7 +221,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val (data, histRV) = histogramRV(numSamples = 10)
       val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile)
       val resultObs = ivMapper(Observable.fromIterable(Array(histRV)), querySession, 1000, histSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Quantile (between 0 and 1) required for histogram quantile"
 
     // histogram bucket
@@ -229,7 +229,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val (data, histRV) = histogramRV(numSamples = 10)
       val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket)
       val resultObs = ivMapper(Observable.fromIterable(Array(histRV)), querySession, 1000, histSchema, Nil)
-      resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+      resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)).toList)
     } should have message "requirement failed: Bucket/le required for histogram bucket"
   }
 
@@ -298,10 +298,10 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   it ("should fail with wrong calculation") {
     // ceil
-    val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expectedVal = sampleBase.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.Ceil)
     val resultObs = instantVectorFnMapper(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -315,7 +315,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   it("should compute histogram_quantile on Histogram RV") {
     val (data, histRV) = histogramRV(numSamples = 10)
     val expected = Seq(0.8, 1.6, 2.4, 3.2, 4.0, 5.6, 7.2, 9.6)
-    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.iterator),
                                  InstantFunctionId.HistogramQuantile, Seq(0.4), histSchema)
 
     // check output schema
@@ -337,7 +337,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         _hist.bucketTop((i-1) % 8) + ratio * (_max -  _hist.bucketTop((i-1) % 8))
       }
     }
-    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.iterator),
                                  InstantFunctionId.HistogramMaxQuantile, Seq(0.9), histMaxMinSchema)
   }
 
@@ -351,15 +351,15 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   it("should compute histogram_bucket on Histogram RV") {
     val (data, histRV) = histogramRV(numSamples = 10, infBucket = true)
     val expected = Seq(1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0)
-    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.iterator),
                                  InstantFunctionId.HistogramBucket, Seq(16.0), histSchema)
 
     val infExpected = (1 to 10).map(_.toDouble)
-    applyFunctionAndAssertResult(Array(histRV), Array(infExpected.toIterator),
+    applyFunctionAndAssertResult(Array(histRV), Array(infExpected.iterator),
                                  InstantFunctionId.HistogramBucket, Seq(Double.PositiveInfinity), histSchema)
 
     // Specifying a nonexistant bucket returns NaN
-    applyFunctionAndAssertResult(Array(histRV), Array(Seq.fill(8)(Double.NaN).toIterator),
+    applyFunctionAndAssertResult(Array(histRV), Array(Seq.fill(8)(Double.NaN).iterator),
                                  InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
   }
 
@@ -378,13 +378,13 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    applyFunctionAndAssertResult(samples, Array(List(2.0, 3.0, 1.0, 12.0, 9.0).toIterator), InstantFunctionId.Month)
-    applyFunctionAndAssertResult(samples, Array(List(2016.0, 2016.0, 2009.0, 2008.0, 2019.0).toIterator), InstantFunctionId.Year)
-    applyFunctionAndAssertResult(samples, Array(List(59.0, 0.0, 0.0, 59.0, 15.0).toIterator), InstantFunctionId.Minute)
-    applyFunctionAndAssertResult(samples, Array(List(23.0, 0.0, 0.0, 23.0, 19.0).toIterator), InstantFunctionId.Hour)
-    applyFunctionAndAssertResult(samples, Array(List(29.0, 31.0, 31.0, 31.0, 30.0).toIterator), InstantFunctionId.DaysInMonth)
-    applyFunctionAndAssertResult(samples, Array(List(29.0, 1.0, 1.0, 31.0, 22.0).toIterator), InstantFunctionId.DayOfMonth)
-    applyFunctionAndAssertResult(samples, Array(List(1.0, 2.0, 4.0, 3.0, 0.0).toIterator), InstantFunctionId.DayOfWeek)
+    applyFunctionAndAssertResult(samples, Array(List(2.0, 3.0, 1.0, 12.0, 9.0).iterator), InstantFunctionId.Month)
+    applyFunctionAndAssertResult(samples, Array(List(2016.0, 2016.0, 2009.0, 2008.0, 2019.0).iterator), InstantFunctionId.Year)
+    applyFunctionAndAssertResult(samples, Array(List(59.0, 0.0, 0.0, 59.0, 15.0).iterator), InstantFunctionId.Minute)
+    applyFunctionAndAssertResult(samples, Array(List(23.0, 0.0, 0.0, 23.0, 19.0).iterator), InstantFunctionId.Hour)
+    applyFunctionAndAssertResult(samples, Array(List(29.0, 31.0, 31.0, 31.0, 30.0).iterator), InstantFunctionId.DaysInMonth)
+    applyFunctionAndAssertResult(samples, Array(List(29.0, 1.0, 1.0, 31.0, 22.0).iterator), InstantFunctionId.DayOfMonth)
+    applyFunctionAndAssertResult(samples, Array(List(1.0, 2.0, 4.0, 3.0, 0.0).iterator), InstantFunctionId.DayOfWeek)
   }
 
   it("should handle NaN for date time functions") {
@@ -399,13 +399,13 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Month)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Year)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Minute)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Hour)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DaysInMonth)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DayOfMonth)
-    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DayOfWeek)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.Month)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.Year)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.Minute)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.Hour)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.DaysInMonth)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.DayOfMonth)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).iterator), InstantFunctionId.DayOfWeek)
   }
 
   private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
@@ -414,7 +414,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId,
       funcParams.map(x => StaticFuncArgs(x, RangeParams(100, 10, 200))))
     val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), querySession, 1000, schema, Nil)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows)
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows())
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {

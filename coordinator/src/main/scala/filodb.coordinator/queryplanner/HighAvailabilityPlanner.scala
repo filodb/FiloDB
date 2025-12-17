@@ -434,7 +434,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       dp => dp.name == partitionName
     )
     //val clusterType = localPlanner.asInstanceOf[SingleClusterPlanner].cl
-    val downWorkUnit = downPartition.foreach(dp =>
+    @scala.annotation.unused val downWorkUnit = downPartition.foreach(dp =>
       dp.downWorkUnits.find(dwu => dwu.name == workunitName).foreach(
         wu => wu.downClusters.find(dc => dc.clusterType == clusterType).foreach(
           dc => dc.downShards.foreach(

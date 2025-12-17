@@ -91,7 +91,7 @@ object CliMain extends StrictLogging {
   val config = allConfig.getConfig("filodb")
   val v2ClusterEnabled =  allConfig.getBoolean("filodb.v2-cluster-enabled")
   lazy val system = ActorSystem("FiloCli", allConfig)
-  lazy implicit val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
+  lazy implicit val ioPool: Scheduler = Scheduler.io(name = FiloSchedulers.IOSchedName,
     reporter = UncaughtExceptionReporter(
       logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
   lazy val settings = FilodbSettings.initialize(allConfig)
@@ -154,7 +154,7 @@ object CliMain extends StrictLogging {
 
   def main(rawArgs: Array[String]): Unit = {
     try {
-      val args = new Arguments(rawArgs)
+      val args = new Arguments(rawArgs.toIndexedSeq)
       val timeout = args.timeoutseconds().seconds
       args.command.toOption match {
         case Some("init") =>
@@ -284,7 +284,7 @@ object CliMain extends StrictLogging {
               timeout, args.shards.toOption.map(_.map(_.toInt)), args.spread.toOption.map(Integer.valueOf))
             parsePromQuery2(remote, query, args.dataset(), getQueryRange(args), options)
           }
-            .getOrElse(printHelp)
+            .getOrElse(printHelp())
       }
     } catch {
       case e: Throwable =>
@@ -447,8 +447,8 @@ object CliMain extends StrictLogging {
   }
 
   def printPartKeyBrAsString(brHex: String): Unit = {
-    val pkBytes = hexStringToByteArray(brHex)
-    val partSchema = Schemas.fromConfig(config).get.part
+    @scala.annotation.unused val pkBytes = hexStringToByteArray(brHex)
+    @scala.annotation.unused val partSchema = Schemas.fromConfig(config).get.part
     println(partKeyBrAsString(brHex))
   }
 
@@ -560,6 +560,7 @@ object CliMain extends StrictLogging {
     content
   }
 
+  @scala.annotation.unused
   private def writeResult(datasetName: String,
                           rows: Iterator[RowReader],
                           columnNames: Seq[String],

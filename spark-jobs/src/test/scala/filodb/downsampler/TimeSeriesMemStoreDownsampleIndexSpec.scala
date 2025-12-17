@@ -28,9 +28,9 @@ import filodb.memory.MemFactory
   * This test creates its own Cassandra column stores
   */
 class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
 
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Configuration that enables chunk-downsampler and write-downsample-index-by-raw-ingesting-store
   val baseConf = ConfigFactory.load("application_test.conf")
@@ -141,8 +141,8 @@ class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers wit
   def linearMultiSeries(
     startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
     seriesPrefix: String = "Series "
-  ): Stream[Seq[Any]] = {
-    Stream.from(0).map { n =>
+  ): LazyList[Seq[Any]] = {
+    LazyList.from(0).map { n =>
       Seq(
         startTs + n * timeStep,
         (1 + n).toDouble,
@@ -153,7 +153,7 @@ class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers wit
   }
 
   def records(
-    ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0,
+    ds: Dataset, stream: LazyList[Seq[Any]], offset: Int = 0,
     ingestionTimeMillis: Long = System.currentTimeMillis()
   ): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory) {
@@ -168,12 +168,12 @@ class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers wit
     containers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
   }
 
-  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
+  def groupedRecords(ds: Dataset, stream: LazyList[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
                      offset: Int = 0): Seq[SomeData] = {
-    val i : Iterator[Stream[Seq[Any]]] = stream.take(n).grouped(groupSize)
+    val i : Iterator[LazyList[Seq[Any]]] = stream.take(n).grouped(groupSize)
     i.toSeq.zipWithIndex.map {
-      case (group: Stream[Seq[Any]], i: Int) =>
+      case (group: LazyList[Seq[Any]], i: Int) =>
         records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
   }

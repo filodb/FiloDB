@@ -128,7 +128,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   protected var firstPageAddress: Long = 0L
 
@@ -171,7 +171,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   override def requestBlocks(memorySize: Long,
                              odp: Boolean,
                              ownerBmf: Option[BlockMemFactory] = None): Seq[Block] = {
-    val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
+    val num: Int = Math.ceil(memorySize.toDouble / blockSizeInBytes).toInt
     stats.requestedBlocksMetric.increment(num)
 
     lock.lock()
@@ -195,7 +195,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
           use(block, odp)
           allocated(i) = block
         }
-        allocated
+        allocated.toIndexedSeq
       } else {
         logger.warn(s"Out of blocks to allocate!  num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}")
         Seq.empty[Block]
@@ -279,7 +279,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   protected def allocate(): util.ArrayDeque[Block] = {
-    val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
+    val numBlocks: Int = Math.floor(totalMemorySizeInBytes.toDouble / blockSizeInBytes).toInt
     val blocks = new util.ArrayDeque[Block]()
     logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
     firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, false)
@@ -292,7 +292,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   protected def use(block: Block, odp: Boolean) = {
-    block.markInUse
+    block.markInUse()
     if (odp) {
       usedOdpBlocks.add(block)
       stats.usedOdpBlocksMetric.update(usedOdpBlocks.size())
@@ -304,8 +304,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   private def addToReclaimLog(block: Block): Unit = {
-    val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining)
-    if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
+    val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining())
+    if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue() }
     reclaimLog += event
   }
 
@@ -340,7 +340,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         }
       }
       usedBlocksStats.update(list.size())
-      removed
+      removed.toSeq
     }
     reclaimed
   }
@@ -360,7 +360,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
    * Useful for debugging.  O(n) - not performant.
    */
   def reclaimEventsForPtr(ptr: BinaryRegion.NativePointer): Seq[ReclaimEvent] =
-    reclaimLog.filter { ev => ptr >= ev.block.address && ptr < (ev.block.address + ev.block.capacity) }
+    reclaimLog.toSeq.filter { ev => ptr >= ev.block.address && ptr < (ev.block.address + ev.block.capacity) }
 
   def timeBlocksForPtr(ptr: BinaryRegion.NativePointer): Seq[Block] = {
     lock.lock()

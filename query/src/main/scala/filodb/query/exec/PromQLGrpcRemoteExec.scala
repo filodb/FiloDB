@@ -32,7 +32,7 @@ trait GrpcRemoteExec extends RemoteExec {
     def remoteExecHttpClient: RemoteExecHttpClient = ???
 
     override def sendRequest(span: Span, timeoutMs: Long)(implicit sched: Scheduler):
-    Task[QueryResponse] = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
+    Task[QueryResponse] = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.iterator.toQueryResponse)
 
     override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +
@@ -59,7 +59,7 @@ trait GrpcRemoteExec extends RemoteExec {
 case class PromQLGrpcRemoteExec(channel: Channel,
                            requestTimeoutMs: Long,
                            queryContext: QueryContext,
-                           dispatcher: PlanDispatcher,
+                           dispatcher: filodb.query.exec.PlanDispatcher,
                            dataset: DatasetRef,
                            plannerSelector: String) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):

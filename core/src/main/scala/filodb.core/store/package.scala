@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 
+import filodb.core.Iterators.RichObservable
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.query.QuerySession
@@ -133,8 +134,6 @@ package object store {
    * Adds a few useful methods to ChunkSource
    */
   implicit class RichChunkSource(source: ChunkSource) {
-    import Iterators._
-
     /**
      * Convenience method to scan/iterate over all rows of given selection of source data.  You must iterate
      * through all the elements.
@@ -149,7 +148,7 @@ package object store {
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan,
-                 querySession: QuerySession = QuerySession.makeForTestingOnly): Iterator[RowReader] =
+                 querySession: QuerySession = QuerySession.makeForTestingOnly()): Iterator[RowReader] =
       source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod, querySession)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))

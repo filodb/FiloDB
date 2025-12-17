@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.mutable
 
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -74,7 +74,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     if (pushdownKeys.isDefined) {
       val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
-      Some(PlanResult(plans))
+      Some(PlanResult(plans.toSeq))
     } else None
   }
 
@@ -153,18 +153,18 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val hasSameShardKeyFilters = shardKeyFilterGroups.tail.forall(_.toSet == shardKeyFilterGroups.head.toSet)
     val shardKeys = getShardKeys(logicalPlan)
     val partitions = shardKeys
-      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters), qParams).map(_.proportionMap))
+      .flatMap(filters => getPartitions(logicalPlan.replaceFilters(filters.toSeq), qParams).map(_.proportionMap))
       .distinct
 
     // NOTE: don't use partitions.size < 2. When partitions == 0, generateExec will not
     //   materialize any plans because there are no partitions against which it should materialize.
     //   That is a problem for e.g. scalars or absent().
     if (hasSameShardKeyFilters && partitions.size == 1) {
-      val plans = generateExec(logicalPlan, shardKeys, qContext)
+      val plans = generateExec(logicalPlan, shardKeys, qContext, pushdownPlan = false)
       // If !=1 plans were produced, additional high-level coordination may be needed
       //   (e.g. joins / aggregations). In that case, proceed through the logic below.
       if (plans.size == 1) {
-        return PlanResult(plans)
+        return PlanResult(plans.toSeq)
       }
     }
     logicalPlan match {
@@ -187,7 +187,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    generateExec(logicalPlan, shardKeyMatches, qContext)
+    generateExec(logicalPlan, shardKeyMatches, qContext, pushdownPlan = false)
   }
 
   // scalastyle:off method.length
@@ -223,7 +223,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExecForEachAssignment(logicalPlan: LogicalPlan,
                                            keys: Seq[Seq[ColumnFilter]],
                                            qContext: QueryContext,
-                                           pushdownPlan: Boolean = false): Seq[ExecPlan] = {
+                                           pushdownPlan: Boolean): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
     if (keys.isEmpty) {
@@ -237,7 +237,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     //   individually to take advantage of exiting split-key stitching infrastructure.
     val assignmentSplitKeys = new mutable.ArrayBuffer[Seq[ColumnFilter]]
     keys.foreach { key =>
-      val newLogicalPlan = logicalPlan.replaceFilters(key)
+      val newLogicalPlan = logicalPlan.replaceFilters(key.toSeq)
       val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val assignments = getPartitions(newLogicalPlan, newQueryParams)
         .distinct
@@ -307,7 +307,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // Just materialize each of these partition-split plans individually -- let the
     //   lower-level planners handle stitching.
     val splitPlans = assignmentSplitKeys.map{ key =>
-      val newLogicalPlan = logicalPlan.replaceFilters(key)
+      val newLogicalPlan = logicalPlan.replaceFilters(key.toSeq)
       val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val newQueryContext = qContext.copy(
         origQueryParams = newQueryParams,
@@ -325,11 +325,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExecForEachKey(logicalPlan: LogicalPlan,
                                      keys: Seq[Seq[ColumnFilter]],
                                      qContext: QueryContext,
-                                     pushdownPlan: Boolean = false): Seq[ExecPlan] = {
+                                     pushdownPlan: Boolean): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val skipAggregatePresentValue = !pushdownPlan && keys.length > 1
     keys.map { result =>
-      val newLogicalPlan = logicalPlan.replaceFilters(result)
+      val newLogicalPlan = logicalPlan.replaceFilters(result.toSeq)
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
       // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
@@ -367,7 +367,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def generateExec(logicalPlan: LogicalPlan,
                            keys: Seq[Seq[ColumnFilter]],
                            qContext: QueryContext,
-                           pushdownPlan: Boolean = false): Seq[ExecPlan] =
+                           pushdownPlan: Boolean): Seq[ExecPlan] =
     if (qContext.plannerParams.reduceShardKeyRegexFanout) {
       generateExecForEachAssignment(logicalPlan, keys, qContext, pushdownPlan)
     } else {
@@ -395,7 +395,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       val lhsPlanRes = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
       val rhsPlanRes = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
-      val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+      val execPlan: ExecPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, inProcessPlanDispatcher, lhsPlanRes.plans, rhsPlanRes.plans, logicalPlan.operator,
           logicalPlan.on.map(LogicalPlanUtils.renameLabels(_, datasetMetricColumn)),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
@@ -408,7 +408,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
           LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
           rvRangeFromPlan(logicalPlan))
 
-      PlanResult(Seq(execPlan))
+      PlanResult(Seq(execPlan).toSeq)
     }
   }
 
@@ -418,7 +418,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def getTschemaLabelsIfCanPushdown(lp: LogicalPlan, qContext: QueryContext): Option[Seq[String]] = {
     val canTschemaPushdown = getPushdownKeys(qContext, lp).isDefined
     if (canTschemaPushdown) {
-      LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext), getShardKeys)
+      LogicalPlanUtils.sameRawSeriesTargetSchemaColumns(lp, targetSchemaProvider(qContext), getShardKeys).map(_.toSeq)
     } else None
   }
 
@@ -434,8 +434,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
 
     val tschemaLabels = getTschemaLabelsIfCanPushdown(aggregate.vectors, queryContext)
-    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels, queryContext)
-    val plan = if (!canPushdown) {
+    val canPushdown = canPushdownAggregate(aggregate, tschemaLabels.map(_.toSeq), queryContext)
+    val plan: ExecPlan = if (!canPushdown) {
       val childPlanRes = walkLogicalPlanTree(aggregate.vectors,
         queryContext.copy(plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = false)))
       // We are here because we cannot pushdown the aggregation, if that was multi-partition, the dispatcher will
@@ -444,28 +444,28 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // use the same dispatcher
       addAggregator(aggregate, queryContext, childPlanRes)
     } else {
-      val execPlans = generateExecWithoutRegex(aggregate,
+      val execPlans: Seq[ExecPlan] = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head,
         queryContext)
-      val exec = if (execPlans.size == 1) execPlans.head
+      val exec: ExecPlan = if (execPlans.size == 1) execPlans.head
       else {
         if ((aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
           || aggregate.operator.equals(AggregationOperator.CountValues)
-          ) && !canSupportMultiPartitionCalls(execPlans))
+          ) && !canSupportMultiPartitionCalls(execPlans.toSeq))
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-          val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
+          val _promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
-            RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+            RangeParams(_promQlQueryParams.startSecs, _promQlQueryParams.stepSecs, _promQlQueryParams.endSecs)))
           reducer
         }
       }
       exec
     }
-    PlanResult(Seq(plan))
+    PlanResult(Seq(plan).toSeq)
   }
 
   /***
@@ -476,8 +476,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-    val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-    val exec = if (execPlans.size == 1) {
+    val execPlans: Seq[ExecPlan] = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
+    val exec: ExecPlan = if (execPlans.size == 1) {
       execPlans.head
     } else if (execPlans.size > 1) {
       // TODO
@@ -489,11 +489,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // would have suboptimal performance. See subquery tests in PlannerHierarchySpec
       MultiPartitionDistConcatExec(
         queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq
       )
     } else {
       EmptyResultExec(queryContext, dataset.ref, inProcessPlanDispatcher)
     }
-    PlanResult(Seq(exec))
+    PlanResult(Seq(exec).toSeq)
   }
 }

@@ -23,7 +23,7 @@ object NewFiloServerMain extends StrictLogging {
   def start(): Unit = {
     try {
 
-      val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
+      val allConfig = GlobalConfig.systemConfig
       val settings = FilodbSettings.initialize(allConfig)
 
       Kamon.init()
