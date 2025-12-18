@@ -27,6 +27,7 @@ object Dependencies {
   val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "3.4.0"
   val sttpVersion       = "1.3.3"
+  val arrowVersion      = "15.0.0"
 
   /* Dependencies shared */
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
@@ -88,7 +89,10 @@ object Dependencies {
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
     "com.twitter"                  %% "chill"             % "0.9.3",
-    "org.apache.commons"           % "commons-lang3"      % "3.14.0"
+    "org.apache.commons"           % "commons-lang3"      % "3.14.0",
+    // Apache Arrow dependencies for ArrowSerializedRangeVector
+    "org.apache.arrow"             % "arrow-vector"       % arrowVersion,
+    "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
@@ -127,7 +131,12 @@ object Dependencies {
     "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21" excludeAll(excludeAkka),
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
     "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test,
-    "org.apache.commons" % "commons-text" % "1.9"
+    "org.apache.commons"     % "commons-text"                 % "1.9",
+    // Apache Arrow Flight dependencies for FiloDBFlightServer
+    "org.apache.arrow"       % "flight-core"                  % arrowVersion excludeAll(excludegrpc),
+    "org.apache.arrow"       % "flight-grpc"                  % arrowVersion excludeAll(excludegrpc),
+    "io.grpc"                % "grpc-netty"                   % "1.60.0",
+    "io.grpc"                % "grpc-stub"                    % "1.60.0"
   )
 
   lazy val cliDeps = Seq(

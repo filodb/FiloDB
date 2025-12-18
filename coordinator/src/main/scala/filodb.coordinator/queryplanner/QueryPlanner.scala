@@ -7,7 +7,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.query.{LogicalPlan, QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
 
@@ -29,6 +29,7 @@ trait QueryPlanner {
     * Trigger orchestration of the ExecPlan. It sends the ExecPlan to the destination where it will be executed.
     */
   def dispatchExecPlan(execPlan: ExecPlan,
+                       querySession: QuerySession,
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -38,11 +39,13 @@ trait QueryPlanner {
     Kamon.runWithSpan(parentSpan, false) {
       // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
       execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource())
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
+        querySession.queryAllocator), UnsupportedChunkSource())
     }
   }
 
   def dispatchStreamingExecPlan(execPlan: ExecPlan,
+                       querySession: QuerySession,
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler, timeout: FiniteDuration): Observable[StreamQueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -52,7 +55,8 @@ trait QueryPlanner {
     Kamon.runWithSpan(parentSpan, false) {
       // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
       execPlan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource())
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
+        querySession.queryAllocator), UnsupportedChunkSource())
     }
   }
 

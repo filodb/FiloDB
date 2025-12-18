@@ -40,7 +40,8 @@ case class GenericRemoteExec(
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val planWithParams = ExecPlanWithClientParams(
       execPlan,
-      ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)
+      ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
+      querySession.queryAllocator
     )
     dispatcher.dispatch(planWithParams, UnsupportedChunkSource())
   }

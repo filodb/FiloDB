@@ -396,12 +396,18 @@ message GrpcPlanDispatcher {
   int64  requestTimeoutMs    = 2;
 }
 
+message SingleClusterFlightPlanDispatcher {
+  PlanDispatcher planDispatcher      = 1;
+  string location            = 2;
+}
+
 message PlanDispatcherContainer {
   oneof dispatcher  {
     ActorPlanDispatcher actorPlanDispatcher                        = 1;
     InProcessPlanDispatcher inProcessPlanDispatcher                = 2;
     RemoteActorPlanDispatcher remoteActorPlanDispatcher            = 3;
     GrpcPlanDispatcher grpcPlanDispatcher                          = 4;
+    SingleClusterFlightPlanDispatcher singleClusterFlightPlanDispatcher         = 5;
   }
 
 }

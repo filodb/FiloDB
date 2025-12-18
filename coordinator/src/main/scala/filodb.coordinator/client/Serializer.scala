@@ -1,5 +1,7 @@
 package filodb.coordinator.client
 
+import java.net.URI
+
 import com.esotericsoftware.kryo.{Kryo, Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.minlog.Log
@@ -13,6 +15,83 @@ import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.{Column, PartitionSchema, Schema, Schemas}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
+
+
+object KryoInit {
+  def initKryo(kryo: Kryo): Unit = {
+    kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
+    val colTypeSer = new ColumnTypeSerializer
+    Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
+
+    kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
+    kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
+    kryo.register(classOf[Schema], new SchemaSerializer)
+    kryo.register(classOf[PartitionSchema], new PartSchemaSerializer)
+
+    initOtherFiloClasses(kryo)
+    initQueryEngine2Classes(kryo)
+    kryo.setReferences(true)   // save space by referring to same objects with ordinals
+    Log.info("Finished initializing custom Kryo serializers")
+
+    // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
+    // even if it gets filtered out by the logging framework.
+    Log.WARN()
+
+  }
+
+  def initQueryEngine2Classes(kryo: Kryo): Unit = {
+    kryo.register(classOf[QueryCommands.LogicalPlan2Query])
+    kryo.register(classOf[filodb.query.QueryResult])
+    kryo.register(classOf[filodb.query.QueryError])
+    kryo.register(classOf[filodb.query.exec.SelectRawPartitionsExec])
+    kryo.register(classOf[filodb.query.exec.LocalPartitionReduceAggregateExec])
+    kryo.register(classOf[filodb.query.exec.MultiPartitionReduceAggregateExec])
+    kryo.register(classOf[filodb.query.exec.BinaryJoinExec])
+    kryo.register(classOf[filodb.query.exec.LocalPartitionDistConcatExec])
+    kryo.register(classOf[filodb.query.exec.MultiPartitionDistConcatExec])
+    kryo.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
+    kryo.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
+    kryo.register(classOf[filodb.query.exec.ScalarOperationMapper])
+    kryo.register(classOf[filodb.query.exec.AggregateMapReduce])
+    kryo.register(classOf[filodb.query.exec.AggregatePresenter])
+    kryo.register(classOf[filodb.core.query.SerializedRangeVector])
+    kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey],
+      new PartitionRangeVectorKeySerializer)
+    kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
+
+    // Needed to serialize/deserialize exceptions multiple times (see unit test for example)
+    UnmodifiableCollectionsSerializer.registerSerializers(kryo)
+  }
+
+  def initOtherFiloClasses(kryo: Kryo): Unit = {
+    // Initialize other commonly used FiloDB classes
+    kryo.register(classOf[DatasetRef])
+    kryo.register(classOf[RecordSchema2])
+    kryo.register(classOf[filodb.coordinator.ShardEvent])
+    kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
+    kryo.register(classOf[filodb.coordinator.StatusActor.EventEnvelope])
+    kryo.register(classOf[filodb.coordinator.StatusActor.StatusAck])
+    kryo.register(classOf[URI], new URISerializer)
+
+    import filodb.core.query._
+    kryo.register(classOf[PartitionInfo], new PartitionInfoSerializer)
+    kryo.register(classOf[ColumnInfo])
+    kryo.register(classOf[ColumnFilter])
+
+    import filodb.core.store._
+    kryo.register(classOf[ChunkSetInfo])
+    kryo.register(WriteBufferChunkScan.getClass)
+    kryo.register(AllChunkScan.getClass)
+    kryo.register(classOf[TimeRangeChunkScan])
+    kryo.register(classOf[FilteredPartitionScan])
+    kryo.register(classOf[ShardSplit])
+
+    kryo.register(classOf[QueryCommands.BadQuery])
+    kryo.register(classOf[QueryContext])
+    kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
+  }
+
+}
 
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
@@ -33,74 +112,17 @@ import filodb.memory.format.ZeroCopyUTF8String
  */
 class KryoInit extends DefaultKryoInitializer {
   override def postInit(kryo: ScalaKryo): Unit = {
-    kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
-    val colTypeSer = new ColumnTypeSerializer
-    Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
+    KryoInit.initKryo(kryo)
+  }
+}
 
-    kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
-    kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
-    kryo.register(classOf[Schema], new SchemaSerializer)
-    kryo.register(classOf[PartitionSchema], new PartSchemaSerializer)
-
-    initOtherFiloClasses(kryo)
-    initQueryEngine2Classes(kryo)
-    kryo.setReferences(true)   // save space by referring to same objects with ordinals
-    Log.info("Finished initializing custom Kryo serializers")
-
-    // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
-    // even if it gets filtered out by the logging framework.
-    Log.WARN()
+class URISerializer extends KryoSerializer[URI] {
+  override def write(kryo: Kryo, output: Output, uri: URI): Unit = {
+    output.writeString(uri.toString)
   }
 
-  def initQueryEngine2Classes(kryo: Kryo): Unit = {
-    kryo.register(classOf[QueryCommands.LogicalPlan2Query])
-    kryo.register(classOf[filodb.query.QueryResult])
-    kryo.register(classOf[filodb.query.QueryError])
-    kryo.register(classOf[filodb.query.exec.SelectRawPartitionsExec])
-    kryo.register(classOf[filodb.query.exec.LocalPartitionReduceAggregateExec])
-    kryo.register(classOf[filodb.query.exec.MultiPartitionReduceAggregateExec])
-    kryo.register(classOf[filodb.query.exec.BinaryJoinExec])
-    kryo.register(classOf[filodb.query.exec.LocalPartitionDistConcatExec])
-    kryo.register(classOf[filodb.query.exec.MultiPartitionDistConcatExec])
-    kryo.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
-    kryo.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
-    kryo.register(classOf[filodb.query.exec.ScalarOperationMapper])
-    kryo.register(classOf[filodb.query.exec.AggregateMapReduce])
-    kryo.register(classOf[filodb.query.exec.AggregatePresenter])
-    kryo.register(classOf[filodb.core.query.SerializedRangeVector])
-    kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey],
-                  new PartitionRangeVectorKeySerializer)
-    kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
-
-    // Needed to serialize/deserialize exceptions multiple times (see unit test for example)
-    UnmodifiableCollectionsSerializer.registerSerializers(kryo)
-  }
-
-  def initOtherFiloClasses(kryo: Kryo): Unit = {
-    // Initialize other commonly used FiloDB classes
-    kryo.register(classOf[DatasetRef])
-    kryo.register(classOf[RecordSchema2])
-    kryo.register(classOf[filodb.coordinator.ShardEvent])
-    kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
-    kryo.register(classOf[filodb.coordinator.StatusActor.EventEnvelope])
-    kryo.register(classOf[filodb.coordinator.StatusActor.StatusAck])
-
-    import filodb.core.query._
-    kryo.register(classOf[PartitionInfo], new PartitionInfoSerializer)
-    kryo.register(classOf[ColumnInfo])
-    kryo.register(classOf[ColumnFilter])
-
-    import filodb.core.store._
-    kryo.register(classOf[ChunkSetInfo])
-    kryo.register(WriteBufferChunkScan.getClass)
-    kryo.register(AllChunkScan.getClass)
-    kryo.register(classOf[TimeRangeChunkScan])
-    kryo.register(classOf[FilteredPartitionScan])
-    kryo.register(classOf[ShardSplit])
-
-    kryo.register(classOf[QueryCommands.BadQuery])
-    kryo.register(classOf[QueryContext])
-    kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
+  override def read(kryo: Kryo, input: Input, tpe: Class[URI]): URI = {
+    new URI(input.readString())
   }
 }
 
