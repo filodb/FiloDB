@@ -2096,7 +2096,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     ep4.isInstanceOf[EmptyResultExec] shouldEqual true
     import GlobalScheduler._
     val res = ep4.dispatcher.dispatch(ExecPlanWithClientParams(ep4, ClientParams
-    (ep4.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+    (ep4.queryContext.plannerParams.queryTimeoutMillis), None), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     res.result.isEmpty shouldEqual true
   }
 

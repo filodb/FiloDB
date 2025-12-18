@@ -20,7 +20,8 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.metrics.{FilodbMetrics, MetricsHistogram}
-import filodb.core.query.{IteratorBackedRangeVector, QueryConfig, QueryContext, QueryStats, SerializedRangeVector}
+import filodb.core.query.{IteratorBackedRangeVector, QueryConfig, QueryContext, QuerySession,
+                          QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
@@ -182,7 +183,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           implicit val dispatcherScheduler: Scheduler = scheduler
           rp.span.mark("Sending query request")
           val queryParams = request.getQueryParams
-          val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
+          val qContext = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
           val eval = Try {
             val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
@@ -191,15 +192,16 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
               queryParams.getPromQL,
               TimeStepParams(queryParams.getStart, queryParams.getStep, queryParams.getEnd))
 
-            val exec = queryPlanner.materialize(logicalPlan, config)
-            queryPlanner.dispatchExecPlan(exec, rp.span).foreach(
+            val querySession = QuerySession(qContext, queryConfig, catchMultipleLockSetErrors = true)
+            val exec = queryPlanner.materialize(logicalPlan, qContext)
+            queryPlanner.dispatchExecPlan(exec, querySession, rp.span).foreach(
               (qr: QueryResponse) => rp.processQueryResponse(qr)
             )
           }
           eval match {
             case Failure(t)   =>
               logger.error("Caught failure while executing query", t)
-              rp.processQueryResponse(QueryError(config.queryId, QueryStats(), t))
+              rp.processQueryResponse(QueryError(qContext.queryId, QueryStats(), t))
               rp.span.fail("Query execution failed", t)
             case _            =>  rp.span.mark("query execution successful")
           }
@@ -240,7 +242,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           val rp = new StreamingResponseProcessor(responseObserver, span, dataset, startNs)
           val eval = Try {
             val execPlanWParams = ExecPlanWithClientParams(
-              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)
+              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis), None
             )
             execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource()).foreach(
               (qr: QueryResponse) => rp.processQueryResponse(qr)

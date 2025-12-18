@@ -7,10 +7,10 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.SortedSet
 import scala.concurrent.duration._
 
+import org.apache.arrow.memory.BufferAllocator
+
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
-
-
 
 trait TsdbQueryParams
 
@@ -337,6 +337,7 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
+ * QuerySession should never be serialized and sent/recieved over the wire to a peer Filodb or client node.
   *
   * IMPORTANT: The param catchMultipleLockSetErrors should be false
   * only in unit test code for ease of use.
@@ -349,6 +350,7 @@ case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
                         streamingDispatch: Boolean = false,
                         catchMultipleLockSetErrors: Boolean = false,
+                        queryAllocator: Option[BufferAllocator] = None,
                         // in case of target schemas, when the child Exec plan is run, if the
                         //  the execution happens locally and thus no serialization is necessary
                         preventRangeVectorSerialization: Boolean = false) {
@@ -367,6 +369,7 @@ case class QuerySession(qContext: QueryContext,
 
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
+    queryAllocator.foreach(_.close())
     lock = None
   }
 }
