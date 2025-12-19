@@ -27,7 +27,7 @@ object Dependencies {
   val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "3.4.0"
   val sttpVersion       = "1.3.3"
-  val arrowVersion      = "15.0.0"
+  val arrowVersion      = "11.0.0" // latest version is 15, but unfortunately it breaks Spark compatibility
 
   /* Dependencies shared */
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
