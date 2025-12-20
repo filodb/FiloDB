@@ -95,14 +95,12 @@ object GatewayServer extends StrictLogging {
 
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
-    import GatewayOptions._
 
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
       descr = "# of samples per time series")
     val numSeriesPerMetric = opt[Int](short = 'p', default = Some(20), descr = "# of total time series per metric")
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
-    val genHistData = opt[Option[String]](name = "gen-hist-data",
-      descr = "Generate Prometheus hist-schema test data. Can be passed with an optional metric name.")
+    val genHistData = toggle(name = "gen-hist-data", descrYes = "Generate Prometheus hist-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
     val genOtelCumulativeHistData = toggle(noshort = true,
       descrYes = "Generate otel-cumulative-histogram schema test data and exit")
@@ -110,15 +108,14 @@ object GatewayServer extends StrictLogging {
       descrYes = "Generate otel-delta-histogram schema test data and exit")
     val genOtelExpDeltaHistData = toggle(noshort = true,
       descrYes = "Generate otel-exponential-delta-histogram schema test data and exit")
-    val genGaugeData = opt[Option[String]](name = "gen-gauge-data",
-      descr = "Generate Prometheus gauge-schema test data. Can be passed with an optional metric name.")
-    val genCounterData = opt[Option[String]](name = "gen-counter-data",
-      descr = "Generate Prometheus counter-schema test data. Can be passed with an optional metric name.")
+    val genGaugeData = toggle(name = "gen-gauge-data", descrYes = "Generate Prometheus gauge-schema test data and exit")
+    val genCounterData = toggle(name = "gen-counter-data",
+      descrYes = "Generate Prometheus counter-schema test data and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
-    val nameSpace = opt[String](name = "ns", default = Some("Test-data_dev1_0"), descr = "FiloDB ingestion namespace")
-    val workSpace = opt[String](name = "ws", default = Some("aci-telemetry"), descr = "FiloDB ingestion workspace")
+    val nameSpace = opt[String](name = "ns", default = Some("App-0"), descr = "FiloDB ingestion namespace")
+    val workSpace = opt[String](name = "ws", default = Some("demo"), descr = "FiloDB ingestion workspace")
 
     verify()
   }
@@ -168,10 +165,10 @@ object GatewayServer extends StrictLogging {
                                name: String,
                                generator: () => Stream[InputRecord])
 
-    val genHist = userOpts.genHistData.isSupplied
-    val genGaugeData = userOpts.genGaugeData.isSupplied
+    val genHist = userOpts.genHistData.getOrElse(false)
+    val genGaugeData = userOpts.genGaugeData.getOrElse(false)
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    val genCounterData = userOpts.genCounterData.isSupplied
+    val genCounterData = userOpts.genCounterData.getOrElse(false)
     val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
@@ -183,24 +180,32 @@ object GatewayServer extends StrictLogging {
     val allGenerators = Seq(
       GeneratorConfig(genHist, promHistogram.name,
         () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram,
-          metricNameOverride = userOpts.genHistData(), namespace = userOpts.nameSpace(),
+          metricNameOverride = None, namespace = userOpts.nameSpace(),
           workspace = userOpts.workSpace())),
       GeneratorConfig(genOtelCumulativeHistData, otelCumulativeHistogram.name,
-        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelCumulativeHistogram)),
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelCumulativeHistogram,
+          metricNameOverride = None, namespace = userOpts.nameSpace(),
+          workspace = userOpts.workSpace())),
       GeneratorConfig(genOtelDeltaHistData, otelDeltaHistogram.name,
-        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelDeltaHistogram)),
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelDeltaHistogram,
+          metricNameOverride = None, namespace = userOpts.nameSpace(),
+          workspace = userOpts.workSpace())),
       GeneratorConfig(genOtelExpDeltaHistData, otelExpDeltaHistogram.name,
-        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelExpDeltaHistogram)),
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, otelExpDeltaHistogram,
+          metricNameOverride = None, namespace = userOpts.nameSpace(),
+          workspace = userOpts.workSpace())),
       GeneratorConfig(genDeltaHist, deltaHistogram.name,
-        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)),
+        () => TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram,
+          metricNameOverride = None, namespace = userOpts.nameSpace(),
+          workspace = userOpts.workSpace())),
       GeneratorConfig(genGaugeData, gauge.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), gauge, userOpts.nameSpace(), userOpts.workSpace(),
-          metricNameOverride = userOpts.genGaugeData())),
+          metricNameOverride = None)),
       GeneratorConfig(genCounterData, promCounter.name,
         () => TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), userOpts.nameSpace(), userOpts.workSpace(),
-          metricNameOverride = userOpts.genCounterData())),
+          metricNameOverride = None)),
       GeneratorConfig(genDeltaCounterData, deltaCounter.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), deltaCounter))
@@ -241,9 +246,7 @@ object GatewayServer extends StrictLogging {
         genHist,
         genDeltaHist,
         genGaugeData,
-        userOpts.genGaugeData().getOrElse("heap_usage0"),
         genCounterData,
-        userOpts.genCounterData().getOrElse("heap_usage_counter"),
         genOtelCumulativeHistData,
         genOtelDeltaHistData,
         genOtelExpDeltaHistData,
