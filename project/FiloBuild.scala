@@ -196,7 +196,8 @@ object Submodules {
       commonSettings,
       name := "filodb-jmh",
       libraryDependencies ++= jmhDeps,
-      publish := {}
+      publish := {},
+      Test / skip := true // to avoid including JMH tests in coverage reports
     )
 
   //  lazy val stress = (project in file("stress"))
@@ -227,6 +228,7 @@ object Submodules {
       commonSettings,
       name := "filodb-gatling",
       libraryDependencies ++= gatlingDeps,
-      publish := {}
+      publish := {},
+      Test / skip := true // to avoid including Performance tests in coverage reports
     )
 }
