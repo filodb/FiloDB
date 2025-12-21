@@ -235,6 +235,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           import filodb.coordinator.ProtoConverters._
           val queryContextProto = remoteExecPlanProto.getQueryContext
           val queryContext = queryContextProto.fromProto
+          val querySession = QuerySession(queryContext, queryConfig, catchMultipleLockSetErrors = true)
           val execPlan = remoteExecPlanProto.getExecPlan().fromProto(queryContext)
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
@@ -242,8 +243,8 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           val rp = new StreamingResponseProcessor(responseObserver, span, dataset, startNs)
           val eval = Try {
             val execPlanWParams = ExecPlanWithClientParams(
-              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis), None
-            )
+              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
+              querySession)
             execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource()).foreach(
               (qr: QueryResponse) => rp.processQueryResponse(qr)
             )

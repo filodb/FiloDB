@@ -4,7 +4,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.SortedSet
+import scala.collection.mutable.{ListBuffer, SortedSet}
 import scala.concurrent.duration._
 
 import org.apache.arrow.memory.BufferAllocator
@@ -360,6 +360,12 @@ case class QuerySession(qContext: QueryContext,
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false
   var partialResultsReason: Option[String] = None
+  private val arrowCloseables: ListBuffer[AutoCloseable] =
+    scala.collection.mutable.ListBuffer.empty[AutoCloseable]
+
+  def registerArrowCloseable(closeable: AutoCloseable): Unit = {
+    arrowCloseables += closeable
+  }
 
   def setLock(toSet: EvictionLock): Unit = {
     if (catchMultipleLockSetErrors && lock.isDefined)
@@ -370,6 +376,8 @@ case class QuerySession(qContext: QueryContext,
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     queryAllocator.foreach(_.close())
+    arrowCloseables.reverseIterator.foreach(_.close())
+    arrowCloseables.clear()
     lock = None
   }
 }

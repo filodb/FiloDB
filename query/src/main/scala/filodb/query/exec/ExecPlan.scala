@@ -11,7 +11,6 @@ import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.{DatasetRef, Utils}
 import filodb.core.binaryrecord2.RecordSchema
@@ -620,7 +619,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
     Observable.fromTask(
       execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
                                           ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000),
-                                          querySession.queryAllocator), source)
+                                          querySession), source)
           .onErrorHandle { ex: Throwable =>
             QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
           }.map {
@@ -699,7 +698,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000,
-                     preventRangeVectorSerialization), qSession.queryAllocator), source)
+                     preventRangeVectorSerialization), qSession), source)
           .onErrorHandle { ex: Throwable =>
             QueryError(queryContext.queryId, qSession.queryStats, ex)
           }
@@ -716,7 +715,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000,
-          qSession.preventRangeVectorSerialization), qSession.queryAllocator), source)
+          qSession.preventRangeVectorSerialization), qSession), source)
           .onErrorHandle { ex: Throwable =>
             StreamQueryError(queryContext.queryId, planId, qSession.queryStats, ex)
           }
@@ -914,7 +913,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
 // deadline is set to QueryContext.plannerParams.queryTimeoutMillis for the top level call
 case class ClientParams(deadlineMs: Long, preventRangeVectorSerialization: Boolean = false)
-case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams,
-                                    queryAllocator: Option[BufferAllocator])
+case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams, querySession: QuerySession)
 
 trait MetadataLeafExecPlan extends  LeafExecPlan with MetadataExecPlan

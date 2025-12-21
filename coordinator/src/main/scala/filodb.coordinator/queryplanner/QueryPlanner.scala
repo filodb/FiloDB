@@ -40,7 +40,7 @@ trait QueryPlanner {
       // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
       execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
         ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
-        querySession.queryAllocator), UnsupportedChunkSource())
+        querySession), UnsupportedChunkSource())
     }
   }
 
@@ -56,7 +56,7 @@ trait QueryPlanner {
       // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
       execPlan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(execPlan,
         ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
-        querySession.queryAllocator), UnsupportedChunkSource())
+        querySession), UnsupportedChunkSource())
     }
   }
 

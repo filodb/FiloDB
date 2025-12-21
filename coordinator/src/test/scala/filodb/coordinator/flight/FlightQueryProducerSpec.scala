@@ -1,4 +1,4 @@
-package filodb.coordinator
+package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
 import org.apache.arrow.flight.{FlightServer, Location}
@@ -8,18 +8,17 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.coordinator.flight.{FiloDBFlightProducer, FlightAllocator, SingleClusterFlightPlanDispatcher}
 import filodb.core.MachineMetricsData.records
 import filodb.core.MetricsTestData.{timeSeriesData, timeseriesDatasetWithMetric}
 import filodb.core.TestData
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ArrowSerializedRangeVector, ColumnFilter, Filter, QueryContext, RangeParams, RvRange}
+import filodb.core.query._
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
 import filodb.query.AggregationOperator.Count
-import filodb.query.{BinaryOperator, Cardinality, QueryResult}
 import filodb.query.exec._
+import filodb.query.{BinaryOperator, Cardinality, QueryResult}
 
 class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
@@ -43,7 +42,6 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     FlightAllocator.rootAllocator.close()
     // dont close these since there can be other tests using it, but enabling them will help find leaks within this test
 //    FlightClientManager.global.shutdown()
-
   }
 
   it("should ingest into multiple series and be able to query across all partitions in real time") {
@@ -54,7 +52,10 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     memStore.ingest(timeseriesDatasetWithMetric.ref, 0, data)
     memStore.refreshIndexForTesting(timeseriesDatasetWithMetric.ref)
 
-    val allocator = FlightAllocator.rootAllocator
+    val allocator = FlightAllocator.rootAllocator.newChildAllocator("FlightQueryProducerSpec", 0, 100000)
+    val querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig,
+      queryAllocator = Some(allocator))
+
     val location = Location.forGrpcInsecure("localhost", 8815)
     val server = FlightServer.builder(allocator, location,
                               new FiloDBFlightProducer(memStore, allocator, location, config)).build()
@@ -105,7 +106,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       metricColumn = "_metric_",
       Some(RvRange(0, 1000, 100000)))
 
-    val qRes2 = bje.dispatcher.dispatch(ExecPlanWithClientParams(bje, ClientParams(60000), Some(allocator)),
+    val qRes2 = bje.dispatcher.dispatch(ExecPlanWithClientParams(bje, ClientParams(60000), querySession),
       UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     val rvRows2 = qRes2.result.map { rv =>
       val rows = rv.rows().map(r => (r.getLong(0))).toList
@@ -117,7 +118,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     qRes2.result.map(_.key.toString) shouldEqual
       List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
-    FlightAllocator.rootAllocator.close()
+    querySession.close()
 
     /*
     Add to the previous query plan with an aggregation on top.
@@ -143,7 +144,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       Nil)
     agg.addRangeVectorTransformer(AggregatePresenter(Count, Nil, RangeParams(0, 1, 100), Nil))
 
-    val qRes = agg.dispatcher.dispatch(ExecPlanWithClientParams(agg, ClientParams(60000), Some(allocator)),
+    val qRes = agg.dispatcher.dispatch(ExecPlanWithClientParams(agg, ClientParams(60000), querySession),
                                 UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     val rvRows = qRes.result.map { rv =>
       val rows = rv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
@@ -155,7 +156,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     qRes.result.map(_.key.toString) shouldEqual
       List("/shard:/Map()")
 
-    FlightAllocator.rootAllocator.close()
+    querySession.close()
 
     // Label values query now
 
@@ -174,7 +175,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       Seq(lve)
     )
 
-    val qRes3 = lvdce.dispatcher.dispatch(ExecPlanWithClientParams(lvdce, ClientParams(60000), Some(allocator)),
+    val qRes3 = lvdce.dispatcher.dispatch(ExecPlanWithClientParams(lvdce, ClientParams(60000), querySession),
       UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
 
     val rvRows3 = qRes3.result.map { rv =>
@@ -184,7 +185,8 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     }
     rvRows3 shouldEqual List(List("host1", "host2"))
 
-    FlightAllocator.rootAllocator.close()
+    querySession.close()
+
     // Part Key exec query now
 
     val pke = PartKeysExec(
@@ -202,7 +204,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       Seq(pke)
     )
 
-    val qRes4 = pkdce.dispatcher.dispatch(ExecPlanWithClientParams(pkdce, ClientParams(60000), Some(allocator)),
+    val qRes4 = pkdce.dispatcher.dispatch(ExecPlanWithClientParams(pkdce, ClientParams(60000), querySession),
       UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
 
     val rvRows4 = qRes4.result.map { rv =>
@@ -213,6 +215,9 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     rvRows4 shouldEqual List(List(
       Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host2", "region" -> "region1"),
       Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
+    querySession.close()
+
+    allocator.close()
   }
   FlightAllocator.rootAllocator.close()
 
