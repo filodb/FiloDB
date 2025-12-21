@@ -8,7 +8,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.coordinator.flight.{FlightAllocator, SingleClusterFlightPlanDispatcher, FiloDBFlightProducer}
+import filodb.coordinator.flight.{FiloDBFlightProducer, FlightAllocator, SingleClusterFlightPlanDispatcher}
 import filodb.core.MachineMetricsData.records
 import filodb.core.MetricsTestData.{timeSeriesData, timeseriesDatasetWithMetric}
 import filodb.core.TestData
@@ -40,9 +40,10 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
   after {
     memStore.reset()
     memStore.metastore.clearAllData()
+    FlightAllocator.rootAllocator.close()
     // dont close these since there can be other tests using it, but enabling them will help find leaks within this test
 //    FlightClientManager.global.shutdown()
-//    FlightAllocator.rootAllocator.close()
+
   }
 
   it("should ingest into multiple series and be able to query across all partitions in real time") {
@@ -116,6 +117,8 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     qRes2.result.map(_.key.toString) shouldEqual
       List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
+    FlightAllocator.rootAllocator.close()
+
     /*
     Add to the previous query plan with an aggregation on top.
     It is two mspe plans with two time series each joined with plus operator. Then a count aggregation on top.
@@ -152,6 +155,8 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     qRes.result.map(_.key.toString) shouldEqual
       List("/shard:/Map()")
 
+    FlightAllocator.rootAllocator.close()
+
     // Label values query now
 
     val lve = LabelValuesExec(
@@ -179,6 +184,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
     }
     rvRows3 shouldEqual List(List("host1", "host2"))
 
+    FlightAllocator.rootAllocator.close()
     // Part Key exec query now
 
     val pke = PartKeysExec(
@@ -208,5 +214,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host2", "region" -> "region1"),
       Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
   }
+  FlightAllocator.rootAllocator.close()
 
+  FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
 }
