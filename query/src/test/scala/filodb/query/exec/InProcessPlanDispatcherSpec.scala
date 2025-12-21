@@ -117,7 +117,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
-    (sep.queryContext.plannerParams.queryTimeoutMillis), None), source).runToFuture.futureValue
+    (sep.queryContext.plannerParams.queryTimeoutMillis), querySession), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -146,7 +146,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
-    (sep.queryContext.plannerParams.queryTimeoutMillis), None), source).runToFuture.futureValue
+    (sep.queryContext.plannerParams.queryTimeoutMillis), querySession), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -160,7 +160,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan1))
     val result2 = dispatcher.dispatch(ExecPlanWithClientParams(sep2, ClientParams
-    (sep.queryContext.plannerParams.queryTimeoutMillis), None), source).runToFuture.futureValue
+    (sep.queryContext.plannerParams.queryTimeoutMillis), querySession), source).runToFuture.futureValue
 
     result2 match {
       case e: QueryError => throw e.t
@@ -173,7 +173,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     // Two children none of which returns data
     val sep3 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan2))
     val result3 = dispatcher.dispatch(ExecPlanWithClientParams(sep3, ClientParams
-    (sep.queryContext.plannerParams.queryTimeoutMillis), None), source).runToFuture.futureValue
+    (sep.queryContext.plannerParams.queryTimeoutMillis), querySession), source).runToFuture.futureValue
 
     result3 match {
       case e: QueryError => throw e.t
@@ -200,7 +200,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     val sep = StitchRvsExec(QueryContext(plannerParams = PlannerParams(allowPartialResults = true)), dispatcher, None,
       Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams(2), None), source).runToFuture.futureValue
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams(2), querySession), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t

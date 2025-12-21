@@ -1,16 +1,14 @@
-package filodb.coordinator
+package filodb.coordinator.flight
 
 import java.util.concurrent.TimeUnit
 
 import monix.execution.Scheduler
 import org.apache.arrow.flight._
 import org.apache.arrow.memory.RootAllocator
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
-import filodb.coordinator.flight.FlightClientManager
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
 class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
                                                  with BeforeAndAfter with BeforeAndAfterAll {

@@ -9,13 +9,12 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, Location, Ticket}
-import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.FlightIoSchedName
-import filodb.core.query.{ArrowSerializedRangeVector, QueryStats}
+import filodb.core.query.{ArrowSerializedRangeVector, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
@@ -47,12 +46,12 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
   private def dispatchFlightPlan(
     plan: ExecPlanWithClientParams,
     remainingTimeMs: Long): Task[QueryResponse] = {
-    if (plan.queryAllocator.isEmpty)
+    if (plan.querySession.queryAllocator.isEmpty)
       throw new IllegalArgumentException("QueryAllocator must be provided in ExecPlanWithClientParams for Flight")
     qLogger.debug(s"FlightPlanDispatcher executing request ${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
     val ticket = new Ticket(FlightKryoSerDeser.serializeToBytes(plan.execPlan))
-    executeFlightRequest(plan.execPlan.planId, client, ticket, remainingTimeMs, plan.queryAllocator.get)
+    executeFlightRequest(plan.execPlan.planId, client, ticket, remainingTimeMs, plan.querySession)
   }
 
   // scalastyle:off method.length
@@ -61,8 +60,10 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     client: FlightClient,
     ticket: Ticket,
     timeoutMs: Long,
-    requestAllocator: BufferAllocator
+    querySession: QuerySession
   ): Task[QueryResponse] = {
+    require(querySession.queryAllocator.isDefined, "QueryAllocator must be provided in QuerySession for Flight")
+    val requestAllocator = querySession.queryAllocator.get
     val srvs = mutable.ListBuffer[ArrowSerializedRangeVector]()
     Task.evalAsync {
       FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
@@ -73,7 +74,6 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         while (stream.next()) { // this is a blocking call - this is why we run on ioScheduler below
           FlightKryoSerDeser.deserialize(stream.getLatestMetadata) match {
             case header: RespHeader =>
-              val header = FlightKryoSerDeser.deserialize(stream.getLatestMetadata).asInstanceOf[RespHeader]
               respHeader = Some(header)
               qLogger.debug(s"FlightPlanDispatcher received RespHeader with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
@@ -92,6 +92,8 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
                 respHeader.get.resultSchema.toRecordSchema,
                 reqVsr, rvMetadata.rvRange)
               srvs += asrv
+              // this ensures that this srv will be closed at the end of the query session
+              querySession.registerArrowCloseable(asrv)
             case footer: RespFooter =>
               respFooter = Some(footer)
               qLogger.debug(s"FlightPlanDispatcher received RespFooter with stats: ${footer.queryStats}, " +
@@ -106,7 +108,6 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         }
       }
     }.onErrorHandle { ex =>
-      srvs.foreach( _.close()) // release off-heap memory in case of error
       qLogger.error(s"FlightPlanDispatcher - Flight request to $location failed", ex)
 
       // Attempt to force reconnection on certain errors
