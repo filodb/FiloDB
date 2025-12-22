@@ -100,13 +100,13 @@ class FlightClientManager(rootAllocator: RootAllocator) {
    */
   def forceRebuild(location: Location): FlightClient = {
     val locationKey = locationToKey(location)
-      clientMap.get(locationKey) match {
-        case Some(entry) =>
-          logger.info(s"Force reconnecting FlightClient for $location")
-          reconnectClient(entry, location)
-        case None =>
-          logger.info(s"Creating new FlightClient for forced reconnect to $location")
-          createNewClient(location, locationKey)
+    clientMap.get(locationKey) match {
+      case Some(entry) =>
+        logger.info(s"Force reconnecting FlightClient for $location")
+        reconnectClient(entry, location)
+      case None =>
+        logger.info(s"Creating new FlightClient for forced reconnect to $location")
+        createNewClient(location, locationKey)
     }
   }
 

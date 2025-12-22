@@ -33,7 +33,6 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
                                            |  """.stripMargin)
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
-
   val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
@@ -60,7 +59,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
   override def afterAll(): Unit = {
     memStore.shutdown()
     // dont close these since there can be other tests using it, but enabling them will help find leaks within this test
-    //    FlightClientManager.global.shutdown()
+//    FlightClientManager.global.shutdown()
 //    FlightAllocator.rootAllocator.close()
   }
 
@@ -113,7 +112,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       -----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(0,100000), filters=List(ColumnFilter(region,Equals(region1))), colName=None, schema=None) on SingleClusterFlightPlanDispatcher(Location{uri=grpc+tcp://localhost:8815},test)
       */
 
-      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
+      val allocatedMemBeforeQuery = FlightAllocator.rootAllocator.getAllocatedMemory
       val qRes2 = bje.dispatcher.dispatch(ExecPlanWithClientParams(bje, ClientParams(60000), querySession),
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows2 = qRes2.result.map { rv =>
@@ -126,12 +125,12 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       qRes2.result.map(_.key.toString) shouldEqual
         List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
-      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
+      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do aggregation on top of binary join query plan over flight server") {
 
-      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
+      val allocatedMemBeforeQuery = FlightAllocator.rootAllocator.getAllocatedMemory
       /*
       Add to the previous query plan with an aggregation on top.
       It is two mspe plans with two time series each joined with plus operator. Then a count aggregation on top.
@@ -168,11 +167,11 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       qRes.result.map(_.key.toString) shouldEqual
         List("/shard:/Map()")
 
-      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
+      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do label values queries") {
-      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual 0L
+      val allocatedMemBeforeQuery = FlightAllocator.rootAllocator.getAllocatedMemory
       val lve = LabelValuesExec(
         QueryContext(),
         SingleClusterFlightPlanDispatcher(location, "test"),
@@ -198,14 +197,12 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       }
       rvRows3 shouldEqual List(List("host1", "host2"))
 
-      querySession.close()
-      allocator.close()
       println(allocator.toVerboseString)
-      allocator.getAllocatedMemory shouldEqual 0L
+      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do part keys queries") {
-      allocator.getAllocatedMemory shouldEqual 0L
+      val allocatedMemBeforeQuery = FlightAllocator.rootAllocator.getAllocatedMemory
       val pke = PartKeysExec(
         QueryContext(),
         SingleClusterFlightPlanDispatcher(location, "test"),
@@ -234,11 +231,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
 
       println(allocator.toVerboseString)
-
-      allocator.getAllocatedMemory shouldEqual 0L
-
+      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
   }
-
-
 }

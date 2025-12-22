@@ -206,7 +206,9 @@ trait FlightQueryExecutor extends StrictLogging {
                 case asrv: ArrowSerializedRangeVector =>
                   val unloader = new VectorUnloader(asrv.vectorSchemaRoot)
                   val loader = new VectorLoader(vec)
-                  loader.load(unloader.getRecordBatch)
+                  Using.resource(unloader.getRecordBatch) { rb =>
+                    loader.load(rb)
+                  }
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
                   asrv.close()
                 case rv: RangeVector =>
