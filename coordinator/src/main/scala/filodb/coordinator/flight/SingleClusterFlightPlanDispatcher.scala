@@ -78,13 +78,13 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               qLogger.debug(s"FlightPlanDispatcher received RespHeader with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
               val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
-              Using (stream.getRoot) { root =>
-                // move vector data into per-requestAllocator so that it is released when RVs are consumed
-                val unloader = new VectorUnloader(root)
-                val loader = new VectorLoader(reqVsr)
-                Using.resource(unloader.getRecordBatch) { rb =>
-                  loader.load(rb)
-                }
+              // stream.getRoot is owned by the stream and should not be closed by us
+              val root = stream.getRoot
+              // move vector data into per-requestAllocator so that it is released when RVs are consumed
+              val unloader = new VectorUnloader(root)
+              val loader = new VectorLoader(reqVsr)
+              Using.resource(unloader.getRecordBatch) { rb =>
+                loader.load(rb)
               }
               qLogger.debug(s"FlightPlanDispatcher received RV for RangeVectorKey: ${rvMetadata.rvk}")
               require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
