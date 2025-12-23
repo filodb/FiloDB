@@ -143,7 +143,8 @@ trait RangeVector {
   *  A marker trait to identify range vector that can be serialized for write into wire. If Range Vector does not
   *  implement this marker trait, then query engine will convert it to one that does.
   */
-sealed trait SerializableRangeVector extends RangeVector {
+trait SerializableRangeVector extends RangeVector {
+
   /**
    * Used to calculate number of samples sent over the wire for limiting resources used by query
    */

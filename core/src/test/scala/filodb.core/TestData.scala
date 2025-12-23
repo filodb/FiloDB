@@ -3,6 +3,8 @@ package filodb.core
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
 import scala.io.Source
+import scala.util.Random.nextInt
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
@@ -547,6 +549,17 @@ object MetricsTestData {
     options = DatasetOptions(Seq("__name__"), "__name__", true)
   ).get
   val downsampleSchema = downsampleDataset.schema
+
+
+  def timeSeriesData(tags: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): Stream[Seq[Any]] = {
+    val initTs = 0L
+    Stream.from(0).map { n =>
+      Seq(initTs + n * 1000,
+        (45 + nextInt(10)).toDouble,
+        "cpu_usage".utf8, tags)
+    }
+  }
+
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
