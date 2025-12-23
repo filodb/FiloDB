@@ -1,9 +1,8 @@
 package filodb.coordinator.flight
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
@@ -23,9 +22,14 @@ import filodb.core.GlobalConfig
  * The manager follows the same patterns established by GrpcPlanDispatcher for consistency
  * with the existing FiloDB codebase architecture.
  *
+ * Thread-Safety:
+ * - All public methods are thread-safe and can be called concurrently
+ * - Multiple threads can safely fetch, create, or recreate clients for a location
+ * - Ensures only one client is created per location, even under concurrent access
+ * - Per-location synchronization prevents duplicate reconnections
+ *
  * Features:
  * - Connection pooling with automatic client creation per Location
- * - Configurable keep-alive and timeout settings
  * - Automatic reconnection on connection failures
  * - Background health checking and connection validation
  * - Graceful shutdown with proper resource cleanup
@@ -48,7 +52,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
   private val healthCheckTimeoutMs = flightClientConfig.getDuration("health-check-timeout").toMillis
 
   // Client storage and metadata
-  private val clientMap = new TrieMap[String, FlightClientEntry]()
+  private val clientMap = new ConcurrentHashMap[String, FlightClientEntry]()
   private val isShutdown = new AtomicBoolean(false)
 
   // Background scheduler for health checks and reconnections
@@ -63,50 +67,41 @@ class FlightClientManager(rootAllocator: RootAllocator) {
    * Returns Some(None) if health is unknown, Some(Some(true)) if healthy, Some(Some(false)) if unhealthy.
    */
   def getClientHealth(location: Location): Option[Option[Boolean]] = {
+    if (isShutdown.get()) {
+      throw new IllegalStateException("FlightClientManager has been shut down")
+    }
     val locationKey = locationToKey(location)
-    clientMap.get(locationKey).map(_.isHealthy)
+    Option(clientMap.get(locationKey)).map(_.isHealthy)
   }
 
   /**
    * Gets or creates a FlightClient for the given location.
    * Note it does not connect to the location until the first request is made.
+   * Thread-safe: multiple threads can safely call this method concurrently.
    *
    * @param location The Arrow Flight Location to connect to
+   * @param forceRebuild If true, it will rebuild connection for the location
    */
-  def getClient(location: Location): FlightClient = {
+  def getClient(location: Location, forceRebuild: Boolean = false): FlightClient = {
     if (isShutdown.get()) {
       throw new IllegalStateException("FlightClientManager has been shut down")
-    } else {
-      val locationKey = locationToKey(location)
-      clientMap.get(locationKey) match {
-        case Some(entry) =>
-          if (entry.isHealthy.isDefined && !entry.isHealthy.get) { // not healthy
-            logger.info(s"Reconnecting unhealthy FlightClient for $location")
-            reconnectClient(entry, location)
-          } else {
-            logger.debug(s"Reusing existing healthy FlightClient for $location")
-            entry.client
-          }
-        case None =>
-          logger.info(s"Creating new FlightClient for $location")
-          createNewClient(location, locationKey)
-      }
     }
-  }
-
-  /**
-   * Forces reconnection for a client at the given location.
-   * Useful when external code detects connection issues.
-   */
-  def forceRebuild(location: Location): FlightClient = {
     val locationKey = locationToKey(location)
-    clientMap.get(locationKey) match {
-      case Some(entry) =>
-        logger.info(s"Force reconnecting FlightClient for $location")
-        reconnectClient(entry, location)
-      case None =>
-        logger.info(s"Creating new FlightClient for forced reconnect to $location")
-        createNewClient(location, locationKey)
+
+    // Use getOrElseUpdate for atomic creation - only one thread will create the entry
+    val entry = clientMap.computeIfAbsent(locationKey, l => {
+      logger.info(s"Creating new FlightClient for $location")
+      createNewClientEntry(location, locationKey)
+    })
+
+    // Synchronize on entry to prevent concurrent reconnections for the same location
+    entry.synchronized {
+      if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) { // not healthy
+        logger.info(s"Reconnecting unhealthy FlightClient for $location")
+        reconnectClientUnsafe(entry, location)
+      } else {
+        entry.client
+      }
     }
   }
 
@@ -114,13 +109,14 @@ class FlightClientManager(rootAllocator: RootAllocator) {
    * Removes a client from the pool (e.g., when permanently shutting down a peer).
    */
   def removeClient(location: Location): Unit = {
+    if (isShutdown.get()) {
+      throw new IllegalStateException("FlightClientManager has been shut down")
+    }
     val locationKey = locationToKey(location)
-    clientMap.remove(locationKey) match {
-      case Some(entry) =>
-        logger.info(s"Removing FlightClient for $location")
-        closeClientEntry(entry)
-      case None =>
-        logger.debug(s"No FlightClient found to remove for $location")
+    val entry = clientMap.remove(locationKey)
+    if (entry != null) {
+      logger.info(s"Removing FlightClient for $location")
+      closeClientEntry(entry)
     }
   }
 
@@ -136,7 +132,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
       healthCheckScheduler.shutdown()
 
       // Close all clients
-      clientMap.values.foreach(closeClientEntry)
+      clientMap.values.forEach(closeClientEntry)
       clientMap.clear()
       logger.info("FlightClientManager shutdown complete")
     }
@@ -149,11 +145,14 @@ class FlightClientManager(rootAllocator: RootAllocator) {
   }
 
   def getClientAllocatorAllocatedBytes(location: Location): Long = {
+    if (isShutdown.get()) {
+      throw new IllegalStateException("FlightClientManager has been shut down")
+    }
     val locationKey = locationToKey(location)
-    clientMap(locationKey).allocator.getAllocatedMemory
+    clientMap.get(locationKey).allocator.getAllocatedMemory
   }
 
-  private def createNewClient(location: Location, locationKey: String): FlightClient = {
+  private def createNewClientEntry(location: Location, locationKey: String): FlightClientEntry = {
     val allocator = rootAllocator.newChildAllocator(s"flight-client-$locationKey", 0, maxMemoryPerClient)
 
     try {
@@ -172,9 +171,8 @@ class FlightClientManager(rootAllocator: RootAllocator) {
         lastHealthCheck = System.currentTimeMillis()
       )
 
-      clientMap.put(locationKey, entry)
       logger.info(s"Successfully created FlightClient for $location")
-      client
+      entry
 
     } catch {
       case ex: Exception =>
@@ -184,11 +182,17 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     }
   }
 
-  private def reconnectClient(entry: FlightClientEntry, location: Location): FlightClient = {
+  /**
+   * Reconnects a client by closing the old one and creating a new one.
+   * IMPORTANT: This method is not thread-safe and should only be called when synchronized on the entry.
+   *
+   * @param entry The FlightClientEntry to reconnect
+   * @param location The location to connect to
+   * @return The new FlightClient
+   */
+  private def reconnectClientUnsafe(entry: FlightClientEntry, location: Location): FlightClient = {
     // Close the old client
     closeClient(entry.client)
-
-    // FIXME this is not threadsafe yet - two threads could try to reconnect simultaneously
 
     // Create new client with existing allocator
     try {
@@ -241,7 +245,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     if (isShutdown.get()) return
 
     try {
-      clientMap.values.foreach { entry =>
+      clientMap.values.forEach { entry =>
         if (!isShutdown.get()) {
           checkClientHealth(entry)
         }
@@ -254,18 +258,26 @@ class FlightClientManager(rootAllocator: RootAllocator) {
 
   private def checkClientHealth(entry: FlightClientEntry): Unit = {
     try {
-      entry.lastHealthCheck = System.currentTimeMillis()
       // Simple health check: attempt to list actions (lightweight operation)
       val hn = entry.client.listActions(CallOptions.timeout(healthCheckTimeoutMs, TimeUnit.MILLISECONDS))
                                 .iterator().hasNext
-      if (entry.isHealthy.getOrElse(false)) {
-        logger.info(s"FlightClient for ${entry.location} is now healthy")
+
+      // Synchronize when updating entry fields
+      entry.synchronized {
+        entry.lastHealthCheck = System.currentTimeMillis()
+        if (!entry.isHealthy.getOrElse(false)) {
+          logger.info(s"FlightClient for ${entry.location} is now healthy")
+        }
+        entry.isHealthy = Some(true)
       }
-      entry.isHealthy = Some(true)
     } catch {
       case ex: Exception =>
         logger.warn(s"FlightClient for ${entry.location} failed health check", ex)
-        entry.isHealthy = Some(false)
+        // Synchronize when updating entry fields
+        entry.synchronized {
+          entry.lastHealthCheck = System.currentTimeMillis()
+          entry.isHealthy = Some(false)
+        }
     }
   }
 }
