@@ -35,6 +35,10 @@ import filodb.core.GlobalConfig
  * - Graceful shutdown with proper resource cleanup
  * - Memory management with per-client Buffer allocators
  *
+ * TODO:
+ * - Removal of old clients after a certain period of inactivity. Depending on usage patterns,
+ *  this may be necessary to prevent unbounded growth of the client pool.
+ *
  * @param rootAllocator The root memory allocator for creating client allocators
  */
 class FlightClientManager(rootAllocator: RootAllocator) {
@@ -78,6 +82,8 @@ class FlightClientManager(rootAllocator: RootAllocator) {
    * Gets or creates a FlightClient for the given location.
    * Note it does not connect to the location until the first request is made.
    * Thread-safe: multiple threads can safely call this method concurrently.
+   *
+   * Clients should NOT close the returned FlightClient. The manager handles client lifecycle.
    *
    * @param location The Arrow Flight Location to connect to
    * @param forceRebuild If true, it will rebuild connection for the location
@@ -144,12 +150,12 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     s"${location.getUri.getHost}:${location.getUri.getPort}"
   }
 
-  def getClientAllocatorAllocatedBytes(location: Location): Long = {
+  def getClientAllocatorAllocatedBytes(location: Location): Option[Long] = {
     if (isShutdown.get()) {
       throw new IllegalStateException("FlightClientManager has been shut down")
     }
     val locationKey = locationToKey(location)
-    clientMap.get(locationKey).allocator.getAllocatedMemory
+    Option(clientMap.get(locationKey)).map(_.allocator.getAllocatedMemory)
   }
 
   private def createNewClientEntry(location: Location, locationKey: String): FlightClientEntry = {
@@ -220,9 +226,9 @@ class FlightClientManager(rootAllocator: RootAllocator) {
 
   private def closeClientEntry(entry: FlightClientEntry): Unit = {
     try {
-      closeClient(entry.client)
-    } finally {
       entry.allocator.close()
+    } finally {
+      closeClient(entry.client)
     }
   }
 

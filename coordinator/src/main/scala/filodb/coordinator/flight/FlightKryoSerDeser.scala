@@ -4,7 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Using
 
 import com.esotericsoftware.kryo.Kryo
-import com.esotericsoftware.kryo.io.{ByteBufferInput, ByteBufferOutput, Input, Output}
+import com.esotericsoftware.kryo.io.{ByteBufferInput, Input, Output}
 import com.esotericsoftware.kryo.serializers.FieldSerializer
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, DefaultStreamFactory, ListReferenceResolver}
 import io.altoo.akka.serialization.kryo.serializer.scala._
@@ -111,19 +111,15 @@ object FlightKryoSerDeser {
   def serializeToArrowBuf(obj: Any, allocator: BufferAllocator): ArrowBuf = {
     val bytes = serializeToBytes(obj)
     val buf = allocator.buffer(bytes.length)
-    buf.writeBytes(bytes)
-    buf.writerIndex(bytes.length).readerIndex(0)
-    buf
-  }
-
-  def serializeToArrowBuf(obj: Any, buf: ArrowBuf): Unit = {
-    val k = kryo.get()
-    buf.writerIndex(0) // start writing at beginning
-    val output = new ByteBufferOutput(buf.nioBuffer())
-    k.writeClassAndObject(output, obj)
-    output.flush() // ensure ByteBuffer position advanced
-    // Advance ArrowBuf writerIndex by what Kryo wrote
-    buf.writerIndex(output.position).readerIndex(0)
+    try {
+      buf.writeBytes(bytes)
+      buf.writerIndex(bytes.length).readerIndex(0)
+      buf
+    } catch {
+      case e: Throwable =>
+        buf.close()
+        throw e
+    }
   }
 
   def serializeToBytes(obj: Any): Array[Byte] = {
