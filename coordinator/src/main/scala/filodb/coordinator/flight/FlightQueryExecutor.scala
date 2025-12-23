@@ -67,90 +67,91 @@ trait FlightQueryExecutor extends StrictLogging {
 
   // scalastyle:off method.length
   def executePhysicalPlanEntry(context: FlightProducer.CallContext,
-                                       execPlan: ExecPlan,
-                                       listener: ServerStreamListener): Unit = {
+                               execPlan: ExecPlan,
+                               listener: ServerStreamListener): Unit = {
     execPhysicalPlanInner(execPlan)
 
     def execPhysicalPlanInner(q: ExecPlan): Unit = {
       logger.debug(s"Received request to run query $q")
-      val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.queryContext.queryId}",
-        0, perReqAllocatorLimit)
-      if (checkTimeoutBeforeQueryExec(listener, reqAllocator, q.queryContext)) {
-        epRequests.increment(1, Map("dataset" -> q.dataset.toString))
-        val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
-          .asChildOf(Kamon.currentSpan())
-          .start()
-        val startTime = System.nanoTime()
-        // Dont finish span since we finish it asynchronously when response is received
-        Kamon.runWithSpan(queryExecuteSpan, false) {
-          queryExecuteSpan.tag("query", q.getClass.getSimpleName)
-          queryExecuteSpan.tag("query-id", q.queryContext.queryId)
-          val querySession = QuerySession(q.queryContext,
-            queryConfig,
-            streamingDispatch = false,
-            queryAllocator = Some(reqAllocator),
-            preventRangeVectorSerialization = true, // because we will be serializing as ArrowSRV here
-            catchMultipleLockSetErrors = true)
-          queryExecuteSpan.mark("query-actor-received-execute-start")
-
-          val execTask = { // TODO remove this block when query streaming is enabled and working well
-            q.execute(memStore, querySession)(queryScheduler)
-              .onErrorHandle { t =>
-                QueryError(q.queryContext.queryId, querySession.queryStats, t)
-              }.map { res =>
-                logger.debug(s"Query execution pipeline constructed for queryId=${q.queryContext.queryId}")
-                // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
-                // the query on the current/Actor thread instead of the scheduler
-                if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
-                  FiloSchedulers.assertThreadName(QuerySchedName)
-                }
-                streamResults(res, reqAllocator, listener, q)
-                res match {
-                  case e: QueryError =>
-                    logQueryErrors(e.t, q)
-                    queryErrors.increment(1, Map("dataset" -> q.dataset.toString))
-                    queryExecuteSpan.fail(e.t.getMessage)
-                    // rethrow so circuit beaker can block queries when there is a surge of such exceptions
-                    if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
-                  case _ =>
-                }
-              }.guarantee(Task.eval {
-                SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
-                queryExecuteSpan.finish()
-                querySession.close()
-                val timeTaken = System.nanoTime() - startTime
-                execPlanLatency.record(timeTaken,
-                  Map("plan" -> q.getClass.getSimpleName, "dataset" -> q.dataset.toString))
-              })
-          }
-
-          val execTask2 = if (circuitBreakerEnabled) {
-            circuitBreaker.protect(execTask)
-              .onErrorRecover {
-                case t: ExecutionRejectedException =>
-                  logQueryErrors(t, q)
-                  if (querySession.streamingDispatch) {
-                    ???
-                  } else {
-                    sendRespFooterAndComplete(listener, reqAllocator, querySession.queryStats, Some(t))
-                  }
-                case _ => // all other errors are already handled
-              }
-          } else execTask
-          execTask2.runToFuture(queryScheduler)
-        }
+      epRequests.increment(1, Map("dataset" -> q.dataset.toString))
+      if (checkTimeoutBeforeQueryExec(listener, q.queryContext)) {
+        return
       }
+      val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
+        .asChildOf(Kamon.currentSpan())
+        .start()
+      val startTime = System.nanoTime()
+      // Dont finish span since we finish it asynchronously when response is received
+      Kamon.runWithSpan(queryExecuteSpan, finishSpan = false) {
+        queryExecuteSpan.tag("query", q.getClass.getSimpleName)
+        queryExecuteSpan.tag("query-id", q.queryContext.queryId)
+        val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.queryContext.queryId}",
+          0, perReqAllocatorLimit)
+        val querySession = QuerySession(q.queryContext,
+          queryConfig,
+          queryAllocator = Some(reqAllocator),
+          preventRangeVectorSerialization = true, // because we will be serializing as ArrowSRV here
+          catchMultipleLockSetErrors = true)
+        queryExecuteSpan.mark("query-actor-received-execute-start")
 
+        val execTask = q.execute(memStore, querySession)(queryScheduler)
+          .onErrorHandle { t =>
+            QueryError(q.queryContext.queryId, querySession.queryStats, t)
+          }.map { res =>
+            logger.debug(s"Query execution pipeline constructed for queryId=${q.queryContext.queryId}")
+            // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+            // the query on the current/Actor thread instead of the scheduler
+            if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
+              FiloSchedulers.assertThreadName(QuerySchedName)
+            }
+            streamResults(res, reqAllocator, listener, q)
+            res match {
+              case e: QueryError =>
+                logQueryErrors(e.t, q)
+                queryErrors.increment(1, Map("dataset" -> q.dataset.toString))
+                queryExecuteSpan.fail(e.t.getMessage)
+                // rethrow so circuit beaker can block queries when there is a surge of such exceptions
+                if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
+              case _ =>
+            }
+          }.guarantee(Task.eval {
+            SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
+            queryExecuteSpan.finish()
+            querySession.close()
+            val timeTaken = System.nanoTime() - startTime
+            execPlanLatency.record(timeTaken,
+              Map("plan" -> q.getClass.getSimpleName, "dataset" -> q.dataset.toString))
+          })
+
+        val execTaskWithCircuitBreaker = if (circuitBreakerEnabled) {
+          circuitBreaker.protect(execTask)
+            .onErrorRecover {
+              case t: ExecutionRejectedException =>
+                querySession.close()
+                logQueryErrors(t, q)
+                listener.error(t)
+              case t =>
+                querySession.close()
+                // all other errors are already handled; listner should already have the error
+            }
+        } else execTask
+        execTaskWithCircuitBreaker.runToFuture(queryScheduler)
+      }
     }
 
+    /**
+     * Checks if the query has already timed out before starting execution.
+     * If it has timed out, sends the timeout error in the response footer and
+     * completes the listener.
+     * @return true if the query has timed out, false otherwise
+     */
     def checkTimeoutBeforeQueryExec(listener: ServerStreamListener,
-                                    reqAllocator: BufferAllocator,
                                     queryContext: QueryContext) = {
       val ex = queryContext.checkQueryTimeout(this.getClass.getName, false)
       ex match {
-        case Some(qte) => sendRespFooterAndComplete(listener, reqAllocator, QueryStats(), Some(qte))
-          false
-        case None =>      true
+        case Some(qte) => listener.error(qte)
+          true
+        case None =>      false
       }
     }
 
@@ -191,6 +192,8 @@ trait FlightQueryExecutor extends StrictLogging {
           logger.debug(s"Sending header for queryId=${execPlan.queryContext.queryId}")
           try {
             val respHeader = RespHeader(res.resultSchema)
+            // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
+            // and hence not closed here
             listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, reqAllocator))
           } catch { case ex: Exception =>
             logger.error(s"Error sending response header for queryId=${execPlan.queryContext.queryId}", ex)
@@ -214,6 +217,8 @@ trait FlightQueryExecutor extends StrictLogging {
                 case rv: RangeVector =>
                   ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
                     vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
+                  // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
+                  // and hence not closed here
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
               }
             }
@@ -227,6 +232,8 @@ trait FlightQueryExecutor extends StrictLogging {
                                   s: QueryStats, t: Option[Throwable]): Unit = {
       logger.debug(s"Sending response footer and completing stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)
+      // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
+      // and hence not closed here
       listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, reqAllocator))
       listener.completed()
     }

@@ -62,10 +62,10 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     timeoutMs: Long,
     querySession: QuerySession
   ): Task[QueryResponse] = {
-    require(querySession.queryAllocator.isDefined, "QueryAllocator must be provided in QuerySession for Flight")
-    val requestAllocator = querySession.queryAllocator.get
-    val srvs = mutable.ListBuffer[ArrowSerializedRangeVector]()
     Task.evalAsync {
+      require(querySession.queryAllocator.isDefined, "QueryAllocator must be provided in QuerySession for Flight")
+      val requestAllocator = querySession.queryAllocator.get
+      val srvs = mutable.ListBuffer[ArrowSerializedRangeVector]()
       FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
       Using.resource(client.getStream(ticket, CallOptions.timeout(timeoutMs, TimeUnit.MILLISECONDS))) { stream =>
         var respHeader: Option[RespHeader] = None
@@ -78,6 +78,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               qLogger.debug(s"FlightPlanDispatcher received RespHeader with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
               val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
+              querySession.registerArrowCloseable(reqVsr)
               // stream.getRoot is owned by the stream and should not be closed by us
               val root = stream.getRoot
               // move vector data into per-requestAllocator so that it is released when RVs are consumed
@@ -99,7 +100,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               qLogger.debug(s"FlightPlanDispatcher received RespFooter with stats: ${footer.queryStats}, " +
                 s"throwable: ${footer.throwable}")
           }
-          // TODO handle error on stream
+          // Error on stream is thrown as exception and will be handled at onErrorHandle below
         }
         if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
           QueryError(planId, respFooter.get.queryStats, respFooter.get.throwable.get)
