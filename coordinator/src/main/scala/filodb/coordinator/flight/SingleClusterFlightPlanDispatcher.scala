@@ -114,7 +114,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
       ex match {
         case _: java.net.ConnectException | _: java.io.IOException =>
           qLogger.info(s"FlightPlanDispatcher - Connection error to $location, forcing reconnection")
-          FlightClientManager.global.forceRebuild(location)
+          FlightClientManager.global.getClient(location, forceRebuild = true)
         case _ =>
       }
       QueryError(planId, QueryStats(), ex)

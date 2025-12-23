@@ -90,12 +90,12 @@ class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
       manager.getClientHealth(locations(0)) shouldBe Some(None)
 
       // Force reconnection should create a new client
-      val client2 = manager.forceRebuild(locations(0))
+      val client2 = manager.getClient(locations(0), forceRebuild = true)
       client2 should not be theSameInstanceAs(client1)
       manager.getClientHealth(locations(0)) shouldBe Some(None)
 
       // Force reconnect on non-existent client should create new one
-      val client3 = manager.forceRebuild(locations(1))
+      val client3 = manager.getClient(locations(1), forceRebuild = true)
       client3 should not be null
 
       manager.shutdown()
@@ -191,7 +191,7 @@ class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
         manager.getClientHealth(locations(0)) shouldBe Some(Some(false))
         val server2 = FlightServer.builder(allocator, locations(0), new TestFlightProducer()).build()
         server2.start()
-        val client2 = manager.forceRebuild(locations(0))
+        val client2 = manager.getClient(locations(0), forceRebuild = true)
         client2 should not be theSameInstanceAs(client1)
         client2.listActions().iterator().hasNext shouldBe false
         server2.shutdown()
@@ -253,7 +253,7 @@ class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
       try {
         // Force reconnect to invalid location should fail gracefully
         val thrown = intercept[FlightRuntimeException] {
-          val client1 = manager.forceRebuild(invalidLocation)
+          val client1 = manager.getClient(invalidLocation, forceRebuild = true)
           client1.listActions().iterator().hasNext shouldBe false
         }
         thrown.getCause shouldBe a[Exception]
