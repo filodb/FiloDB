@@ -36,6 +36,8 @@ import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
  */
 trait FlightQueryExecutor extends StrictLogging {
 
+  System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
+
   def memStore: TimeSeriesStore
   def allocator: BufferAllocator
   def sysConfig: com.typesafe.config.Config
@@ -85,7 +87,7 @@ trait FlightQueryExecutor extends StrictLogging {
       Kamon.runWithSpan(queryExecuteSpan, finishSpan = false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
-        val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.queryContext.queryId}",
+        val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.planId}",
           0, perReqAllocatorLimit)
         val querySession = QuerySession(q.queryContext,
           queryConfig,
@@ -187,7 +189,7 @@ trait FlightQueryExecutor extends StrictLogging {
       queryResult match {
         case qe: QueryError =>
           logQueryErrors(qe.t, execPlan)
-          sendRespFooterAndComplete(listener, reqAllocator, qe.queryStats, Some(qe.t))
+          sendRespFooterAndComplete(listener, reqAllocator, execPlan.planId, qe.queryStats, Some(qe.t))
         case res: QueryResult =>
           logger.debug(s"Sending header for queryId=${execPlan.queryContext.queryId}")
           try {
@@ -196,9 +198,9 @@ trait FlightQueryExecutor extends StrictLogging {
             // and hence not closed here
             listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, reqAllocator))
           } catch { case ex: Exception =>
-            logger.error(s"Error sending response header for queryId=${execPlan.queryContext.queryId}", ex)
+            logger.error(s"Error sending response header for queryPlanId=${execPlan.planId}", ex)
           }
-          logger.debug(s"Sending RVs for queryId=${execPlan.queryContext.queryId}")
+          logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
           Using.resource(ArrowSerializedRangeVector.emptyVectorSchemaRoot(reqAllocator)) { vec =>
             listener.start(vec)
             val rb = SerializedRangeVector.newBuilder()
@@ -214,7 +216,7 @@ trait FlightQueryExecutor extends StrictLogging {
                   }
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
                   asrv.close()
-                case rv: RangeVector =>
+                case rv: RangeVector =>FlightKryoSerDeser
                   ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
                     vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
                   // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
@@ -222,15 +224,16 @@ trait FlightQueryExecutor extends StrictLogging {
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
               }
             }
-            sendRespFooterAndComplete(listener, reqAllocator, res.queryStats, None)
+            sendRespFooterAndComplete(listener, reqAllocator, execPlan.planId, res.queryStats, None)
           }
       }
     }
 
     def sendRespFooterAndComplete(listener: ServerStreamListener,
                                   reqAllocator: BufferAllocator,
+                                  planId: String,
                                   s: QueryStats, t: Option[Throwable]): Unit = {
-      logger.debug(s"Sending response footer and completing stream for queryStats=$s, throwable=$t")
+      logger.debug(s"Sending response footer for planId=$planId and completing stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
       // and hence not closed here

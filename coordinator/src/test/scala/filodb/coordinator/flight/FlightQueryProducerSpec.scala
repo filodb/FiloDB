@@ -99,6 +99,45 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       metricColumn = "_metric_",
       Some(RvRange(0, 1000, 100000)))
 
+    it("should be able to run a LocalPartitionDistConcatExec query plan over flight server") {
+
+      /*
+      Construct the following query plan by hand.
+      It is two mspe plans with two time series each joined with plus operator
+
+      ---E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on SingleClusterFlightPlanDispatcher(Location{uri=grpc+tcp://localhost:8815},test)
+      ----T~PeriodicSamplesMapper(start=0, step=1000, end=100000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      -----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(0,100000), filters=List(ColumnFilter(region,Equals(region1))), colName=None, schema=None) on SingleClusterFlightPlanDispatcher(Location{uri=grpc+tcp://localhost:8815},test)
+      ----T~PeriodicSamplesMapper(start=0, step=1000, end=100000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      -----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(0,100000), filters=List(ColumnFilter(region,Equals(region1))), colName=None, schema=None) on SingleClusterFlightPlanDispatcher(Location{uri=grpc+tcp://localhost:8815},test)
+      */
+
+      val dce = LocalPartitionDistConcatExec(
+        QueryContext(),
+        SingleClusterFlightPlanDispatcher(location, "test"),
+        Seq(mspe1, mspe2)
+      )
+
+      val allocatedMemBeforeQuery = FlightAllocator.rootAllocator.getAllocatedMemory
+      val qRes2 = dce.dispatcher.dispatch(ExecPlanWithClientParams(dce, ClientParams(60000), querySession),
+        UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+      val rvRows2 = qRes2.result.map { rv =>
+        val rows = rv.rows().map(r => (r.getLong(0))).toList
+        rv.asInstanceOf[ArrowSerializedRangeVector].close()
+        rows
+      }
+      rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList,
+                               (0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
+
+      qRes2.result.map(_.key.toString) shouldEqual
+        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
+             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]",
+             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
+             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+
+      FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+    }
+
     it("should be able to run a binary join query plan over flight server") {
 
       /*
