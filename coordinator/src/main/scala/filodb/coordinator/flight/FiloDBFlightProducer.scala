@@ -11,6 +11,10 @@ import filodb.core.memstore.TimeSeriesStore
 import filodb.core.query._
 import filodb.query.exec.ExecPlan
 
+object FiloDBFlightProducer {
+  def akkaPortToFlightPort(akkaPort: Int): Int = akkaPort + 5000
+}
+
 /**
  * FiloDB Flight Producer - serves Flight RPCs for FiloDB
  * It extends FlightQueryExecutor to execute queries
