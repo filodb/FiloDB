@@ -46,8 +46,6 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
   private def dispatchFlightPlan(
     plan: ExecPlanWithClientParams,
     remainingTimeMs: Long): Task[QueryResponse] = {
-    if (plan.querySession.queryAllocator.isEmpty)
-      throw new IllegalArgumentException("QueryAllocator must be provided in ExecPlanWithClientParams for Flight")
     qLogger.debug(s"FlightPlanDispatcher executing request ${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
     val ticket = new Ticket(FlightKryoSerDeser.serializeToBytes(plan.execPlan))

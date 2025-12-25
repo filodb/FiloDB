@@ -139,7 +139,7 @@ trait FlightQueryExecutor extends StrictLogging {
       }
     }
 
-    /**
+    /*
      * Checks if the query has already timed out before starting execution.
      * If it has timed out, sends the timeout error in the response footer and
      * completes the listener.
