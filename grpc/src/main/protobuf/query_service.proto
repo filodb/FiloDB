@@ -459,6 +459,7 @@ enum AggregationOperator {
   STDVAR          =  9;
   QUANTILE        = 10;
   MAX             = 11;
+  AVGH            = 12;
 }
 
 message AggregateParameter {

@@ -15,25 +15,25 @@ import filodb.memory.format.RowReader
 object HistAvgRowAggregator extends RowAggregator {
   class HistAvgHolder(var timestamp: Long = 0L,
                       var mean: Double = Double.NaN,
-                      var count: Long = 0) extends AggregateHolder {
-    val row = new AvgAggTransientRow()
+                      var count: Double = 0d) extends AggregateHolder {
+    val row = new HistAvgAggTransientRow()
     def toRowReader: MutableRowReader = {
       row.setLong(0, timestamp)
       row.setDouble(1, mean)
-      row.setLong(2, count)
+      row.setDouble(2, count)
       row
     }
-    def resetToZero(): Unit = { count = 0; mean = Double.NaN }
+    def resetToZero(): Unit = { count = 0d; mean = Double.NaN }
   }
   type AggHolderType = HistAvgHolder
   def zero: HistAvgHolder = new HistAvgHolder()
-  def newRowToMapInto: MutableRowReader = new AvgAggTransientRow()
+  def newRowToMapInto: MutableRowReader = new HistAvgAggTransientRow()
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     val count = item.getDouble(2)
     val sum = item.getDouble(1)
 
     mapInto.setLong(0, item.getLong(0))
-    mapInto.setDouble(1, if (count.isNaN || count == 0) 0 else sum/count)
+    mapInto.setDouble(1, if (count.isNaN || count == 0d) 0d else sum/count)
     mapInto.setDouble(2, count)
     mapInto
   }
@@ -41,9 +41,10 @@ object HistAvgRowAggregator extends RowAggregator {
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN) {
       if (acc.mean.isNaN) acc.mean = 0d
-      val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2)) / (acc.count + aggRes.getLong(2))
+      val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getDouble(2)) /
+        (acc.count + aggRes.getDouble(2))
       acc.mean = newMean
-      acc.count += aggRes.getLong(2)
+      acc.count += aggRes.getDouble(2)
     }
     acc
   }

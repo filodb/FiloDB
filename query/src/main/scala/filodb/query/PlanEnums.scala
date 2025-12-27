@@ -99,6 +99,7 @@ object AggregationOperator extends Enum[AggregationOperator] {
   val values = findValues
 
   case object Avg extends AggregationOperator("avg")
+  case object AvgH extends AggregationOperator("avgh")
   case object Count extends AggregationOperator("count")
   case object Group extends AggregationOperator("group")
   case object Sum extends AggregationOperator("sum")
