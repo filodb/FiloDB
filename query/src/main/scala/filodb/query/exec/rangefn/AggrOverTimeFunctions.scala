@@ -771,8 +771,8 @@ class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
 class ChunkedSumCountRateFunctionDD(sumColId: Int, countColId: Int)
                                     extends ChunkedRangeFunction[HistAvgAggTransientRow] {
 
-  private val sumFunc = new MaxOverTimeChunkedFunctionD
-  private val countFunc = new MinOverTimeChunkedFunctionD
+  private val sumFunc = new ChunkedRateFunction
+  private val countFunc = new ChunkedRateFunction
   private val tr = new TransientRow()
 
   override final def reset(): Unit = {
@@ -804,12 +804,14 @@ class ChunkedSumCountRateFunctionDD(sumColId: Int, countColId: Int)
       // Get valueVector/reader for max column
       val maxVectAcc = info.vectorAccessor(sumColId)
       val maxVectPtr = info.vectorAddress(sumColId)
-      sumFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
+      sumFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr),
+                            startRowNum, endRowNum, startTime, endTime)
 
       // Get valueVector/reader for min column
       val minVectAcc = info.vectorAccessor(countColId)
       val minVectPtr = info.vectorAddress(countColId)
-      countFunc.addTimeChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr), startRowNum, endRowNum)
+      countFunc.addTimeChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr),
+                              startRowNum, endRowNum, startTime, endTime)
     }
   }
 }

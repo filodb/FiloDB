@@ -38,8 +38,9 @@ object HistAvgRowAggregator extends RowAggregator {
   }
   def reduceAggregate(acc: HistAvgHolder, aggRes: RowReader): HistAvgHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
+    if (!aggRes.getDouble(1).isNaN && !aggRes.getDouble(2).isNaN) {
       if (acc.mean.isNaN) acc.mean = 0d
+      if (acc.count.isNaN) acc.count = 0d
       val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getDouble(2)) /
         (acc.count + aggRes.getDouble(2))
       acc.mean = newMean

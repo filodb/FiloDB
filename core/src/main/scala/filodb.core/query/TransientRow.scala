@@ -195,7 +195,7 @@ final class AvgAggTransientRow extends MutableRowReader {
 }
 
 final class HistAvgAggTransientRow extends TransientRow {
-  var count: Double = _
+  var count: Double = 0d
 
   override def setLong(columnNo: Int, valu: Long): Unit =
     if (columnNo == 0) timestamp = valu
