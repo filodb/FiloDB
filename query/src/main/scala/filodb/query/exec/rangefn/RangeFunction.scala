@@ -8,8 +8,9 @@ import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
-//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
+import filodb.query.exec.aggregator.RowAggregator
+//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 
 /**
   * Container for samples within a window of samples
@@ -344,6 +345,9 @@ object RangeFunction {
       case Some(Last)                             => () => new LastSampleChunkedFunctionD
       case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedIncreaseFunction
+      case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountRateFunctionDD(1, 2)
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedRateFunction
       case Some(Increase) if !schema.columns(1).isCumulative

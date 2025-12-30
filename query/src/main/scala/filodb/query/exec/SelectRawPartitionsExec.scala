@@ -9,6 +9,7 @@ import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
 import filodb.core.store._
+import filodb.query.AggregationOperator.AvgH
 import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
@@ -49,6 +50,17 @@ object SelectRawPartitionsExec extends {
     }
     else false
   }
+
+  def checkAvgHAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
+    transformers.exists { rvt =>
+      if (rvt.isInstanceOf[AggregateMapReduce]) {
+        val avghAmr = rvt.asInstanceOf[AggregateMapReduce]
+        avghAmr.aggrOp == AvgH
+      } else {
+        false
+      }
+
+    }
 
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
     transformers.collectFirst { case p: PeriodicSamplesMapper => p.functionId }.flatten
@@ -96,6 +108,13 @@ object SelectRawPartitionsExec extends {
         // query is selecting specific columns
         val colIds = dataSchema.colIDs(colNames: _*)
         require(colIds.isGood, s"$colNames is not a valid column name.")
+        colIds.get
+      } else if (checkAvgHAggExists(transformers)) {
+        // select sum & count columns
+        val avgHCols = Seq("sum", "count")
+        val colIds = dataSchema.colIDs(avgHCols: _*)
+        require(colIds.isGood,
+          s"Histogram average can be applied only on types that have both sum & count columns, such as a histogram")
         colIds.get
       } else if (dataSchema != Schemas.dsGauge) {
         // needs to select raw data

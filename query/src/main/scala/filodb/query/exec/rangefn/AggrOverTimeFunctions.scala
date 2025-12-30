@@ -5,7 +5,7 @@ import java.util
 
 import debox.Buffer
 
-import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
+import filodb.core.query.{HistAvgAggTransientRow, QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
@@ -768,6 +768,51 @@ class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
   }
 }
 
+class ChunkedSumCountRateFunctionDD(sumColId: Int, countColId: Int)
+                                    extends ChunkedRangeFunction[HistAvgAggTransientRow] {
+
+  private val sumFunc = new MaxOverTimeChunkedFunctionD
+  private val countFunc = new MinOverTimeChunkedFunctionD
+  private val tr = new TransientRow()
+
+  override final def reset(): Unit = {
+    sumFunc.reset()
+    countFunc.reset()
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: HistAvgAggTransientRow): Unit = {
+    sumFunc.apply(windowStart, windowEnd, tr)
+    sampleToEmit.setDouble(1, tr.getDouble(1))
+    countFunc.apply(windowStart, windowEnd, tr)
+    sampleToEmit.setDouble(2, tr.getDouble(1))
+  }
+  final def apply(endTimestamp: Long, sampleToEmit: HistAvgAggTransientRow): Unit = ??? // should not be invoked
+
+  import BinaryVector.BinaryVectorPtr
+
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for all columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+
+      // Get valueVector/reader for max column
+      val maxVectAcc = info.vectorAccessor(sumColId)
+      val maxVectPtr = info.vectorAddress(sumColId)
+      sumFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
+
+      // Get valueVector/reader for min column
+      val minVectAcc = info.vectorAccessor(countColId)
+      val minVectPtr = info.vectorAddress(countColId)
+      countFunc.addTimeChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr), startRowNum, endRowNum)
+    }
+  }
+}
 
 /**
   * Computes Average Over Time using sum and count columns.

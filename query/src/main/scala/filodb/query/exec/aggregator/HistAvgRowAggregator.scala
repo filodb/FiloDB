@@ -1,6 +1,5 @@
 package filodb.query.exec.aggregator
 
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.RowReader
 
@@ -51,9 +50,7 @@ object HistAvgRowAggregator extends RowAggregator {
   // ignore last count column. we rely on schema change
   def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams,
               queryStats: QueryStats): Seq[RangeVector] = Seq(aggRangeVector)
-  def reductionSchema(source: ResultSchema): ResultSchema = {
-    source.copy(columns = source.columns :+ ColumnInfo("count", ColumnType.LongColumn))
-  }
+  def reductionSchema(source: ResultSchema): ResultSchema = source
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
     // drop last column with count
     reductionSchema.copy(reductionSchema.columns.filterNot(_.name.equals("count")))

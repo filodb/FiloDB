@@ -267,7 +267,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     // AvgH
     val tscSchema = ResultSchema(Seq(
       ColumnInfo("timestamp", ColumnType.TimestampColumn),
-      ColumnInfo("sum", ColumnType.DoubleColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn),
       ColumnInfo("count", ColumnType.DoubleColumn)),
       1)
 
@@ -286,6 +286,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultAvg = result4(0).rows().map(rr => (rr.getLong(0), rr.getDouble(1))).toList
 
     resultAvg shouldEqual expectedAvg
+
+    agg4.reductionSchema(tscSchema) shouldEqual tscSchema
+    agg4.presentationSchema(tscSchema) shouldEqual tvSchema
   }
 
 
