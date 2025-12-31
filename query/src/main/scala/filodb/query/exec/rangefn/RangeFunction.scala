@@ -10,7 +10,6 @@ import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
 import filodb.query.exec._
 import filodb.query.exec.aggregator.RowAggregator
-//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 
 /**
   * Container for samples within a window of samples

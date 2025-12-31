@@ -9,7 +9,7 @@ import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
 import filodb.core.store._
-import filodb.query.AggregationOperator.AvgH
+import filodb.query.AggregationOperator.HAvg
 import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
@@ -51,11 +51,11 @@ object SelectRawPartitionsExec extends {
     else false
   }
 
-  def checkAvgHAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
+  def checkHAvgAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
     transformers.exists { rvt =>
       if (rvt.isInstanceOf[AggregateMapReduce]) {
         val avghAmr = rvt.asInstanceOf[AggregateMapReduce]
-        avghAmr.aggrOp == AvgH
+        avghAmr.aggrOp == HAvg
       } else {
         false
       }
@@ -109,10 +109,10 @@ object SelectRawPartitionsExec extends {
         val colIds = dataSchema.colIDs(colNames: _*)
         require(colIds.isGood, s"$colNames is not a valid column name.")
         colIds.get
-      } else if (checkAvgHAggExists(transformers)) {
+      } else if (checkHAvgAggExists(transformers)) {
         // select sum & count columns
-        val avgHCols = Seq("sum", "count")
-        val colIds = dataSchema.colIDs(avgHCols: _*)
+        val hAvgCols = Seq("sum", "count")
+        val colIds = dataSchema.colIDs(hAvgCols: _*)
         require(colIds.isGood,
           s"Histogram average can be applied only on types that have both sum & count columns, such as a histogram")
         colIds.get

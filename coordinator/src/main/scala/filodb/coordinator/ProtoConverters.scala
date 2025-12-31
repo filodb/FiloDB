@@ -1429,7 +1429,7 @@ object ProtoConverters {
         case AggregationOperator.BottomK => GrpcMultiPartitionQueryService.AggregationOperator.BOTTOM_K
         case AggregationOperator.Min => GrpcMultiPartitionQueryService.AggregationOperator.MIN
         case AggregationOperator.Avg => GrpcMultiPartitionQueryService.AggregationOperator.AVG
-        case AggregationOperator.AvgH => GrpcMultiPartitionQueryService.AggregationOperator.AVGH
+        case AggregationOperator.HAvg => GrpcMultiPartitionQueryService.AggregationOperator.HAVG
         case AggregationOperator.Sum => GrpcMultiPartitionQueryService.AggregationOperator.SUM
         case AggregationOperator.Stddev => GrpcMultiPartitionQueryService.AggregationOperator.STDDEV
         case AggregationOperator.Stdvar => GrpcMultiPartitionQueryService.AggregationOperator.STDVAR
@@ -1449,7 +1449,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.AggregationOperator.BOTTOM_K => AggregationOperator.BottomK
         case GrpcMultiPartitionQueryService.AggregationOperator.MIN => AggregationOperator.Min
         case GrpcMultiPartitionQueryService.AggregationOperator.AVG => AggregationOperator.Avg
-        case GrpcMultiPartitionQueryService.AggregationOperator.AVGH => AggregationOperator.AvgH
+        case GrpcMultiPartitionQueryService.AggregationOperator.HAVG => AggregationOperator.HAvg
         case GrpcMultiPartitionQueryService.AggregationOperator.SUM => AggregationOperator.Sum
         case GrpcMultiPartitionQueryService.AggregationOperator.STDDEV => AggregationOperator.Stddev
         case GrpcMultiPartitionQueryService.AggregationOperator.STDVAR => AggregationOperator.Stdvar

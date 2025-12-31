@@ -131,7 +131,7 @@ object RowAggregator {
       case Max if valColType != ColumnType.HistogramColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
       case Sum if isHistMaxMin(valColType, schema) => HistMaxMinSumAggregator
-      case AvgH if isHistSumCount(schema) => HistAvgRowAggregator
+      case HAvg if isHistSumCount(schema) => HistAvgRowAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist

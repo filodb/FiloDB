@@ -180,7 +180,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result10(0).rows().map(_.getDouble(1)), readyToAggr10.map { v => 1d }.iterator)
   }
 
-  it ("should optimize histogram average using the avgh function ") {
+  it ("should optimize histogram average using the havg function ") {
 
     def tuple3ToRR(t3: (Long, Double, Double)) = new RowReader() {
       override def notNull(columnNo: Int): Boolean = ???
@@ -264,14 +264,14 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     )
 
     val rvs = Seq(rv1, rv2, rv3)
-    // AvgH
+    // HAvg
     val tscSchema = ResultSchema(Seq(
       ColumnInfo("timestamp", ColumnType.TimestampColumn),
       ColumnInfo("value", ColumnType.DoubleColumn),
       ColumnInfo("count", ColumnType.DoubleColumn)),
       1)
 
-    val agg4 = RowAggregator(AggregationOperator.AvgH, Nil, tscSchema)
+    val agg4 = RowAggregator(AggregationOperator.HAvg, Nil, tscSchema)
     val resultObs4a = RangeVectorAggregator.mapReduce(
       agg4, false, Observable.fromIterable(rvs), noGrouping,  queryContext = qc, QueryWarnings()
     )
@@ -282,7 +282,6 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
 
-
     val resultAvg = result4(0).rows().map(rr => (rr.getLong(0), rr.getDouble(1))).toList
 
     resultAvg shouldEqual expectedAvg
@@ -290,7 +289,6 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     agg4.reductionSchema(tscSchema) shouldEqual tscSchema
     agg4.presentationSchema(tscSchema) shouldEqual tvSchema
   }
-
 
   private def stdvar(items: List[Double]): Double = {
     val mean = items.sum / items.size
