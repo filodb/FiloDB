@@ -347,14 +347,16 @@ object RangeFunction {
                                                   => () => new ChunkedIncreaseFunction
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
                           RowAggregator.isHistSumCount(schema)
-                                                  => () => new ChunkedSumCountRateFunctionDD(1, 2)
+                                                  => () => new ChunkedSumCountCumulRateFunctionDD(1, 2)
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedRateFunction
       case Some(Increase) if !schema.columns(1).isCumulative
                                                   => () => new SumOverTimeChunkedFunctionD
+      case Some(Rate)     if config.fasterRateEnabled && !schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountDeltaRateFunctionDD(1, 2)
       case Some(Rate)     if !schema.columns(1).isCumulative
                                                   => () => new RateOverDeltaChunkedFunctionD
-
       case Some(CountOverTime)                    => () => new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)                      => () => new SumOverTimeChunkedFunctionD
       case Some(AvgWithSumAndCountOverTime)

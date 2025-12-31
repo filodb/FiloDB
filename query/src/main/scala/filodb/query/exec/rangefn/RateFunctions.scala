@@ -2,7 +2,8 @@ package filodb.query.exec.rangefn
 
 import spire.syntax.cfor._
 
-import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
+import filodb.core.query.{HistAvgAggTransientRow, QueryConfig, TransientHistRow, TransientRow}
+import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{ vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, MutableHistogram}
@@ -441,6 +442,54 @@ class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
   }
 
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
+}
+
+class ChunkedSumCountDeltaRateFunctionDD(sumColId: Int, countColId: Int)
+                          extends ChunkedRangeFunction[HistAvgAggTransientRow] {
+
+  private val sumFunc = new RateOverDeltaChunkedFunctionD
+  private val countFunc = new RateOverDeltaChunkedFunctionD
+  private val tr = new TransientRow()
+
+  override final def reset(): Unit = {
+    sumFunc.reset()
+    countFunc.reset()
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: HistAvgAggTransientRow): Unit = {
+    sampleToEmit.setLong(0, windowEnd)
+    sumFunc.apply(windowStart, windowEnd, tr)
+    sampleToEmit.setDouble(1, tr.getDouble(1))
+    countFunc.apply(windowStart, windowEnd, tr)
+    sampleToEmit.setDouble(2, tr.getDouble(1))
+  }
+
+  override def apply(endTimestamp: Long, sampleToEmit: HistAvgAggTransientRow): Unit = ???
+
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for all columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+
+      // Get valueVector/reader for max column
+      val sumVectAcc = info.vectorAccessor(sumColId)
+      val sumVectPtr = info.vectorAddress(sumColId)
+      sumFunc.addTimeDoubleChunks(sumVectAcc, sumVectPtr, bv.DoubleVector(sumVectAcc, sumVectPtr),
+        startRowNum, endRowNum)
+
+      // Get valueVector/reader for min column
+      val countVectAcc = info.vectorAccessor(countColId)
+      val countVectPtr = info.vectorAddress(countColId)
+      countFunc.addTimeDoubleChunks(countVectAcc, countVectPtr, bv.DoubleVector(countVectAcc, countVectPtr),
+        startRowNum, endRowNum)
+    }
+  }
 }
 
 class RateOverDeltaChunkedFunctionL extends ChunkedLongRangeFunction {
