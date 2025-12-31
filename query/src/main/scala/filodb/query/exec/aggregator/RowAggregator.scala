@@ -117,7 +117,7 @@ object RowAggregator {
       schema.columns(2).name == "max" &&
       schema.columns(3).name == "min"
   def isHistSumCount(schema: ResultSchema): Boolean = {
-    (schema.columns(1).name == "sum" || schema.columns(1).name == "value") &&
+    schema.columns.length == 3 && (schema.columns(1).name == "sum" || schema.columns(1).name == "value") &&
       schema.columns(2).name == "count"
   }
 

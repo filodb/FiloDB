@@ -781,6 +781,7 @@ class ChunkedSumCountRateFunctionDD(sumColId: Int, countColId: Int)
   }
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: HistAvgAggTransientRow): Unit = {
+    sampleToEmit.setLong(0, windowEnd)
     sumFunc.apply(windowStart, windowEnd, tr)
     sampleToEmit.setDouble(1, tr.getDouble(1))
     countFunc.apply(windowStart, windowEnd, tr)
