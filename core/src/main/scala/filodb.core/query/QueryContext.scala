@@ -375,9 +375,9 @@ case class QuerySession(qContext: QueryContext,
 
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
-    queryAllocator.foreach(_.close())
     arrowCloseables.reverseIterator.foreach(_.close())
     arrowCloseables.clear()
+    queryAllocator.foreach(_.close())
     lock = None
   }
 }
