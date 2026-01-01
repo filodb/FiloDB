@@ -344,14 +344,14 @@ object RangeFunction {
       case Some(Last)                             => () => new LastSampleChunkedFunctionD
       case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
                           RowAggregator.isHistSumCount(schema)
-                                                  => () => new ChunkedSumCountCumulRateFunctionDD(1, 2,
+                                                  => () => new ChunkedSumCountCumulRangeFunctionDD(1, 2,
                                                                                 new ChunkedIncreaseFunction,
                                                                                 new ChunkedIncreaseFunction)
       case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedIncreaseFunction
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
                           RowAggregator.isHistSumCount(schema)
-                                                  => () => new ChunkedSumCountCumulRateFunctionDD(1, 2,
+                                                  => () => new ChunkedSumCountCumulRangeFunctionDD(1, 2,
                                                                                 new ChunkedRateFunction,
                                                                                 new ChunkedRateFunction)
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative

@@ -769,13 +769,15 @@ class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
 }
 
 /**
- * Composite range function to calculate rate for two columns that are cumulative counters.
+ * Composite range function to calculate rate/increase for two columns that are cumulative counters.
  * Typically, it is activated when the "havg" function is invoked to be able to
  * calculate the rate for both sum and count columns simultaneously.
+ * @param sumFunc The range function to be used for the sum column
+ * @param countFunc The range function to be used for the count column
  */
-class ChunkedSumCountCumulRateFunctionDD(sumColId: Int, countColId: Int,
-                                         sumFunc: ChunkedRateFunctionBase,
-                                         countFunc: ChunkedRateFunctionBase)
+class ChunkedSumCountCumulRangeFunctionDD(sumColId: Int, countColId: Int,
+                                          sumFunc: ChunkedRateFunctionBase,
+                                          countFunc: ChunkedRateFunctionBase)
                                     extends ChunkedRangeFunction[HistAvgAggTransientRow] {
 
   private val tr = new TransientRow()
@@ -786,6 +788,10 @@ class ChunkedSumCountCumulRateFunctionDD(sumColId: Int, countColId: Int,
   }
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: HistAvgAggTransientRow): Unit = {
+    // Since the underlying ChunkedRangeFunctionBase objects support only two columns using TransientRow,
+    // we use a temporary TransientRow ("tr" in this case) instance to get the result and put it back into sampleToEmit.
+    // We can optimize this by having ChunkedRangeFunctionBase accept a column number to set.
+    // But this work is deferred for later
     sampleToEmit.setLong(0, windowEnd)
     sumFunc.apply(windowStart, windowEnd, tr)
     sampleToEmit.setDouble(1, tr.getDouble(1))
