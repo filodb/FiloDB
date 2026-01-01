@@ -58,6 +58,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
 
   override def afterAll(): Unit = {
     memStore.shutdown()
+    server.shutdown()
     // dont close these since there can be other tests using it, but enabling them will help find leaks within this test
 //    FlightClientManager.global.shutdown()
 //    FlightAllocator.rootAllocator.close()
@@ -236,7 +237,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       }
       rvRows3 shouldEqual List(List("host1", "host2"))
 
-      println(allocator.toVerboseString)
+//      println(allocator.toVerboseString)
       FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -269,7 +270,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host2", "region" -> "region1"),
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
 
-      println(allocator.toVerboseString)
+      // println(allocator.toVerboseString)
       FlightAllocator.rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
   }
