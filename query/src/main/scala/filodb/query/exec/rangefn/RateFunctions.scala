@@ -443,7 +443,11 @@ class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
 
   override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
 }
-
+/**
+ * Composite range function to calculate rate for two columns that are delta counters.
+ * Typically, it is activated when the "havg" function is invoked to be able to
+ * calculate the rate for both sum and count columns simultaneously.
+ */
 class ChunkedSumCountDeltaRateFunctionDD(sumColId: Int, countColId: Int)
                           extends ChunkedRangeFunction[HistAvgAggTransientRow] {
 

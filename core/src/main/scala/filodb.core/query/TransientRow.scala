@@ -194,6 +194,11 @@ final class AvgAggTransientRow extends MutableRowReader {
   }
 }
 
+/**
+ * Mutable RowReader for transporting histogram average results.
+ * Contains three columns: Timestamp, Mean, and Count.
+ * Timestamp & Mean are part of the superclass, and count is added here.
+ */
 final class HistAvgAggTransientRow extends TransientRow {
   var count: Double = 0d
 

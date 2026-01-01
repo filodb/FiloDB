@@ -51,15 +51,16 @@ object SelectRawPartitionsExec extends {
     else false
   }
 
+  /**
+   * Checks if RVTs attached to an ExecPlan node imply that
+   * the operation called is HAvg (Histogram Average).
+   * Typically used to select columns from MultiSchemaPartitionsExec
+   * @param transformers RVTs attached to the ExecPlan node.
+   */
   def checkHAvgAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
-    transformers.exists { rvt =>
-      if (rvt.isInstanceOf[AggregateMapReduce]) {
-        val avghAmr = rvt.asInstanceOf[AggregateMapReduce]
-        avghAmr.aggrOp == HAvg
-      } else {
-        false
-      }
-
+    transformers.exists {
+      case avghAmr: AggregateMapReduce =>  avghAmr.aggrOp == HAvg
+      case _ =>                            false
     }
 
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =

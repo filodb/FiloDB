@@ -768,6 +768,11 @@ class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
   }
 }
 
+/**
+ * Composite range function to calculate rate for two columns that are cumulative counters.
+ * Typically, it is activated when the "havg" function is invoked to be able to
+ * calculate the rate for both sum and count columns simultaneously.
+ */
 class ChunkedSumCountCumulRateFunctionDD(sumColId: Int, countColId: Int)
                                     extends ChunkedRangeFunction[HistAvgAggTransientRow] {
 
