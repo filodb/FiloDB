@@ -773,11 +773,11 @@ class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
  * Typically, it is activated when the "havg" function is invoked to be able to
  * calculate the rate for both sum and count columns simultaneously.
  */
-class ChunkedSumCountCumulRateFunctionDD(sumColId: Int, countColId: Int)
+class ChunkedSumCountCumulRateFunctionDD(sumColId: Int, countColId: Int,
+                                         sumFunc: ChunkedRateFunctionBase,
+                                         countFunc: ChunkedRateFunctionBase)
                                     extends ChunkedRangeFunction[HistAvgAggTransientRow] {
 
-  private val sumFunc = new ChunkedRateFunction
-  private val countFunc = new ChunkedRateFunction
   private val tr = new TransientRow()
 
   override final def reset(): Unit = {

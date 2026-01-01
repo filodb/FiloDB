@@ -448,11 +448,13 @@ class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
  * Typically, it is activated when the "havg" function is invoked to be able to
  * calculate the rate for both sum and count columns simultaneously.
  */
-class ChunkedSumCountDeltaRateFunctionDD(sumColId: Int, countColId: Int)
+class ChunkedSumCountDeltaRangeFunctionDD(sumColId: Int, countColId: Int,
+                                          sumFunc: ChunkedDoubleRangeFunction,
+                                          countFunc: ChunkedDoubleRangeFunction)
                           extends ChunkedRangeFunction[HistAvgAggTransientRow] {
-
-  private val sumFunc = new RateOverDeltaChunkedFunctionD
-  private val countFunc = new RateOverDeltaChunkedFunctionD
+//
+//  private val sumFunc = new RateOverDeltaChunkedFunctionD
+//  private val countFunc = new RateOverDeltaChunkedFunctionD
   private val tr = new TransientRow()
 
   override final def reset(): Unit = {
