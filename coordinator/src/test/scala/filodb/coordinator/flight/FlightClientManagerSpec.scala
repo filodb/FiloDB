@@ -22,9 +22,9 @@ class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
 
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
   private val allocator = new RootAllocator(10000)
-  private val locations = Seq (Location.forGrpcInsecure("localhost", 8815),
-                       Location.forGrpcInsecure("localhost", 8816),
-                       Location.forGrpcInsecure("localhost", 8817))
+  private val locations = Seq (Location.forGrpcInsecure("localhost", 8835),
+                       Location.forGrpcInsecure("localhost", 8836),
+                       Location.forGrpcInsecure("localhost", 8837))
 
   private var servers: Seq[FlightServer] = _
   implicit val scheduler: Scheduler = Scheduler.global
