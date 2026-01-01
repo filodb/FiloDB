@@ -226,9 +226,9 @@ class FlightClientManager(rootAllocator: RootAllocator) {
 
   private def closeClientEntry(entry: FlightClientEntry): Unit = {
     try {
-      entry.allocator.close()
-    } finally {
       closeClient(entry.client)
+    } finally {
+      entry.allocator.close()
     }
   }
 
