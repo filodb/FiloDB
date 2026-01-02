@@ -498,6 +498,7 @@ object RangeFunction {
     case Some(QuantileOverTime)                 => () => new QuantileOverTimeFunction(funcParams)
     case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeFunction(funcParams)
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
+    case Some(Timestamp)                        => () => new TimestampIteratingFunction()
   }
 }
 
@@ -546,6 +547,30 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
       }
     }
     sampleToEmit.setValues(endTimestamp, Double.NaN)
+  }
+}
+
+/**
+ * Timestamp function for iterating (sliding window) mode.
+ * Returns the timestamp of the last sample in the window, in seconds.
+ */
+class TimestampIteratingFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    // Return the timestamp of the last sample in the window, in seconds
+    if (window.size > 0) {
+      val lastSample = window.last
+      // Timestamp value should be in seconds (convert from milliseconds)
+      sampleToEmit.setValues(endTimestamp, lastSample.timestamp.toDouble / 1000.0)
+    } else {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
   }
 }
 
