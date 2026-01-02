@@ -11,11 +11,11 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object SeedNodeSortingFixture {
 
   val expected = IndexedSeq(
-    Address("akka.tcp", "sys1", "host1", 2552),
-    Address("akka.tcp", "sys1", "host2", 2552),
-    Address("akka.tcp", "sys1", "host3", 8000),
-    Address("akka.tcp", "sys1", "host4", 9000),
-    Address("akka.tcp", "sys1", "host5", 10000))
+    Address("akka", "sys1", "host1", 2552),
+    Address("akka", "sys1", "host2", 2552),
+    Address("akka", "sys1", "host3", 8000),
+    Address("akka", "sys1", "host4", 9000),
+    Address("akka", "sys1", "host5", 10000))
 
   val config = {
     val seeds = expected.map(_.toString).mkString("\"", "\",\"", "\"")
@@ -32,11 +32,11 @@ class SeedNodeAddressSortingSpec
   "An Ordering[Address]" must {
     "be sorted by address correctly" in {
       import Member.addressOrdering
-      val m1 = Address("akka.tcp", "sys1", "host1", 9000)
-      val m2 = Address("akka.tcp", "sys1", "host1", 10000)
-      val m3 = Address("akka.tcp", "sys1", "host2", 8000)
-      val m4 = Address("akka.tcp", "sys1", "host2", 9000)
-      val m5 = Address("akka.tcp", "sys1", "host2", 10000)
+      val m1 = Address("akka", "sys1", "host1", 9000)
+      val m2 = Address("akka", "sys1", "host1", 10000)
+      val m3 = Address("akka", "sys1", "host2", 8000)
+      val m4 = Address("akka", "sys1", "host2", 9000)
+      val m5 = Address("akka", "sys1", "host2", 10000)
 
       val expected = IndexedSeq(m1, m2, m3, m4, m5)
       val shuffled = Random.shuffle(expected)

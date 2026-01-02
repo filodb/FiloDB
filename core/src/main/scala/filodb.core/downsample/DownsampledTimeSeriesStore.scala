@@ -36,7 +36,7 @@ class DownsampledTimeSeriesStore(val store: ColumnStore,
                                 (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
 
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
   private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]

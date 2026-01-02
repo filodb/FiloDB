@@ -60,7 +60,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
     earliestRawTime, latestDownsampleTime, disp,
     queryConfig, dataset)
-  implicit val system = ActorSystem()
+  implicit val system: ActorSystem = ActorSystem()
   val node = TestProbe().ref
 
   val mapper = new ShardMapper(32)
@@ -193,7 +193,6 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     downsampleEp.name shouldEqual "downsample"
     val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
     val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
-    val actualStart = (start - 28.minutes.toSeconds)
 
     // LogicalPlanUtils.getLookBackMillis() will return 300s as a default stale data lookback
     val rawStartForSubquery =

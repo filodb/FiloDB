@@ -39,9 +39,9 @@ object Submodules {
              "io.grpc" % "protoc-gen-grpc-java" % "1.51.1" asProtocPlugin()
         ),
       PB.protocVersion := "3.21.7",
-      PB.targets in Compile := Seq(
-        PB.gens.java  -> (sourceManaged in Compile).value,
-        PB.gens.plugin("grpc-java")      -> (sourceManaged in Compile).value,
+      Compile / PB.targets := Seq(
+        PB.gens.java  -> (Compile / sourceManaged).value,
+        PB.gens.plugin("grpc-java")      -> (Compile / sourceManaged).value,
       )
   )
 
@@ -66,10 +66,7 @@ object Submodules {
       multiJvmSettings,
       testMultiJvmToo,
       name := "filodb-coordinator",
-      libraryDependencies ++= coordDeps,
-      libraryDependencies +=
-      "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
-        "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}")
+      libraryDependencies ++= coordDeps
     )
 
   lazy val prometheus = (project in file("prometheus"))
@@ -78,9 +75,8 @@ object Submodules {
     .settings(
       commonSettings,
       name := "filodb-prometheus",
-      publishArtifact in (Compile, packageDoc) := false,
-      publishArtifact in packageDoc := false,
-      sources in (Compile, doc) := Seq.empty,
+      Compile / packageDoc / publishArtifact := false,
+      Compile / doc / sources := Seq.empty,
       assemblySettings,
       libraryDependencies ++= promDeps
     )
@@ -101,7 +97,7 @@ object Submodules {
     .settings(
       commonSettings,
       name := "filodb-cassandra",
-      baseDirectory in Test := file("."),   // since we have a config using FiloDB project root as relative path
+      Test / baseDirectory := file("."),   // since we have a config using FiloDB project root as relative path
       libraryDependencies ++= cassDeps
     )
 
@@ -135,9 +131,36 @@ object Submodules {
     .dependsOn(cassandra, core % "compile->compile; test->test")
     .settings(
       commonSettings,
+      // Now uses Scala 2.13.12 (from ThisBuild) with Spark 3.5.7
       name := "spark-jobs",
-      fork in Test := false,
-      baseDirectory in Test := file("."),   // since we have a config using FiloDB project root as relative path
+      Test / fork := true,  // Fork tests to avoid classloader conflicts
+      Test / baseDirectory := file("."),   // since we have a config using FiloDB project root as relative path
+      // Use Flat classloader strategy to avoid NoClassDefFoundError for Cassandra driver's JmxReporter
+      // This is needed because Spark 3.5.x uses Dropwizard Metrics 4.x which moved JmxReporter to a separate module
+      Test / classLoaderLayeringStrategy := ClassLoaderLayeringStrategy.Flat,
+      // Force metrics-core 3.2.2 for Cassandra driver compatibility
+      // Cassandra driver 3.7.1 requires com.codahale.metrics.JmxReporter which only exists in metrics-core 3.x
+      dependencyOverrides += "io.dropwizard.metrics" % "metrics-core" % "3.2.2",
+      // Override global kryo-shaded exclusion - Spark's KryoSerializer needs KryoPool from kryo-shaded
+      excludeDependencies -= ExclusionRule("com.esotericsoftware", "kryo-shaded"),
+      // JDK 17+ requires --add-opens for Spark to access internal Java APIs
+      Test / javaOptions ++= Seq(
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.net=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+        "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+        "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+        "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED",
+        "-Djdk.reflect.useDirectMethodHandle=false"
+      ),
       assemblySettings,
       scalacOptions += "-language:postfixOps",
       libraryDependencies ++= sparkJobsDeps
@@ -215,9 +238,9 @@ object Submodules {
       name := "filodb-gateway",
       libraryDependencies ++= gatewayDeps,
       gatewayAssemblySettings,
-      PB.protoSources in Compile += baseDirectory.value / "src" / "main" / "protobuf",
-      PB.targets in Compile := Seq(
-        scalapb.gen() -> (sourceManaged in Compile).value
+      Compile / PB.protoSources += baseDirectory.value / "src" / "main" / "protobuf",
+      Compile / PB.targets := Seq(
+        scalapb.gen() -> (Compile / sourceManaged).value
       )
     )
 

@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
@@ -48,7 +48,7 @@ object ChunkSet {
     val info = ChunkSetInfo(factory, schema, chunkID(startTime, ingestionTime), ingestionTime,
                             rows.length, schema.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(schema.columns)
-    val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
+    val chunkMap = RowToVectorBuilder.buildFromRows(rows.iterator, filoSchema, factory)
     val chunks = schema.columns.map(c => chunkMap(c.name))
     ChunkSet(info, part, Nil, chunks)
   }
@@ -285,7 +285,7 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    */
   def map[B](func: ChunkSetInfo => B): Iterator[B] = new Iterator[B] {
     def hasNext: Boolean = base.hasNext
-    def next: B = {
+    def next(): B = {
       try {
         func(base.nextInfo)
       } catch {
@@ -303,7 +303,7 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
     try {
       val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
       while (hasNext) { buf += nextInfo }
-      buf
+      buf.toSeq
     } catch {
       case e: Throwable => close(); throw e;
     }
@@ -448,7 +448,7 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader],
+                            windowInfos: ArrayBuffer[ChunkSetInfoReader] = ArrayBuffer.empty[ChunkSetInfoReader],
                             isInclusiveRange: Boolean = true)
 extends Iterator[ChunkSetInfoReader] {
   require(step > 0, s"Adjusted step $step not > 0")
@@ -518,7 +518,7 @@ extends Iterator[ChunkSetInfoReader] {
   /**
    * Returns the next ChunkSetInfo for the current window
    */
-  final def next: ChunkSetInfoReader = {
+  final def next(): ChunkSetInfoReader = {
     val next = windowInfos(readIndex)
     readIndex += 1
     next

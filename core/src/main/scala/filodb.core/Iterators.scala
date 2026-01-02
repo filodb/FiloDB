@@ -28,7 +28,7 @@ object Iterators extends StrictLogging {
     def sortedGroupBy[B](func: T => B): Iterator[(B, Iterator[T])] = new Iterator[(B, Iterator[T])] {
       var iter = origIt
       def hasNext: Boolean = iter.hasNext
-      def next: (B, Iterator[T]) = {
+      def next(): (B, Iterator[T]) = {
         val first = iter.next()
         val firstValue = func(first)
         val (i1, i2) = iter.span(el => func(el) == firstValue)
@@ -65,7 +65,7 @@ object Iterators extends StrictLogging {
    */
   final class ObservableIterator[T](observable: Observable[T],
                               queueSize: Int = 8)
-                             (implicit scheduler: Scheduler)
+                             (implicit @scala.annotation.nowarn("msg=never used") scheduler: Scheduler)
   extends Iterator[T] with Closeable {
     import Notification._
 
@@ -83,7 +83,7 @@ object Iterators extends StrictLogging {
       !completed
     }
 
-    final def next: T = cached match {
+    final def next(): T = cached match {
       case OnNext(elem) => elem
       case x: Any       => throw new RuntimeException("should not call next() after error or completed")
     }
@@ -97,7 +97,7 @@ object Iterators extends StrictLogging {
     }
 
     override def close(): Unit = {
-      subscription.cancel
+      subscription.cancel()
     }
   }
 
@@ -114,7 +114,7 @@ object Iterators extends StrictLogging {
   final class SortedGroupByOperator[A, B](groupingFunc: A => B) extends Operator[A, (B, Seq[A])] {
     def apply(out: Subscriber[(B, Seq[A])]): Subscriber[A] =
       new Subscriber[A] {
-        implicit val scheduler = out.scheduler
+        implicit val scheduler: monix.execution.Scheduler = out.scheduler
         var buf = new ArrayBuffer[A]()
         var lastGroupVal: Option[B] = None
         var ack: Future[Ack] = Continue
@@ -126,7 +126,7 @@ object Iterators extends StrictLogging {
             lastGroupVal.foreach { groupVal =>
               if (thisGroup != groupVal) {
                 streamError = false
-                ack = out.onNext((groupVal, buf))
+                ack = out.onNext((groupVal, buf.toSeq))
                 buf = new ArrayBuffer[A]()
                 lastGroupVal = Some(thisGroup)
               } else {
@@ -152,7 +152,7 @@ object Iterators extends StrictLogging {
 
         def onComplete(): Unit = {
           ack.syncOnContinue {
-            lastGroupVal.foreach { groupVal => out.onNext((groupVal, buf)) }
+            lastGroupVal.foreach { groupVal => out.onNext((groupVal, buf.toSeq)) }
             buf = new ArrayBuffer[A]()
             lastGroupVal = None
             out.onComplete()
@@ -171,7 +171,7 @@ object Iterators extends StrictLogging {
 
     def apply(out: Subscriber[A]): Subscriber[A] =
       new Subscriber[A] {
-        implicit val scheduler = out.scheduler
+        implicit val scheduler: monix.execution.Scheduler = out.scheduler
         private[this] var isActive = true
 
         def onNext(elem: A): Future[Ack] = {

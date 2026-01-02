@@ -279,8 +279,8 @@ object RangeVectorAggregator extends StrictLogging {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
-    rvs.groupBy(grouping).mapValues { rvs =>
-      new CloseableIterator[rowAgg.AggHolderType] {
+    rvs.groupBy(grouping).map { case (k, rvs) =>
+      k -> new CloseableIterator[rowAgg.AggHolderType] {
         // create tuple from rv since rows() will create new iter each time
         val itsAndKeys = rvs.map { rv => (rv.rows(), rv.key) }
         def hasNext: Boolean = {
@@ -328,11 +328,11 @@ object RangeVectorAggregator extends StrictLogging {
     val aggObs = if (skipMapPhase) {
       source.foldLeft(accs) { case (_, rv) =>
         count += 1
-        val rowIter = rv.rows
+        val rowIter = rv.rows()
         if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
-            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next())
           }
         } finally {
           rowIter.close()
@@ -343,11 +343,11 @@ object RangeVectorAggregator extends StrictLogging {
       val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
       source.foldLeft(accs) { case (_, rv) =>
         count += 1
-        val rowIter = rv.rows
+        val rowIter = rv.rows()
         if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
-            val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+            val mapped = rowAgg.map(rv.key, rowIter.next(), mapIntos(i))
             accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
           }
         } finally {
@@ -362,7 +362,7 @@ object RangeVectorAggregator extends StrictLogging {
       if (count > 0) {
         import NoCloseCursor._ // The base range vectors are already closed, so no close propagation needed
         Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty,
-          NoCloseCursor(accs.toIterator.map(_.toRowReader)), period))
+          NoCloseCursor(accs.iterator.map(_.toRowReader)), period))
       } else {
         Observable.empty
       }

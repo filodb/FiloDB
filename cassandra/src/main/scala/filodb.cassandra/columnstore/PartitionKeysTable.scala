@@ -3,7 +3,7 @@ package filodb.cassandra.columnstore
 import java.lang.{Integer => JInt, Long => JLong}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters.asScalaIteratorConverter
+import scala.jdk.CollectionConverters._
 
 import com.datastax.driver.core.{ConsistencyLevel, Row}
 import monix.eval.Task
@@ -184,7 +184,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
    * @return Option[PartKeyRecord]
    */
   def readPartKey(pk: Array[Byte]) : Option[PartKeyRecord] = {
-    val iterator = session.execute(readCql.bind().setBytes(0, toBuffer(pk))).iterator()
+    val iterator = session.execute(readCql.bind().setBytes(0, toBuffer(pk))).iterator
     if (iterator.hasNext) {
       Some(PartitionKeysTable.rowToPartKeyRecord(iterator.next(), shard))
     } else {

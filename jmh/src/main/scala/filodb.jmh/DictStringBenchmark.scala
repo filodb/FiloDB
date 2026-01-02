@@ -41,7 +41,7 @@ class DictStringBenchmark {
   val randomStrings = (0 until numValues).map(i => uniqueStrings(nextInt(numUniqueStrings)))
   val scNoNA = UTF8Vector(memFactory, randomStrings.map(_.utf8))
 
-  def shouldNA: Boolean = nextFloat < naChance
+  def shouldNA: Boolean = nextFloat() < naChance
 
   val scNA = UTF8Vector(memFactory, randomStrings.map(str => if (shouldNA) ZeroCopyUTF8String.empty else str.utf8))
   val scNAPtr = scNA.optimize(memFactory)

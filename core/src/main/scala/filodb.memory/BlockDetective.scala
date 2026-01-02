@@ -7,7 +7,7 @@ import org.joda.time.DateTime
  * This helps to track down ownership and causes for corruption issues.
  */
 object BlockDetective {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   def containsPtr(ptr: BinaryRegion.NativePointer, blocks: Seq[Block]): Seq[Block] =
     blocks.filter { blk => ptr >= blk.address && ptr < (blk.address + blk.capacity) }

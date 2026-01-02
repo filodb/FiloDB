@@ -22,7 +22,7 @@ object NodeClusterSpecConfig extends MultiNodeConfig {
   // this configuration will be used for all nodes
   // Uses our common Akka test config from application_test.conf
   val globalConfig = ConfigFactory.parseString("""filodb.memstore.groups-per-shard = 4
-                                                 |akka.remote.netty.tcp.applied-adapters = [trttl, gremlin]
+                                                 |akka.remote.artery.applied-adapters = [trttl, gremlin]
                                                  |akka.remote.artery.advanced.test-mode = on
                                                  |akka.coordinated-shutdown.exit-jvm = on
                                                  |akka.cluster.run-coordinated-shutdown-when-down = on

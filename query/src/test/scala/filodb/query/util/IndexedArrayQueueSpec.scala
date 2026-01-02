@@ -19,9 +19,9 @@ class IndexedArrayQueueSpec extends AnyFunSpec with Matchers {
     q.size shouldEqual 8
 
     // remove elements
-    q.remove shouldEqual "0"
-    q.remove shouldEqual "1"
-    q.remove shouldEqual "2"
+    q.remove() shouldEqual "0"
+    q.remove() shouldEqual "1"
+    q.remove() shouldEqual "2"
     q.size shouldEqual 5
     for { i <- 0 until 5 } {
       q(i) shouldEqual (i + 3).toString  // 3 elements removed so far

@@ -37,6 +37,7 @@ private[coordinator] final class NodeLifecycleStrategy(settings: FilodbSettings)
     case e: DeadLetter        => onDeadLetter(e)
   }
 
+  @scala.annotation.unused
   private def state = cluster.state
 
   private def onUp(e: MemberUp): Unit = {}

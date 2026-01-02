@@ -37,7 +37,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     def getString(columnNo: Int): String = ???
     override def getHistogram(columnNo: Int): bv.Histogram = {
       try {
-        vectorIts(columnNo).asHistIt.next
+        vectorIts(columnNo).asHistIt.next()
       } catch {
         case e : EmptyHistogramException => {
           var message = s"EmptyHistogramException ${e.getMessage} infos=["
@@ -111,7 +111,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     }
   }
 
-  final def next: RowReader = {
+  final def next(): RowReader = {
     rowNo += 1
     rowReader
   }

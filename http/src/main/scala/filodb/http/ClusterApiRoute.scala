@@ -56,7 +56,7 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
     //     "status": "success",
     //     "data": [
     //         {
-    //             "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
+    //             "address": "akka://filo-standalone@23.13.16.45:91007",
     //             "shardList": [
     //                 {
     //                     "shard": 0,
@@ -111,7 +111,7 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
     // Sample input as follows:
     // {{{
     //  {
-    //    "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
+    //    "address": "akka://filo-standalone@23.13.16.45:91007",
     //    "shardList": [23, 24]
     //  }
     // }}}

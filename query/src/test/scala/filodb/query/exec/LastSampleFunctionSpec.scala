@@ -114,7 +114,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
                                      start: Long = System.currentTimeMillis()): Seq[(Long, Double)] = {
     var time = start
     (0 until numSamples).map { _ =>
-      var randomness = Math.abs(rand.nextGaussian * intervalStdDev).toLong
+      var randomness = Math.abs(rand.nextGaussian() * intervalStdDev).toLong
       // randomness should not be < -intervalMean otherwise time will reduce
       if (randomness < -intervalMean) randomness = intervalMean
       time  = time + intervalMean + randomness

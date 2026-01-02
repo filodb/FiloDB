@@ -2,9 +2,8 @@ package filodb.core.binaryrecord2
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
-
-import debox.Buffer
 
 import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge}
 import filodb.memory.format.UnsafeUtils
@@ -78,7 +77,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
     var curOffset = offset + ContainerHeaderLen
 
     final def hasNext: Boolean = curOffset < endOffset
-    final def next: BinaryRecordRowReader = {
+    final def next(): BinaryRecordRowReader = {
       val recordLen = BinaryRegionLarge.numBytes(base, curOffset)
       reader.recordOffset = curOffset
       curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes
@@ -101,17 +100,17 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
    * Convenience functional method to map the BinaryRecords to something else and returns a Buffer which
    * can be unboxed and efficient.  If you want performance, consider using consumeRecords instead.
    */
-  def map[@specialized B: ClassTag](func: (Any, Long) => B): Buffer[B] = {
-    val result = Buffer.empty[B]
+  def map[@specialized B: ClassTag](func: (Any, Long) => B): ArrayBuffer[B] = {
+    val result = ArrayBuffer.empty[B]
     foreach { case (b, o) => result += func(b, o) }
     result
   }
 
   /**
    * A convenient method to return all of the record offsets (or native pointers if offheap) for this container.
-   * @return a debox.Buffer[Long], which conveniently does not box, and minimizes memory use.
+   * @return a scala.collection.mutable.ArrayBuffer[Long], which conveniently does not box, and minimizes memory use.
    */
-  final def allOffsets: Buffer[Long] = map { case (b, o) => o }
+  final def allOffsets: ArrayBuffer[Long] = map { case (b, o) => o }
 
   class CountingConsumer(var count: Int = 0) extends BinaryRegionConsumer {
     final def onNext(base: Any, offset: Long): Unit = count += 1

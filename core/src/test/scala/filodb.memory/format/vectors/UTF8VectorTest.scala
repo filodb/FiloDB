@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.memory.format._
 
@@ -102,14 +102,14 @@ class UTF8VectorTest extends NativeVectorTest {
       val utf8vect = UTF8Vector.appendingVector(memFactory, 50, 16384)
       strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       val ptr = utf8vect.optimize(memFactory)
-      UTF8Vector(acc, ptr).toBuffer(acc, ptr) shouldEqual Buffer.fromIterable(strs)
+      UTF8Vector(acc, ptr).toBuffer(acc, ptr) shouldEqual ArrayBuffer.from(strs)
 
       val vect2 = UTF8Vector.appendingVector(memFactory, 50, 8192)
       vect2 shouldBe a[GrowableVector[_]]
       vect2.asInstanceOf[GrowableVector[_]].inner shouldBe a[UTF8AppendableVector]
       strs.foreach(s => vect2.addData(s) shouldEqual Ack)
       val ptr2 = vect2.optimize(memFactory)
-      UTF8Vector(acc, ptr2).toBuffer(acc, ptr2) shouldEqual Buffer.fromIterable(strs)
+      UTF8Vector(acc, ptr2).toBuffer(acc, ptr2) shouldEqual ArrayBuffer.from(strs)
     }
   }
 
@@ -143,7 +143,7 @@ class UTF8VectorTest extends NativeVectorTest {
     it("shouldMakeDict when source strings are mostly repeated") {
       val strs = Seq("apple", "zoe", "grape").permutations.flatten.toList.map(ZeroCopyUTF8String.apply)
       val dictInfo = DictUTF8Vector.shouldMakeDict(memFactory, UTF8Vector(memFactory, strs), samplingRate=0.5)
-      dictInfo should be ('defined)
+      dictInfo should be (Symbol("defined"))
       dictInfo.get.codeMap.size should equal (3)
       dictInfo.get.dictStrings.length should equal (4)
     }
@@ -151,7 +151,7 @@ class UTF8VectorTest extends NativeVectorTest {
     it("should not makeDict when source strings are all unique") {
       val strs = (0 to 9).map(_.toString).map(ZeroCopyUTF8String.apply)
       val dictInfo = DictUTF8Vector.shouldMakeDict(memFactory, UTF8Vector(memFactory, strs))
-      dictInfo should be ('empty)
+      dictInfo should be (Symbol("empty"))
     }
 
     it("should optimize UTF8Vector to DictVector with NAs and read it back") {

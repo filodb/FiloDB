@@ -65,7 +65,7 @@ object NodeClusterActor {
                                 storeConfig: StoreConfig,
                                 downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
                                 overrideSchema: Boolean = true) {
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
     val config = IngestionConfig(dataset.ref, resourceConfig,
@@ -247,7 +247,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     shardManager.logAllMappers("PostStop of NodeClusterActor")
     super.postStop()
     cluster.unsubscribe(self)
-    pubTask foreach (_.cancel)
+    pubTask foreach (_.cancel())
     // Publish one last update
     datasets.keys.foreach(shardManager.publishSnapshot)
     watcher ! NodeProtocol.PostStop(singletonProxy, cluster.selfAddress)
@@ -279,8 +279,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case s: CurrentClusterState =>
       logger.info(s"Initial Cluster State was: $s")
       shardManager.logAllMappers("After receiving initial cluster state")
-      val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).map(memberUp(_))
-      Future.sequence(memberUpFutures.toSeq).onComplete { _ =>
+      val memberUpFutures = s.members.toSeq.filter(_.status == MemberStatus.Up).map(memberUp)
+      Future.sequence(memberUpFutures).onComplete { _ =>
         self ! RemoveStaleCoordinators
       }
 
@@ -301,8 +301,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
           //   val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
           //   addr == member.address
           // }
-          roleToCoords.transform { case (_, refs) => refs - ref }
-          roleToCoords.retain { case (role, refs) => refs.nonEmpty }
+          roleToCoords.mapValuesInPlace { case (_, refs) => refs - ref }
+          roleToCoords.filterInPlace { case (role, refs) => refs.nonEmpty }
 
         case None =>
           logger.info(s"Received MemberRemoved for stale member ${member.address}. It " +
@@ -355,7 +355,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   // handleEventEnvelope() currently acks right away, so there is a chance that this actor dies between receiving
   // a new event and the new snapshot is published.
   private def scheduleSnapshotPublishes() = {
-    pubTask = Some(context.system.scheduler.schedule(1.minute, publishInterval, self, PublishSnapshot))
+    pubTask = Some(context.system.scheduler.scheduleWithFixedDelay(1.minute, publishInterval, self, PublishSnapshot))
   }
 
   def shardMapHandler: Receive = LoggingReceive {
@@ -460,7 +460,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       datasets.clear()
       sources.clear()
 
-      implicit val timeout: Timeout = DefaultTaskTimeout
+      @scala.annotation.unused implicit val timeout: Timeout = DefaultTaskTimeout
       shardManager.reset()
       origin ! NodeProtocol.StateReset
   }

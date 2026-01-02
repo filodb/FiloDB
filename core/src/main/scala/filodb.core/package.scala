@@ -2,7 +2,7 @@ package filodb
 
 import java.util.concurrent.ConcurrentMap
 
-import scala.language.implicitConversions
+// import scala.language.implicitConversions  // unused
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 

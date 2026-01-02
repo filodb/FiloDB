@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import debox.Buffer
+import scala.collection.mutable.ArrayBuffer
+
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -57,7 +58,7 @@ object IntBinaryVector {
     case 32 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setInt(addr + numBytes, v)
+          UnsafeUtils.setInt(this.addr + numBytes, v)
           incWriteOffset(4)
           Ack
         case other: AddResponse => other
@@ -66,7 +67,7 @@ object IntBinaryVector {
     case 16 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setShort(addr + numBytes, v.toShort)
+          UnsafeUtils.setShort(this.addr + numBytes, v.toShort)
           incWriteOffset(2)
           Ack
         case other: AddResponse => other
@@ -75,7 +76,7 @@ object IntBinaryVector {
     case 8 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          UnsafeUtils.setByte(addr + numBytes, v.toByte)
+          UnsafeUtils.setByte(this.addr + numBytes, v.toByte)
           incWriteOffset(1)
           Ack
         case other: AddResponse => other
@@ -185,7 +186,7 @@ object IntBinaryVector {
     // Get nbits and signed
     val (min, max) = vector.minMax
     val (nbits, signed) = minMaxToNbitsSigned(min, max)
-    val dispose = () => vector.dispose()
+    @scala.annotation.nowarn("msg=never used") val dispose = () => vector.dispose()
     if (vector.noNAs) {
       if (min == max) {
         ConstVector.make(memFactory, vector.length, 4) { addr => UnsafeUtils.setInt(ZeroPointer, addr, vector(0)) }
@@ -290,8 +291,8 @@ trait IntVectorDataReader extends VectorDataReader {
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
-  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Int] = {
-    val newBuf = Buffer.empty[Int]
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): ArrayBuffer[Int] = {
+    val newBuf = ArrayBuffer.empty[Int]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
@@ -483,7 +484,7 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
   final def addNA(): AddResponse = addData(0)
   final def apply(index: Int): Int = reader.apply(nativePtrReader, addr, index)
   val reader = IntBinaryVector.simple(nativePtrReader, addr)
-  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Int] = reader.asIntReader.toBuffer(nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
@@ -518,7 +519,7 @@ BitmapMaskAppendableVector[Int](addr, maxElements) with OptimizingPrimitiveAppen
                                                     nbits, signed, dispose)
 
   def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
-  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(nativePtrReader, addr)
+  def copyToBuffer: ArrayBuffer[Int] = MaskedIntBinaryVector.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Int, Int) = {
     var min = Int.MaxValue

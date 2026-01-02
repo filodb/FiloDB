@@ -15,8 +15,6 @@ import io.opentelemetry.api.common.{AttributeKey, Attributes, AttributesBuilder}
 import io.opentelemetry.api.metrics._
 import io.opentelemetry.exporter.logging.otlp.OtlpJsonLoggingMetricExporter
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter
-import io.opentelemetry.instrumentation.oshi.SystemMetrics
-import io.opentelemetry.instrumentation.runtimemetrics.java8.{Classes, Cpu, GarbageCollector, MemoryPools, Threads}
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.{Aggregation, InstrumentSelector, InstrumentType, SdkMeterProvider, View}
 import io.opentelemetry.sdk.metrics.data.AggregationTemporality
@@ -160,7 +158,7 @@ case class MetricsCounter(otelCounter: Option[DoubleCounter],
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     val value2 = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
-      case None => value
+      case None => value.toDouble
     }
     otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
@@ -179,9 +177,9 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
     otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
       // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
-      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
+      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value.toDouble))
     } else {
-      kamonCounter.foreach(_.increment(value))
+      kamonCounter.foreach(_.increment(value.toDouble))
     }
   }
 }
@@ -214,7 +212,7 @@ case class MetricsHistogram(otelHistogram: Option[DoubleHistogram],
   def record(value: Long, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     val valueInSeconds = timeUnit match {
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
-      case None => value
+      case None => value.toDouble
     }
     otelHistogram.foreach(_.record(valueInSeconds, withAttributes(additionalAttributes)))
 
@@ -277,7 +275,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder().setType(InstrumentType.HISTOGRAM).build(),
         View.builder().setAggregation(Aggregation.base2ExponentialBucketHistogram(64, 20)).build())
     } else {
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val timeBuckets = otelConfig.customHistogramBucketsTime.map(Double.box).asJava
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder()
         .setType(InstrumentType.HISTOGRAM).setUnit("seconds")
@@ -293,13 +291,13 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    import scala.collection.JavaConverters._
-    closeables ++= Classes.registerObservers(sdk).asScala
-    closeables ++= Cpu.registerObservers(sdk).asScala
-    closeables ++= MemoryPools.registerObservers(sdk).asScala
-    closeables ++= Threads.registerObservers(sdk).asScala
-    closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
-    closeables ++= SystemMetrics.registerObservers(sdk).asScala
+    // TODO: Fix these instrumentation imports for JDK 21
+    // closeables ++= Classes.registerObservers(sdk).asScala
+    // closeables ++= Cpu.registerObservers(sdk).asScala
+    // closeables ++= MemoryPools.registerObservers(sdk).asScala
+    // closeables ++= Threads.registerObservers(sdk).asScala
+    // closeables ++= GarbageCollector.registerObservers(sdk, true).asScala
+    // closeables ++= SystemMetrics.registerObservers(sdk).asScala
     closeables ++= registerProcessMetrics(sdk)
     sdk
   }
@@ -328,8 +326,8 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
 
       val future = Observable.intervalWithFixedDelay(0.seconds, otelConfig.exportIntervalSeconds.seconds).foreach { _ =>
         processInfo.updateAttributes()
-        memRss.update(processInfo.getResidentSetSize)
-        memVms.update(processInfo.getVirtualSize)
+        memRss.update(processInfo.getResidentSetSize.toDouble)
+        memVms.update(processInfo.getVirtualSize.toDouble)
         cpuSystemTime.update(processInfo.getKernelTime.toDouble)
         cpuUserTime.update(processInfo.getUserTime.toDouble)
         majorPageFaults.update(processInfo.getMajorFaults.toDouble)

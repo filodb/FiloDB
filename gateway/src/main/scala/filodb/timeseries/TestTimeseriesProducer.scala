@@ -82,7 +82,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val promQL = s"""$metricName{_ns_="$nameSpace",_ws_="$workSpace"}"""
 
     val cliQuery =
-      s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +
+      s"""./filo-cli '-Dakka.remote.artery.canonical.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +
         s"""--promql '$promQL' --start $startQuery --end $endQuery --limit 15"""
     logger.info(s"CLI Query : \n$cliQuery")
 
@@ -133,15 +133,16 @@ object TestTimeseriesProducer extends StrictLogging {
                      schema: Schema,
                      namespace: String = "App-0",
                      workspace: String = "demo",
-                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
+                     metricNameOverride: Option[String] = None): LazyList[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     val metricName = metricNameOverride.getOrElse("heap_usage")
-    Stream.from(0).flatMap { n =>
+    LazyList.from(0).flatMap { n =>
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
@@ -171,16 +172,17 @@ object TestTimeseriesProducer extends StrictLogging {
                      publishIntervalSec: Int,
                      namespace: String = "App-0",
                      workspace: String = "demo",
-                     metricNameOverride: Option[String] = None): Stream[InputRecord] = {
+                     metricNameOverride: Option[String] = None): LazyList[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     val metricName = metricNameOverride.getOrElse("heap_usage_counter")
     val valMap: mutable.HashMap[Map[String, String], Double] = mutable.HashMap.empty[Map[String, String], Double]
-    Stream.from(0).flatMap { n =>
+    LazyList.from(0).flatMap { n =>
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
 
@@ -220,7 +222,7 @@ object TestTimeseriesProducer extends StrictLogging {
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema,
                        numBuckets : Int = 20, metricNameOverride: Option[String] = None,
-                       namespace: String = "App-0", workspace: String = "demo"): Stream[InputRecord] = {
+                       namespace: String = "App-0", workspace: String = "demo"): LazyList[InputRecord] = {
 
     val metricName: String = metricNameOverride.getOrElse("http_request_latency")
     val histBucketScheme = if (Schemas.otelExpDeltaHistogram == histSchema)
@@ -249,11 +251,12 @@ object TestTimeseriesProducer extends StrictLogging {
 
     val instanceBase = System.currentTimeMillis
     var prevTimestamp = startTime
-    Stream.from(0).map { n =>
+    LazyList.from(0).map { n =>
       val instance = n % numTimeSeries + instanceBase
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      @scala.annotation.unused val app = 0
+      // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       // reset buckets for delta histograms

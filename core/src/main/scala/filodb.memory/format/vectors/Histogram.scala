@@ -491,8 +491,8 @@ sealed trait HistogramBuckets {
     tops
   }
 
-  final def bucketSet: debox.Set[Double] = {
-    val tops = debox.Set.empty[Double]
+  final def bucketSet: scala.collection.mutable.HashSet[Double] = {
+    val tops = scala.collection.mutable.HashSet.empty[Double]
     cforRange { 0 until numBuckets } { b =>
       tops += bucketTop(b)
     }

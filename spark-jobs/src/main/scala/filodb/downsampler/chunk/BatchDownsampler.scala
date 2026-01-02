@@ -90,13 +90,13 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     * Chunk Downsamplers by Raw Schema Id
     */
   @transient lazy private val chunkDownsamplersByRawSchemaId = {
-    val map = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+    val map = scala.collection.mutable.HashMap.empty[Int, scala.Seq[ChunkDownsampler]]
     rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplers }
     map
   }
 
   @transient lazy private val downsamplePeriodMarkersByRawSchemaId = {
-    val map = debox.Map.empty[Int, DownsamplePeriodMarker]
+    val map = scala.collection.mutable.HashMap.empty[Int, DownsamplePeriodMarker]
     rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplePeriodMarker }
     map
   }
@@ -294,7 +294,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         val resMillis = resolution.toMillis
 
         val downsamplePeriods =
-          periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
+          periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray
         java.util.Arrays.sort(downsamplePeriods)
 
         if (shouldTrace)
@@ -360,7 +360,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
   private def getDownsampledChunksAsList(
     downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]
   ): ListBuffer[Row] = {
-    val start = System.currentTimeMillis()
+    @scala.annotation.unused val start = System.currentTimeMillis()
     @volatile var numChunks = 0
     val allRows = new ListBuffer[Row]
     downsampledChunksToPersist.foreach { case (res, chunks) =>
@@ -436,7 +436,7 @@ class BatchDownsampler(val settings: DownsamplerSettings,
       val res = Duration.apply(row.getString(0)).asInstanceOf[FiniteDuration]
       val chunkTable = downsampleCassandraColStore.getOrCreateChunkTable(
         downsampleRefsByRes(res))
-      import collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       val chunks = row.getAs[Seq[Array[Byte]]](4).map(ByteBuffer.wrap).toList.asJava
       val insert = chunkTable.writeChunksCql.bind()
         .setBytes(0, ByteBuffer.wrap(row.getAs[Array[Byte]](1)))

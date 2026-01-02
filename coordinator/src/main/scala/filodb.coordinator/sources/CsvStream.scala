@@ -88,7 +88,7 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                                 columnNames: Seq[String],
                                 settings: CsvStream.CsvStreamSettings,
                                 offset: Option[Long]) extends IngestionStream with StrictLogging {
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
   require(schemas.schemas.nonEmpty, s"Schemas cannot be empty")
 
   val numLinesToSkip = offset.filter(n => n >= 0 && n <= Int.MaxValue).map(_.toInt)

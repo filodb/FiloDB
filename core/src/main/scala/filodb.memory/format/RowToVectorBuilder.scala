@@ -82,6 +82,7 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory) {
     schema.zip(chunks).map { case (VectorInfo(colName, _), bytes) => (colName, bytes) }.toMap
   }
 
+  @scala.annotation.nowarn("msg=never used")
   private def unsupportedInput(typ: Any) =
     throw new RuntimeException("Unsupported input type " + typ)
 }

@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
 
@@ -50,7 +50,7 @@ case class DataColumn(id: Int,
   // NOTE: this is one reason why column names cannot have commas
   override def toString: String = {
     val paramStrs = params.entrySet.asScala.map { e => s"${e.getKey}=${e.getValue.render}" }
-    (Seq(id, name, columnType).map(_.toString) ++ paramStrs).mkString("[", ",", "]")
+    (Seq(id.toString, name, columnType.toString) ++ paramStrs).mkString("[", ",", "]")
   }
 
   def extractor: TypedFieldExtractor[_] = columnType.keyType.extractor

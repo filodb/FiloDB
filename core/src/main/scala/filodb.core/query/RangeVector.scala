@@ -4,10 +4,11 @@ import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
-import org.joda.time.DateTime
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Using
+
+import com.typesafe.scalalogging.StrictLogging
+import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
@@ -433,8 +434,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   }
   import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
-  override def rows: RangeVectorCursor = {
-    val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsSerialized)
+  override def rows(): RangeVectorCursor = {
+    val it = containers.iterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsSerialized)
     if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {
       new Iterator[RowReader] {
         var curTime = outputRange.get.startMs
@@ -464,11 +465,11 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   }
 
   override def estimateSerializedRowBytes: Long =
-    containers.toIterator.flatMap(_.iterate(schema))
+    containers.iterator.flatMap(_.iterate(schema))
       .slice(startRecordNo, startRecordNo + numRowsSerialized)
       .foldLeft(0)(_ + _.recordLength)
 
-  def containersIterator : Iterator[RecordContainer] = containers.toIterator
+  def containersIterator : Iterator[RecordContainer] = containers.iterator
 
   /**
     * Pretty prints all the elements into strings using record schema
@@ -476,7 +477,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   override def prettyPrint(formatTime: Boolean = true): String = {
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
-      rows.map { reader =>
+      rows().map { reader =>
         val firstCol = if (formatTime && schema.isTimeSeries) {
           val timeStamp = reader.getLong(0)
           s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
@@ -591,8 +592,8 @@ final case class IteratorBackedRangeVector(key: RangeVectorKey,
 
 
 final case class BufferRangeVector(key: RangeVectorKey,
-                                   timestamps: Buffer[Long],
-                                   values: Buffer[Double],
+                                   timestamps: ArrayBuffer[Long],
+                                   values: ArrayBuffer[Double],
                                    override val outputRange: Option[RvRange]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
@@ -600,7 +601,7 @@ final case class BufferRangeVector(key: RangeVectorKey,
     val row = new TransientRow()
     var n = 0
     def hasNext: Boolean = n < timestamps.length
-    def next: RowReader = {
+    def next(): RowReader = {
       row.setValues(timestamps(n), values(n))
       n += 1
       row

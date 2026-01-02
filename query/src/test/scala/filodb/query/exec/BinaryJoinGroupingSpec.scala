@@ -137,15 +137,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan).toIndexedSeq, // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1).toIndexedSeq, // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -162,9 +164,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    // Check values in an order-independent way by mapping mode label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("mode")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("idle") shouldEqual List(3)
+    resultMap("user") shouldEqual List(1)
   }
 
   it("should join many-to-one with ignoring ") {
@@ -172,15 +177,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       None, Seq("role", "mode"), Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -197,9 +204,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    // Check values in an order-independent way by mapping mode label to value
+    val resultMap = result.map(rv => rv.key.labelValues(ZeroCopyUTF8String("mode")).toString ->
+      rv.rows().map(_.getDouble(1)).toList).toMap
+    resultMap("idle") shouldEqual List(3)
+    resultMap("user") shouldEqual List(1)
   }
 
   it("should join many-to-one with by and grouping without arguments") {
@@ -213,15 +223,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -246,10 +258,16 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    // Check values in an order-independent way by mapping (instance, mode) to value
+    val resultMap = result.map { rv =>
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      val mode = rv.key.labelValues(ZeroCopyUTF8String("mode")).toString
+      (instance, mode) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    resultMap(("abc", "idle")) shouldEqual List(0.75)
+    resultMap(("abc", "user")) shouldEqual List(0.25)
+    resultMap(("def", "idle")) shouldEqual List(0.8)
+    resultMap(("def", "user")) shouldEqual List(0.2)
   }
 
   it("copy sample role to node using group right ") {
@@ -257,16 +275,18 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeVar.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.MUL,
       Cardinality.OneToMany,
       None, Seq("role"),
       Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeRole.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -278,8 +298,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     result.size shouldEqual 1
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(2))
+    result.foreach(_.rows().size shouldEqual(1))
+    result(0).rows().map(_.getDouble(1)).foreach(_ shouldEqual(2))
   }
 
   it("should join many-to-one when group left label does not exist") {
@@ -293,15 +313,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.DIV,
       Cardinality.ManyToOne, None,
       Seq("mode"), Seq("dummy"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -326,10 +348,16 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    // Check values in an order-independent way by mapping (instance, mode) to value
+    val resultMap = result.map { rv =>
+      val instance = rv.key.labelValues(ZeroCopyUTF8String("instance")).toString
+      val mode = rv.key.labelValues(ZeroCopyUTF8String("mode")).toString
+      (instance, mode) -> rv.rows().map(_.getDouble(1)).toList
+    }.toMap
+    resultMap(("abc", "idle")) shouldEqual List(0.75)
+    resultMap(("abc", "user")) shouldEqual List(0.25)
+    resultMap(("def", "idle")) shouldEqual List(0.8)
+    resultMap(("def", "user")) shouldEqual List(0.2)
   }
 
   it("should have metric name when operator is not MathOperator") {
@@ -379,15 +407,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan).toIndexedSeq, // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1).toIndexedSeq, // empty since we test compose, not execute or doExecute
       BinaryOperator.GTR,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "metric", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      sampleRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -416,15 +446,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan).toIndexedSeq, // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1).toIndexedSeq, // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -445,15 +477,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       None, Seq("role", "mode"), Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -480,15 +514,17 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Array(dummyPlan).toIndexedSeq,
+      new Array[ExecPlan](1).toIndexedSeq,
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     // actual query results into 4 rows. since limit is 3, this results in BadQueryException

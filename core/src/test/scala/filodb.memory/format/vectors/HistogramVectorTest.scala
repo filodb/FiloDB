@@ -268,7 +268,7 @@ class HistogramVectorTest extends NativeVectorTest {
     val oReader2 = optReader.asInstanceOf[CounterHistogramReader]
     oReader2.updateCorrection(acc, optimized, NoCorrection) shouldEqual
       HistogramCorrection(lastIncrHist, LongHistogram.empty(bucketScheme))
-    oReader2.updateCorrection(acc, optimized, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+    oReader2.updateCorrection(acc, optimized, HistogramCorrection(lastIncrHist, correction1.copy())) shouldEqual
       HistogramCorrection(lastIncrHist, correction1)
   }
 
@@ -304,7 +304,7 @@ class HistogramVectorTest extends NativeVectorTest {
     val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
     reader.length shouldEqual bucketData.length
 
-    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual debox.Buffer(6, 10)
+    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual scala.collection.mutable.ArrayBuffer(6, 10)
 
     (0 until bucketData.length).foreach { i =>
       verifyHistogram(reader(i), i, bucketData, myBucketScheme)
@@ -322,7 +322,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     onHeapAcc.foreach { a =>
       val readerH = HistogramVector(a, 0).asInstanceOf[SectDeltaHistogramReader]
-      readerH.dropPositions(a, 0) shouldEqual debox.Buffer(6, 10)
+      readerH.dropPositions(a, 0) shouldEqual scala.collection.mutable.ArrayBuffer(6, 10)
       (0 until bucketData.length).foreach { i =>
         val h = readerH(i)
         verifyHistogram(h, i, bucketData, myBucketScheme)
@@ -355,9 +355,9 @@ class HistogramVectorTest extends NativeVectorTest {
     // Now, verify updateCorrection will propagate correction correctly
     reader.updateCorrection(acc, appender.addr, NoCorrection) shouldEqual
       HistogramCorrection(lastIncrHist, lastIncrHist)
-    val corr2 = correction1.copy
+    val corr2 = correction1.copy()
     corr2.add(lastIncrHist)
-    reader.updateCorrection(acc, appender.addr, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+    reader.updateCorrection(acc, appender.addr, HistogramCorrection(lastIncrHist, correction1.copy())) shouldEqual
       HistogramCorrection(lastIncrHist, corr2)
   }
 
@@ -443,12 +443,12 @@ class HistogramVectorTest extends NativeVectorTest {
     incrReader.detectDropAndCorrection(acc, incrAddr, NoCorrection) shouldEqual NoCorrection
 
     // No drop in first value, correction should be returned unchanged
-    val meta1 = HistogramCorrection(correction1, correction2.copy)
+    val meta1 = HistogramCorrection(correction1, correction2.copy())
     incrReader.detectDropAndCorrection(acc, incrAddr, meta1) shouldEqual meta1
 
     // Drop in first value, correction should be done
-    val meta2 = HistogramCorrection(lastIncrHist, correction2.copy)
-    val corr3 = correction2.copy
+    val meta2 = HistogramCorrection(lastIncrHist, correction2.copy())
+    val corr3 = correction2.copy()
     corr3.add(lastIncrHist)
     incrReader.detectDropAndCorrection(acc, incrAddr, meta2) shouldEqual
       HistogramCorrection(lastIncrHist, corr3)
@@ -458,8 +458,8 @@ class HistogramVectorTest extends NativeVectorTest {
     val incr1 = LongHistogram(bucketScheme, incrHistBuckets(1).map(_.toLong))
     incrReader.correctedValue(1, NoCorrection) shouldEqual incr1
 
-    val meta1 = HistogramCorrection(correction1, correction2.copy)
-    val adjustedHist = correction2.copy
+    val meta1 = HistogramCorrection(correction1, correction2.copy())
+    val adjustedHist = correction2.copy()
     adjustedHist.add(incr1)
     incrReader.correctedValue(1, meta1) shouldEqual adjustedHist
   }
@@ -482,7 +482,7 @@ class HistogramVectorTest extends NativeVectorTest {
     reader.correctedValue(5, NoCorrection) shouldEqual incr5
 
     // value @5 plus correction plus carryover correction from meta
-    val meta1 = HistogramCorrection(correction1, correction2.copy)
+    val meta1 = HistogramCorrection(correction1, correction2.copy())
     incr5.add(correction2)
     reader.correctedValue(5, meta1) shouldEqual incr5
   }

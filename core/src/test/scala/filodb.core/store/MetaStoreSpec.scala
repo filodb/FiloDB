@@ -62,7 +62,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
-  private def stripStoreConf(c: IngestionConfig): IngestionConfig =
+  @scala.annotation.unused private def stripStoreConf(c: IngestionConfig): IngestionConfig =
     c.copy(sourceConfig = c.sourceConfig.withoutPath("store"))
 
   describe("IngestionConfig API") {
@@ -73,8 +73,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                                                  min-num-nodes=16""")
     val resource2 = ConfigFactory.parseString("""num-shards=50
                                                  min-num-nodes=10""")
-    val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1, TestData.storeConf)
-    val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1, TestData.storeConf)
+    @scala.annotation.unused val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1, TestData.storeConf)
+    @scala.annotation.unused val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1, TestData.storeConf)
 
     it("should be able to parse source config with no sourceFactory") {
       val sourceConf = """
@@ -142,7 +142,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     it("should be able to store and read back same source config") {
       val ingestionConfig = IngestionConfig(exampleSourceConf, "a.backup").get
       val storedConfig = ingestionConfig.sourceStoreConfig.root.render(ConfigRenderOptions.concise)
-      val readConfig = IngestionConfig(DatasetRef("gdelt"),
+      @scala.annotation.unused val readConfig = IngestionConfig(DatasetRef("gdelt"),
         "a.backup","{\"min-num-nodes\":32,\"num-shards\":128}", storedConfig)
       ingestionConfig.streamFactoryClass shouldEqual "a.backup"
       ingestionConfig.sourceConfig.isEmpty shouldEqual false

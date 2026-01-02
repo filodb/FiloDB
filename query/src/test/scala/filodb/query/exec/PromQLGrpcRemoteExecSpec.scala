@@ -35,8 +35,8 @@ import scala.util.Using
 class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures
                                 with StrictLogging with BeforeAndAfter with BeforeAndAfterAll {
 
-  implicit val scheduler = monix.execution.Scheduler.Implicits.global
-  implicit val defaultPatience = PatienceConfig(timeout = Span(60000, Millis))
+  implicit val scheduler: Scheduler = monix.execution.Scheduler.Implicits.global
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(60000, Millis))
 
   private def toRv(samples: Seq[(Long, Double)],
                    rangeVectorKey: RangeVectorKey,
@@ -162,7 +162,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val deserializedSrv = qr.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     deserializedSrv.key shouldEqual rvKey
     // queryStats ResultBytes counter increment is not done as part of SRV constructor, so skipping that assertion
     (qr.queryStats.getCpuNanosCounter(List()).get() > 0) shouldEqual true
@@ -236,12 +236,13 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val qres = Await.result(fut, Duration.Inf).asInstanceOf[QueryResult]
 
     // Convert the result back to simple key / time-value tuples.
+    // Extract values during iteration since the underlying reader object is reused
     qres.result.map { rv =>
       val key = rv.key.labelValues
-      val pairs = rv.rows().toSeq.map { r =>
+      val pairs = rv.rows().map { r =>
         // Subtract the diff from the result-- this should again equal the original data.
         (r.getLong(0), r.getDouble(1) - diff)
-      }
+      }.toSeq
       (key, pairs)
     } shouldEqual data.map { rv => (rv._1.labelValues, rv._2) }
   }

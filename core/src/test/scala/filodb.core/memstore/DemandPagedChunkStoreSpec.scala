@@ -66,6 +66,6 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
     val stream2 = filterByPartAndMakeStream(data2, 0)
     val rawPart2 = TestData.toRawPartData(stream2).runToFuture.futureValue
     val result2 = onDemandPartMaker.populateRawChunks(rawPart2).runToFuture.futureValue
-    val tsPart2 = result2.partition
+    @scala.annotation.unused val tsPart2 = result2.partition
   }
 }

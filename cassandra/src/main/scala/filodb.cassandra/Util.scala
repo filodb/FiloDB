@@ -64,7 +64,7 @@ object Util {
     }
   }
 
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   implicit class ResultSetFutureOps(rsf: ResultSetFuture) {
     def toIterator: Future[Iterator[Row]] = rsf.toScalaFuture.map { rs => rs.iterator.asScala }

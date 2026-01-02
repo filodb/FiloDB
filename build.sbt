@@ -7,12 +7,37 @@ publishTo := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 // Global setting across all subprojects
 ThisBuild / organization := "org.filodb"
 ThisBuild / organizationName := "FiloDB"
-ThisBuild / scalaVersion := "2.12.12"
+ThisBuild / scalaVersion := "2.13.12"
 ThisBuild / publishMavenStyle := true
 ThisBuild / Test / publishArtifact := false
-ThisBuild / IntegrationTest / publishArtifact := false
 ThisBuild / licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/"))
 ThisBuild / pomIncludeRepository := { x => false }
+
+// Force Scala 2.13 versions to prevent cross-version conflicts
+// Also force consistent circe versions (sttp 1.7.2 requires 0.12.3)
+// Force Kryo 5.x to prevent conflicts with akka-kryo-serialization
+ThisBuild / dependencyOverrides ++= Seq(
+  "org.typelevel" %% "cats-kernel" % "2.10.0",
+  "org.typelevel" %% "cats-core" % "2.10.0",
+  "io.circe" %% "circe-core" % "0.12.3",
+  "io.circe" %% "circe-generic" % "0.12.3",
+  "io.circe" %% "circe-parser" % "0.12.3",
+  "io.circe" %% "circe-jawn" % "0.12.3",
+  "org.scala-lang.modules" %% "scala-parser-combinators" % "2.3.0",
+  "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
+  "com.esotericsoftware" % "kryo" % "5.5.0",
+  "com.esotericsoftware" % "minlog" % "1.3.1",
+  "org.objenesis" % "objenesis" % "3.3"
+)
+
+// Globally exclude kryo-shaded to prevent conflicts with kryo 5.5.0
+// kryo-shaded contains com.esotericsoftware.kryo.Kryo$DefaultInstantiatorStrategy (old location)
+// kryo 5.x has it in com.esotericsoftware.kryo.util.DefaultInstantiatorStrategy (new location)
+// Having both on classpath causes ClassCastException
+// NOTE: sparkJobs needs kryo-shaded for Spark's KryoSerializer (KryoPool), so it overrides this exclusion
+ThisBuild / excludeDependencies ++= Seq(
+  ExclusionRule("com.esotericsoftware", "kryo-shaded")
+)
 
 enablePlugins(ProtobufPlugin)
 
@@ -47,7 +72,7 @@ lazy val root = (project in file("."))
     http,
     gateway,
     standalone,
-    sparkJobs,
+    sparkJobs,  // Re-enabled with Spark 3.5.7 for Scala 2.13 compatibility
     grpc,
     bootstrapper,
     gatling,

@@ -7,9 +7,9 @@ import java.util
 import java.util.{Base64, PriorityQueue}
 import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -279,7 +279,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.info(s"Started stats thread pool for lucene index on dataset=$ref shard=$shardNum")
   }
 
-  def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
+  def partIdsEndedBefore(endedBefore: Long): scala.collection.mutable.ArrayBuffer[Int] = {
     val collector = new PartIdCollector(Int.MaxValue)
     val deleteQuery = LongPoint.newRangeQuery(END_TIME, 0, endedBefore)
 
@@ -314,7 +314,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
   }
 
-  def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
+  def removePartKeys(partIds: scala.collection.mutable.ArrayBuffer[Int]): Unit = {
     if (!partIds.isEmpty) {
       val terms = new util.ArrayList[BytesRef]()
       cforRange { 0 until partIds.length } { i =>
@@ -439,7 +439,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     labelValuesQueryLatency.record(System.nanoTime() - start)
     readerStateCacheHitRate.update(readerStateCacheShardKeys.stats().hitRate(), Map("label" -> "shardKey"))
     readerStateCacheHitRate.update(readerStateCacheNonShardKeys.stats().hitRate(), Map("label" -> "other"))
-    labelValues
+    labelValues.toSeq
   }
 
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
@@ -457,7 +457,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
         //scalastyle:off
         if (terms != null) {
-          val termsEnum = terms.iterator()
+          val termsEnum = terms.iterator
           var nextVal: BytesRef = termsEnum.next()
           while (nextVal != null && termsRead < MAX_TERMS_TO_ITERATE) {
             //scalastyle:on
@@ -487,7 +487,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       val indexReader = searcher.getIndexReader
       val segments = indexReader.leaves()
       val iter = segments.asScala.iterator.flatMap { segment =>
-        segment.reader().getFieldInfos.asScala.toIterator.map(_.name)
+        segment.reader().getFieldInfos.asScala.iterator.map(_.name)
       }.filterNot { n => ignoreIndexNames.contains(n) || n.startsWith(FACET_FIELD_PREFIX) }
       ret = iter.take(limit).toSeq
     }
@@ -570,7 +570,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.singleResult
   }
 
-  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
+  def startTimeFromPartIds(partIds: Iterator[Int]): scala.collection.mutable.HashMap[Int, Long] = {
 
     val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
@@ -655,7 +655,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long,
-                         limit: Int = Int.MaxValue): debox.Buffer[Int] = {
+                         limit: Int = Int.MaxValue): scala.collection.mutable.ArrayBuffer[Int] = {
     val collector = new PartIdCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.result
@@ -688,7 +688,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                 limit: Int = Int.MaxValue): Seq[PartKeyLuceneIndexRecord] = {
     val collector = new PartKeyRecordCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
-    collector.records
+    collector.records.toSeq
   }
 
 
@@ -750,7 +750,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
 protected class LuceneQueryBuilder extends PartKeyQueryBuilder {
 
-  private val stack: mutable.ArrayStack[BooleanQuery.Builder] = mutable.ArrayStack()
+  private val stack: mutable.Stack[BooleanQuery.Builder] = mutable.Stack()
 
   private def toLuceneOccur(occur: PartKeyQueryOccur): Occur = {
     occur match {
@@ -1001,19 +1001,19 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 
   def topKPartIds(): IntIterator = {
     val result = new EWAHCompressedBitmap()
-    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    topkResults.iterator.asScala.foreach { p => result.set(p._1) }
     result.intIterator()
   }
 
   def topKPartIDsBitmap(): EWAHCompressedBitmap = {
     val result = new EWAHCompressedBitmap()
-    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    topkResults.iterator.asScala.foreach { p => result.set(p._1) }
     result
   }
 }
 
 class PartIdCollector(limit: Int) extends SimpleCollector {
-  val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
+  val result: scala.collection.mutable.ArrayBuffer[Int] = scala.collection.mutable.ArrayBuffer.empty[Int]
   private var partIdDv: NumericDocValues = _
 
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
@@ -1035,7 +1035,7 @@ class PartIdCollector(limit: Int) extends SimpleCollector {
 }
 
 class PartIdStartTimeCollector extends SimpleCollector {
-  val startTimes = debox.Map.empty[Int, Long]
+  val startTimes = scala.collection.mutable.HashMap.empty[Int, Long]
   private var partIdDv: NumericDocValues = _
   private var startTimeDv: NumericDocValues = _
 

@@ -29,7 +29,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val dsRef = DatasetRef("raw-metrics")
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val allConfig = ConfigFactory.parseString("filodb.query.streaming-query-results-enabled = true")
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
@@ -74,7 +74,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val histData = MMD.linearHistSeries().take(100)
   val system = ActorSystemHolder.createActorSystem("testActorSystem", allConfig)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
@@ -113,7 +113,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val resp = execPlan.executeStreaming(memStore, querySession).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
@@ -144,7 +144,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val resp = reducerExec.executeStreaming(memStore, querySession).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tupleCounts.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual Map()
@@ -186,7 +186,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val resp = actorPlanDispatcher.dispatchStreaming(
       ExecPlanWithClientParams(reducerExec, ClientParams(5000)), memStore).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
-    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tupleCounts.take(11)
     val partKeyRead = resp(1).asInstanceOf[StreamQueryResult].result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual Map()

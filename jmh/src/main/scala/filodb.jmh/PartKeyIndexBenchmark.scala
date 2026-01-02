@@ -149,7 +149,7 @@ abstract class PartKeyIndexBenchmark {
   @OperationsPerInvocation(8)
   def partIdsLookupWithEnumRegexFilter(): Unit = {
     cforRange(0 until 8) { i =>
-      val c = partKeyIndex.partIdsFromFilters(
+      @scala.annotation.unused val c = partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-0")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
@@ -168,9 +168,9 @@ abstract class PartKeyIndexBenchmark {
   @OperationsPerInvocation(8)
   def startTimeLookupWithPartId(): Unit = {
     cforRange ( 0 until 8 ) { i =>
-      val pIds = debox.Buffer.empty[Int]
+      val pIds = scala.collection.mutable.ArrayBuffer.empty[Int]
       cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
-      partKeyIndex.startTimeFromPartIds(pIds.iterator())
+      partKeyIndex.startTimeFromPartIds(pIds.iterator)
     }
   }
 

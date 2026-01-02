@@ -29,7 +29,7 @@ trait CompressorAnalyzer {
   var writeBufferTotal = 0
   var samplesEncoded = 0
 
-  lazy val histograms = Source.fromFile(inputFile).getLines
+  lazy val histograms = Source.fromFile(inputFile).getLines()
                          .take(numSamples)
                          .map { line =>
                            val buckets = line.split(",").map(_.trim.toLong)

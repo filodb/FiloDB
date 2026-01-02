@@ -20,7 +20,7 @@ import filodb.query.exec._
 
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)
@@ -257,11 +257,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
   it ("should generate simple plan for one local partition for TopLevelSubquery") {
-    val p1StartSecs = 1000
-    val p1EndSecs = 12000
-    val stepSecs = 100
     val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -414,9 +410,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
   // lives in one partition, and another one lives in another.
   it ("should generate plan over remote and local partitions which are NOT time split for TopLevelSubquery") {
-    val stepSecs = 100
     val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -462,9 +456,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
   // lives in one partition, and another one lives in another.
   it ("should generate plan over two remote partitions which are NOT time split for TopLevelSubquery") {
-    val stepSecs = 100
     val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -508,9 +500,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
   // lives in one partition, and another one lives in another.
   it ("should generate plan over remote and local partitions which are NOT time split for TopLevelSubquery /w func") {
-    val stepSecs = 100
     val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -562,7 +552,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
 
   it ("one remote partition should work for SubqueryWithWindowing") {
-    val stepSecs = 120
     val queryStartSecs = 1200
     val queryEndSecs = 1800
     def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
@@ -1891,8 +1880,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val p2StartSecs = 7000
     val p2EndSecs = 15000
     val stepSecs = 100
-    val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
 
     def twoPartitions(): List[PartitionAssignment] = List(
       PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),

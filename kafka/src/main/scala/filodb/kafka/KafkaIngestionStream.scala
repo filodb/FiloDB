@@ -60,7 +60,7 @@ class KafkaIngestionStream(config: Config,
   private[filodb] def createConsumer(sourceConfig: SourceConfig,
                                      topicPartition: TopicPartition,
                                      offset: Option[Long]): KafkaConsumer[Long, Any] = {
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     val props = sourceConfig.asProps
     if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
 
@@ -119,7 +119,7 @@ class KafkaIngestionStream(config: Config,
    */
   override def endOffset: Option[Long] = {
     // Kafka offsets are Long, so we can return the last offset as the endOffset
-    import collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     kafkaConsumer.endOffsets(List(tp).asJava).asScala.get(tp) match {
       case Some(offset) => Some(offset)
       case None => None

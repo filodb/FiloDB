@@ -1,6 +1,6 @@
 package filodb.memory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.kenai.jffi.PageManager
 import org.scalatest.flatspec.AnyFlatSpec

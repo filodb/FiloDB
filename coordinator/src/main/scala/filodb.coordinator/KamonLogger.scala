@@ -33,7 +33,7 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
     for { c <- metrics } {
       val name = normalizeMetricName(c.name, c.settings.unit)
       c.instruments.foreach(instrument => {
-        val value = scale(instrument.value, c.settings.unit)
+        val value = scale(instrument.value.toDouble, c.settings.unit)
         logger.debug(s"KAMON ${metricType} name=${name} ${formatTags(instrument.tags)} value=$value")
       })
     }
@@ -43,7 +43,7 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
     for { c <- metrics } {
       val name = normalizeMetricName(c.name, c.settings.unit)
       c.instruments.foreach(instrument => {
-        val value = scale(instrument.value, c.settings.unit)
+        val value = scale(instrument.value.toDouble, c.settings.unit)
         logger.debug(s"KAMON ${metricType} name=${name} ${formatTags(instrument.tags)} value=$value")
       })
     }
@@ -55,13 +55,13 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
 
       m.instruments.foreach(instrument => {
         val h = instrument.value
-        def percentile(percentile: Double) = scale(h.percentile(25.0D).value, m.settings.unit)
+        def percentile(percentile: Double) = scale(h.percentile(25.0D).value.toDouble, m.settings.unit)
         if(h.count > 0) {
           logger.debug(s"KAMON ${metricType} name=$name ${formatTags(instrument.tags)} " +
-            s"n=${h.count} sum=${h.sum} min=${scale(h.min, m.settings.unit)} " +
+            s"n=${h.count} sum=${h.sum} min=${scale(h.min.toDouble, m.settings.unit)} " +
             s"p50=${percentile(50.0D)} p90=${percentile(90.0D)} " +
             s"p95=${percentile(95.0D)} p99=${percentile(99.0D)} " +
-            s"p999=${percentile(99.9D)} max=${scale(h.max, m.settings.unit)}")
+            s"p999=${percentile(99.9D)} max=${scale(h.max.toDouble, m.settings.unit)}")
         }
       })
     }
@@ -70,6 +70,7 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
   private def formatTags(tags: TagSet) = tags.iterator(tagPair => tagPair.toString)
     .map{case t => s"${t.key}=${t.value}"}.mkString(" ")
 
+  @scala.annotation.unused
   private def normalizeLabelName(label: String): String =
     label.map(charOrUnderscore)
 

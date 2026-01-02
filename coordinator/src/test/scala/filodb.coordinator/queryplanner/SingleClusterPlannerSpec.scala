@@ -55,7 +55,7 @@ object SingleClusterPlannerSpec {
 class SingleClusterPlannerSpec extends AnyFunSpec
   with Matchers with ScalaFutures with BeforeAndAfterEach with  PlanValidationSpec {
 
-  implicit val system = ActorSystem()
+  implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)
@@ -64,7 +64,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec
   private def mapperRef = mapper
 
   private val dataset = MetricsTestData.timeseriesDataset
-  private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
   private val config = ConfigFactory.load("application_test.conf").resolve()
@@ -255,7 +254,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
   }
 
   it("should use spread function to change/override spread and generate ExecPlan with appropriate shards") {
-    var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
+    val filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
     filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
 
     val spreadFunc = QueryContext.simpleMapSpreadFunc(Seq("job"), filodbSpreadMap, 1)
@@ -2167,7 +2166,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
   it ("should replace __name__ with _metric_ in by and without") {
     val dataset = MetricsTestData.timeseriesDatasetWithMetric
-    val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
 
     val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
@@ -2203,7 +2201,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
   it ("should replace __name__ with _metric_ in ignoring and group_left/group_right") {
       val dataset = MetricsTestData.timeseriesDatasetWithMetric
-      val dsRef = dataset.ref
       val schemas = Schemas(dataset.schema)
 
       val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,

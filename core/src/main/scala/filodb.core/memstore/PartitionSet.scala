@@ -377,12 +377,11 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    *
    * This is an O(n) operation, where n is the size of the set.
    */
-  def map[@sp(Short, Char, Int, Float, Long, Double, AnyRef) B: ClassTag](f: FiloPartition => B): debox.Set[B] = {
-    val out = debox.Set.ofSize[B](len)
+  def map[@sp(Short, Char, Int, Float, Long, Double, AnyRef) B: ClassTag](f: FiloPartition => B): scala.collection.mutable.HashSet[B] = {
+    val out = new scala.collection.mutable.HashSet[B]()
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3) out.add(f(items(i)))
     }
-    if (out.size < len / 3) out.compact
     out
   }
 
@@ -475,7 +474,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
         if (rhs.buckets(i) == 3) lhs += rhs.items(i)
       }
     } else {
-      val out = rhs.copy
+      val out = rhs.copy()
       out |= lhs
       lhs.absorb(out)
     }
@@ -495,11 +494,11 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    */
   def |(rhs: PartitionSet): PartitionSet =
     if (lhs.size >= rhs.size) {
-      val out = lhs.copy
+      val out = lhs.copy()
       out |= rhs
       out
     } else {
-      val out = rhs.copy
+      val out = rhs.copy()
       out |= lhs
       out
     }
@@ -520,7 +519,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
         }
       }
     } else {
-      val out = rhs.copy
+      val out = rhs.copy()
       out &= lhs
       lhs.absorb(out)
     }
@@ -540,11 +539,11 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    */
   def &(rhs: PartitionSet): PartitionSet =
     if (lhs.size <= rhs.size) {
-      val out = lhs.copy
+      val out = lhs.copy()
       out &= rhs
       out
     } else {
-      val out = rhs.copy
+      val out = rhs.copy()
       out &= lhs
       out
     }
@@ -581,7 +580,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * This is an O(n) operation, where n is the size of the set.
    */
   def --(rhs: PartitionSet): PartitionSet = {
-    val out = lhs.copy
+    val out = lhs.copy()
     out --= rhs
     out
   }
@@ -693,7 +692,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     new Iterator[FiloPartition] {
       var index = i
       def hasNext: Boolean = index < buckets.length
-      def next: FiloPartition = {
+      def next(): FiloPartition = {
         val item = items(index)
         index += 1
         while (index < buckets.length && buckets(index) != 3) index += 1
@@ -723,7 +722,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   def toIterable(): Iterable[FiloPartition] =
     new Iterable[FiloPartition] {
       override def size: Int = lhs.size
-      def iterator: Iterator[FiloPartition] = lhs.iterator
+      def iterator: Iterator[FiloPartition] = lhs.iterator()
       override def foreach[U](f: FiloPartition => U): Unit = lhs.foreach(a => f(a))
     }
 
@@ -736,7 +735,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * This is an O(n) operation, where n is the size of the set.
    */
   def toScalaSet(): scala.collection.immutable.Set[FiloPartition] =
-    iterator.toSet
+    iterator().toSet
 }
 
 
@@ -758,6 +757,14 @@ object PartitionSet {
     ofAllocatedSize(n / 2 * 3)
 
   /**
+   * Find the next power of two >= n.
+   */
+  private def nextPowerOfTwo(n: Int): Int = {
+    val x = java.lang.Integer.highestOneBit(n)
+    if (x == n) n else x * 2
+  }
+
+  /**
    * Allocate an empty Set, with underlying storage of size n.
    *
    * This method is useful if you know exactly how big you want the
@@ -765,8 +772,8 @@ object PartitionSet {
    * you want instead.
    */
   private def ofAllocatedSize(n: Int): PartitionSet = {
-    val sz = debox.Util.nextPowerOfTwo(n) match {
-      case n if n < 0 => throw debox.DeboxOverflowError(n)
+    val sz = nextPowerOfTwo(n) match {
+      case n if n < 0 => throw new IllegalArgumentException(s"Set size overflow: $n")
       case 0 => 8
       case n => n
     }

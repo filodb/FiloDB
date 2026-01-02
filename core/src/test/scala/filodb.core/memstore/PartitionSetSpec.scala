@@ -13,7 +13,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   import MachineMetricsData._
   import TimeSeriesPartitionSpec._
 
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val chunkRetentionHours = 72
@@ -23,7 +23,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   val reclaimer = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
       assert(numBytes == dataset2.schema.data.blockMetaSize)
-      val partID = UnsafeUtils.getInt(metaAddr)
+      @scala.annotation.unused val partID = UnsafeUtils.getInt(metaAddr)
       val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       part.removeChunksAt(chunkID)
     }
@@ -32,7 +32,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1, evictionLock)
   protected val bufferPool = new WriteBufferPool(memFactory, dataset2.schema.data, TestData.storeConf)
-  private val ingestBlockHolder = new BlockMemFactory(blockStore, dataset2.schema.data.blockMetaSize,
+  @scala.annotation.unused private val ingestBlockHolder = new BlockMemFactory(blockStore, dataset2.schema.data.blockMetaSize,
                                     dummyContext, true)
 
   val builder = new RecordBuilder(memFactory)

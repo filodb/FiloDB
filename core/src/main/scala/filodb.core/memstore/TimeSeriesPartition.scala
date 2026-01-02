@@ -143,11 +143,11 @@ extends ChunkMap(initMapSize) with ReadablePartition {
         && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
         switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
-          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples)
       } else if (ts - currentInfo.startTime > maxChunkTime) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
         switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
-          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples)
       } else {
         cforRange { 0 until schema.numDataColumns } { col =>
           chunkmapWithExclusive { // acquire write lock to ensure readers don't read partial data
@@ -155,12 +155,12 @@ extends ChunkMap(initMapSize) with ReadablePartition {
           } match {
             case r: VectorTooSmall =>
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
-                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples)
               return
             // Different histogram bucket schema: need a new vector here
             case BucketSchemaMismatch =>
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
-                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples)
               return
             case other: AddResponse =>
           }
@@ -191,15 +191,14 @@ extends ChunkMap(initMapSize) with ReadablePartition {
                                      overflowBlockHolder: BlockMemFactory,
                                      createChunkAtFlushBoundary: Boolean,
                                      flushIntervalMillis: Option[Long],
-                                     acceptDuplicateSamples: Boolean,
-                                     maxChunkTime: Long = Long.MaxValue): Unit = {
+                                     acceptDuplicateSamples: Boolean): Unit = {
     // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
     // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
     // So we do not call ingest again unless switcing buffers succeeds.
     // re-ingest every element, allocating new WriteBuffers
     if (switchBuffers(overflowBlockHolder, encode = true)) {
       ingest(ingestionTime, row, overflowBlockHolder, createChunkAtFlushBoundary, flushIntervalMillis,
-        acceptDuplicateSamples, maxChunkTime)
+        acceptDuplicateSamples)
     } else {
       _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
         s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}")
@@ -321,7 +320,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = chunkmapSize // inherited from ChunkMap
+  def numChunks: Int = chunkmapSize() // inherited from ChunkMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**
@@ -331,7 +330,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
    */
   def unflushedChunksets: Int = chunkmapSliceToEnd(newestFlushedID + 1).count
 
-  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate)
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate())
 
   // NOT including currently flushing writeBuffer chunks if there are any
   private[memstore] def infosToBeFlushed: ChunkInfoIterator =
@@ -416,7 +415,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       Long.MaxValue
     } else {
       // Acquire shared lock to safely access the native pointer.
-      chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst).startTime)
+      chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst()).startTime)
     }
   }
 
@@ -431,7 +430,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       currentInfo.endTime
     } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
-      chunkmapWithShared(infoLast.endTime)
+      chunkmapWithShared(infoLast().endTime)
     } else {
       -1
     }
@@ -468,7 +467,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(chunkmapDoGet(id))
 
   // Caller must hold lock on the inherited map.
-  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast)
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast())
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     chunkmapWithExclusive(chunkmapDoPut(info.infoAddr, newestFlushedID))
@@ -554,7 +553,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shardInfo, initMapSize) {
   }
 
   override def chunkmapReleaseShared(): Unit = {
-    super.chunkmapReleaseShared()
+    super.chunkmapReleaseShared()()
     _log.info(s"SHARED LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
   }
 

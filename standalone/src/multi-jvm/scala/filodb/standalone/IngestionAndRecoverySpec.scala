@@ -71,7 +71,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   // Test fields
   var query1Response: Double = 0
   val chunkDurationTimeout = FiniteDuration(chunkDuration.toMillis + 60000, TimeUnit.MILLISECONDS)
-  implicit val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
+  implicit val producePatience: PatienceConfig =
+    PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
 
   "IngestionAndRecoverySpec Multi-JVM Test" should "clear data on node 1" in {
     runOn(first) {

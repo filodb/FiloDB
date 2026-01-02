@@ -1,8 +1,8 @@
 package filodb.http
 
-import scala.collection.JavaConverters._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
@@ -11,7 +11,7 @@ import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.ExceptionHandler
 import akka.http.scaladsl.server.Route
-import akka.stream.ActorMaterializer
+import akka.stream.Materializer
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.FilodbSettings
@@ -49,7 +49,7 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
             v2ClusterEnabled: Boolean,
             externalRoutes: Route = reject): Unit = {
     implicit val system = actorSystem
-    implicit val materializer = ActorMaterializer()
+    @scala.annotation.unused implicit val materializer: Materializer = Materializer(system)
     // This is a preliminary implementation of routes. Will be enhanced later
     val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
@@ -70,9 +70,8 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
     val finalRoute = handleExceptions(filoExceptionHandler) {
       reduced ~ externalRoutes
     }
-    val bindingFuture = Http().bindAndHandle(finalRoute,
-      settings.httpServerBindHost,
-      settings.httpServerBindPort)
+    val bindingFuture = Http().newServerAt(settings.httpServerBindHost, settings.httpServerBindPort)
+      .bind(finalRoute)
     binding = Await.result(bindingFuture,
       scala.concurrent.duration.Duration.fromNanos(settings.httpServerStartTimeout.toNanos))
     logger.info("FiloDB HTTP server is live at http:/{}/", binding.localAddress)

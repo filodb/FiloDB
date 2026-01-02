@@ -4,8 +4,8 @@ import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
-import scala.collection.JavaConverters._
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
@@ -216,7 +216,7 @@ object ProtoConverters {
       builder.setId(dc.id)
       builder.setName(dc.name)
       builder.setColumnType(dc.columnType.toProto)
-      val params = dc.params.entrySet().stream().forEach( e => {
+      @scala.annotation.unused val params = dc.params.entrySet().stream().forEach( e => {
         builder.putParams(e.getKey, e.getValue.render())
       })
       builder.build()
@@ -311,10 +311,10 @@ object ProtoConverters {
         dso.getShardKeyColumnsList.asScala.toSeq,
         dso.getMetricColumn,
         dso.getHasDownsampledData,
-        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.mapValues(rs => rs.fromProto).toMap,
+        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.view.mapValues(rs => rs.fromProto).toMap,
         dso.getIgnoreTagsOnPartitionKeyHashList.asScala.toSeq,
-        dso.getCopyTagsList.asScala.map(t => t.fromProto),
-        dso.getMultiColumFacetsMap.asScala.mapValues(rs => rs.fromProto).toMap
+        dso.getCopyTagsList.asScala.map(t => t.fromProto).toSeq,
+        dso.getMultiColumFacetsMap.asScala.view.mapValues(rs => rs.fromProto).toMap
       )
     }
   }
@@ -673,8 +673,8 @@ object ProtoConverters {
 
   implicit class DataSchemaFromProtoConverter(ds: GrpcMultiPartitionQueryService.DataSchema) {
     def fromProto: filodb.core.metadata.DataSchema = {
-      val columns : Seq[filodb.core.metadata.Column] = ds.getColumnsList.asScala.map(c => c.fromProto)
-      val downsamplers = ds.getDownsamplersList.asScala.map(d => d.fromProto)
+      val columns : Seq[filodb.core.metadata.Column] = ds.getColumnsList.asScala.map(c => c.fromProto).toSeq
+      val downsamplers = ds.getDownsamplersList.asScala.map(d => d.fromProto).toSeq
       val downsampleSchema = if (ds.hasDownsampleSchema) {Option(ds.getDownsampleSchema)} else {None}
       filodb.core.metadata.DataSchema(
         ds.getName,
@@ -731,7 +731,7 @@ object ProtoConverters {
       builder.setChunkMethod(plr.chunkMethod.toProto)
       plr.partsInMemory.foreach(p => builder.addPartsInMemory(p))
       plr.firstSchemaId.foreach(fsi => builder.setFirstSchemaID(fsi))
-      plr.partIdsMemTimeGap.foreach((k, v) => builder.putPartIdsMemTimeGap(k, v))
+      plr.partIdsMemTimeGap.foreach { case (k, v) => builder.putPartIdsMemTimeGap(k, v) }
       plr.partIdsNotInMemory.foreach(i => builder.addPartIdsNotInMemory(i))
       plr.pkRecords.foreach(pklir => builder.addPkRecords(pklir.toProto))
       builder.setDataBytesScannedCtr(plr.dataBytesScannedCtr.longValue())
@@ -743,13 +743,13 @@ object ProtoConverters {
   implicit class PartLookupResultFromProtoConverter(plr: GrpcMultiPartitionQueryService.PartLookupResult) {
     def fromProto: PartLookupResult = {
       val psim = plr.getPartsInMemoryList.asScala.map(intgr => intgr.intValue())
-      val partsInMemory = debox.Buffer.fromIterable(psim)
+      val partsInMemory = scala.collection.mutable.ArrayBuffer.from(psim)
       val firstSchemaId = if (plr.hasFirstSchemaID) Option(plr.getFirstSchemaID) else None
       val pimtg = plr.getPartIdsMemTimeGapMap.asScala.map{case (key, value) => (key.intValue(), value.longValue())}
-      val partIdsMemTimeGap = debox.Map.fromIterable(pimtg)
+      val partIdsMemTimeGap = scala.collection.mutable.HashMap.from(pimtg)
       val pinim = plr.getPartIdsNotInMemoryList.asScala.map(intgr => intgr.intValue())
-      val partIdsNotInMemory = debox.Buffer.fromIterable(pinim)
-      val pkRecords = plr.getPkRecordsList.asScala.map(pklir => pklir.fromProto)
+      val partIdsNotInMemory = scala.collection.mutable.ArrayBuffer.from(pinim)
+      val pkRecords = plr.getPkRecordsList.asScala.map(pklir => pklir.fromProto).toSeq
       PartLookupResult(
         plr.getShard,
         plr.getChunkMethod.fromProto,
@@ -1207,8 +1207,8 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.FilterAnd = {
       val builder = GrpcMultiPartitionQueryService.FilterAnd.newBuilder()
       builder.setFilter(getProtoFilter(fa))
-      builder.setLeft(fa.left.toProto)
-      builder.setRight(fa.right.toProto)
+      builder.setLeft(fa.left.toProto())
+      builder.setRight(fa.right.toProto())
       builder.build()
     }
   }
@@ -1275,7 +1275,7 @@ object ProtoConverters {
       builder.setQueryId(qc.queryId)
       builder.setSubmitTime(qc.submitTime)
       builder.setPlannerParams(qc.plannerParams.toProto)
-      val javaTraceInfoMap = mapAsJavaMap(qc.traceInfo)
+      val javaTraceInfoMap = qc.traceInfo.asJava
       builder.putAllTraceInfo(javaTraceInfoMap)
       builder.build()
     }
@@ -1310,10 +1310,10 @@ object ProtoConverters {
     def toPlanDispatcherContainer : GrpcMultiPartitionQueryService.PlanDispatcherContainer = {
       val builder = GrpcMultiPartitionQueryService.PlanDispatcherContainer.newBuilder()
       pd match {
-        case apd: ActorPlanDispatcher => builder.setActorPlanDispatcher(apd.toProto)
-        case ippd: InProcessPlanDispatcher => builder.setInProcessPlanDispatcher(ippd.toProto)
-        case rapd: RemoteActorPlanDispatcher => builder.setRemoteActorPlanDispatcher(rapd.toProto)
-        case gpd: GrpcPlanDispatcher => builder.setGrpcPlanDispatcher(gpd.toProto)
+        case apd: ActorPlanDispatcher => builder.setActorPlanDispatcher(apd.toProto())
+        case ippd: InProcessPlanDispatcher => builder.setInProcessPlanDispatcher(ippd.toProto())
+        case rapd: RemoteActorPlanDispatcher => builder.setRemoteActorPlanDispatcher(rapd.toProto())
+        case gpd: GrpcPlanDispatcher => builder.setGrpcPlanDispatcher(gpd.toProto())
         case _ => throw new IllegalArgumentException(s"Unexpected PlanDispatcher subclass ${pd.getClass.getName}")
       }
       builder.build()
@@ -1414,7 +1414,7 @@ object ProtoConverters {
     def toProto : GrpcMultiPartitionQueryService.QueryCommand = {
       val builder = GrpcMultiPartitionQueryService.QueryCommand.newBuilder()
       builder.setSubmitTime(qc.submitTime)
-      builder.setDatasetRef(qc.dataset.toProto)
+      builder.setDatasetRef(qc.dataset.toProto())
       builder.build()
     }
   }
@@ -1516,8 +1516,8 @@ object ProtoConverters {
   implicit class AggregateClauseFromProto(ac: GrpcMultiPartitionQueryService.AggregateClause) {
     def fromProto(): filodb.query.AggregateClause = {
       filodb.query.AggregateClause(
-        ac.getClauseType.fromProto,
-        ac.getLabelsList.asScala
+        ac.getClauseType.fromProto(),
+        ac.getLabelsList.asScala.toSeq
       )
     }
   }
@@ -1525,7 +1525,7 @@ object ProtoConverters {
   implicit class ExecPlanFuncArgsToProtoConverter(epfs : ExecPlanFuncArgs) {
     def toProto() : GrpcMultiPartitionQueryService.ExecPlanFuncArgs = {
       val builder = GrpcMultiPartitionQueryService.ExecPlanFuncArgs.newBuilder()
-      builder.setExecPlan(epfs.execPlan.toExecPlanContainerProto)
+      builder.setExecPlan(epfs.execPlan.toExecPlanContainerProto())
       builder.setTimeStepParams(epfs.timeStepParams.toProto)
       builder.build()
     }
@@ -1579,15 +1579,15 @@ object ProtoConverters {
       val builder = GrpcMultiPartitionQueryService.FuncArgs.newBuilder()
       fa match {
         case epfa : ExecPlanFuncArgs => {
-          val epfaProto : GrpcMultiPartitionQueryService.ExecPlanFuncArgs  = epfa.toProto
+          val epfaProto : GrpcMultiPartitionQueryService.ExecPlanFuncArgs  = epfa.toProto()
           builder.setExecPlanFuncArgs(epfaProto)
         }
         case tfa : TimeFuncArgs => {
-          val tfaProto : GrpcMultiPartitionQueryService.TimeFuncArgs = tfa.toProto
-          builder.setTimeFuncArgs(tfa.toProto)
+          @scala.annotation.unused val tfaProto : GrpcMultiPartitionQueryService.TimeFuncArgs = tfa.toProto()
+          builder.setTimeFuncArgs(tfa.toProto())
         }
         case sfa : StaticFuncArgs => {
-          val sfaProto : GrpcMultiPartitionQueryService.StaticFuncArgs = sfa.toProto
+          val sfaProto : GrpcMultiPartitionQueryService.StaticFuncArgs = sfa.toProto()
           builder.setStaticFuncArgs(sfaProto)
         }
       }
@@ -1599,8 +1599,8 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext) : FuncArgs = {
       fa.getFuncArgTypeCase match {
         case FuncArgTypeCase.EXECPLANFUNCARGS => fa.getExecPlanFuncArgs.fromProto(queryContext)
-        case FuncArgTypeCase.TIMEFUNCARGS => fa.getTimeFuncArgs.fromProto
-        case FuncArgTypeCase.STATICFUNCARGS => fa.getStaticFuncArgs.fromProto
+        case FuncArgTypeCase.TIMEFUNCARGS => fa.getTimeFuncArgs.fromProto()
+        case FuncArgTypeCase.STATICFUNCARGS => fa.getStaticFuncArgs.fromProto()
         case FuncArgTypeCase.FUNCARGTYPE_NOT_SET => throw new IllegalArgumentException("invalid function argument")
       }
     }
@@ -1671,7 +1671,7 @@ object ProtoConverters {
         amr.getAggrOp.fromProto,
         amr.getAggrParamsList().asScala.toSeq.map(ap => ap.fromProto()),
         if (amr.hasClauseOpt) Option(amr.getClauseOpt.fromProto()) else None,
-        amr.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+        amr.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       )
     }
   }
@@ -1702,7 +1702,7 @@ object ProtoConverters {
 
   implicit class LabelCardinalityPresenterFromProtoConverter(lcp: GrpcMultiPartitionQueryService.LabelCardinalityPresenter) {
     def fromProto(queryContext: QueryContext): LabelCardinalityPresenter = {
-      val funcParams = lcp.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+      val funcParams = lcp.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       new LabelCardinalityPresenter(funcParams)
     }
   }
@@ -1718,7 +1718,7 @@ object ProtoConverters {
 
   implicit class HistogramQuantileMapperFromProtoConverter(hqm: GrpcMultiPartitionQueryService.HistogramQuantileMapper) {
     def fromProto(queryContext: QueryContext): HistogramQuantileMapper = {
-      val funcParams = hqm.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+      val funcParams = hqm.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       HistogramQuantileMapper(funcParams)
     }
   }
@@ -1995,7 +1995,7 @@ object ProtoConverters {
         case RangeVectorTransfomerCase.VECTORFUNCTIONMAPPER => rvtc.getVectorFunctionMapper().fromProto
         case RangeVectorTransfomerCase.AGGREGATEPRESENTER => rvtc.getAggregatePresenter().fromProto(queryContext)
         case RangeVectorTransfomerCase.ABSENTFUNCTIONMAPPER => rvtc.getAbsentFunctionMapper().fromProto
-        case RangeVectorTransfomerCase.REPEATTRANSFORMER => rvtc.getRepeatTransformer().fromProto
+        case RangeVectorTransfomerCase.REPEATTRANSFORMER => rvtc.getRepeatTransformer().fromProto()
         case RangeVectorTransfomerCase.RANGEVECTORTRANSFOMER_NOT_SET =>
           throw new IllegalArgumentException("Unexpected Range Vector Transformer")
       }
@@ -2006,7 +2006,7 @@ object ProtoConverters {
 
     def toProto(): GrpcMultiPartitionQueryService.LeafExecPlan = {
       val builder = GrpcMultiPartitionQueryService.LeafExecPlan.newBuilder()
-      builder.setExecPlan(lep.asInstanceOf[filodb.query.exec.ExecPlan].toProto)
+      builder.setExecPlan(lep.asInstanceOf[filodb.query.exec.ExecPlan].toProto())
       builder.setSubmitTime(lep.submitTime)
       builder.build()
     }
@@ -2016,8 +2016,8 @@ object ProtoConverters {
   implicit class NonLeafExecPlanToProtoConverter(mspe: filodb.query.exec.NonLeafExecPlan) {
     def toProto(): GrpcMultiPartitionQueryService.NonLeafExecPlan = {
       val builder = GrpcMultiPartitionQueryService.NonLeafExecPlan.newBuilder()
-      builder.setExecPlan(mspe.asInstanceOf[filodb.query.exec.ExecPlan].toProto)
-      mspe.children.foreach(ep => builder.addChildren(ep.toExecPlanContainerProto))
+      builder.setExecPlan(mspe.asInstanceOf[filodb.query.exec.ExecPlan].toProto())
+      mspe.children.foreach(ep => builder.addChildren(ep.toExecPlanContainerProto()))
       builder.build()
     }
   }
@@ -2032,7 +2032,7 @@ object ProtoConverters {
   implicit class LabelCardinalityReduceExecToProtoConverter(lcre : LabelCardinalityReduceExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelCardinalityReduceExec = {
       val builder = GrpcMultiPartitionQueryService.LabelCardinalityReduceExec.newBuilder()
-      builder.setNonLeafExecPlan(lcre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(lcre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2057,7 +2057,7 @@ object ProtoConverters {
   implicit class MultiPartitionDistConcatExecToProtoConverter(mpdce: filodb.query.exec.MultiPartitionDistConcatExec) {
     def toProto(): GrpcMultiPartitionQueryService.MultiPartitionDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.MultiPartitionDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(mpdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(mpdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2078,7 +2078,7 @@ object ProtoConverters {
   implicit class LocalPartitionDistConcatExecToProtoConverter(mspe: filodb.query.exec.LocalPartitionDistConcatExec) {
     def toProto(): GrpcMultiPartitionQueryService.LocalPartitionDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.LocalPartitionDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(mspe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(mspe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2101,7 +2101,7 @@ object ProtoConverters {
   ) {
     def toProto(): GrpcMultiPartitionQueryService.SplitLocalPartitionDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.SplitLocalPartitionDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(mspe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(mspe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2124,7 +2124,7 @@ object ProtoConverters {
   implicit class LocalPartitionReduceAggregateExecToProtoConverter(lpra: LocalPartitionReduceAggregateExec) {
     def toProto(): GrpcMultiPartitionQueryService.LocalPartitionReduceAggregateExec = {
       val builder = GrpcMultiPartitionQueryService.LocalPartitionReduceAggregateExec.newBuilder()
-      builder.setNonLeafExecPlan(lpra.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(lpra.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.setAggrOp(lpra.aggrOp.toProto)
       lpra.aggrParams.foreach(ap => builder.addAggrParams(getAggregateParameter(ap)))
       builder.build()
@@ -2145,7 +2145,7 @@ object ProtoConverters {
         dispatcher: PlanDispatcher,
         children: Seq[ExecPlan],
         lcre.getAggrOp.fromProto,
-        lcre.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto)
+        lcre.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto())
       )
       execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto(queryContext)))
       p
@@ -2156,7 +2156,7 @@ object ProtoConverters {
   implicit class MultiPartitionReduceAggregateExecToProtoConverter(mprae: MultiPartitionReduceAggregateExec) {
     def toProto(): GrpcMultiPartitionQueryService.MultiPartitionReduceAggregateExec = {
       val builder = GrpcMultiPartitionQueryService.MultiPartitionReduceAggregateExec.newBuilder()
-      builder.setNonLeafExecPlan(mprae.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(mprae.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.setAggrOp(mprae.aggrOp.toProto)
       mprae.aggrParams.foreach(ap => builder.addAggrParams(getAggregateParameter(ap)))
       builder.build()
@@ -2178,7 +2178,7 @@ object ProtoConverters {
         dispatcher: PlanDispatcher,
         children: Seq[ExecPlan],
         mprae.getAggrOp.fromProto,
-        mprae.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto)
+        mprae.getAggrParamsList.asScala.toSeq.map(ap => ap.fromProto())
       )
       execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto(queryContext)))
       p
@@ -2189,9 +2189,9 @@ object ProtoConverters {
   implicit class BinaryJoinExecToProtoConverter(bje: BinaryJoinExec) {
     def toProto(): GrpcMultiPartitionQueryService.BinaryJoinExec = {
       val builder = GrpcMultiPartitionQueryService.BinaryJoinExec.newBuilder()
-      builder.setNonLeafExecPlan(bje.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
-      bje.lhs.foreach(ep => builder.addLhs(ep.toExecPlanContainerProto))
-      bje.rhs.foreach(ep => builder.addRhs(ep.toExecPlanContainerProto))
+      builder.setNonLeafExecPlan(bje.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
+      bje.lhs.foreach(ep => builder.addLhs(ep.toExecPlanContainerProto()))
+      bje.rhs.foreach(ep => builder.addRhs(ep.toExecPlanContainerProto()))
       builder.setBinaryOp(bje.binaryOp.toProto)
       builder.setCardinality(bje.cardinality.toProto)
       builder.build()
@@ -2241,7 +2241,7 @@ object ProtoConverters {
   implicit class TsCardReduceExecToProtoConverter(tcre: TsCardReduceExec) {
     def toProto(): GrpcMultiPartitionQueryService.TsCardReduceExec = {
       val builder = GrpcMultiPartitionQueryService.TsCardReduceExec.newBuilder()
-      builder.setNonLeafExecPlan(tcre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(tcre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2266,7 +2266,7 @@ object ProtoConverters {
   implicit class StitchRvsExecToProtoConverter(sre: StitchRvsExec) {
     def toProto(): GrpcMultiPartitionQueryService.StitchRvsExec = {
       val builder = GrpcMultiPartitionQueryService.StitchRvsExec.newBuilder()
-      builder.setNonLeafExecPlan(sre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(sre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       sre.outputRvRange.foreach(orr => builder.setOutputRvRange(orr.toProto))
       builder.build()
     }
@@ -2295,9 +2295,9 @@ object ProtoConverters {
   implicit class SetOperatorExecToProtoConverter(soe: SetOperatorExec) {
     def toProto(): GrpcMultiPartitionQueryService.SetOperatorExec = {
       val builder = GrpcMultiPartitionQueryService.SetOperatorExec.newBuilder()
-      builder.setNonLeafExecPlan(soe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
-      soe.lhs.foreach(ep => builder.addLhs(ep.toExecPlanContainerProto))
-      soe.rhs.foreach(ep => builder.addRhs(ep.toExecPlanContainerProto))
+      builder.setNonLeafExecPlan(soe.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
+      soe.lhs.foreach(ep => builder.addLhs(ep.toExecPlanContainerProto()))
+      soe.rhs.foreach(ep => builder.addRhs(ep.toExecPlanContainerProto()))
       builder.setBinaryOp(soe.binaryOp.toProto)
       builder.build()
       soe.on.foreach(onOption =>(onOption.foreach(on => builder.addOn(on))))
@@ -2314,7 +2314,7 @@ object ProtoConverters {
       val execPlan = soe.getNonLeafExecPlan().getExecPlan()
       val dispatcher: filodb.query.exec.PlanDispatcher = execPlan.getDispatcher.fromProto
       val protoChildren: Seq[GrpcMultiPartitionQueryService.ExecPlanContainer] = soe.getNonLeafExecPlan.getChildrenList().asScala.toSeq
-      val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto(queryContext))
+      @scala.annotation.unused val children: Seq[filodb.query.exec.ExecPlan] = protoChildren.map(e => e.fromProto(queryContext))
       val lhs: Seq[filodb.query.exec.ExecPlan] =
         soe.getLhsList.asScala.toSeq.map(c => c.fromProto(queryContext))
       val rhs: Seq[filodb.query.exec.ExecPlan] =
@@ -2345,7 +2345,7 @@ object ProtoConverters {
   implicit class LabelValuesDistConcatExecToProtoConverter(lvdce: LabelValuesDistConcatExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelValuesDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.LabelValuesDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(lvdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(lvdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2370,7 +2370,7 @@ object ProtoConverters {
   implicit class PartKeysDistConcatExecToProtoConverter(pkdce: PartKeysDistConcatExec) {
     def toProto(): GrpcMultiPartitionQueryService.PartKeysDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.PartKeysDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(pkdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(pkdce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2395,7 +2395,7 @@ object ProtoConverters {
   implicit class LabelNamesDistConcatExecToProtoConverter(lndce: LabelNamesDistConcatExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelNamesDistConcatExec = {
       val builder = GrpcMultiPartitionQueryService.LabelNamesDistConcatExec.newBuilder()
-      builder.setNonLeafExecPlan(lndce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
+      builder.setNonLeafExecPlan(lndce.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2444,7 +2444,7 @@ object ProtoConverters {
   implicit class LabelNamesExecToProtoConverter(lne: filodb.query.exec.LabelNamesExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelNamesExec = {
       val builder = GrpcMultiPartitionQueryService.LabelNamesExec.newBuilder()
-      builder.setLeafExecPlan(lne.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto)
+      builder.setLeafExecPlan(lne.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto())
       builder.setShard(lne.shard)
       lne.filters.foreach(f => builder.addFilters(f.toProto))
       builder.setStartMs(lne.startMs)
@@ -2479,7 +2479,7 @@ object ProtoConverters {
   implicit class EmptyResultExecToProtoConverter(lne: filodb.query.exec.EmptyResultExec) {
     def toProto(): GrpcMultiPartitionQueryService.EmptyResultExec = {
       val builder = GrpcMultiPartitionQueryService.EmptyResultExec.newBuilder()
-      builder.setLeafExecPlan(lne.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto)
+      builder.setLeafExecPlan(lne.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto())
       builder.build()
     }
   }
@@ -2506,7 +2506,7 @@ object ProtoConverters {
   implicit class PartKeysExecToProtoConverter(pke: filodb.query.exec.PartKeysExec) {
     def toProto(): GrpcMultiPartitionQueryService.PartKeysExec = {
       val builder = GrpcMultiPartitionQueryService.PartKeysExec.newBuilder()
-      builder.setLeafExecPlan(pke.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto)
+      builder.setLeafExecPlan(pke.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto())
       builder.setShard(pke.shard)
       pke.filters.foreach(f => builder.addFilters(f.toProto))
       builder.setFetchFirstLastSampleTimes(pke.fetchFirstLastSampleTimes)
@@ -2543,7 +2543,7 @@ object ProtoConverters {
   implicit class LabelValuesExecToProtoConverter(lve: filodb.query.exec.LabelValuesExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelValuesExec = {
       val builder = GrpcMultiPartitionQueryService.LabelValuesExec.newBuilder()
-      builder.setLeafExecPlan(lve.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto)
+      builder.setLeafExecPlan(lve.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto())
       builder.setShard(lve.shard)
       lve.filters.foreach(f => builder.addFilters(f.toProto))
       lve.columns.foreach(c => builder.addColumns(c))
@@ -2581,7 +2581,7 @@ object ProtoConverters {
   implicit class LabelCardinalityExecToProtoConverter(lce: filodb.query.exec.LabelCardinalityExec) {
     def toProto(): GrpcMultiPartitionQueryService.LabelCardinalityExec = {
       val builder = GrpcMultiPartitionQueryService.LabelCardinalityExec.newBuilder()
-      builder.setLeafExecPlan(lce.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto)
+      builder.setLeafExecPlan(lce.asInstanceOf[filodb.query.exec.LeafExecPlan].toProto())
       builder.setShard(lce.shard)
       lce.filters.foreach(f => builder.addFilters(f.toProto))
       builder.setStartMs(lce.startMs)
@@ -2617,7 +2617,7 @@ object ProtoConverters {
 
     def toProto(): GrpcMultiPartitionQueryService.SelectChunkInfosExec = {
       val builder = GrpcMultiPartitionQueryService.SelectChunkInfosExec.newBuilder()
-      builder.setLeafExecPlan(scie.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(scie.asInstanceOf[LeafExecPlan].toProto())
       builder.setShard(scie.shard)
       scie.filters.foreach(f => builder.addFilters(f.toProto))
       builder.setChunkScanMethod(scie.chunkMethod.toProto)
@@ -2633,7 +2633,7 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): SelectChunkInfosExec = {
       val ep = scie.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = scie.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = scie.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val filters = scie.getFiltersList.asScala.toSeq.map(
         f => f.fromProto
       )
@@ -2664,7 +2664,7 @@ object ProtoConverters {
 
     def toProto(): GrpcMultiPartitionQueryService.MultiSchemaPartitionsExec = {
       val builder = GrpcMultiPartitionQueryService.MultiSchemaPartitionsExec.newBuilder()
-      builder.setLeafExecPlan(mspe.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(mspe.asInstanceOf[LeafExecPlan].toProto())
       builder.setShard(mspe.shard)
       mspe.filters.foreach(f => builder.addFilters(f.toProto))
       builder.setChunkMethod(mspe.chunkMethod.toProto)
@@ -2683,7 +2683,7 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): MultiSchemaPartitionsExec = {
       val ep = mspe.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = mspe.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = mspe.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val filters = mspe.getFiltersList.asScala.toSeq.map(
         f => f.fromProto
       )
@@ -2714,18 +2714,18 @@ object ProtoConverters {
 
     def toProto(): GrpcMultiPartitionQueryService.ScalarBinaryOperationExec = {
       val builder = GrpcMultiPartitionQueryService.ScalarBinaryOperationExec.newBuilder()
-      builder.setLeafExecPlan(sboe.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(sboe.asInstanceOf[LeafExecPlan].toProto())
       builder.setParams(sboe.params.toProto)
       sboe.lhs match {
         case d : Left[Double, ScalarBinaryOperationExec] => builder.setDoubleValueLhs(d.value)
         case sboe : Right[Double, ScalarBinaryOperationExec] => {
-          builder.setScalarBinaryOperationExecLhs(sboe.value.toProto)
+          builder.setScalarBinaryOperationExecLhs(sboe.value.toProto())
         }
       }
       sboe.rhs match {
         case d: Left[Double, ScalarBinaryOperationExec] => builder.setDoubleValueRhs(d.value)
         case sboe: Right[Double, ScalarBinaryOperationExec] => {
-          builder.setScalarBinaryOperationExecRhs(sboe.value.toProto)
+          builder.setScalarBinaryOperationExecRhs(sboe.value.toProto())
         }
       }
       builder.setOperator(sboe.operator.toProto)
@@ -2737,7 +2737,7 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): ScalarBinaryOperationExec = {
       val ep = sboe.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = sboe.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = sboe.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val lhs = sboe.getLhsCase match {
         case GrpcMultiPartitionQueryService.ScalarBinaryOperationExec.LhsCase.DOUBLEVALUELHS => Left(sboe.getDoubleValueLhs)
         case GrpcMultiPartitionQueryService.ScalarBinaryOperationExec.LhsCase.SCALARBINARYOPERATIONEXECLHS=>
@@ -2773,7 +2773,7 @@ object ProtoConverters {
   implicit class ScalarFixedDoubleExecToProtoConverter(sfde: ScalarFixedDoubleExec) {
     def toProto(): GrpcMultiPartitionQueryService.ScalarFixedDoubleExec = {
       val builder = GrpcMultiPartitionQueryService.ScalarFixedDoubleExec.newBuilder()
-      builder.setLeafExecPlan(sfde.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(sfde.asInstanceOf[LeafExecPlan].toProto())
       builder.setParams(sfde.params.toProto)
       builder.setValue(sfde.value)
       builder.build()
@@ -2784,7 +2784,7 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): ScalarFixedDoubleExec = {
       val ep = sfde.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = sfde.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = sfde.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val inProcessPlanDispatcher = dispatcher match {
         case ippd: InProcessPlanDispatcher => ippd
       }
@@ -2804,7 +2804,7 @@ object ProtoConverters {
   implicit class TsCardExecToProtoConverter(tce: TsCardExec) {
     def toProto(): GrpcMultiPartitionQueryService.TsCardExec = {
       val builder = GrpcMultiPartitionQueryService.TsCardExec.newBuilder()
-      builder.setLeafExecPlan(tce.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(tce.asInstanceOf[LeafExecPlan].toProto())
       builder.setShard(tce.shard)
       tce.shardKeyPrefix.foreach(f => builder.addShardKeyPrefix(f))
       builder.setNumGroupByFields(tce.numGroupByFields)
@@ -2817,9 +2817,9 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): TsCardExec = {
       val ep = tce.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = tce.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = tce.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val shardKeyPrefix = tce.getShardKeyPrefixList.asScala.toSeq
-      val numGroupByFields = tce.getNumGroupByFields
+      @scala.annotation.unused val numGroupByFields = tce.getNumGroupByFields
       val p = TsCardExec(
         queryContext, dispatcher, datasetRef,
         tce.getShard,
@@ -2836,7 +2836,7 @@ object ProtoConverters {
   implicit class TimeScalarGeneratorExecProtoConverter(tsge: TimeScalarGeneratorExec) {
     def toProto(): GrpcMultiPartitionQueryService.TimeScalarGeneratorExec = {
       val builder = GrpcMultiPartitionQueryService.TimeScalarGeneratorExec.newBuilder()
-      builder.setLeafExecPlan(tsge.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(tsge.asInstanceOf[LeafExecPlan].toProto())
       builder.setParams(tsge.params.toProto)
       builder.setFunction(tsge.function.toProto)
       builder.build()
@@ -2847,7 +2847,7 @@ object ProtoConverters {
     def fromProto(queryContext: QueryContext): TimeScalarGeneratorExec = {
       val ep = tsge.getLeafExecPlan.getExecPlan
       val dispatcher = ep.getDispatcher.fromProto
-      val datasetRef = tsge.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = tsge.getLeafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val inProcessPlanDispatcher = dispatcher match {
         case ippd: InProcessPlanDispatcher => ippd
       }
@@ -2868,7 +2868,7 @@ object ProtoConverters {
 
     def toProto(): GrpcMultiPartitionQueryService.SelectRawPartitionsExec = {
       val builder = GrpcMultiPartitionQueryService.SelectRawPartitionsExec.newBuilder()
-      builder.setLeafExecPlan(srp.asInstanceOf[LeafExecPlan].toProto)
+      builder.setLeafExecPlan(srp.asInstanceOf[LeafExecPlan].toProto())
       srp.dataSchema.map(s => builder.setDataSchema(s.toProto))
       srp.lookupRes.foreach(lr => builder.setLookupRes(lr.toProto))
       builder.setFilterSchemas(srp.filterSchemas)
@@ -2880,14 +2880,14 @@ object ProtoConverters {
 
   implicit class SelectRawPartitionsExecFromProtoConverter(srpe: GrpcMultiPartitionQueryService.SelectRawPartitionsExec) {
     def fromProto(queryContext: QueryContext): SelectRawPartitionsExec = {
-      val ep = srpe.getLeafExecPlan.getExecPlan
+      @scala.annotation.unused val ep = srpe.getLeafExecPlan.getExecPlan
       val dataSchema = if (srpe.hasDataSchema) Option(srpe.getDataSchema.fromProto) else None
       val lookupRes = if (srpe.hasLookupRes) Option(srpe.getLookupRes.fromProto) else None
-      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue())
+      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue()).toSeq
       val leafExecPlan = srpe.getLeafExecPlan
       val execPlan = leafExecPlan.getExecPlan
       val dispatcher = execPlan.getDispatcher.fromProto
-      val datasetRef = leafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto
+      val datasetRef = leafExecPlan.getExecPlan.getQueryCommand.getDatasetRef.fromProto()
       val p = SelectRawPartitionsExec(
         queryContext, dispatcher, datasetRef,
         dataSchema,
@@ -2921,33 +2921,33 @@ object ProtoConverters {
       val b = GrpcMultiPartitionQueryService.ExecPlanContainer.newBuilder()
       ep match {
         // non leaf plans
-        case lcre: LabelCardinalityReduceExec => b.setLabelCardinalityReduceExec(lcre.toProto)
-        case mpdce: MultiPartitionDistConcatExec => b.setMultiPartitionDistConcatExec(mpdce.toProto)
-        case lpdce: LocalPartitionDistConcatExec => b.setLocalPartitionDistConcatExec(lpdce.toProto)
-        case slpdce: SplitLocalPartitionDistConcatExec => b.setSplitLocalPartitionDistConcatExec(slpdce.toProto)
+        case lcre: LabelCardinalityReduceExec => b.setLabelCardinalityReduceExec(lcre.toProto())
+        case mpdce: MultiPartitionDistConcatExec => b.setMultiPartitionDistConcatExec(mpdce.toProto())
+        case lpdce: LocalPartitionDistConcatExec => b.setLocalPartitionDistConcatExec(lpdce.toProto())
+        case slpdce: SplitLocalPartitionDistConcatExec => b.setSplitLocalPartitionDistConcatExec(slpdce.toProto())
         case lprae: LocalPartitionReduceAggregateExec => b.setLocalPartitionReduceAggregateExec(lprae.toProto())
         case mprae: MultiPartitionReduceAggregateExec => b.setMultiPartitionReduceAggregateExec(mprae.toProto())
-        case bje: BinaryJoinExec => b.setBinaryJoinExec(bje.toProto)
-        case tcre: TsCardReduceExec => b.setTsCardReduceExec(tcre.toProto)
-        case sre: StitchRvsExec => b.setStitchRvsExec(sre.toProto)
-        case soe: SetOperatorExec => b.setSetOperatorExec(soe.toProto)
-        case lvd: LabelValuesDistConcatExec => b.setLabelValuesDistConcatExec(lvd.toProto)
-        case pkdce: PartKeysDistConcatExec => b.setPartKeysDistConcatExec(pkdce.toProto)
-        case lndce: LabelNamesDistConcatExec => b.setLabelNamesDistConcatExec(lndce.toProto)
+        case bje: BinaryJoinExec => b.setBinaryJoinExec(bje.toProto())
+        case tcre: TsCardReduceExec => b.setTsCardReduceExec(tcre.toProto())
+        case sre: StitchRvsExec => b.setStitchRvsExec(sre.toProto())
+        case soe: SetOperatorExec => b.setSetOperatorExec(soe.toProto())
+        case lvd: LabelValuesDistConcatExec => b.setLabelValuesDistConcatExec(lvd.toProto())
+        case pkdce: PartKeysDistConcatExec => b.setPartKeysDistConcatExec(pkdce.toProto())
+        case lndce: LabelNamesDistConcatExec => b.setLabelNamesDistConcatExec(lndce.toProto())
         // leaf plans
-        case lne: LabelNamesExec => b.setLabelNamesExec(lne.toProto)
-        case ers: EmptyResultExec => b.setEmptyResultExec(ers.toProto)
-        case pke: PartKeysExec => b.setPartKeysExec(pke.toProto)
-        case lve: LabelValuesExec => b.setLabelValuesExec(lve.toProto)
-        case lce: LabelCardinalityExec => b.setLabelCardinalityExec(lce.toProto)
-        case scie: SelectChunkInfosExec => b.setSelectChunkInfosExec(scie.toProto)
+        case lne: LabelNamesExec => b.setLabelNamesExec(lne.toProto())
+        case ers: EmptyResultExec => b.setEmptyResultExec(ers.toProto())
+        case pke: PartKeysExec => b.setPartKeysExec(pke.toProto())
+        case lve: LabelValuesExec => b.setLabelValuesExec(lve.toProto())
+        case lce: LabelCardinalityExec => b.setLabelCardinalityExec(lce.toProto())
+        case scie: SelectChunkInfosExec => b.setSelectChunkInfosExec(scie.toProto())
         case mspe: MultiSchemaPartitionsExec => b.setMultiSchemaPartitionsExec(mspe.toProto())
-        case sboe: ScalarBinaryOperationExec => b.setScalarBinaryOperatinExec(sboe.toProto)
-        case sfde: ScalarFixedDoubleExec => b.setScalarFixedDoubleExec(sfde.toProto)
-        case tce: TsCardExec => b.setTsCardExec(tce.toProto)
-        case tsge: TimeScalarGeneratorExec => b.setTimeScalarGeneratorExec(tsge.toProto)
-        case srpe: SelectRawPartitionsExec => b.setSelectRawPartitionsExec(srpe.toProto)
-        case gre: GenericRemoteExec => b.setGenericRemoteExec(gre.toProto)
+        case sboe: ScalarBinaryOperationExec => b.setScalarBinaryOperatinExec(sboe.toProto())
+        case sfde: ScalarFixedDoubleExec => b.setScalarFixedDoubleExec(sfde.toProto())
+        case tce: TsCardExec => b.setTsCardExec(tce.toProto())
+        case tsge: TimeScalarGeneratorExec => b.setTimeScalarGeneratorExec(tsge.toProto())
+        case srpe: SelectRawPartitionsExec => b.setSelectRawPartitionsExec(srpe.toProto())
+        case gre: GenericRemoteExec => b.setGenericRemoteExec(gre.toProto())
         //case _ => throw new IllegalArgumentException(s"Unknown execution plan ${ep.getClass.getName}")
       }
       b.build()

@@ -469,8 +469,8 @@ class HistogramTest extends NativeVectorTest {
 
     it("should copy and not be affected by mutation to original") {
       val addedBuckets = rawHistBuckets(0).zip(rawHistBuckets(1)).map { case(a,b) => a + b }.toArray
-      val hist = mutableHistograms(0).copy
-      val hist2 = hist.copy
+      val hist = mutableHistograms(0).copy()
+      val hist2 = hist.copy()
       hist shouldEqual hist2
       hist.add(mutableHistograms(1))
       hist should not equal (hist2)
@@ -478,7 +478,7 @@ class HistogramTest extends NativeVectorTest {
     }
 
     it("should correctly add & makeMonotonic histograms containing NaNs") {
-      val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
+      val hist1 = mutableHistograms(0).copy().asInstanceOf[MutableHistogram]
       val histWNans = mutableHistograms(1)
       histWNans.values(0) = Double.NaN
       histWNans.values(2) = Double.NaN
@@ -523,7 +523,7 @@ class HistogramTest extends NativeVectorTest {
 
     // Test this later when different schemas are supported
     ignore("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
-      val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
+      val hist1 = mutableHistograms(0).copy().asInstanceOf[MutableHistogram]
 
       val scheme2 = GeometricBuckets(2.0, 6.0, 3)
       val hist2 = LongHistogram(scheme2, Array(10L, 20L, 40L))

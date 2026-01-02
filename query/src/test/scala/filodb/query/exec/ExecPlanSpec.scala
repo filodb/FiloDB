@@ -24,7 +24,8 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import ZeroCopyUTF8String._
 
 class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
@@ -183,7 +184,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new NoCloseCursor(
           bucketValues.zipWithIndex.map{ case (arr, i) =>
             new TransientHistRow(i.toLong, LongHistogram(buckets, arr))
-          }.toIterator)
+          }.iterator)
 
       override def outputRange: Option[RvRange] = Some(RvRange(1000, 1, 1000))
     }
@@ -203,7 +204,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       )
     )
 
-    val rows = plan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult].result.head.rows
+    val rows = plan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult].result.head.rows()
     // cannot assert size; will exhaust the iterator
     for ((row, irow) <- rows.zipWithIndex) {
       val hist = row.getHistogram(1)
@@ -269,7 +270,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new NoCloseCursor(
           (0 until 10).zipWithIndex.map{ case (obs, i) =>
             new TransientRow(i.toLong, obs)
-          }.toIterator)
+          }.iterator)
 
       override def outputRange: Option[RvRange] = Some(RvRange(1000, 1, 1000))
     }
@@ -319,7 +320,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new NoCloseCursor(
           (0 until 10).zipWithIndex.map{ case (obs, i) =>
             new TransientRow(i.toLong, obs)
-          }.toIterator)
+          }.iterator)
 
       override def outputRange: Option[RvRange] = range
     }

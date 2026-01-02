@@ -11,7 +11,7 @@ trait Instance {
   def createClass[T: ClassTag](fqcn: String): Try[Class[_ <: T]] =
     Try[Class[_ <: T]]({
       val c = Class.forName(fqcn, false, getClass.getClassLoader).asInstanceOf[Class[_ <: T]]
-      val t = implicitly[ClassTag[T]].runtimeClass
+      // val t = implicitly[ClassTag[T]].runtimeClass // unused
       if (c.isAssignableFrom(c) || c.getName == fqcn) c
       else throw new ClassCastException(s"$c must be assignable from or be $c")
     })

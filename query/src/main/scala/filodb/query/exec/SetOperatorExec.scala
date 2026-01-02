@@ -192,7 +192,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         result.put(jk, arrayBuffer)
       }
     }
-    result.valuesIterator.map(_.toIterator).flatten
+    result.valuesIterator.map(_.iterator).flatten
   }
   // scalastyle:on method.length
 
@@ -212,20 +212,20 @@ final case class SetOperatorExec(queryContext: QueryContext,
     // While iterating all lhs rangevectors for a time instant where none of the lhs range vectors are having a value
     // all RHS range vectors for that time instant having a matching join key will have a value in o/p
 
-    //lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
+    //lhsResult.valuesIterator.map(_.iterator).flatten ++ rhsResult.valuesIterator.map(_.iterator).flatten
 
     // Create a Map of join key as key and value is a two tuple where _1 is all LHS Rvs for the join key and _2
     // are all RHS Rvs for that same join key
     val lRvs = lhsResult.foldLeft(Map.empty[Map[Utf8Str, Utf8Str], (Seq[RangeVector], Seq[RangeVector])]) {
-      case (acc, (jk, rvs)) => acc + (jk -> ((rvs, Seq.empty[RangeVector])))
+      case (acc, (jk, rvs)) => acc + (jk -> ((rvs.toSeq, Seq.empty[RangeVector])))
     }
 
     val joinedRvs = rhsResult.foldLeft(lRvs) {
       case (acc, (jk, rvs))  =>
         val newVal = acc.get(jk).map {
             // RHS will be Nil
-          case (lhs, rhs) => (lhs, rvs)
-        }.getOrElse((Nil, rvs))
+          case (lhs, rhs) => (lhs, rvs.toSeq)
+        }.getOrElse((Nil, rvs.toSeq))
         acc + (jk -> newVal)
     }
 
@@ -337,7 +337,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
       // value defined for that time instant
       case (lhs, rhs)  =>
         OrSetOpIteratorWrapper(lhs, rhs).joined()
-    }.toIterator
+    }.iterator
   }
   //scalastyle:on method.length
 

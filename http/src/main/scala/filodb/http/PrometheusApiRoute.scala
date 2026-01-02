@@ -1,16 +1,15 @@
 package filodb.http
 
-import scala.concurrent.Future
-
 import akka.actor.ActorRef
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaTypes, StatusCodes => Codes}
 import akka.http.scaladsl.server.Directives._
-import akka.stream.ActorMaterializer
+import akka.stream.Materializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
+import scala.concurrent.Future
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
@@ -23,7 +22,9 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
-class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
+
+class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)
+                        (implicit @scala.annotation.unused mat: Materializer)
            extends FiloRoute with StrictLogging {
 
   import FailFastCirceSupport._
@@ -47,9 +48,11 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // If partialResults query parameter value is not specified, value from config is used
     path( "api" / "v1" / "query_range") {
       get {
-        parameter(('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
-          'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?,
-          'allowPartialResults.as[Boolean].?))
+        parameters(Symbol("query").as[String], Symbol("start").as[Double],
+          Symbol("end").as[Double], Symbol("histogramMap").as[Boolean].?,
+          Symbol("step").as[Int], Symbol("explainOnly").as[Boolean].?,
+          Symbol("verbose").as[Boolean].?, Symbol("spread").as[Int].?,
+          Symbol("allowPartialResults").as[Boolean].?)
         { (query, start, end, histMap, step, explainOnly, verbose, spread, partialResults) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
@@ -66,10 +69,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter(('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
-          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?, 'allowPartialResults.as[Boolean].?))
+        parameters(Symbol("query").as[String], Symbol("time").as[Double],
+          Symbol("explainOnly").as[Boolean].?, Symbol("verbose").as[Boolean].?,
+          Symbol("spread").as[Int].?, Symbol("histogramMap").as[Boolean].?,
+          Symbol("step").as[Double].?, Symbol("allowPartialResults").as[Boolean].?)
         { (query, time, explainOnly, verbose, spread, histMap, step, partialResults) =>
-          val stepLong = step.map(_.toLong).getOrElse(0L)
+          @scala.annotation.unused val stepLong = step.map(_.toLong).getOrElse(0L)
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong),
@@ -83,12 +88,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Label names](https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names)
     path( "api" / "v1" / "labels") {
       get {
-        parameter(("match[]".as[String], 'start.as[Double].?, 'end.as[Double].?,
-          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?, 'allowPartialResults.as[Boolean].?))
+        parameters("match[]".as[String], Symbol("start").as[Double].?, Symbol("end").as[Double].?,
+          Symbol("explainOnly").as[Boolean].?, Symbol("verbose").as[Boolean].?,
+          Symbol("spread").as[Int].?, Symbol("allowPartialResults").as[Boolean].?)
         { (query, start, end, explainOnly, verbose, spread, partialResults) =>
-          val currentTimeInSecs = System.currentTimeMillis()/1000
-          val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
-          val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
+          @scala.annotation.unused val currentTimeInSecs = System.currentTimeMillis()/1000
+          @scala.annotation.unused val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
+          @scala.annotation.unused val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
           val logicalPlan = Parser.labelNamesQueryToLogicalPlan(query, TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, startLong, 0L, endLong),
@@ -103,12 +109,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // TODO Why did we deviate from Prom by taking match param as comma separated key-values instead of PromQL selector?
     path ("api" / "v1" / "label" / Segment / "values") { label: String =>
       get {
-        parameter(("match[]".as[String].?, 'start.as[Double].?, 'end.as[Double].?, 'explainOnly.as[Boolean].?,
-          'allowPartialResults.as[Boolean].?))
+        parameters("match[]".as[String].?, Symbol("start").as[Double].?,
+          Symbol("end").as[Double].?, Symbol("explainOnly").as[Boolean].?,
+          Symbol("allowPartialResults").as[Boolean].?)
         { (query, start, end, explainOnly, partialResults) =>
-          val currentTimeInSecs = System.currentTimeMillis()/1000
-          val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
-          val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
+          @scala.annotation.unused val currentTimeInSecs = System.currentTimeMillis()/1000
+          @scala.annotation.unused val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
+          @scala.annotation.unused val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
           val logicalPlan = Parser.labelValuesQueryToLogicalPlan(Seq(label), query,
                                                                  TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
@@ -140,7 +147,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             }
             Future.sequence(asks)
           }
-          onSuccess(fut) { case qr =>
+          onSuccess(fut) { qr =>
             qr.find(!_.isInstanceOf[filodb.query.QueryResult]) match {
               case Some(qe: QueryError) => complete(toPromErrorResponse(qe))
               case Some(UnknownDataset) => complete(Codes.NotFound ->
@@ -164,6 +171,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
+  @scala.annotation.unused
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
                                  spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean,
                                  partialResults: Boolean) = {

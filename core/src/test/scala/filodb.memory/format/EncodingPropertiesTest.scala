@@ -32,7 +32,7 @@ class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPro
   def optionList[T](implicit a: Arbitrary[T]): Gen[Seq[Option[T]]] =
     Gen.containerOf[Seq, Option[T]](noneOrThing[T])
 
-  implicit val utf8arb = Arbitrary(arbitrary[String].map(ZeroCopyUTF8String.apply))
+  implicit val utf8arb: Arbitrary[ZeroCopyUTF8String] = Arbitrary(arbitrary[String].map(ZeroCopyUTF8String.apply))
 
   it("should match elements and length for BinaryIntVectors with missing/NA elements") {
     val memFactory = new NativeMemoryManager(1000 * 1024)

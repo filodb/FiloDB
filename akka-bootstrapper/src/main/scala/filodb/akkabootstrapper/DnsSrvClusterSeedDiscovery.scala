@@ -113,7 +113,7 @@ final class ConsulClusterSeedDiscovery(cluster: Cluster,
       })
     case _ =>
       val context = s"""'host' and 'port' in $defaultAddress must be configured properly.
-        Check 'akka.remote.netty.tcp.{hostname,port}'."""
+        Check 'akka.remote.artery.{hostname,port}'."""
       logger.error(context)
       throw new ConfigurationException(context)
   }

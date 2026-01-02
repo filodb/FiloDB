@@ -274,7 +274,7 @@ object QueryContext {
       Seq(SpreadChange(spread = spreadMap.getOrElse(shardKeysInQuery.toMap, defaultSpread)))
   }
 
-  import collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   def simpleMapSpreadFunc(shardKeyNames: java.util.List[String],
                           spreadMap: java.util.Map[java.util.Map[String, String], Integer],
@@ -283,7 +283,7 @@ object QueryContext {
       case (d, v) => d.asScala -> v.toInt
     }
 
-    simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
+    simpleMapSpreadFunc(shardKeyNames.asScala.toSeq, spreadAssignment, defaultSpread)
   }
 
   /**
@@ -330,7 +330,7 @@ object QueryContext {
     val targetSchema: Map[Map[String, String], Seq[TargetSchemaChange]] = targetSchemaMap.asScala.map {
       case (d, v) => d.asScala.toMap -> v.asScala.toSeq
     }.toMap
-    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema, optionalShardKey)
+    mapTargetSchemaFunc(shardKeyNames.asScala.toSeq, targetSchema, optionalShardKey)
   }
 
 }

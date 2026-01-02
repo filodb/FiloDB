@@ -27,7 +27,7 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
 
-      override def numRows: Option[Int] = Option(rows.size)
+      override def numRows: Option[Int] = Option(rows().size)
 
       override def outputRange: Option[RvRange] = None
     }
@@ -43,8 +43,8 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
-        new TransientRow(1L, 3.3d)).toIterator
-      override def numRows: Option[Int] = Option(rows.size)
+        new TransientRow(1L, 3.3d)).iterator
+      override def numRows: Option[Int] = Option(rows().size)
 
       override def outputRange: Option[RvRange] = None
 
@@ -57,8 +57,8 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
-        new TransientRow(1L, 9.4d)).toIterator
-      override def numRows: Option[Int] = Option(rows.size)
+        new TransientRow(1L, 9.4d)).iterator
+      override def numRows: Option[Int] = Option(rows().size)
       override def outputRange: Option[RvRange] = None
 
     }
@@ -75,8 +75,8 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
-        new TransientRow(1L, 3.3d)).toIterator
-      override def numRows: Option[Int] = Option(rows.size)
+        new TransientRow(1L, 3.3d)).iterator
+      override def numRows: Option[Int] = Option(rows().size)
       override def outputRange: Option[RvRange] = None
 
     }

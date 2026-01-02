@@ -30,7 +30,7 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
 
   it("should convert single schema histogram to appropriate Prom bucket time series") {
     import NoCloseCursor._
-    val rv = IteratorBackedRangeVector(rvKey, rows.toIterator, None)
+    val rv = IteratorBackedRangeVector(rvKey, rows.iterator, None)
 
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)
     val sourceObs = Observable.now(rv)
@@ -50,12 +50,12 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
       kvMap.contains("le") shouldEqual true
       kvMap("metric").endsWith("_bucket") shouldEqual true
       val le = kvMap("le").toDouble
-      rv.rows.map(_.getLong(0)).toSeq shouldEqual eightBTimes
+      rv.rows().map(_.getLong(0)).toSeq shouldEqual eightBTimes
 
       // Figure out bucket number and extract bucket values for comparison
       var bucketNo = 0
       while (eightBHists.head.bucketTop(bucketNo) < le) bucketNo += 1
-      rv.rows.map(_.getDouble(1)).toSeq shouldEqual eightBHists.map(_.bucketValue(bucketNo))
+      rv.rows().map(_.getDouble(1)).toSeq shouldEqual eightBHists.map(_.bucketValue(bucketNo))
     }
   }
 
@@ -66,7 +66,7 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
 
   it("should convert multiple schema histograms to Prom bucket time series") {
     import filodb.core.query.NoCloseCursor._
-    val rv = IteratorBackedRangeVector(rvKey, (rows ++ tenRows).toIterator, None)
+    val rv = IteratorBackedRangeVector(rvKey, (rows ++ tenRows).iterator, None)
 
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)
     val sourceObs = Observable.now(rv)
@@ -87,13 +87,13 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
       kvMap.contains("le") shouldEqual true
       kvMap("metric").endsWith("_bucket") shouldEqual true
       val le = kvMap("le").toDouble
-      rv.rows.map(_.getLong(0)).toSeq shouldEqual (eightBTimes ++ tenBTimes)
+      rv.rows().map(_.getLong(0)).toSeq shouldEqual (eightBTimes ++ tenBTimes)
 
       // Figure out bucket number and extract bucket values for comparison
       var bucketNo = 0
       while (tenBHists.head.bucketTop(bucketNo) < le) bucketNo += 1
 
-      val bucketValues = rv.rows.map(_.getDouble(1)).toSeq
+      val bucketValues = rv.rows().map(_.getDouble(1)).toSeq
       if (bucketNo < 8) {
         bucketValues take 20 shouldEqual eightBHists.map(_.bucketValue(bucketNo))
       } else {

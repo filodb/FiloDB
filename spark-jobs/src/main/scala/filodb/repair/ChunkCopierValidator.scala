@@ -14,7 +14,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.concurrent.duration.Duration
-import scala.jdk.CollectionConverters.asScalaIteratorConverter
+import scala.jdk.CollectionConverters._
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit, TimeSeriesChunksTable}
@@ -106,8 +106,8 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
 
     val partSchema = Schemas.fromConfig(sourceConfig).get.part
 
-    chunksTable.readChunksNoAsync(partition, chunkInfos)
-      .iterator()
+    chunksTable.readChunksNoAsync(partition, chunkInfos.toSeq)
+      .iterator
       .asScala
       .map(
         row => {

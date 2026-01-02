@@ -25,9 +25,9 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggregator {
 
   var serializedMap = new Array[Byte](500)
-  val rowMap = debox.Map[Double, Int]()
+  val rowMap = scala.collection.mutable.HashMap[Double, Int]()
   class CountValuesHolder(var timestamp: Long = 0L) extends AggregateHolder {
-    val frequencyMap = debox.Map[Double, Int]()
+    val frequencyMap = scala.collection.mutable.HashMap[Double, Int]()
     val row = new CountValuesTransientRow
     def toRowReader: MutableRowReader = {
       val size = frequencyMap.size * CountValuesSerDeser.sampleSize
@@ -78,7 +78,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     } else {
       val aggMap = CountValuesSerDeser.deserialize(aggRes.getBlobBase(1),
         aggRes.getBlobNumBytes(1), aggRes.getBlobOffset(1))
-      aggMap.keysSet.foreach(x => acc.addValue(x, aggMap.get(x).get))
+      aggMap.keySet.foreach(x => acc.addValue(x, aggMap.get(x).get))
     }
     acc
   }
@@ -99,7 +99,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
           rows => rows.take(limit).foreach { row =>
             val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
               row.getBlobNumBytes(1), row.getBlobOffset(1))
-            rowMap.foreach { (k, v) =>
+            rowMap.foreach { case (k, v) =>
               val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
                 (label.utf8 -> k.toString.utf8))
               val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
@@ -128,11 +128,11 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val cols = new Array[ColumnInfo](2)
     cols(0) = source.columns(0)
     cols(1) = ColumnInfo("map", ColumnType.StringColumn)
-    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
+    ResultSchema(cols.toIndexedSeq, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)).toIndexedSeq, 1,
       fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }

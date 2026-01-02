@@ -141,7 +141,7 @@ object ActorName {
    * @return Actor path for the node coordinator actor in clusteringV2
    */
   def nodeCoordinatorPathClusterV2(hostPort: String): String = {
-    s"akka.tcp://filo-standalone@$hostPort/user/coordinator"
+    s"akka://filo-standalone@$hostPort/user/coordinator"
   }
 
 }

@@ -43,7 +43,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -67,7 +67,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -97,7 +97,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rvHistMaxMin)), querySession,
       1000, histMaxMinSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getHistogram(1))))
 
     resultRows.map(_.toList).mkString shouldEqual expectedResults
@@ -146,7 +146,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -168,7 +168,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).toList)
 
     resultRows.head.head._2 shouldEqual(2)
@@ -190,7 +190,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
       querySession, 1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).toList)
 
     // 1 for 100 -> 20 and 1 for 20 -> Double.NaN. Should not increase for Double.NaN -> Double.NaN

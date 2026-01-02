@@ -35,7 +35,7 @@ class OffHeapMemory(schemas: Seq[Schema],
     * Buffer Pool keyed by Raw schema Id
     */
   val bufferPools = {
-    val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
+    val bufferPoolByRawSchemaId = scala.collection.mutable.HashMap.empty[Int, WriteBufferPool]
     schemas.foreach { s =>
       val pool = new WriteBufferPool(nativeMemoryManager, s.data, storeConfig)
       bufferPoolByRawSchemaId += s.schemaHash -> pool

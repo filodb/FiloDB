@@ -114,7 +114,7 @@ class ClusterApiRouteSpec extends AnyFunSpec with ScalatestRouteTest with AsyncT
 
   describe("/api/v1/cluster/<dataset>/startshards") {
     it("should return 200 with valid config") {
-      val conf = AssignShardConfig("akka.tcp://filo-standalone@127.0.0.1:25523", Seq(2, 5))
+      val conf = AssignShardConfig("akka://filo-standalone@127.0.0.1:25523", Seq(2, 5))
       Post("/api/v1/cluster/gdelt/startshards", conf).
         withHeaders(RawHeader("Content-Type", "application/json")) ~> clusterRoute ~> check {
         handled shouldBe true
