@@ -20,7 +20,7 @@ import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
-import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.memstore.FiloSchedulers.{assertThreadName, QuerySchedName}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ArrowSerializedRangeVector, QueryConfig, QueryContext,
   QueryLimitException, QuerySession, QueryStats, RangeVector, SerializedRangeVector}
@@ -178,6 +178,9 @@ trait FlightQueryExecutor extends StrictLogging {
                       listener: ServerStreamListener,
                       execPlan: ExecPlan
                      ): Unit = {
+      // FIXME: should this method run on the IO pool instead of the computation pool, since
+      //  flight listener methods block?
+      assertThreadName(QuerySchedName)
       logger.debug(s"Streaming results for queryPlanId=${execPlan.planId}")
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {

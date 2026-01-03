@@ -54,20 +54,21 @@ object NewFiloServerMain extends StrictLogging {
 
       nodeCoordinatorActor ! NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 
-      // Allocate Flight server port + 1000 to reuse Akka based peer discovery
-      val port = akkaPortToFlightPort(allConfig.getInt("akka.remote.netty.tcp.port"))
-      val host = {
-        val h = allConfig.getString("akka.remote.netty.tcp.hostname")
-        if (h.isEmpty) InetAddress.getLocalHost.getHostAddress else h
+      val flightServerEnabled = allConfig.getBoolean("filodb.flight.server.enabled")
+      if (flightServerEnabled) {
+        val host = {
+          val h = allConfig.getString("akka.remote.netty.tcp.hostname")
+          if (h.isEmpty) InetAddress.getLocalHost.getHostAddress else h
+        }
+        // Allocate Flight server port + 1000 to reuse Akka based peer discovery
+        val port = akkaPortToFlightPort(allConfig.getInt("akka.remote.netty.tcp.port"))
+        val location = Location.forGrpcInsecure(host, port)
+        val flightServer = FlightServer.builder(FlightAllocator.serverAllocator, location,
+          new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig)).build()
+        logger.info(s"Starting FiloDB Flight server on $host:$port")
+        flightServer.start()
       }
-      val location = Location.forGrpcInsecure(host, port)
-      val flightServerMaxAlloc = allConfig.getBytes("filodb.flight.server.server-allocator-limit")
-      val allocator = FlightAllocator.rootAllocator.newChildAllocator("FilodbFlightServer", 0, flightServerMaxAlloc)
-      val flightServer = FlightServer.builder(allocator, location,
-        new FiloDBFlightProducer(memStore, allocator, location, allConfig)).build()
-      logger.info(s"Starting FiloDB Flight server on $host:$port")
-      flightServer.start()
-
+      
       val filoHttpServer = new FiloHttpServer(system, settings)
       filoHttpServer.start(nodeCoordinatorActor, nodeCoordinatorActor, true)
       startGrpcServer(settings, nodeCoordinatorActor)
