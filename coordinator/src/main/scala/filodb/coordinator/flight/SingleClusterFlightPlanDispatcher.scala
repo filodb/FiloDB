@@ -17,7 +17,7 @@ import filodb.core.memstore.FiloSchedulers.FlightIoSchedName
 import filodb.core.query.{ArrowSerializedRangeVector, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
-import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
+import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
 object SingleClusterFlightPlanDispatcher {
   private val flightIoScheduler = Scheduler.io(FlightIoSchedName)
@@ -46,15 +46,16 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
   private def dispatchFlightPlan(
     plan: ExecPlanWithClientParams,
     remainingTimeMs: Long): Task[QueryResponse] = {
-    qLogger.debug(s"FlightPlanDispatcher executing request ${plan.execPlan.getClass.getSimpleName} to $location")
+    qLogger.debug(s"FlightPlanDispatcher dispatching queryPlanId=${plan.execPlan.planId} " +
+      s"${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
     val ticket = new Ticket(FlightKryoSerDeser.serializeToBytes(plan.execPlan))
-    executeFlightRequest(plan.execPlan.planId, client, ticket, remainingTimeMs, plan.querySession)
+    executeFlightRequest(plan.execPlan, client, ticket, remainingTimeMs, plan.querySession)
   }
 
   // scalastyle:off method.length
   private def executeFlightRequest(
-    planId: String,
+    plan: ExecPlan,
     client: FlightClient,
     ticket: Ticket,
     timeoutMs: Long,
@@ -73,7 +74,8 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
           FlightKryoSerDeser.deserialize(stream.getLatestMetadata) match {
             case header: RespHeader =>
               respHeader = Some(header)
-              qLogger.debug(s"FlightPlanDispatcher received RespHeader with schema: ${header.resultSchema}")
+              qLogger.debug(s"FlightPlanDispatcher received RespHeader for queryPlanId=${plan.planId} " +
+                s"with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
               val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
               querySession.registerArrowCloseable(reqVsr)
@@ -85,7 +87,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               Using.resource(unloader.getRecordBatch) { rb =>
                 loader.load(rb)
               }
-              qLogger.debug(s"FlightPlanDispatcher received RV for RangeVectorKey: ${rvMetadata.rvk}")
+              qLogger.debug(s"FlightPlanDispatcher received RV queryPlanId=${plan.planId} with Key: ${rvMetadata.rvk}")
               require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
               val asrv = new ArrowSerializedRangeVector(rvMetadata.rvk, reqVsr.getRowCount,
                 respHeader.get.resultSchema.toRecordSchema,
@@ -95,19 +97,21 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               querySession.registerArrowCloseable(asrv)
             case footer: RespFooter =>
               respFooter = Some(footer)
-              qLogger.debug(s"FlightPlanDispatcher received RespFooter with stats: ${footer.queryStats}, " +
-                s"throwable: ${footer.throwable}")
+              qLogger.debug(s"FlightPlanDispatcher received RespFooter for queryPlanId=${plan.planId} with stats: " +
+                s"${footer.queryStats}, throwable: ${footer.throwable}")
           }
           // Error on stream is thrown as exception and will be handled at onErrorHandle below
         }
         if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
-          QueryError(planId, respFooter.get.queryStats, respFooter.get.throwable.get)
+          QueryError(plan.queryContext.queryId, respFooter.get.queryStats, respFooter.get.throwable.get)
         } else {
-          QueryResult(planId, respHeader.get.resultSchema, srvs, respFooter.map(_.queryStats).getOrElse(QueryStats()))
+          QueryResult(plan.queryContext.queryId, respHeader.get.resultSchema, srvs,
+            respFooter.map(_.queryStats).getOrElse(QueryStats()))
         }
       }
     }.onErrorHandle { ex =>
-      qLogger.error(s"FlightPlanDispatcher - Flight request to $location failed", ex)
+      qLogger.error(s"FlightPlanDispatcher - Flight request for queryId=${plan.queryContext.queryId}" +
+        s" to $location failed", ex)
 
       // Attempt to force reconnection on certain errors
       ex match {
@@ -116,7 +120,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
           FlightClientManager.global.getClient(location, forceRebuild = true)
         case _ =>
       }
-      QueryError(planId, QueryStats(), ex)
+      QueryError(plan.queryContext.queryId, QueryStats(), ex)
     }.executeOn(flightIoScheduler).asyncBoundary
   }
 
