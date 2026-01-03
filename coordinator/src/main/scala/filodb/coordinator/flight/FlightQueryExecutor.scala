@@ -100,7 +100,7 @@ trait FlightQueryExecutor extends StrictLogging {
           .onErrorHandle { t =>
             QueryError(q.queryContext.queryId, querySession.queryStats, t)
           }.map { res =>
-            logger.debug(s"Query execution pipeline constructed for queryId=${q.queryContext.queryId}")
+            logger.debug(s"Query execution pipeline constructed for queryPlanId=${q.planId}")
             // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
             // the query on the current/Actor thread instead of the scheduler
             if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
@@ -109,11 +109,11 @@ trait FlightQueryExecutor extends StrictLogging {
             streamResults(res, reqAllocator, listener, q)
             res match {
               case e: QueryError =>
-                logQueryErrors(e.t, q)
                 queryErrors.increment(1, Map("dataset" -> q.dataset.toString))
                 queryExecuteSpan.fail(e.t.getMessage)
                 // rethrow so circuit beaker can block queries when there is a surge of such exceptions
                 if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
+                else logQueryErrors(e.t, q)
               case _ =>
             }
           }.guarantee(Task.eval {
@@ -125,19 +125,14 @@ trait FlightQueryExecutor extends StrictLogging {
               Map("plan" -> q.getClass.getSimpleName, "dataset" -> q.dataset.toString))
           })
 
-        val execTaskWithCircuitBreaker = if (circuitBreakerEnabled) {
-          circuitBreaker.protect(execTask)
-            .onErrorRecover {
-              case t: ExecutionRejectedException =>
-                querySession.close()
-                logQueryErrors(t, q)
-                listener.error(t)
-              case t =>
-                querySession.close()
-                // all other errors are already handled; listner should already have the error
-            }
-        } else execTask
-        execTaskWithCircuitBreaker.runToFuture(queryScheduler)
+        val execTaskWithCircuitBreaker = if (circuitBreakerEnabled) circuitBreaker.protect(execTask)
+                                         else execTask
+        execTaskWithCircuitBreaker.onErrorRecover { case t =>
+            logQueryErrors(t, q)
+            querySession.close()
+            listener.error(t)
+            // all other errors are already handled; listener should already have the error
+          }.runToFuture(queryScheduler)
       }
     }
 
@@ -166,8 +161,7 @@ trait FlightQueryExecutor extends StrictLogging {
           logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${execPlan.queryContext.queryId} " +
             s"${execPlan.queryContext.origQueryParams} ${t.getMessage}")
         case _: QueryLimitException =>
-          logger.warn(s"Query Limit Breached " +
-            s"${execPlan.queryContext.origQueryParams} ${t.getMessage}")
+          logger.warn(s"Query Limit Breached ${execPlan.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${execPlan.queryContext.queryId} " +
             s"${execPlan.queryContext.origQueryParams}", e)
@@ -184,14 +178,13 @@ trait FlightQueryExecutor extends StrictLogging {
                       listener: ServerStreamListener,
                       execPlan: ExecPlan
                      ): Unit = {
-      logger.debug(s"Streaming results for queryId=${execPlan.queryContext.queryId}")
+      logger.debug(s"Streaming results for queryPlanId=${execPlan.planId}")
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {
         case qe: QueryError =>
-          logQueryErrors(qe.t, execPlan)
           sendRespFooterAndComplete(listener, reqAllocator, execPlan.planId, qe.queryStats, Some(qe.t))
         case res: QueryResult =>
-          logger.debug(s"Sending header for queryId=${execPlan.queryContext.queryId}")
+          logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
           try {
             val respHeader = RespHeader(res.resultSchema)
             // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
@@ -233,7 +226,8 @@ trait FlightQueryExecutor extends StrictLogging {
                                   reqAllocator: BufferAllocator,
                                   planId: String,
                                   s: QueryStats, t: Option[Throwable]): Unit = {
-      logger.debug(s"Sending response footer for planId=$planId and completing stream for queryStats=$s, throwable=$t")
+      logger.debug(s"Sending response footer for queryPlanId=$planId and completing " +
+        s"stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
       // and hence not closed here
