@@ -209,7 +209,7 @@ trait FlightQueryExecutor extends StrictLogging {
                   }
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
                   asrv.close()
-                case rv: RangeVector =>FlightKryoSerDeser
+                case rv: RangeVector =>
                   ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
                     vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
                   // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
