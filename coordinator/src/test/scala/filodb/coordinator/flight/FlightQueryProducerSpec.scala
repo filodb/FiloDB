@@ -38,7 +38,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
 
   val allocator = FlightAllocator.rootAllocator.newChildAllocator("FlightQueryProducerSpec", 0, 100000)
   val querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, queryAllocator = Some(allocator))
-  val location = Location.forGrpcInsecure("localhost", 8815)
+  val location = Location.forGrpcInsecure("localhost", 38815)
 
   memStore.setup(timeseriesDatasetWithMetric.ref, Schemas(timeseriesDatasetWithMetric.schema), 0, TestData.storeConf, 1)
   val rawData = timeSeriesData(Map("host".utf8 -> s"host1".utf8, "region".utf8 -> s"region1".utf8)).take(1000) ++

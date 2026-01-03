@@ -61,7 +61,8 @@ object NewFiloServerMain extends StrictLogging {
         if (h.isEmpty) InetAddress.getLocalHost.getHostAddress else h
       }
       val location = Location.forGrpcInsecure(host, port)
-      val allocator = FlightAllocator.rootAllocator.newChildAllocator("FilodbFlightServer", 0, 100000)
+      val flightServerMaxAlloc = allConfig.getBytes("filodb.flight.server.server-allocator-limit")
+      val allocator = FlightAllocator.rootAllocator.newChildAllocator("FilodbFlightServer", 0, flightServerMaxAlloc)
       val flightServer = FlightServer.builder(allocator, location,
         new FiloDBFlightProducer(memStore, allocator, location, allConfig)).build()
       logger.info(s"Starting FiloDB Flight server on $host:$port")
