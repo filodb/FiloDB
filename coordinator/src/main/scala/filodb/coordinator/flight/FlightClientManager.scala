@@ -9,8 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, Location}
-import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
-import org.slf4j.LoggerFactory
+import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.GlobalConfig
 
@@ -39,17 +38,14 @@ import filodb.core.GlobalConfig
  * - Removal of old clients after a certain period of inactivity. Depending on usage patterns,
  *  this may be necessary to prevent unbounded growth of the client pool.
  *
- * @param rootAllocator The root memory allocator for creating client allocators
+ * @param allocator The allocator which will be the parent allocator used for all FlightClient instances
  */
-class FlightClientManager(rootAllocator: RootAllocator) {
+class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
   import FlightClientManager._
 
-  private val logger = LoggerFactory.getLogger(classOf[FlightClientManager])
-
   // Load configuration
   private val flightClientConfig = GlobalConfig.systemConfig.getConfig("filodb.flight.client")
-  private val maxMemoryPerClient = flightClientConfig.getBytes("per-client-allocator-limit")
   private val maxInboundMessageSize = flightClientConfig.getBytes("max-inbound-message-size").toInt
   private val healthCheckInterval = FiniteDuration(flightClientConfig.getDuration("health-check-interval").toMillis,
                                       TimeUnit.MILLISECONDS)
@@ -122,7 +118,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     val entry = clientMap.remove(locationKey)
     if (entry != null) {
       logger.info(s"Removing FlightClient for $location")
-      closeClientEntry(entry)
+      closeClient(entry.client)
     }
   }
 
@@ -138,7 +134,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
       healthCheckScheduler.shutdown()
 
       // Close all clients
-      clientMap.values.forEach(closeClientEntry)
+      clientMap.values.forEach(c => closeClient(c.client))
       clientMap.clear()
       logger.info("FlightClientManager shutdown complete")
     }
@@ -150,17 +146,14 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     s"${location.getUri.getHost}:${location.getUri.getPort}"
   }
 
-  def getClientAllocatorAllocatedBytes(location: Location): Option[Long] = {
+  def getClientAllocatorAllocatedBytes(): Long = {
     if (isShutdown.get()) {
       throw new IllegalStateException("FlightClientManager has been shut down")
     }
-    val locationKey = locationToKey(location)
-    Option(clientMap.get(locationKey)).map(_.allocator.getAllocatedMemory)
+    allocator.getAllocatedMemory
   }
 
   private def createNewClientEntry(location: Location, locationKey: String): FlightClientEntry = {
-    val allocator = rootAllocator.newChildAllocator(s"flight-client-$locationKey", 0, maxMemoryPerClient)
-
     try {
       val client = FlightClient.builder()
         .allocator(allocator)
@@ -170,19 +163,15 @@ class FlightClientManager(rootAllocator: RootAllocator) {
 
       val entry = FlightClientEntry(
         client = client,
-        allocator = allocator,
         location = location,
         isHealthy = None,
         createdAt = System.currentTimeMillis(),
         lastHealthCheck = System.currentTimeMillis()
       )
-
       logger.info(s"Successfully created FlightClient for $location")
       entry
-
     } catch {
       case ex: Exception =>
-        allocator.close()
         logger.error(s"Failed to create FlightClient for $location", ex)
         throw ex
     }
@@ -203,7 +192,7 @@ class FlightClientManager(rootAllocator: RootAllocator) {
     // Create new client with existing allocator
     try {
       val newClient = FlightClient.builder()
-        .allocator(entry.allocator)
+        .allocator(allocator)
         .location(location)
         .maxInboundMessageSize(maxInboundMessageSize)
         .build()
@@ -221,14 +210,6 @@ class FlightClientManager(rootAllocator: RootAllocator) {
         entry.isHealthy = Some(false)
         logger.error(s"Failed to reconnect FlightClient for $location", ex)
         throw ex
-    }
-  }
-
-  private def closeClientEntry(entry: FlightClientEntry): Unit = {
-    try {
-      closeClient(entry.client)
-    } finally {
-      entry.allocator.close()
     }
   }
 
@@ -295,7 +276,6 @@ object FlightClientManager extends StrictLogging {
    */
   private[coordinator] case class FlightClientEntry(
     var client: FlightClient,
-    allocator: BufferAllocator,
     location: Location,
     var isHealthy: Option[Boolean],
     createdAt: Long,
@@ -303,7 +283,7 @@ object FlightClientManager extends StrictLogging {
   )
 
   // Global FlightClientManager instance that follows the same pattern as GrpcPlanDispatcher
-  private val globalManagerInstance = new FlightClientManager(FlightAllocator.rootAllocator)
+  private val globalManagerInstance = new FlightClientManager(FlightAllocator.clientAllocator)
 
   // Shutdown hook for graceful cleanup
   Runtime.getRuntime.addShutdownHook(new Thread(() => {
