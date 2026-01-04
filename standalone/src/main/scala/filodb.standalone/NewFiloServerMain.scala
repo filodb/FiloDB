@@ -68,7 +68,7 @@ object NewFiloServerMain extends StrictLogging {
         logger.info(s"Starting FiloDB Flight server on $host:$port")
         flightServer.start()
       }
-      
+
       val filoHttpServer = new FiloHttpServer(system, settings)
       filoHttpServer.start(nodeCoordinatorActor, nodeCoordinatorActor, true)
       startGrpcServer(settings, nodeCoordinatorActor)
