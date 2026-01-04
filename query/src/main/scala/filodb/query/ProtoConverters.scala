@@ -978,6 +978,7 @@ object ProtoConverters {
         case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
+        case asrv: ArrowSerializedRangeVector  => ??? // FIXME need to implement before productionizing
       }
     }
   }

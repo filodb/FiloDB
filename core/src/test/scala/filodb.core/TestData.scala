@@ -550,7 +550,6 @@ object MetricsTestData {
   ).get
   val downsampleSchema = downsampleDataset.schema
 
-
   def timeSeriesData(tags: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): Stream[Seq[Any]] = {
     val initTs = 0L
     Stream.from(0).map { n =>
@@ -559,7 +558,6 @@ object MetricsTestData {
         "cpu_usage".utf8, tags)
     }
   }
-
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

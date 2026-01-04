@@ -84,7 +84,6 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   }
 
   def toRecordSchema: RecordSchema = new RecordSchema(columns)
-
 }
 
 object ResultSchema {
