@@ -1,7 +1,7 @@
 package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
-import org.apache.arrow.flight.{FlightServer, Location}
+import org.apache.arrow.flight.Location
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -20,7 +20,7 @@ import filodb.query.AggregationOperator.Count
 import filodb.query.exec._
 import filodb.query.{BinaryOperator, Cardinality, QueryResult}
 
-class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAfter
+class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfter
                                                   with BeforeAndAfterAll with ScalaFutures {
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
   implicit val s = monix.execution.Scheduler.Implicits.global
@@ -30,14 +30,15 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
                                            |filodb.memstore.ensure-tsp-count-headroom-percent = 10
                                            |filodb.memstore.ensure-native-memory-headroom-percent = 10
                                            |filodb.memstore.index-updates-publishing-enabled = true
+                                           |akka.remote.netty.tcp.port=33815
                                            |  """.stripMargin)
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
   private val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
-  private val rootAllocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 100000)
-  private val querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, queryAllocator = Some(rootAllocator))
+  private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 100000)
+  private val querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, queryAllocator = Some(allocator))
   private val location = Location.forGrpcInsecure("localhost", 38815)
 
   memStore.setup(timeseriesDatasetWithMetric.ref, Schemas(timeseriesDatasetWithMetric.schema), 0, TestData.storeConf, 1)
@@ -47,13 +48,11 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
   memStore.ingest(timeseriesDatasetWithMetric.ref, 0, data)
   memStore.refreshIndexForTesting(timeseriesDatasetWithMetric.ref)
 
-  private val server = FlightServer.builder(rootAllocator, location,
-    new FiloDBFlightProducer(memStore, rootAllocator, location, config)).build()
-  server.start()
+  private val server = FilodbGrpcServer.start(memStore, config)
 
   after {
     querySession.close()
-    rootAllocator.close()
+    allocator.close()
   }
 
   override def afterAll(): Unit = {
@@ -119,7 +118,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
         Seq(mspe1, mspe2)
       )
 
-      val allocatedMemBeforeQuery = rootAllocator.getAllocatedMemory
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val qRes2 = dce.dispatcher.dispatch(ExecPlanWithClientParams(dce, ClientParams(60000), querySession),
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows2 = qRes2.result.map { rv =>
@@ -136,7 +135,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
 
-      rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to run a binary join query plan over flight server") {
@@ -152,7 +151,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       -----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(0,100000), filters=List(ColumnFilter(region,Equals(region1))), colName=None, schema=None) on SingleClusterFlightPlanDispatcher(Location{uri=grpc+tcp://localhost:8815},test)
       */
 
-      val allocatedMemBeforeQuery = rootAllocator.getAllocatedMemory
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val qRes2 = bje.dispatcher.dispatch(ExecPlanWithClientParams(bje, ClientParams(60000), querySession),
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows2 = qRes2.result.map { rv =>
@@ -165,12 +164,12 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       qRes2.result.map(_.key.toString) shouldEqual
         List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
-      rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do aggregation on top of binary join query plan over flight server") {
 
-      val allocatedMemBeforeQuery = rootAllocator.getAllocatedMemory
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       /*
       Add to the previous query plan with an aggregation on top.
       It is two mspe plans with two time series each joined with plus operator. Then a count aggregation on top.
@@ -207,11 +206,11 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       qRes.result.map(_.key.toString) shouldEqual
         List("/shard:/Map()")
 
-      rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do label values queries") {
-      val allocatedMemBeforeQuery = rootAllocator.getAllocatedMemory
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val lve = LabelValuesExec(
         QueryContext(),
         SingleClusterFlightPlanDispatcher(location, "test"),
@@ -238,11 +237,11 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
       rvRows3 shouldEqual List(List("host1", "host2"))
 
 //      println(allocator.toVerboseString)
-      rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
     it("should be able to do part keys queries") {
-      val allocatedMemBeforeQuery = rootAllocator.getAllocatedMemory
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val pke = PartKeysExec(
         QueryContext(),
         SingleClusterFlightPlanDispatcher(location, "test"),
@@ -271,7 +270,7 @@ class FlightQueryProducerSpec  extends AnyFunSpec with Matchers with BeforeAndAf
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
 
       // println(allocator.toVerboseString)
-      rootAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
   }
 }

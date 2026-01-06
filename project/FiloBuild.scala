@@ -6,7 +6,7 @@ import io.gatling.sbt.GatlingPlugin
 import pl.project13.scala.sbt.JmhPlugin
 import sbt._
 import sbt.Keys.{libraryDependencies, _}
-import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
+import sbtprotoc.ProtocPlugin.autoImport.PB
 
 // All of the submodules are defined here.
 // This works around an issue where things in multiple build.sbt files cannot reference one another.
@@ -28,16 +28,7 @@ object Submodules {
       commonSettings,
       name := "filodb-grpc",
       scalacOptions += "-language:postfixOps",
-      libraryDependencies ++=
-        Seq(
-             "javax.annotation" % "javax.annotation-api" % "1.3.2",
-             "io.grpc" % "grpc-protobuf" % "1.50.0",
-             "io.grpc" % "grpc-core" % "1.50.0",
-             "io.grpc" % "grpc-stub" % "1.50.0",
-             "io.grpc" % "grpc-netty" % "1.50.0",
-             "io.grpc" % "grpc-netty-shaded" % "1.50.0",
-             "io.grpc" % "protoc-gen-grpc-java" % "1.51.1" asProtocPlugin()
-        ),
+      libraryDependencies ++= grpcDeps,
       PB.protocVersion := "3.21.7",
       PB.targets in Compile := Seq(
         PB.gens.java  -> (sourceManaged in Compile).value,
