@@ -1,7 +1,5 @@
 package filodb.standalone
 
-import java.net.InetAddress
-
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
@@ -9,12 +7,10 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import net.ceedubs.ficus.Ficus._
-import org.apache.arrow.flight.{FlightServer, Location}
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.coordinator.flight.{FiloDBFlightProducer, FlightAllocator}
-import filodb.coordinator.flight.FiloDBFlightProducer.akkaPortToFlightPort
+import filodb.coordinator.flight.FilodbGrpcServer
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.coordinator.v2.{FiloDbClusterDiscovery, NewNodeCoordinatorActor}
 import filodb.core.{DatasetRef, GlobalConfig, GlobalScheduler}
@@ -56,17 +52,7 @@ object NewFiloServerMain extends StrictLogging {
 
       val flightServerEnabled = allConfig.getBoolean("filodb.flight.server.enabled")
       if (flightServerEnabled) {
-        val host = {
-          val h = allConfig.getString("akka.remote.netty.tcp.hostname")
-          if (h.isEmpty) InetAddress.getLocalHost.getHostAddress else h
-        }
-        // Allocate Flight server port + 1000 to reuse Akka based peer discovery
-        val port = akkaPortToFlightPort(allConfig.getInt("akka.remote.netty.tcp.port"))
-        val location = Location.forGrpcInsecure(host, port)
-        val flightServer = FlightServer.builder(FlightAllocator.serverAllocator, location,
-          new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig)).build()
-        logger.info(s"Starting FiloDB Flight server on $host:$port")
-        flightServer.start()
+        FilodbGrpcServer.start(memStore, allConfig)
       }
 
       val filoHttpServer = new FiloHttpServer(system, settings)

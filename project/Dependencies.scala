@@ -1,4 +1,5 @@
 import sbt._
+import sbtprotoc.ProtocPlugin.autoImport.AsProtocPlugin
 
 object Dependencies {
 
@@ -27,6 +28,7 @@ object Dependencies {
   val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "3.4.0"
   val sttpVersion       = "1.3.3"
+  val grpcVersion       = "1.50.0"
   val arrowVersion      = "11.0.0" // latest version is 15, but unfortunately it breaks Spark compatibility; we cannot
                                    // move to spark 4.0 yet; when we do move to Spark 4.0, do upgrade Arrow as well
 
@@ -92,7 +94,7 @@ object Dependencies {
     "com.twitter"                  %% "chill"             % "0.9.3",
     "org.apache.commons"           % "commons-lang3"      % "3.14.0",
     "org.apache.arrow"             % "arrow-vector"       % arrowVersion,
-    "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion
+    "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion,
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
@@ -134,8 +136,20 @@ object Dependencies {
     "org.apache.commons"     % "commons-text"                 % "1.9",
     "org.apache.arrow"       % "flight-core"                  % arrowVersion excludeAll(excludegrpc),
     "org.apache.arrow"       % "flight-grpc"                  % arrowVersion excludeAll(excludegrpc),
-    "io.grpc"                % "grpc-netty"                   % "1.60.0",
-    "io.grpc"                % "grpc-stub"                    % "1.60.0"
+    "io.grpc"                % "grpc-netty"                   % grpcVersion,
+    "io.grpc"                % "grpc-netty-shaded"            % grpcVersion,
+    "io.grpc"                % "grpc-stub"                    % grpcVersion,
+    "com.github.luben"       % "zstd-jni"                     % "1.5.7-6"
+  )
+
+  lazy val grpcDeps = Seq(
+    "javax.annotation"       % "javax.annotation-api"         % "1.3.2",
+    "io.grpc"                % "grpc-protobuf"                % grpcVersion,
+    "io.grpc"                % "grpc-core"                    % grpcVersion,
+    "io.grpc"                % "grpc-stub"                    % grpcVersion,
+    "io.grpc"                % "grpc-netty-shaded"            % grpcVersion,
+    "io.grpc"                % "grpc-netty"                   % grpcVersion,
+    "io.grpc"                % "protoc-gen-grpc-java"         % "1.51.1" asProtocPlugin()
   )
 
   lazy val cliDeps = Seq(

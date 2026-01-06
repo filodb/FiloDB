@@ -6,9 +6,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
+import io.grpc.ManagedChannelBuilder
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
-import org.apache.arrow.flight.{CallOptions, FlightClient, Location}
+import org.apache.arrow.flight.{CallOptions, FlightClient, FlightGrpcUtils, Location}
 import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.GlobalConfig
@@ -44,9 +45,10 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
   import FlightClientManager._
 
+  private val allConfig = GlobalConfig.systemConfig
   // Load configuration
-  private val flightClientConfig = GlobalConfig.systemConfig.getConfig("filodb.flight.client")
-  private val maxInboundMessageSize = flightClientConfig.getBytes("max-inbound-message-size").toInt
+  private val flightClientConfig = allConfig.getConfig("filodb.flight.client")
+  private val compressionEnabled = allConfig.getBoolean("filodb.flight.compression-enabled")
   private val healthCheckInterval = FiniteDuration(flightClientConfig.getDuration("health-check-interval").toMillis,
                                       TimeUnit.MILLISECONDS)
   private val healthCheckTimeoutMs = flightClientConfig.getDuration("health-check-timeout").toMillis
@@ -92,18 +94,14 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
     // Use getOrElseUpdate for atomic creation - only one thread will create the entry
     val entry = clientMap.computeIfAbsent(locationKey, l => {
-      logger.info(s"Creating new FlightClient for $location")
-      createNewClientEntry(location, locationKey)
+      createNewClientEntry(location)
     })
 
-    // Synchronize on entry to prevent concurrent reconnections for the same location
-    entry.synchronized {
-      if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) { // not healthy
-        logger.info(s"Reconnecting unhealthy FlightClient for $location")
-        reconnectClientUnsafe(entry, location)
-      } else {
-        entry.client
-      }
+    if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) { // not healthy
+      logger.info(s"Reconnecting unhealthy FlightClient for $location")
+      reconnectClientUnsafe(entry, location)
+    } else {
+      entry.client
     }
   }
 
@@ -146,20 +144,21 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
     s"${location.getUri.getHost}:${location.getUri.getPort}"
   }
 
-  def getClientAllocatorAllocatedBytes(): Long = {
+  def getClientAllocatorAllocatedBytes: Long = {
     if (isShutdown.get()) {
       throw new IllegalStateException("FlightClientManager has been shut down")
     }
     allocator.getAllocatedMemory
   }
 
-  private def createNewClientEntry(location: Location, locationKey: String): FlightClientEntry = {
+  private def createNewClientEntry(location: Location): FlightClientEntry = {
     try {
-      val client = FlightClient.builder()
-        .allocator(allocator)
-        .location(location)
-        .maxInboundMessageSize(maxInboundMessageSize)
-        .build()
+
+      val channel1 = ManagedChannelBuilder.forAddress(location.getUri.getHost, location.getUri.getPort)
+        .usePlaintext().asInstanceOf[ManagedChannelBuilder[_]]
+      val channel2 = if (compressionEnabled) channel1.intercept(GzipClientInterceptor) else channel1
+      val channel3 = channel2.asInstanceOf[ManagedChannelBuilder[_]].build()
+      val client = FlightGrpcUtils.createFlightClient(allocator, channel3)
 
       val entry = FlightClientEntry(
         client = client,
@@ -168,7 +167,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
         createdAt = System.currentTimeMillis(),
         lastHealthCheck = System.currentTimeMillis()
       )
-      logger.info(s"Successfully created FlightClient for $location")
+      logger.info(s"Successfully created FlightClient for $location with compression = $compressionEnabled")
       entry
     } catch {
       case ex: Exception =>
@@ -191,19 +190,11 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
     // Create new client with existing allocator
     try {
-      val newClient = FlightClient.builder()
-        .allocator(allocator)
-        .location(location)
-        .maxInboundMessageSize(maxInboundMessageSize)
-        .build()
-
-      // Update entry with new client
-      entry.client = newClient
-      entry.isHealthy = None
-      entry.lastHealthCheck = System.currentTimeMillis()
-
-      logger.info(s"Successfully reconnected FlightClient for $location")
-      newClient
+      val locationKey = locationToKey(location)
+      val newEntry = createNewClientEntry(location)  // Create new client entry
+      clientMap.put(locationKey, newEntry)           // Update the map with the new entry
+      logger.info(s"Successfully recreated for FlightClient for $location")
+      newEntry.client
 
     } catch {
       case ex: Exception =>
@@ -246,7 +237,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
   private def checkClientHealth(entry: FlightClientEntry): Unit = {
     try {
       // Simple health check: attempt to list actions (lightweight operation)
-      val hn = entry.client.listActions(CallOptions.timeout(healthCheckTimeoutMs, TimeUnit.MILLISECONDS))
+      entry.client.listActions(CallOptions.timeout(healthCheckTimeoutMs, TimeUnit.MILLISECONDS))
                                 .iterator().hasNext
 
       // Synchronize when updating entry fields
@@ -275,7 +266,7 @@ object FlightClientManager extends StrictLogging {
    * Represents a FlightClient entry in the connection pool.
    */
   private[coordinator] case class FlightClientEntry(
-    var client: FlightClient,
+    client: FlightClient,
     location: Location,
     var isHealthy: Option[Boolean],
     createdAt: Long,
