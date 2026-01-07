@@ -48,7 +48,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
   memStore.ingest(timeseriesDatasetWithMetric.ref, 0, data)
   memStore.refreshIndexForTesting(timeseriesDatasetWithMetric.ref)
 
-  private val server = FilodbGrpcServer.start(memStore, config)
+  private val server = FiloDBFlightProducer.start(memStore, config)
 
   after {
     querySession.close()

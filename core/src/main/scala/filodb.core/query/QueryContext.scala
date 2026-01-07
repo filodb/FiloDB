@@ -236,6 +236,11 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
     } else None
   }
 
+  def queryTimeRemaining: Long = {
+    val timeElapsed = System.currentTimeMillis() - submitTime
+    plannerParams.queryTimeoutMillis - timeElapsed
+  }
+
   def getQueryLogLine(msg: String): String = {
     val promQl = origQueryParams match {
       case PromQlQueryParams(query: String, _, _, _, _, _) => query

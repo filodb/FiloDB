@@ -10,7 +10,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.coordinator.flight.FilodbGrpcServer
+import filodb.coordinator.flight.FiloDBFlightProducer
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.coordinator.v2.{FiloDbClusterDiscovery, NewNodeCoordinatorActor}
 import filodb.core.{DatasetRef, GlobalConfig, GlobalScheduler}
@@ -52,7 +52,7 @@ object NewFiloServerMain extends StrictLogging {
 
       val flightServerEnabled = allConfig.getBoolean("filodb.flight.server.enabled")
       if (flightServerEnabled) {
-        FilodbGrpcServer.start(memStore, allConfig)
+        FiloDBFlightProducer.start(memStore, allConfig)
       }
 
       val filoHttpServer = new FiloHttpServer(system, settings)

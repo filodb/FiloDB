@@ -2,7 +2,8 @@ package filodb.coordinator.flight
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.util.Using
 
 import akka.pattern.AskTimeoutException
@@ -20,10 +21,10 @@ import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
-import filodb.core.memstore.FiloSchedulers.{assertThreadName, QuerySchedName}
+import filodb.core.memstore.FiloSchedulers.{assertThreadName, FlightIoSchedName}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ArrowSerializedRangeVector, QueryConfig, QueryContext,
-  QueryLimitException, QuerySession, QueryStats, RangeVector, SerializedRangeVector}
+     QueryLimitException, QuerySession, QueryStats, RangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
@@ -97,14 +98,18 @@ trait FlightQueryExecutor extends StrictLogging {
         queryExecuteSpan.mark("query-actor-received-execute-start")
 
         val execTask = q.execute(memStore, querySession)(queryScheduler)
+          .executeOn(queryScheduler)
+          .asyncBoundary
           .onErrorHandle { t =>
             QueryError(q.queryContext.queryId, querySession.queryStats, t)
           }.map { res =>
             logger.debug(s"Query execution pipeline constructed for queryPlanId=${q.planId}")
             // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
-            // the query on the current/Actor thread instead of the scheduler
+            // the query on the current thread instead of the scheduler
             if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
-              FiloSchedulers.assertThreadName(QuerySchedName)
+              // This check was copied from QueryActor - but why would a
+              // plan come here, if InProcessPlanDispatcher is used? Leaving it for now since it is harmless
+              FiloSchedulers.assertThreadName(FlightIoSchedName)
             }
             streamResults(res, reqAllocator, listener, q)
             res match {
@@ -132,7 +137,7 @@ trait FlightQueryExecutor extends StrictLogging {
             querySession.close()
             listener.error(t)
             // all other errors are already handled; listener should already have the error
-          }.runToFuture(queryScheduler)
+          }.runToFuture(QueryScheduler.flightIoScheduler)
       }
     }
 
@@ -178,9 +183,7 @@ trait FlightQueryExecutor extends StrictLogging {
                       listener: ServerStreamListener,
                       execPlan: ExecPlan
                      ): Unit = {
-      // FIXME: should this method run on the IO pool instead of the computation pool, since
-      //  flight listener methods block?
-      assertThreadName(QuerySchedName)
+      assertThreadName(FiloSchedulers.FlightIoSchedName)
       logger.debug(s"Streaming results for queryPlanId=${execPlan.planId}")
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {
@@ -213,10 +216,18 @@ trait FlightQueryExecutor extends StrictLogging {
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
                   asrv.close()
                 case rv: RangeVector =>
-                  ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
-                    vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
-                  // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-                  // and hence not closed here
+                  val fut = Future.apply {
+                    // This call triggers the intensive iterators and calculations and should be done on query scheduler
+                    assertThreadName(FiloSchedulers.QuerySchedName)
+                    logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
+                    ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
+                      vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
+                    // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
+                    // and hence not closed here
+                  }(queryScheduler)
+                  // We are on an io scheduler (already asserted), so okay to block here
+                  // TODO See if we can do better later
+                  Await.result(fut, execPlan.queryContext.queryTimeRemaining.millis)
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
               }
             }

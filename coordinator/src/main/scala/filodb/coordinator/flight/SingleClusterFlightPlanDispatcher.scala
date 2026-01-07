@@ -11,22 +11,17 @@ import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, Location, Ticket}
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
+import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.memstore.FiloSchedulers.FlightIoSchedName
 import filodb.core.query.{ArrowSerializedRangeVector, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
-object SingleClusterFlightPlanDispatcher {
-  private val flightIoScheduler = Scheduler.io(FlightIoSchedName)
-}
-
 case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: String)
   extends PlanDispatcher {
 
-  import SingleClusterFlightPlanDispatcher._
   import filodb.query.Query.qLogger
 
   override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
@@ -121,7 +116,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         case _ =>
       }
       QueryError(plan.queryContext.queryId, QueryStats(), ex)
-    }.executeOn(flightIoScheduler).asyncBoundary
+    }.executeOn(QueryScheduler.flightIoScheduler).asyncBoundary
   }
 
   def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
