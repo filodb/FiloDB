@@ -154,7 +154,7 @@ object CliMain extends StrictLogging {
 
   def main(rawArgs: Array[String]): Unit = {
     try {
-      val args = new Arguments(rawArgs)
+      val args = new Arguments(rawArgs.toIndexedSeq)
       val timeout = args.timeoutseconds().seconds
       args.command.toOption match {
         case Some("init") =>
@@ -284,7 +284,7 @@ object CliMain extends StrictLogging {
               timeout, args.shards.toOption.map(_.map(_.toInt)), args.spread.toOption.map(Integer.valueOf))
             parsePromQuery2(remote, query, args.dataset(), getQueryRange(args), options)
           }
-            .getOrElse(printHelp)
+            .getOrElse(printHelp())
       }
     } catch {
       case e: Throwable =>

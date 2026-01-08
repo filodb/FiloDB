@@ -60,7 +60,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
     earliestRawTime, latestDownsampleTime, disp,
     queryConfig, dataset)
-  implicit val system = ActorSystem()
+  implicit val system: akka.actor.ActorSystem = ActorSystem()
   val node = TestProbe().ref
 
   val mapper = new ShardMapper(32)

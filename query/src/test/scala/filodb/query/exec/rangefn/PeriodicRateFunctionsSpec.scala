@@ -53,7 +53,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1) shouldEqual expectedDelta +- errorOk
+    it.next().getDouble(1) shouldEqual expectedDelta +- errorOk
   }
 
   it("should not return NaN for rate over period-counter when window only contains one sample") {
@@ -62,7 +62,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1).isNaN shouldEqual false
+    it.next().getDouble(1).isNaN shouldEqual false
   }
 
   it("should not return rate of 0 when delta-counter samples do not increase") {
@@ -74,7 +74,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1) should not equal 0.0
+    it.next().getDouble(1) should not equal 0.0
   }
 
   // Also ensures that chunked rate works across chunk boundaries
@@ -131,7 +131,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionH, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -187,7 +187,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
       new SumOverTimeChunkedFunctionD, querySession)
-    it.next.getDouble(1) shouldEqual expectedDelta
+    it.next().getDouble(1) shouldEqual expectedDelta
   }
 
   ignore (" disabled since the lookback extension is disabled for now. See PeriodicSamplesMapper::extendLookback") {

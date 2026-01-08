@@ -18,7 +18,7 @@ import org.scalatest.matchers.should.Matchers
 class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
@@ -102,7 +102,7 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
       filters, Seq("instance"), now, now - 5000, QuerySession.makeForTestingOnly, 10)
 
     metadata.hasNext shouldEqual true
-    metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)
+    metadata.next() shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)
   }
 
   it ("should read the metadata label values for multiple labels: instance, _type_") {
@@ -114,7 +114,7 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
       filters, labelNames = Seq("instance", "_type_"), now, now - 5000, QuerySession.makeForTestingOnly, 10)
 
     metadata.hasNext shouldEqual true
-    metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8, "_type_".utf8 -> "schemaID:35859".utf8)
+    metadata.next() shouldEqual Map("instance".utf8 -> "someHost:8787".utf8, "_type_".utf8 -> "schemaID:35859".utf8)
   }
 
 

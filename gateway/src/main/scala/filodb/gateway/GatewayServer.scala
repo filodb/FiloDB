@@ -122,7 +122,7 @@ object GatewayServer extends StrictLogging {
 
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
-    val userOpts = new GatewayOptions(args)
+    val userOpts = new GatewayOptions(args.toIndexedSeq)
     val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
     val numSeries = userOpts.numSeriesPerMetric()
 

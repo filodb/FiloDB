@@ -617,7 +617,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       }
       diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
-      iter = diffFromMedians.iterator()
+      iter = diffFromMedians.iterator
       diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
 

@@ -24,7 +24,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import ZeroCopyUTF8String._
 
 class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)

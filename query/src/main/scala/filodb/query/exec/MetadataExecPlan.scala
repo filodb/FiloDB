@@ -170,7 +170,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
   }
 
   private def transformRVs(rv: RangeVector, colType: ColumnType): Iterator[Any] = {
-    val metadataResult = rv.rows.map { rowReader =>
+    val metadataResult = rv.rows().map { rowReader =>
       val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
       rv match {
         case srv: SerializedRangeVector if colType == MapColumn =>

@@ -584,7 +584,7 @@ trait ExecPlan extends QueryCommand {
 
     new Iterator[RowReader] {
       val listSize = srvsList.size
-      val rowIteratorList = srvsList.map(srvs => srvs(0).rows)
+      val rowIteratorList = srvsList.map(srvs => srvs(0).rows())
       private var curIterIndex = 0
       override def hasNext: Boolean = rowIteratorList(curIterIndex).hasNext ||
         (curIterIndex < listSize - 1

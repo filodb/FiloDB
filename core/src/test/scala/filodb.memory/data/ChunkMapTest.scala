@@ -38,7 +38,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst }
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetLast }
     map.chunkmapDoGet(5L) shouldEqual 0
-    map.chunkmapIterate.toBuffer shouldEqual Buffer.empty[Long]
+    map.chunkmapIterate().toBuffer shouldEqual Buffer.empty[Long]
 
     map.chunkmapFree()
   }
@@ -56,7 +56,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoGet(5L) shouldEqual elems(5)
     map.chunkmapDoGetLast shouldEqual elems(5)
     map.chunkmapDoGetFirst shouldEqual elems(5)
-    checkElems(Seq(5L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(5L), map.chunkmapIterate().toBuffer)
     checkElems(Seq(5L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // last, not empty and not full
@@ -65,7 +65,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapContains(8L) shouldEqual true
     map.chunkmapDoGetLast shouldEqual elems(8)
     map.chunkmapDoGetFirst shouldEqual elems(5)
-    checkElems(Seq(5L, 8L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(5L, 8L), map.chunkmapIterate().toBuffer)
     checkElems(Seq(8L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // middle, not empty and not full (no resize)
@@ -74,7 +74,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapContains(6L) shouldEqual true
     map.chunkmapDoGetLast shouldEqual elems(8)
     map.chunkmapDoGetFirst shouldEqual elems(5)
-    checkElems(Seq(5L, 6L, 8L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(5L, 6L, 8L), map.chunkmapIterate().toBuffer)
     checkElems(Seq(8L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // Should be no resizing as long as length/# elements < 7
@@ -84,13 +84,13 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     }
     map.chunkmapSize shouldEqual 7
     map.chunkmapDoGetLast shouldEqual elems(9)
-    checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L), map.chunkmapIterate().toBuffer)
     checkElems(Seq(9L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // last, full (should resize)
     map.chunkmapDoPut(elems(10))
     map.chunkmapSize shouldEqual 8
-    checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L, 10L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L, 10L), map.chunkmapIterate().toBuffer)
     checkElems(Seq(10L), map.chunkmapDoGetLastIterator().toBuffer)
 
     // middle, full (should resize)
@@ -105,7 +105,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
     map.chunkmapDoPut(elems(4))
     map.chunkmapSize shouldEqual 16
-    checkElems(((2 to 10) ++ (21 to 27)).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems(((2 to 10) ++ (21 to 27)).map(_.toLong), map.chunkmapIterate().toBuffer)
     checkElems(Seq(27L), map.chunkmapDoGetLastIterator().toBuffer)
 
     map.chunkmapFree()
@@ -131,7 +131,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapSize shouldEqual 9
     map.chunkmapDoGet(4L) shouldEqual newElem4
     map.chunkmapDoGet(4L) should not equal (elems(2))
-    checkElems((2 to 10).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((2 to 10).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     // replace at head
     val newElem10 = makeElementWithID(10L)
@@ -140,7 +140,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoGet(10L) shouldEqual newElem10
     map.chunkmapDoGetLast shouldEqual newElem10
     map.chunkmapDoGet(10L) should not equal (elems.last)
-    checkElems((2 to 10).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((2 to 10).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     map.chunkmapFree()
   }
@@ -198,7 +198,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapSize shouldEqual 1
     map.chunkmapDoRemove(1L)
     map.chunkmapSize shouldEqual 0
-    checkElems(Nil, map.chunkmapIterate.toBuffer)
+    checkElems(Nil, map.chunkmapIterate().toBuffer)
 
     // pre-populate with various elements
     val elems = makeElems((2 to 10).map(_.toLong))
@@ -215,17 +215,17 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapDoRemove(2L)
     map.chunkmapDoGetFirst shouldEqual elems(1)
     map.chunkmapSize shouldEqual 8
-    checkElems((3 to 10).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((3 to 10).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     // remove in middle.  Resizing because 8 -> 7?
     map.chunkmapDoRemove(6L)
     map.chunkmapSize shouldEqual 7
-    checkElems(Seq(3L, 4L, 5L, 7L, 8L, 9L, 10L), map.chunkmapIterate.toBuffer)
+    checkElems(Seq(3L, 4L, 5L, 7L, 8L, 9L, 10L), map.chunkmapIterate().toBuffer)
 
     // re-insert removed element
     map.chunkmapDoPut(elems(4))
     map.chunkmapSize shouldEqual 8
-    checkElems((3 to 10).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((3 to 10).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     map.chunkmapFree()
   }
@@ -291,7 +291,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     Future.sequence(Seq(headThread, midThread)).futureValue
 
     map.chunkmapSize shouldEqual (headElems.length + midElems.length)
-    checkElems((0 to 199).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((0 to 199).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     map.chunkmapFree()
   }
@@ -330,7 +330,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     Future.sequence(Seq(insertThread, stringThread, readThread)).futureValue
 
     map.chunkmapSize shouldEqual elems.length
-    checkElems((0 to 99).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((0 to 99).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     map.chunkmapFree()
   }
@@ -369,7 +369,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
     // Final map should have ONLY 100-199
     map.chunkmapSize shouldEqual moreElems.length
-    checkElems((100 to 199).map(_.toLong), map.chunkmapIterate.toBuffer)
+    checkElems((100 to 199).map(_.toLong), map.chunkmapIterate().toBuffer)
 
     map.chunkmapFree()
   }
@@ -440,7 +440,7 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapContains(3L) shouldEqual false
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst }
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetLast }
-    map.chunkmapIterate.toBuffer shouldEqual Buffer.empty[Long]
+    map.chunkmapIterate().toBuffer shouldEqual Buffer.empty[Long]
     map.chunkmapSliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
     map.chunkmapSize shouldEqual 0
     map.chunkmapDoRemove(6L)

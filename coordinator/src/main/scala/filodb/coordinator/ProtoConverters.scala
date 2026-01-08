@@ -311,10 +311,10 @@ object ProtoConverters {
         dso.getShardKeyColumnsList.asScala.toSeq,
         dso.getMetricColumn,
         dso.getHasDownsampledData,
-        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.mapValues(rs => rs.fromProto).toMap,
+        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.map { case (k, v) => k -> v.fromProto }.toMap,
         dso.getIgnoreTagsOnPartitionKeyHashList.asScala.toSeq,
         dso.getCopyTagsList.asScala.map(t => t.fromProto),
-        dso.getMultiColumFacetsMap.asScala.mapValues(rs => rs.fromProto).toMap
+        dso.getMultiColumFacetsMap.asScala.map { case (k, v) => k -> v.fromProto }.toMap
       )
     }
   }

@@ -707,7 +707,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   def session: Session
   def readEc: Scheduler
 
-  implicit val readSched = readEc
+  implicit val readSched: monix.execution.Scheduler = readEc
 
   val stats = new ChunkSourceStats
 

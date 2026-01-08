@@ -66,7 +66,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
   def present(aggRangeVector: RangeVector, limit: Int,
               rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = {
     val mutRow = new TransientRow()
-    val result = aggRangeVector.rows.mapRow { r =>
+    val result = aggRangeVector.rows().mapRow { r =>
       val qVal = ArrayDigest.fromBytes(r.getBuffer(1)).quantile(q)
       mutRow.setValues(r.getLong(0), qVal)
       mutRow
@@ -79,7 +79,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
     cols(0) = source.columns(0)
     // TODO need a first class blob column
     cols(1) = ColumnInfo("tdig", ColumnType.StringColumn)
-    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
+    ResultSchema(cols.toIndexedSeq, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {

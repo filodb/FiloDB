@@ -34,7 +34,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   import GdeltTestData._
   import NodeClusterActor._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.parseString(
@@ -52,7 +52,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   private lazy val memStore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   private lazy val metaStore = cluster.metaStore
 
-  implicit val ec = cluster.ec
+  implicit val ec: scala.concurrent.ExecutionContext = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
   protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
@@ -320,7 +320,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       }
     }
 
-    implicit val askTimeout = Timeout(5.seconds)
+    implicit val askTimeout: akka.util.Timeout = Timeout(5.seconds)
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()

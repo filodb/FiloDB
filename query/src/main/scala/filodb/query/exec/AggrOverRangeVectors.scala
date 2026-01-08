@@ -332,7 +332,7 @@ object RangeVectorAggregator extends StrictLogging {
         if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
-            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next())
           }
         } finally {
           rowIter.close()
@@ -347,7 +347,7 @@ object RangeVectorAggregator extends StrictLogging {
         if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
-            val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+            val mapped = rowAgg.map(rv.key, rowIter.next(), mapIntos(i))
             accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
           }
         } finally {

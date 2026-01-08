@@ -105,7 +105,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples
+      rvs.result.head.rows().toList.size shouldEqual numSamples
     } finally {
       memStore.shutdown()
     }
@@ -128,7 +128,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples
+        rvs.result.head.rows().toList.size shouldEqual numSamples
       }
     } finally {
       memStore.shutdown()
@@ -154,7 +154,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+      rvs.result.head.rows().toList.size shouldEqual numSamples * 2
     } finally {
       memStore.shutdown()
     }
@@ -184,7 +184,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+        rvs.result.head.rows().toList.size shouldEqual numSamples * 2
       }
     } finally {
       memStore.shutdown()

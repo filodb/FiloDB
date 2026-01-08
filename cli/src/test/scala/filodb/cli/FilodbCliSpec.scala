@@ -58,12 +58,12 @@ class FilodbCliSpec extends RunnableSpec {
   }
 
   def parseSucessFully(commandLine: String): Unit = {
-    new Arguments(commandLine.split(" "))
+    new Arguments(commandLine.split(" ").toIndexedSeq)
   }
 
   def parserError(commandLine: String):Unit = {
     intercept[ScallopException]{
-      new Arguments(commandLine.split(" "))
+      new Arguments(commandLine.split(" ").toIndexedSeq)
     }
   }
 }

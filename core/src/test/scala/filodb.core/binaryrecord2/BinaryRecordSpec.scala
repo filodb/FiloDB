@@ -133,7 +133,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       containers.head.numBytes shouldEqual container1Bytes
       containers.last.numBytes shouldEqual 76
 
-      containers.last.countRecords shouldEqual 1
+      containers.last.countRecords() shouldEqual 1
 
       containers.foreach(_.version shouldEqual RecordBuilder.Version)
       containers.foreach(_.isCurrentVersion shouldEqual true)
@@ -207,7 +207,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val containers = builder.allContainers
       containers should have length (1)
       containers.head.numBytes shouldEqual 76
-      containers.last.countRecords shouldEqual 1
+      containers.last.countRecords() shouldEqual 1
     }
 
     it("should add records, reset, and be able to add records again") {
@@ -220,7 +220,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.isEmpty shouldEqual false
       builder.currentContainer.get.isEmpty shouldEqual false
-      builder.allContainers.head.countRecords shouldEqual 10
+      builder.allContainers.head.countRecords() shouldEqual 10
       val origTimestamp = builder.allContainers.head.timestamp
       origTimestamp shouldEqual curTime +- 20000   // 20 seconds
 
@@ -240,7 +240,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       addToBuilder(builder, linearMultiSeries() take 9)
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual (12 + 64*9)
-      builder.allContainers.head.countRecords shouldEqual 9
+      builder.allContainers.head.countRecords() shouldEqual 9
     }
 
     it("should add records and iterate") {
@@ -251,7 +251,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
-      builder.allContainers.head.countRecords shouldEqual 10
+      builder.allContainers.head.countRecords() shouldEqual 10
 
       val it = builder.allContainers.head.iterate(recSchema1)
       val doubles = data.map(_(1).asInstanceOf[Double])

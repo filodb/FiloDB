@@ -321,7 +321,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = chunkmapSize // inherited from ChunkMap
+  def numChunks: Int = chunkmapSize() // inherited from ChunkMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**

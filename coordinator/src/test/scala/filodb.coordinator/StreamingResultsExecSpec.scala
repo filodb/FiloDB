@@ -29,7 +29,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val dsRef = DatasetRef("raw-metrics")
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val allConfig = ConfigFactory.parseString("filodb.query.streaming-query-results-enabled = true")
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
@@ -74,7 +74,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   val histData = MMD.linearHistSeries().take(100)
   val system = ActorSystemHolder.createActorSystem("testActorSystem", allConfig)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: scala.concurrent.duration.FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)

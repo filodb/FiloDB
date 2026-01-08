@@ -27,7 +27,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   import ZeroCopyUTF8String._
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
@@ -71,7 +71,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03C0tag"))
   val jobQueryResult2 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03BCtag"))
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: scala.concurrent.duration.FiniteDuration = 5.seconds
 
   // Create one container greater than 8K map, we will create one metric with 50 labels, each label of 200 chars
   val commonLabels = Map("_ws_" -> "testws", "_ns_" -> "testns", "job" ->  "myUniqueService")
