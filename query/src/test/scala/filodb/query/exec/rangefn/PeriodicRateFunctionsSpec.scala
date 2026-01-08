@@ -260,7 +260,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -307,7 +307,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -354,7 +354,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -401,7 +401,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList should not equal expectedResults) // increase functioncumulative
@@ -448,7 +448,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults) // increase functioncumulative

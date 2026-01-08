@@ -128,7 +128,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples
   }
 
@@ -148,7 +148,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.result.size shouldEqual 1
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
@@ -183,7 +183,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, LongColumn)
     result.result.size shouldEqual 1
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getLong(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getLong(1))).toList
     dataRead shouldEqual mmdTuples.filter(_(5) == "Series 1").map(r => (r(0), r(4))).take(5)
   }
 
@@ -199,7 +199,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
+    val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1)))
     val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
     resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
   }
@@ -223,7 +223,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual (start to end).by(step)
 
     val validationMap = new java.util.TreeMap[Long, Double]()
@@ -259,7 +259,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual Seq(start)
     dataRead.map(_._2) shouldEqual Seq(2703.0)
   }
@@ -281,7 +281,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual (start to end by step)
     dataRead.map(_._2) shouldEqual (86 to 166).by(20)
   }
@@ -302,7 +302,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
+    val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1)))
     val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3)) }
@@ -329,7 +329,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1)))
+    val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1)))
 
     val expected = (start to end by step).zip(Seq(Double.NaN, 0.049167, 0.078333, 0.115278, 0.145))
     resultIt.zip(expected.toIterator).foreach { case (res, exp) =>
@@ -355,7 +355,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    val dataRead = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples
   }
 
@@ -381,7 +381,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.resultSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1),
+    val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1),
       r.getDouble(2), r.getDouble(3)))
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
@@ -401,7 +401,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val result2 = resp2.asInstanceOf[QueryResult]
     result2.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result2.result.size shouldEqual 1
-    val resultIt2 = result2.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toBuffer
+    val resultIt2 = result2.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1))).toBuffer
 
     resultIt2.foreach { case (t, v) =>
       v.isNaN shouldEqual false
@@ -423,7 +423,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.resultSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, HistogramColumn, DoubleColumn, DoubleColumn)
     result.result.size shouldEqual 1
-    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1),
+    val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getHistogram(1),
       r.getDouble(2), r.getDouble(3)))
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
@@ -481,7 +481,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     partKeyRead shouldEqual partKeyKVWithMetric
 
     // Extract out the numRows, startTime, endTIme and verify
-    val infosRead = result.result(0).rows.map { r => (r.getInt(1), r.getLong(2), r.getLong(3), r.getString(5)) }.toList
+    val infosRead = result.result(0).rows().map { r => (r.getInt(1), r.getLong(2), r.getLong(3), r.getString(5)) }.toList
     infosRead.foreach { i => info(s"  Infos read => $i") }
     val expectedNumChunks = 15
     // One would expect numChunks = numRawSamples / TestData.storeConf.maxChunksSize

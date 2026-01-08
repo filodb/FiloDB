@@ -156,8 +156,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _,  _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
@@ -181,8 +181,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _,  _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
@@ -243,7 +243,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) =>
         response.size shouldEqual 1
-        response(0).rows.map { row =>
+        response(0).rows().map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
           response(0).asInstanceOf[SerializedRangeVector]
             .schema.toStringPairs(r.recordBase, r.recordOffset).toMap
@@ -266,7 +266,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         response.size shouldEqual 1
-        response(0).rows.map { row =>
+        response(0).rows().map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
           response(0).asInstanceOf[SerializedRangeVector]
             .schema.toStringPairs(r.recordBase, r.recordOffset).toMap
@@ -314,8 +314,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = resp1 match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).map {
           case (k, v) => (k.utf8, v.utf8)
         }
@@ -341,8 +341,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual expectedLabels.size
-        rv.rows.map(row => {
+        rv.rows().size shouldEqual expectedLabels.size
+        rv.rows().map(row => {
           val br = row.asInstanceOf[BinaryRecordRowReader]
           br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head
         })
@@ -365,8 +365,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.rows().size shouldEqual 1
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
@@ -396,8 +396,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       case QueryResult(id, _, response, _, _, _, _) =>
         response.size shouldEqual 1
         val rv1 = response(0)
-        rv1.rows.size shouldEqual 1
-        val record1 = rv1.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv1.rows().size shouldEqual 1
+        val record1 = rv1.rows().next().asInstanceOf[BinaryRecordRowReader]
         val result1 = rv1.asInstanceOf[SerializedRangeVector]
                           .schema.toStringPairs(record1.recordBase, record1.recordOffset).toMap
 

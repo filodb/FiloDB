@@ -184,7 +184,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)).toIndexedSeq, 1,
       fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }

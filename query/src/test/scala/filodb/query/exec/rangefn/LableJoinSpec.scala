@@ -112,12 +112,12 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
     //label_join should not change rows
-    testSample.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+    testSample.map(_.rows().map(_.getDouble(1))).zip(resultRows).foreach {
       case (ex, res) => {
         ex.zip(res).foreach {
           case (val1, val2) =>
@@ -143,12 +143,12 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
     //label_join should not change rows
-    testSample.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+    testSample.map(_.rows().map(_.getDouble(1))).zip(resultRows).foreach {
       case (ex, res) => {
         ex.zip(res).foreach {
           case (val1, val2) =>
@@ -173,12 +173,12 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
     //label_join should not change rows
-    testSample.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+    testSample.map(_.rows().map(_.getDouble(1))).zip(resultRows).foreach {
       case (ex, res) => {
         ex.zip(res).foreach {
           case (val1, val2) =>
@@ -204,12 +204,12 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
     //label_join should not change rows
-    testSample.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+    testSample.map(_.rows().map(_.getDouble(1))).zip(resultRows).foreach {
       case (ex, res) => {
         ex.zip(res).foreach {
           case (val1, val2) =>
@@ -234,12 +234,12 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
     //label_join should not change rows
-    testSample.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+    testSample.map(_.rows().map(_.getDouble(1))).zip(resultRows).foreach {
       case (ex, res) => {
         ex.zip(res).foreach {
           case (val1, val2) =>
