@@ -960,7 +960,7 @@ object ProtoConverters {
   implicit class SerializableRangeVectorListFromProtoConverter(
                                             rvList: java.util.List[ProtoRangeVector.SerializableRangeVector]) {
     import collection.JavaConverters._
-    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto)
+    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto).toSeq
   }
 
   implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {

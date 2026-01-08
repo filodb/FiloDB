@@ -431,9 +431,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     def finishBatch(partition: ByteBuffer): Unit = {
       if (diskTimeToLiveSeconds == 0) {
-        futures += targetChunksTable.deleteChunks(partition, chunkInfos)
+        futures += targetChunksTable.deleteChunks(partition, chunkInfos.toSeq)
       } else {
-        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
+        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos.toSeq).iterator.asScala) {
           futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
         }
       }

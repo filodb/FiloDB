@@ -156,7 +156,7 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       ChunkSetInfo.setNumRows(infoPtr, 10) // fake
       ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-      val set = ChunkSet(info, partKey, Nil, chunks)
+      val set = ChunkSet(info, partKey, Nil, chunks.toSeq)
 
       sourceColStore.write(datasetRef, Observable.fromIterable(Iterable(set))).futureValue
     }

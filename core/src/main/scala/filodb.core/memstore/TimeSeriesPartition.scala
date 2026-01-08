@@ -331,7 +331,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
    */
   def unflushedChunksets: Int = chunkmapSliceToEnd(newestFlushedID + 1).count
 
-  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate)
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate())
 
   // NOT including currently flushing writeBuffer chunks if there are any
   private[memstore] def infosToBeFlushed: ChunkInfoIterator =

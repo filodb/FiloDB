@@ -734,7 +734,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val pp = qContext.plannerParams
       eps.map(ep => makeBuddyExecPlanIfNeeded(qContext, ep))
     }
-    PlanResult(plans)
+    PlanResult(plans.toSeq)
   }
   // scalastyle:on method.length
 

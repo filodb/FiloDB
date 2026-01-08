@@ -126,7 +126,7 @@ object Iterators extends StrictLogging {
             lastGroupVal.foreach { groupVal =>
               if (thisGroup != groupVal) {
                 streamError = false
-                ack = out.onNext((groupVal, buf))
+                ack = out.onNext((groupVal, buf.toSeq))
                 buf = new ArrayBuffer[A]()
                 lastGroupVal = Some(thisGroup)
               } else {
@@ -152,7 +152,7 @@ object Iterators extends StrictLogging {
 
         def onComplete(): Unit = {
           ack.syncOnContinue {
-            lastGroupVal.foreach { groupVal => out.onNext((groupVal, buf)) }
+            lastGroupVal.foreach { groupVal => out.onNext((groupVal, buf.toSeq)) }
             buf = new ArrayBuffer[A]()
             lastGroupVal = None
             out.onComplete()
