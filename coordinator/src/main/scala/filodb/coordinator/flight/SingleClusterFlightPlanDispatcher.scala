@@ -9,12 +9,13 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, Location, Ticket}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.query.{ArrowSerializedRangeVector, QuerySession, QueryStats}
+import filodb.core.query.{ArrowSerializedRangeVector, QueryContext, QueryLimitException, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
@@ -72,6 +73,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               qLogger.debug(s"FlightPlanDispatcher received RespHeader for queryPlanId=${plan.planId} " +
                 s"with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
+              checkAllocatorLimits(requestAllocator, plan.queryContext)
               val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
               querySession.registerArrowCloseable(reqVsr)
               // stream.getRoot is owned by the stream and should not be closed by us
@@ -107,7 +109,6 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     }.onErrorHandle { ex =>
       qLogger.error(s"FlightPlanDispatcher - Flight request for queryId=${plan.queryContext.queryId}" +
         s" to $location failed", ex)
-
       // Attempt to force reconnection on certain errors
       ex match {
         case _: java.net.ConnectException | _: java.io.IOException =>
@@ -128,5 +129,19 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
   }
 
   def isLocalCall: Boolean = false
+
+  def checkAllocatorLimits(reqAllocator: BufferAllocator, queryContext: QueryContext): Unit = {
+    val used = reqAllocator.getAllocatedMemory
+    val limit = reqAllocator.getLimit * 0.9 // 90% of limit
+    if (used > limit) {
+      val msg = s"Reached $used bytes of result size (final or intermediate) " +
+        s"for data serialized out of a host or shard breaching maximum result size limit" +
+        s"($limit bytes)."
+      throw QueryLimitException(
+        s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
+        queryContext.queryId
+      )
+    }
+  }
 }
 

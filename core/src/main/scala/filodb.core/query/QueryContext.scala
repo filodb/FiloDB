@@ -7,10 +7,12 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.{ListBuffer, SortedSet}
 import scala.concurrent.duration._
 
+import com.typesafe.scalalogging.StrictLogging
 import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
+import filodb.memory.data.Shutdown
 
 trait TsdbQueryParams
 
@@ -358,7 +360,7 @@ case class QuerySession(qContext: QueryContext,
                         queryAllocator: Option[BufferAllocator] = None,
                         // in case of target schemas, when the child Exec plan is run, if the
                         //  the execution happens locally and thus no serialization is necessary
-                        preventRangeVectorSerialization: Boolean = false) {
+                        preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
 
   val queryStats: QueryStats = QueryStats()
   val warnings: QueryWarnings = QueryWarnings()
@@ -382,7 +384,14 @@ case class QuerySession(qContext: QueryContext,
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     arrowCloseables.reverseIterator.foreach(_.close())
     arrowCloseables.clear()
-    queryAllocator.foreach(_.close())
+    queryAllocator.foreach { a =>
+      if (a.getAllocatedMemory > 0) {
+        logger.error(s"QuerySession closing allocator with ${a.getAllocatedMemory} bytes still allocated")
+        logger.error(s"Allocator Verbose Trace: ${a.toVerboseString}")
+        Shutdown.haltAndCatchFire(new IllegalStateException("Arrow BufferAllocator memory leak detected"))
+      }
+      a.close()
+    }
     lock = None
   }
 }
