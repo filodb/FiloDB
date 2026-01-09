@@ -95,7 +95,11 @@ object Dependencies {
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty, excludeXBean),
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
+    "org.apache.kafka"       %       "kafka-clients" % "1.0.0" exclude("org.slf4j", "slf4j-log4j12"),
+    "org.mockito"            %%      "mockito-scala" % "1.17.45" % Test,
+    circeGeneric,
+    circeParser
   )
 
   lazy val cassDeps = commonDeps ++ Seq(
