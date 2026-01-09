@@ -172,7 +172,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
     stringBuf.toString
   }
 
-  def debugString: String = f"Block @0x$address%016x canReclaim=$canReclaim remaining=$remaining " +
+  def debugString: String = f"Block @0x$address%016x canReclaim=$canReclaim remaining=$remaining() " +
                             s"owner: ${owner.map(_.debugString).getOrElse("--")}"
 
   // Include detailed metadata debug info, enough to debug any block metadata allocation issues

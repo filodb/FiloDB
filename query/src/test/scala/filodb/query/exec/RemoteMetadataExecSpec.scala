@@ -155,7 +155,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows().size shouldEqual 1
-        val record = rv.rows().next.asInstanceOf[BinaryRecordRowReader]
+        val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }

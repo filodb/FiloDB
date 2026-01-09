@@ -228,7 +228,7 @@ object GatewayServer extends StrictLogging {
       val finalObservable = Observable.fromIterable(streamsToGen.reduce(_ ++ _))
 
       // Use a blocking call to ensure the main thread waits for all samples to be generated and queued.
-      implicit val scheduler = Scheduler.global // A scheduler is needed for runSyncUnsafe
+      implicit val scheduler: Scheduler = Scheduler.global // A scheduler is needed for runSyncUnsafe
       finalObservable.foreachL { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(rec)) {

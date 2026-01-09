@@ -326,7 +326,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {
-        val block = entries.next
+        val block = entries.next()
         if (block.canReclaim) {
           entries.remove()
           removed += block

@@ -19,7 +19,7 @@ class StreamingTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
   import NamesTestData._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   // Setup SQLContext and a sample DataFrame

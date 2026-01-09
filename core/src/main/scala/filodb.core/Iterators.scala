@@ -114,7 +114,7 @@ object Iterators extends StrictLogging {
   final class SortedGroupByOperator[A, B](groupingFunc: A => B) extends Operator[A, (B, Seq[A])] {
     def apply(out: Subscriber[(B, Seq[A])]): Subscriber[A] =
       new Subscriber[A] {
-        implicit val scheduler = out.scheduler
+        implicit val scheduler: Scheduler = out.scheduler
         var buf = new ArrayBuffer[A]()
         var lastGroupVal: Option[B] = None
         var ack: Future[Ack] = Continue
@@ -171,7 +171,7 @@ object Iterators extends StrictLogging {
 
     def apply(out: Subscriber[A]): Subscriber[A] =
       new Subscriber[A] {
-        implicit val scheduler = out.scheduler
+        implicit val scheduler: Scheduler = out.scheduler
         private[this] var isActive = true
 
         def onNext(elem: A): Future[Ack] = {

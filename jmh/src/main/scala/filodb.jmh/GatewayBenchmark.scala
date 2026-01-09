@@ -29,7 +29,7 @@ class GatewayBenchmark extends StrictLogging {
     "host"     -> "abc.xyz.company.com",
     "instance" -> s"Instance-123"
   )
-  val influxTags = tagMap.filterKeys(_ != "__name__").toSeq.sortBy(_._1)
+  val influxTags = tagMap.filter { case (k, _) => k != "__name__" }.toSeq.sortBy(_._1)
 
   val initTimestamp = System.currentTimeMillis
   val value: Double = 2.5

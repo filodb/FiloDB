@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
+import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
 import org.scalatest.BeforeAndAfterAll
@@ -27,9 +28,9 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience = PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
 
   val sourceConfigPath = "conf/timeseries-filodb-server.conf"
   val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"

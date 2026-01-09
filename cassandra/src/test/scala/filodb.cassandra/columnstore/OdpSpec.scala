@@ -27,11 +27,11 @@ import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 
 class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
   lazy val downsampleColumnStore = new CassandraColumnStore(config, s, session, true)

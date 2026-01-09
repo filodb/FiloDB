@@ -11,7 +11,7 @@ import filodb.core._
 trait SparkTestBase extends FunSpecLike with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
   def testDatasets: Seq[DatasetRef]
@@ -42,5 +42,5 @@ with Matchers with ScalaFutures {
     FiloExecutor.clusterActor ! NodeProtocol.ResetState
   }
 
-  implicit lazy val ec = FiloDriver.ec
+  implicit lazy val ec: monix.execution.Scheduler = FiloDriver.ec
 }

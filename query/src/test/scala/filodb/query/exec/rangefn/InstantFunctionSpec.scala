@@ -414,7 +414,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId,
       funcParams.map(x => StaticFuncArgs(x, RangeParams(100, 10, 200))))
     val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), querySession, 1000, schema, Nil)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows)
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows())
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {

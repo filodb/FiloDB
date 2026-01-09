@@ -557,7 +557,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val skippedPartIDs = debox.Buffer.empty[Int]
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
-        val nextPartID = intIt.next
+        val nextPartID = intIt.next()
         nextPart = partitions.get(nextPartID)
         if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartID
       }

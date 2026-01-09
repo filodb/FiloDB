@@ -91,7 +91,7 @@ object CliMain extends StrictLogging {
   val config = allConfig.getConfig("filodb")
   val v2ClusterEnabled =  allConfig.getBoolean("filodb.v2-cluster-enabled")
   lazy val system = ActorSystem("FiloCli", allConfig)
-  lazy implicit val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
+  lazy implicit val ioPool: Scheduler = Scheduler.io(name = FiloSchedulers.IOSchedName,
     reporter = UncaughtExceptionReporter(
       logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
   lazy val settings = FilodbSettings.initialize(allConfig)

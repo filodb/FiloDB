@@ -87,7 +87,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   private lazy val coordinatorActor = cluster.coordinatorActor
   private lazy val metaStore = cluster.metaStore
 
-  implicit val patience =   // make sure futureValue has long enough time
+  implicit val patience: PatienceConfig =   // make sure futureValue has long enough time
     PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
 
   var clusterActor: ActorRef = _
