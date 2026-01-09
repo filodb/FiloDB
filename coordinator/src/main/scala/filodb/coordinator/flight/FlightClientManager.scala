@@ -214,7 +214,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
   }
 
   private def startHealthChecking(): CancelableFuture[Unit] = {
-    logger.info(s"Started FlightClient health checking with interval ${healthCheckInterval}ms")
+    logger.info(s"Started FlightClient health checking with interval $healthCheckInterval")
     Observable.intervalWithFixedDelay(healthCheckInterval)
       .foreach( _ => performHealthChecks())(healthCheckScheduler)
   }

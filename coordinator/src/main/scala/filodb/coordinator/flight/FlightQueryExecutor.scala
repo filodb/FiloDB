@@ -21,10 +21,9 @@ import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
-import filodb.core.memstore.FiloSchedulers.{assertThreadName, FlightIoSchedName}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{ArrowSerializedRangeVector, QueryConfig, QueryContext,
-     QueryLimitException, QuerySession, QueryStats, RangeVector, SerializedRangeVector}
+import filodb.core.query.{ArrowSerializedRangeVector, QueryConfig, QueryContext, QueryLimitException, QuerySession,
+                          QueryStats, RangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
@@ -69,7 +68,7 @@ trait FlightQueryExecutor extends StrictLogging {
   private val queryScheduler = QueryScheduler.queryScheduler
 
   // scalastyle:off method.length
-  def executePhysicalPlanEntry(context: FlightProducer.CallContext,
+  def executePhysicalPlanEntry(flightContext: FlightProducer.CallContext,
                                execPlan: ExecPlan,
                                listener: ServerStreamListener): Unit = {
     execPhysicalPlanInner(execPlan)
@@ -109,7 +108,7 @@ trait FlightQueryExecutor extends StrictLogging {
             if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
               // This check was copied from QueryActor - but why would a
               // plan come here, if InProcessPlanDispatcher is used? Leaving it for now since it is harmless
-              FiloSchedulers.assertThreadName(FlightIoSchedName)
+              FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
             }
             streamResults(res, reqAllocator, listener, q)
             res match {
@@ -183,22 +182,19 @@ trait FlightQueryExecutor extends StrictLogging {
                       listener: ServerStreamListener,
                       execPlan: ExecPlan
                      ): Unit = {
-      assertThreadName(FiloSchedulers.FlightIoSchedName)
+      FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
       logger.debug(s"Streaming results for queryPlanId=${execPlan.planId}")
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {
         case qe: QueryError =>
-          sendRespFooterAndComplete(listener, reqAllocator, execPlan.planId, qe.queryStats, Some(qe.t))
+          sendRespFooterAndComplete(listener, reqAllocator, execPlan, qe.queryStats, Some(qe.t))
         case res: QueryResult =>
+          val respHeader = RespHeader(res.resultSchema)
+          // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
+          // and hence not closed here
+          checkAllocatorLimits(reqAllocator, execPlan.queryContext)
           logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
-          try {
-            val respHeader = RespHeader(res.resultSchema)
-            // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-            // and hence not closed here
-            listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, reqAllocator))
-          } catch { case ex: Exception =>
-            logger.error(s"Error sending response header for queryPlanId=${execPlan.planId}", ex)
-          }
+          listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, reqAllocator))
           logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
           Using.resource(ArrowSerializedRangeVector.emptyVectorSchemaRoot(reqAllocator)) { vec =>
             listener.start(vec)
@@ -208,6 +204,7 @@ trait FlightQueryExecutor extends StrictLogging {
               val rvMetadata = RvMetadata(rv.key, rv.outputRange)
               rv match {
                 case asrv: ArrowSerializedRangeVector =>
+                  checkAllocatorLimits(reqAllocator, execPlan.queryContext)
                   val unloader = new VectorUnloader(asrv.vectorSchemaRoot)
                   val loader = new VectorLoader(vec)
                   Using.resource(unloader.getRecordBatch) { rb =>
@@ -216,9 +213,10 @@ trait FlightQueryExecutor extends StrictLogging {
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
                   asrv.close()
                 case rv: RangeVector =>
+                  checkAllocatorLimits(reqAllocator, execPlan.queryContext)
                   val fut = Future.apply {
                     // This call triggers the intensive iterators and calculations and should be done on query scheduler
-                    assertThreadName(FiloSchedulers.QuerySchedName)
+                    FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
                     ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
                       vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
@@ -231,16 +229,18 @@ trait FlightQueryExecutor extends StrictLogging {
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
               }
             }
-            sendRespFooterAndComplete(listener, reqAllocator, execPlan.planId, res.queryStats, None)
+            sendRespFooterAndComplete(listener, reqAllocator, execPlan, res.queryStats, None)
+            // TODO update query statistics on result bytes and metrics as well
           }
       }
     }
 
     def sendRespFooterAndComplete(listener: ServerStreamListener,
                                   reqAllocator: BufferAllocator,
-                                  planId: String,
+                                  execPlan: ExecPlan,
                                   s: QueryStats, t: Option[Throwable]): Unit = {
-      logger.debug(s"Sending response footer for queryPlanId=$planId and completing " +
+      checkAllocatorLimits(reqAllocator, execPlan.queryContext)
+      logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
@@ -249,6 +249,18 @@ trait FlightQueryExecutor extends StrictLogging {
       listener.completed()
     }
 
+    def checkAllocatorLimits(reqAllocator: BufferAllocator, queryContext: QueryContext): Unit = {
+      val used = reqAllocator.getAllocatedMemory
+      val limit = reqAllocator.getLimit * 0.9 // 90% of limit
+      if (used > limit) {
+        val msg = s"Reached ${used} bytes of result size (final or intermediate) " +
+          s"for data serialized out of a host or shard breaching maximum result size limit" +
+          s"($limit bytes)."
+        throw QueryLimitException(
+          s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
+          queryContext.queryId
+        )
+      }
+    }
   }
-
 }
