@@ -37,7 +37,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
 
   class TopKHolder(var timestamp: Long = 0L) extends AggregateHolder {
     val valueOrdering = Ordering.by[RVKeyAndValue, Double](kr => kr.value)
-    implicit val ordering = if (bottomK) valueOrdering else valueOrdering.reverse
+    implicit val ordering: Ordering[RVKeyAndValue] = if (bottomK) valueOrdering else valueOrdering.reverse
     // TODO for later: see if we can use more memory/hava-heap-efficient data structures for this.
     val heap = mutable.PriorityQueue[RVKeyAndValue]()
     val row = new TopBottomKAggTransientRow(k)

@@ -383,7 +383,7 @@ object GatewayServer extends StrictLogging {
     )
     val topicName = sourceConf.getString("sourceconfig.filo-topic-name")
 
-    implicit val io = Scheduler.io("kafka-producer")
+    implicit val io: monix.execution.schedulers.SchedulerService = Scheduler.io("kafka-producer")
     val sink = new KafkaContainerSink(producerCfg, topicName)
     sink.writeTask(containerStream)
       .runToFuture
