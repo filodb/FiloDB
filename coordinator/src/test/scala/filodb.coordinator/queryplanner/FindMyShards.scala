@@ -36,7 +36,7 @@ object FindMyShards extends StrictLogging {
 
   def initEngine(numShard: Int, spread: Int): SingleClusterPlanner = {
 
-    implicit val system = ActorSystem ()
+    implicit val system: akka.actor.ActorSystem = ActorSystem ()
     val node = TestProbe ().ref
 
     val mapper = new ShardMapper (numShard)

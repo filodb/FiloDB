@@ -1129,7 +1129,7 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
     if (size > 0) {
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
       val diffFromMedians: Buffer[Double] = Buffer.ofSize(values.length)
-      val iter = values.iterator()
+      val iter = values.iterator
       for (value <- values) {
         diffFromMedians.append(Math.abs(median - value))
       }

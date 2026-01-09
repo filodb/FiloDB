@@ -55,7 +55,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(
@@ -93,7 +93,7 @@ class LocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers with Sca
   val histDataDisabledWS = MMD.linearHistSeries(ws = GlobalConfig.workspacesDisabledForMaxMin.get.head).take(100)
   val histMaxMinDataDisabledWS = MMD.histMaxMin(histDataDisabledWS)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: scala.concurrent.duration.FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)

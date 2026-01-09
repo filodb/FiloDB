@@ -18,7 +18,7 @@ class TypesSpec extends AnyFunSpec with Matchers {
 
       val orig1 = Seq[Any](1001, "AdamAndEve".utf8)
       val orig2 = Seq[Any](1001, "Noah".utf8)
-      implicit val ordering = compositeType.ordering
+      implicit val ordering: Ordering[Seq[Any]] = compositeType.ordering
       assert(orig1 < orig2)
     }
 
