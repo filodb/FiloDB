@@ -4,15 +4,13 @@ import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.{ListBuffer, SortedSet}
+import scala.collection.mutable.SortedSet
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
-import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
-import filodb.memory.data.Shutdown
 
 trait TsdbQueryParams
 
@@ -357,7 +355,7 @@ case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
                         streamingDispatch: Boolean = false,
                         catchMultipleLockSetErrors: Boolean = false,
-                        queryAllocator: Option[BufferAllocator] = None,
+                        var flightAllocator: Option[FlightAllocator] = None,
                         // in case of target schemas, when the child Exec plan is run, if the
                         //  the execution happens locally and thus no serialization is necessary
                         preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
@@ -367,12 +365,6 @@ case class QuerySession(qContext: QueryContext,
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false
   var partialResultsReason: Option[String] = None
-  private val arrowCloseables: ListBuffer[AutoCloseable] =
-    scala.collection.mutable.ListBuffer.empty[AutoCloseable]
-
-  def registerArrowCloseable(closeable: AutoCloseable): Unit = {
-    arrowCloseables += closeable
-  }
 
   def setLock(toSet: EvictionLock): Unit = {
     if (catchMultipleLockSetErrors && lock.isDefined)
@@ -382,17 +374,9 @@ case class QuerySession(qContext: QueryContext,
 
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
-    arrowCloseables.reverseIterator.foreach(_.close())
-    arrowCloseables.clear()
-    queryAllocator.foreach { a =>
-      if (a.getAllocatedMemory > 0) {
-        logger.error(s"QuerySession closing allocator with ${a.getAllocatedMemory} bytes still allocated")
-        logger.error(s"Allocator Verbose Trace: ${a.toVerboseString}")
-        Shutdown.haltAndCatchFire(new IllegalStateException("Arrow BufferAllocator memory leak detected"))
-      }
-      a.close()
-    }
     lock = None
+    flightAllocator.foreach(_.close())
+    flightAllocator = None
   }
 }
 

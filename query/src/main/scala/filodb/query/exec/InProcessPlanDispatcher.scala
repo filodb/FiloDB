@@ -40,7 +40,7 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
       val querySession = QuerySession(plan.execPlan.queryContext, queryConfig,
                               streamingDispatch = PlanDispatcher.streamingResultsEnabled,
                               catchMultipleLockSetErrors = true,
-                              queryAllocator = plan.querySession.queryAllocator,
+                              flightAllocator = plan.querySession.flightAllocator,
                               preventRangeVectorSerialization = plan.clientParams.preventRangeVectorSerialization)
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadlineMs.milliseconds)

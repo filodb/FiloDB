@@ -22,8 +22,8 @@ import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{ArrowSerializedRangeVector, QueryConfig, QueryContext, QueryLimitException, QuerySession,
-                          QueryStats, RangeVector, SerializedRangeVector}
+import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConfig, QueryContext, QueryLimitException,
+                          QuerySession, QueryStats, RangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
@@ -89,9 +89,10 @@ trait FlightQueryExecutor extends StrictLogging {
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.planId}",
           0, perReqAllocatorLimit)
+        val flightAllocator = new FlightAllocator(reqAllocator)
         val querySession = QuerySession(q.queryContext,
           queryConfig,
-          queryAllocator = Some(reqAllocator),
+          flightAllocator = Some(flightAllocator),
           preventRangeVectorSerialization = true, // because we will be serializing as ArrowSRV here
           catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
@@ -110,7 +111,7 @@ trait FlightQueryExecutor extends StrictLogging {
               // plan come here, if InProcessPlanDispatcher is used? Leaving it for now since it is harmless
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
             }
-            streamResults(res, reqAllocator, listener, q)
+            streamResults(res, flightAllocator, listener, q)
             res match {
               case e: QueryError =>
                 queryErrors.increment(1, Map("dataset" -> q.dataset.toString))
@@ -178,7 +179,7 @@ trait FlightQueryExecutor extends StrictLogging {
     }
 
     def streamResults(queryResult: QueryResponse,
-                      reqAllocator: BufferAllocator,
+                      flightAllocator: FlightAllocator,
                       listener: ServerStreamListener,
                       execPlan: ExecPlan
                      ): Unit = {
@@ -187,16 +188,19 @@ trait FlightQueryExecutor extends StrictLogging {
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {
         case qe: QueryError =>
-          sendRespFooterAndComplete(listener, reqAllocator, execPlan, qe.queryStats, Some(qe.t))
+          sendRespFooterAndComplete(listener, flightAllocator, execPlan, qe.queryStats, Some(qe.t))
         case res: QueryResult =>
           val respHeader = RespHeader(res.resultSchema)
           // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
           // and hence not closed here
-          checkAllocatorLimits(reqAllocator, execPlan.queryContext)
+          checkAllocatorLimits(flightAllocator, execPlan.queryContext)
           logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
-          listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, reqAllocator))
+          listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, flightAllocator))
           logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
-          Using.resource(ArrowSerializedRangeVector.emptyVectorSchemaRoot(reqAllocator)) { vec =>
+          val vsr = flightAllocator.withRequestAllocator(a => ArrowSerializedRangeVector.emptyVectorSchemaRoot(a)) {
+            throw new IllegalStateException("FlightAllocator is already closed, cannot create VectorSchemaRoot")
+          }
+          Using.resource(vsr) { vec =>
             listener.start(vec)
             val rb = SerializedRangeVector.newBuilder()
             res.result.foreach { rv =>
@@ -204,16 +208,16 @@ trait FlightQueryExecutor extends StrictLogging {
               val rvMetadata = RvMetadata(rv.key, rv.outputRange)
               rv match {
                 case asrv: ArrowSerializedRangeVector =>
-                  checkAllocatorLimits(reqAllocator, execPlan.queryContext)
+                  checkAllocatorLimits(flightAllocator, execPlan.queryContext)
                   val unloader = new VectorUnloader(asrv.vectorSchemaRoot)
                   val loader = new VectorLoader(vec)
                   Using.resource(unloader.getRecordBatch) { rb =>
                     loader.load(rb)
                   }
-                  listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
+                  listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, flightAllocator))
                   asrv.close()
                 case rv: RangeVector =>
-                  checkAllocatorLimits(reqAllocator, execPlan.queryContext)
+                  checkAllocatorLimits(flightAllocator, execPlan.queryContext)
                   val fut = Future.apply {
                     // This call triggers the intensive iterators and calculations and should be done on query scheduler
                     FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
@@ -226,36 +230,35 @@ trait FlightQueryExecutor extends StrictLogging {
                   // We are on an io scheduler (already asserted), so okay to block here
                   // TODO See if we can do better later
                   Await.result(fut, execPlan.queryContext.queryTimeRemaining.millis)
-                  listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, reqAllocator))
+                  listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, flightAllocator))
               }
             }
-            sendRespFooterAndComplete(listener, reqAllocator, execPlan, res.queryStats, None)
+            sendRespFooterAndComplete(listener, flightAllocator, execPlan, res.queryStats, None)
             // TODO update query statistics on result bytes and metrics as well
           }
       }
     }
 
     def sendRespFooterAndComplete(listener: ServerStreamListener,
-                                  reqAllocator: BufferAllocator,
+                                  flightAllocator: FlightAllocator,
                                   execPlan: ExecPlan,
                                   s: QueryStats, t: Option[Throwable]): Unit = {
-      checkAllocatorLimits(reqAllocator, execPlan.queryContext)
+      checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
       // and hence not closed here
-      listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, reqAllocator))
+      listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))
       listener.completed()
     }
 
-    def checkAllocatorLimits(reqAllocator: BufferAllocator, queryContext: QueryContext): Unit = {
-      val used = reqAllocator.getAllocatedMemory
-      val limit = reqAllocator.getLimit * 0.9 // 90% of limit
+    def checkAllocatorLimits(flightAllocator: FlightAllocator, queryContext: QueryContext): Unit = {
+      val used = flightAllocator.allocatedBytes
+      val limit = flightAllocator.allocationLimit * 0.9 // 90% of limit
       if (used > limit) {
-        val msg = s"Reached ${used} bytes of result size (final or intermediate) " +
-          s"for data serialized out of a host or shard breaching maximum result size limit" +
-          s"($limit bytes)."
+        val msg = s"Reached $used bytes of result size (final or intermediate) for data serialized out of a host " +
+          s"or shard breaching maximum result size limit ($limit bytes)."
         throw QueryLimitException(
           s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
           queryContext.queryId

@@ -13,6 +13,7 @@ import org.apache.arrow.flight.{CallOptions, FlightClient, FlightGrpcUtils, Loca
 import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.GlobalConfig
+import filodb.core.query.FlightAllocator
 
 /**
  * Manages Arrow FlightClient instances for interacting with various peer nodes.

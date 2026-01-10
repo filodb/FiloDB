@@ -8,11 +8,11 @@ import com.esotericsoftware.kryo.io.{ByteBufferInput, Input, Output}
 import com.esotericsoftware.kryo.serializers.FieldSerializer
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, DefaultStreamFactory, ListReferenceResolver}
 import io.altoo.akka.serialization.kryo.serializer.scala._
-import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
+import org.apache.arrow.memory.ArrowBuf
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import filodb.coordinator.client.KryoInit
-import filodb.core.query.{QueryStats, RangeVectorKey, ResultSchema, RvRange}
+import filodb.core.query.{FlightAllocator, QueryStats, RangeVectorKey, ResultSchema, RvRange}
 
 case class RespHeader(resultSchema: ResultSchema)
 case class RvMetadata(rvk: RangeVectorKey, rvRange: Option[RvRange])
@@ -108,17 +108,21 @@ object FlightKryoSerDeser {
     }
   }
 
-  def serializeToArrowBuf(obj: Any, allocator: BufferAllocator): ArrowBuf = {
-    val bytes = serializeToBytes(obj)
-    val buf = allocator.buffer(bytes.length)
-    try {
-      buf.writeBytes(bytes)
-      buf.writerIndex(bytes.length).readerIndex(0)
-      buf
-    } catch {
-      case e: Throwable =>
-        buf.close()
-        throw e
+  def serializeToArrowBuf(obj: Any, fAllocator: FlightAllocator): ArrowBuf = {
+    fAllocator.withRequestAllocator { allocator =>
+      val bytes = serializeToBytes(obj)
+      val buf = allocator.buffer(bytes.length)
+      try {
+        buf.writeBytes(bytes)
+        buf.writerIndex(bytes.length).readerIndex(0)
+        buf
+      } catch {
+        case e: Throwable =>
+          buf.close()
+          throw e
+      }
+    } {
+      throw new IllegalStateException("FlightAllocator is already closed, cannot serialize to ArrowBuf")
     }
   }
 

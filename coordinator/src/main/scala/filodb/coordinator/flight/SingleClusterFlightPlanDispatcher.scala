@@ -58,40 +58,49 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     querySession: QuerySession
   ): Task[QueryResponse] = {
     Task.evalAsync {
-      require(querySession.queryAllocator.isDefined, "QueryAllocator must be provided in QuerySession for Flight")
-      val requestAllocator = querySession.queryAllocator.get
+      require(querySession.flightAllocator.isDefined, "FlightAllocator must be" +
+                 " provided in QuerySession when enabling Flight dispatcher")
+      val flightAllocator = querySession.flightAllocator.get
       val srvs = mutable.ListBuffer[ArrowSerializedRangeVector]()
       FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
       Using.resource(client.getStream(ticket, CallOptions.timeout(timeoutMs, TimeUnit.MILLISECONDS))) { stream =>
         var respHeader: Option[RespHeader] = None
         var respFooter: Option[RespFooter] = None
+        var canceled = false
         // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
-        while (stream.next()) { // this is a blocking call - this is why we run on ioScheduler below
+        while (canceled || stream.next()) { // next is a blocking call - this is why we run on ioScheduler
           FlightKryoSerDeser.deserialize(stream.getLatestMetadata) match {
             case header: RespHeader =>
               respHeader = Some(header)
               qLogger.debug(s"FlightPlanDispatcher received RespHeader for queryPlanId=${plan.planId} " +
                 s"with schema: ${header.resultSchema}")
             case rvMetadata: RvMetadata =>
-              checkAllocatorLimits(requestAllocator, plan.queryContext)
-              val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
-              querySession.registerArrowCloseable(reqVsr)
-              // stream.getRoot is owned by the stream and should not be closed by us
-              val root = stream.getRoot
-              // move vector data into per-requestAllocator so that it is released when RVs are consumed
-              val unloader = new VectorUnloader(root)
-              val loader = new VectorLoader(reqVsr)
-              Using.resource(unloader.getRecordBatch) { rb =>
-                loader.load(rb)
+              flightAllocator.withRequestAllocator { requestAllocator =>
+                checkAllocatorLimits(requestAllocator, plan.queryContext)
+                val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVector.arrowSrvSchema, requestAllocator)
+                flightAllocator.registerCloseable(reqVsr)
+                // stream.getRoot is owned by the stream and should not be closed by us
+                val root = stream.getRoot
+                // move vector data into per-requestAllocator so that it is released when RVs are consumed
+                val unloader = new VectorUnloader(root)
+                val loader = new VectorLoader(reqVsr)
+                Using.resource(unloader.getRecordBatch) { rb =>
+                  loader.load(rb)
+                }
+                qLogger.debug(s"FlightPlanDispatcher received RV planId=${plan.planId} with Key: ${rvMetadata.rvk}")
+                require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
+                val asrv = new ArrowSerializedRangeVector(rvMetadata.rvk, reqVsr.getRowCount,
+                  respHeader.get.resultSchema.toRecordSchema,
+                  reqVsr, rvMetadata.rvRange)
+                srvs += asrv
+                // this ensures that this srv will be closed at the end of the query session
+                flightAllocator.registerCloseable(asrv)
+              } {
+                // scalastyle:off null
+                stream.cancel("Cancelling due to closed FlightAllocator", null)
+                // scalastyle:on null
+                canceled = true
               }
-              qLogger.debug(s"FlightPlanDispatcher received RV queryPlanId=${plan.planId} with Key: ${rvMetadata.rvk}")
-              require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
-              val asrv = new ArrowSerializedRangeVector(rvMetadata.rvk, reqVsr.getRowCount,
-                respHeader.get.resultSchema.toRecordSchema,
-                reqVsr, rvMetadata.rvRange)
-              srvs += asrv
-              // this ensures that this srv will be closed at the end of the query session
-              querySession.registerArrowCloseable(asrv)
             case footer: RespFooter =>
               respFooter = Some(footer)
               qLogger.debug(s"FlightPlanDispatcher received RespFooter for queryPlanId=${plan.planId} with stats: " +
@@ -99,7 +108,9 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
           }
           // Error on stream is thrown as exception and will be handled at onErrorHandle below
         }
-        if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
+        if (canceled) {
+          QueryError(plan.queryContext.queryId, QueryStats(), new RuntimeException("FlightAllocator closed"))
+        } else if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
           QueryError(plan.queryContext.queryId, respFooter.get.queryStats, respFooter.get.throwable.get)
         } else {
           QueryResult(plan.queryContext.queryId, respHeader.get.resultSchema, srvs,
