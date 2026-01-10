@@ -180,7 +180,6 @@ class FlightClientManagerSpec extends AnyFunSpec with Matchers with ScalaFutures
 
         // fSimulate connection failure by stopping server
         server.shutdown()
-        println(s"server shutdown")
         Thread.sleep(1000) // Wait for server to shut down
         intercept[FlightRuntimeException] {
           val v = client1.listActions(CallOptions.timeout(1000, TimeUnit.MILLISECONDS))

@@ -38,7 +38,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
   private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 100000)
-  private val querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, queryAllocator = Some(allocator))
+  private var querySession: QuerySession = _
   private val location = Location.forGrpcInsecure("localhost", 38815)
 
   memStore.setup(timeseriesDatasetWithMetric.ref, Schemas(timeseriesDatasetWithMetric.schema), 0, TestData.storeConf, 1)
@@ -49,6 +49,10 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
   memStore.refreshIndexForTesting(timeseriesDatasetWithMetric.ref)
 
   private val server = FiloDBFlightProducer.start(memStore, config)
+
+  before {
+    querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, flightAllocator = Some(new FlightAllocator(allocator)))
+  }
 
   after {
     querySession.close()
