@@ -184,7 +184,7 @@ class StreamingResultsExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     println(s"Executing ${reducerExec.printTree()}")
 
     val resp = actorPlanDispatcher.dispatchStreaming(
-      ExecPlanWithClientParams(reducerExec, ClientParams(5000)), memStore).toListL.runToFuture.futureValue
+      ExecPlanWithClientParams(reducerExec, ClientParams(5000), querySession), memStore).toListL.runToFuture.futureValue
     resp.size shouldEqual 3
     val dataRead = resp(1).asInstanceOf[StreamQueryResult].result(0).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tupleCounts.take(11)

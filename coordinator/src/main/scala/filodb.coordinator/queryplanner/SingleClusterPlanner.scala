@@ -6,22 +6,25 @@ import scala.concurrent.duration._
 import akka.actor.ActorRef
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.typesafe.scalalogging.StrictLogging
+import org.apache.arrow.flight.Location
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{Filter, _}
+import filodb.core.query._
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.{exec, _}
+import filodb.query._
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
-import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.Query.qLogger
+import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
 // scalastyle:off file.size.limit
@@ -56,6 +59,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
                            clusterName: String,
+                           flightEnabled: Boolean = false,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
                            timeSplitEnabled: Boolean = false,
@@ -204,10 +208,15 @@ class SingleClusterPlanner(val dataset: Dataset,
       else
         throw new RuntimeException(s"Shard: $shard is not available")
     }
-    ActorPlanDispatcher(targetActor, clusterName)
+    if (flightEnabled) {
+      qLogger.info(s"Converting $targetActor to Flight ... ")
+      val location = Location.forGrpcInsecure(targetActor.path.address.host.get,
+         FiloDBFlightProducer.akkaPortToFlightPort(targetActor.path.address.port.get))
+      SingleClusterFlightPlanDispatcher(location, clusterName)
+    } else {
+      ActorPlanDispatcher(targetActor, clusterName)
+    }
   }
-
-
 
   private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
     val pp = queryContext.plannerParams
