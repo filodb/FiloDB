@@ -93,7 +93,6 @@ class FlightAllocator(private val allocator: BufferAllocator) extends AutoClosea
     else {
       rwLock.readLock().lock()
       try {
-        new RuntimeException().printStackTrace()
         f(allocator)
       } finally {
         rwLock.readLock().unlock()

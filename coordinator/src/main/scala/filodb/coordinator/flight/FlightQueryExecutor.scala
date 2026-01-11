@@ -6,14 +6,14 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.util.Using
 
-import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.trace.Span
 import monix.catnap.CircuitBreaker
 import monix.eval.Task
 import monix.execution.exceptions.ExecutionRejectedException
 import net.ceedubs.ficus.Ficus._
-import org.apache.arrow.flight.FlightProducer
+import org.apache.arrow.flight.{CallStatus, FlightProducer, FlightRuntimeException}
 import org.apache.arrow.flight.FlightProducer.ServerStreamListener
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
@@ -26,7 +26,7 @@ import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConf
                           QuerySession, QueryStats, RangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher}
+import filodb.query.exec.ExecPlan
 
 /**
  * Trait that executes physical plans received over Flight RPC
@@ -51,7 +51,6 @@ trait FlightQueryExecutor extends StrictLogging {
 
   private val perReqAllocatorLimit = sysConfig.getBytes("filodb.flight.server.per-request-allocator-limit")
 
-  private val circuitBreakerEnabled = sysConfig.getBoolean("filodb.query.circuit-breaker.enabled")
   private val circuitBreakerNumFailures = sysConfig.getInt("filodb.query.circuit-breaker.open-when-num-failures")
   private val circuitBreakerResetTimeout = sysConfig.as[FiniteDuration]("filodb.query.circuit-breaker.reset-timeout")
   private val circuitBreakerExpBackOffFactor = sysConfig.getDouble("filodb.query.circuit-breaker.exp-backoff-factor")
@@ -79,14 +78,14 @@ trait FlightQueryExecutor extends StrictLogging {
       if (checkTimeoutBeforeQueryExec(listener, q.queryContext)) {
         return
       }
-      val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
+      val querySpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
         .asChildOf(Kamon.currentSpan())
         .start()
       val startTime = System.nanoTime()
       // Dont finish span since we finish it asynchronously when response is received
-      Kamon.runWithSpan(queryExecuteSpan, finishSpan = false) {
-        queryExecuteSpan.tag("query", q.getClass.getSimpleName)
-        queryExecuteSpan.tag("query-id", q.queryContext.queryId)
+      Kamon.runWithSpan(querySpan, finishSpan = false) {
+        querySpan.tag("query", q.getClass.getSimpleName)
+        querySpan.tag("query-id", q.queryContext.queryId)
         val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.planId}",
           0, perReqAllocatorLimit)
         val flightAllocator = new FlightAllocator(reqAllocator)
@@ -95,7 +94,7 @@ trait FlightQueryExecutor extends StrictLogging {
           flightAllocator = Some(flightAllocator),
           preventRangeVectorSerialization = true, // because we will be serializing as ArrowSRV here
           catchMultipleLockSetErrors = true)
-        queryExecuteSpan.mark("query-actor-received-execute-start")
+        querySpan.mark("query-actor-received-execute-start")
 
         val execTask = q.execute(memStore, querySession)(queryScheduler)
           .executeOn(queryScheduler)
@@ -103,41 +102,34 @@ trait FlightQueryExecutor extends StrictLogging {
           .onErrorHandle { t =>
             QueryError(q.queryContext.queryId, querySession.queryStats, t)
           }.map { res =>
-            logger.debug(s"Query execution pipeline constructed for queryPlanId=${q.planId}")
-            // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
-            // the query on the current thread instead of the scheduler
-            if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
-              // This check was copied from QueryActor - but why would a
-              // plan come here, if InProcessPlanDispatcher is used? Leaving it for now since it is harmless
-              FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-            }
-            streamResults(res, flightAllocator, listener, q)
-            res match {
-              case e: QueryError =>
-                queryErrors.increment(1, Map("dataset" -> q.dataset.toString))
-                queryExecuteSpan.fail(e.t.getMessage)
-                // rethrow so circuit beaker can block queries when there is a surge of such exceptions
-                if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
-                else logQueryErrors(e.t, q)
-              case _ =>
-            }
-          }.guarantee(Task.eval {
+            logger.debug(s"Query execution pipeline constructed by Flight producer for queryPlanId=${q.planId}")
+            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            streamResults(res, flightAllocator, listener, q, querySpan)
+          }.onErrorRecover {
+              // if for any reason streamResults thew exception, do it here
+              case f: FlightRuntimeException =>
+                if (f.status() == CallStatus.TIMED_OUT) {
+                  throw QueryTimeoutException(System.currentTimeMillis() - q.queryContext.submitTime,
+                                                this.getClass.getName, Some(f))
+                } // convert to QueryTimeoutException for circuit breaker handling
+                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(f))
+              case qte: QueryTimeoutException =>
+                throw qte // rethrow so circuit breaker can handle
+              case e =>
+                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(e))
+          }
+        circuitBreaker.protect(execTask).onErrorRecover { case t =>
+          // typically a logged QueryTimeout will be thrown here; all other errors are already handled above
+          sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(t))
+        }.guarantee(Task.eval {
             SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
-            queryExecuteSpan.finish()
-            querySession.close()
             val timeTaken = System.nanoTime() - startTime
             execPlanLatency.record(timeTaken,
               Map("plan" -> q.getClass.getSimpleName, "dataset" -> q.dataset.toString))
-          })
-
-        val execTaskWithCircuitBreaker = if (circuitBreakerEnabled) circuitBreaker.protect(execTask)
-                                         else execTask
-        execTaskWithCircuitBreaker.onErrorRecover { case t =>
-            logQueryErrors(t, q)
+            querySpan.finish()
             querySession.close()
-            listener.error(t)
-            // all other errors are already handled; listener should already have the error
-          }.runToFuture(QueryScheduler.flightIoScheduler)
+        })
+        .runToFuture(QueryScheduler.flightIoScheduler)
       }
     }
 
@@ -158,10 +150,10 @@ trait FlightQueryExecutor extends StrictLogging {
     }
 
     def logQueryErrors(t: Throwable, execPlan: ExecPlan): Unit = {
+      queryErrors.increment(1, Map("dataset" -> execPlan.dataset.toString))
       // error logging
       t match {
         case _: BadQueryException => // dont log user errors
-        case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
         case _: QueryTimeoutException | _: ExecutionRejectedException => // log just message, no need for stacktrace
           logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${execPlan.queryContext.queryId} " +
             s"${execPlan.queryContext.origQueryParams} ${t.getMessage}")
@@ -181,14 +173,16 @@ trait FlightQueryExecutor extends StrictLogging {
     def streamResults(queryResult: QueryResponse,
                       flightAllocator: FlightAllocator,
                       listener: ServerStreamListener,
-                      execPlan: ExecPlan
+                      execPlan: ExecPlan,
+                      querySpan: Span
                      ): Unit = {
       FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
       logger.debug(s"Streaming results for queryPlanId=${execPlan.planId}")
       // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
       queryResult match {
         case qe: QueryError =>
-          sendRespFooterAndComplete(listener, flightAllocator, execPlan, qe.queryStats, Some(qe.t))
+          if (qe.t.isInstanceOf[QueryTimeoutException]) throw qe.t // rethrow so circuit breaker can handle
+          sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
         case res: QueryResult =>
           val respHeader = RespHeader(res.resultSchema)
           // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
@@ -233,7 +227,7 @@ trait FlightQueryExecutor extends StrictLogging {
                   listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, flightAllocator))
               }
             }
-            sendRespFooterAndComplete(listener, flightAllocator, execPlan, res.queryStats, None)
+            sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, res.queryStats, None)
             // TODO update query statistics on result bytes and metrics as well
           }
       }
@@ -242,8 +236,16 @@ trait FlightQueryExecutor extends StrictLogging {
     def sendRespFooterAndComplete(listener: ServerStreamListener,
                                   flightAllocator: FlightAllocator,
                                   execPlan: ExecPlan,
-                                  s: QueryStats, t: Option[Throwable]): Unit = {
-      checkAllocatorLimits(flightAllocator, execPlan.queryContext)
+                                  queryExecuteSpan: Span,
+                                  s: QueryStats,
+                                  t: Option[Throwable]): Unit = {
+      t.foreach { e =>
+        logQueryErrors(e, execPlan)
+        queryExecuteSpan.fail(e.getMessage)
+      }
+      // dont check allocator limit here since we want to send footer even if soft limit is breached - we have
+      // 10% room for precisely this
+      // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
       val respFooter = RespFooter(s, t)

@@ -8,7 +8,7 @@ import scala.util.Using
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.arrow.flight.{CallOptions, FlightClient, Location, Ticket}
+import org.apache.arrow.flight.{CallOptions, CallStatus, FlightClient, FlightRuntimeException, Location, Ticket}
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
@@ -125,6 +125,10 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         case _: java.net.ConnectException | _: java.io.IOException =>
           qLogger.info(s"FlightPlanDispatcher - Connection error to $location, forcing reconnection")
           FlightClientManager.global.getClient(location, forceRebuild = true)
+        case f: FlightRuntimeException => if (f.status() == CallStatus.TIMED_OUT) {
+              throw QueryTimeoutException(System.currentTimeMillis() - plan.queryContext.submitTime,
+                                          this.getClass.getName, Some(f))
+            } // convert to QueryTimeoutException for circuit breaker handling
         case _ =>
       }
       QueryError(plan.queryContext.queryId, QueryStats(), ex)
