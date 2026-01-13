@@ -170,7 +170,6 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
 
   /**
    * Publishes label statistics to Kafka and logs summary information.
-   * Note: No cleanup needed - Kafka producers are managed per partition inside publishLabelStats.
    */
   def actionOnLabelStats(df: DataFrame, producer: LabelStatsKafkaProducer): Unit = {
     // Publish to Kafka
