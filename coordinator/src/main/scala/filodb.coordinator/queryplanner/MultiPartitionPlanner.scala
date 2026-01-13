@@ -539,7 +539,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val lhsContext = queryContext.copy(origQueryParams =
         queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarBinOp.lhs.right.get)))
       val lhsPlan = materializeForAssignment(scalarBinOp.lhs.right.get, assignment, lhsContext, timeRangeOverride)
-      Right(lhsPlan.asInstanceOf[ScalarBinaryOperationExec])
+      lhsPlan match {
+        case exec: ScalarBinaryOperationExec => Right(exec)
+        case other => throw new IllegalStateException(
+          s"Expected ScalarBinaryOperationExec for left side of ScalarBinaryOperation,"
+            + s" but got ${other.getClass.getSimpleName}. "
+            + s"ScalarBinaryOperation can only contain other ScalarBinaryOperation logical plans in its branches.")
+      }
     } else {
       // Left side is a scalar value
       Left(scalarBinOp.lhs.left.get)
@@ -551,7 +557,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val rhsContext = queryContext.copy(origQueryParams =
         queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarBinOp.rhs.right.get)))
       val rhsPlan = materializeForAssignment(scalarBinOp.rhs.right.get, assignment, rhsContext, timeRangeOverride)
-      Right(rhsPlan.asInstanceOf[ScalarBinaryOperationExec])
+      rhsPlan match {
+        case exec: ScalarBinaryOperationExec => Right(exec)
+        case other => throw new IllegalStateException(
+          s"Expected ScalarBinaryOperationExec for right side of ScalarBinaryOperation," +
+            s" but got ${other.getClass.getSimpleName}. " +
+          s"ScalarBinaryOperation can only contain other ScalarBinaryOperation logical plans in its branches.")
+      }
     } else {
       // Right side is a scalar value
       Left(scalarBinOp.rhs.left.get)
@@ -579,8 +591,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
 
     // Add ScalarFunctionMapper to the concatenated/aggregated result
     val rangeParams = timeRangeOverride match {
-      case Some(tr) => RangeParams(tr.startMs, scalarVarying.stepMs, tr.endMs)
-      case None => RangeParams(scalarVarying.startMs, scalarVarying.stepMs, scalarVarying.endMs)
+      case Some(tr) => RangeParams(tr.startMs / 1000, scalarVarying.stepMs / 1000, tr.endMs / 1000)
+      case None => RangeParams(scalarVarying.startMs / 1000, scalarVarying.stepMs / 1000, scalarVarying.endMs / 1000)
     }
     topPlan.addRangeVectorTransformer(ScalarFunctionMapper(scalarVarying.function, rangeParams))
     topPlan
