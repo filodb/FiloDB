@@ -127,6 +127,17 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     resultRows.head.isNaN shouldEqual true
   }
 
+  it("should return NaN when there are no range vectors") {
+    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
+    val emptySource: Array[RangeVector] = Array.empty
+    val resultObs = scalarFunctionMapper(Observable.fromIterable(emptySource), querySession, 1000, resultSchema, Nil)
+    val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
+    resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
+    val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.size shouldEqual (1)
+    resultRows.head.isNaN shouldEqual true
+  }
+
   it("should generate scalar values when there is one range vector") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), querySession, 1000, resultSchema, Nil)
