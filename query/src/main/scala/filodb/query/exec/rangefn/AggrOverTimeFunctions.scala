@@ -639,7 +639,8 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
   }
 }
 
-class RateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int) extends ChunkedRangeFunction[TransientHistMaxMinRow] {
+class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
+                  extends ChunkedRangeFunction[TransientHistMaxMinRow] {
   private val hFunc = new RateOverDeltaChunkedFunctionH
   private val maxFunc = new MaxOverTimeChunkedFunctionD
   private val minFunc = new MinOverTimeChunkedFunctionD
