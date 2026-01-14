@@ -638,7 +638,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val vectorPlan = materializeForAssignment(scalarVecBinOp.vector, assignment, vectorContext, timeRangeOverride)
 
     // Materialize the scalar argument
-    val funcArg = materializeFunctionArgs(Seq(scalarVecBinOp.scalarArg), queryContext)
+    val funcArg = materializeFunctionArgsForAssignment(Seq(scalarVecBinOp.scalarArg), assignment, queryContext)
 
     // Add ScalarOperationMapper to the final aggregated result
     vectorPlan.addRangeVectorTransformer(
