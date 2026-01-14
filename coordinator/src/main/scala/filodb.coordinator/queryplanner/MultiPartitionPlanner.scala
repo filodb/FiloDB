@@ -527,46 +527,35 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * Materialize ScalarBinaryOperation for a multi-partition assignment.
    * Handles cases where left or right side (or both) are logical plans that span multiple partitions.
    */
-  private def materializeForScalarBinaryOpAssignment(scalarBinOp: ScalarBinaryOperation,
-                                                     assignment: PartitionAssignmentTrait,
-                                                     queryContext: QueryContext,
-                                                     timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+  private def materializeForScalarBinaryOpAssignment(
+              scalarBinOp: ScalarBinaryOperation, assignment: PartitionAssignmentTrait,
+              queryContext: QueryContext, timeRangeOverride: Option[TimeRange] = None): ScalarBinaryOperationExec = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
     // Materialize left side
-    val lhs = if (scalarBinOp.lhs.isRight) {
-      // Left side is a logical plan - materialize it for this assignment
-      val lhsContext = queryContext.copy(origQueryParams =
-        queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarBinOp.lhs.right.get)))
-      val lhsPlan = materializeForAssignment(scalarBinOp.lhs.right.get, assignment, lhsContext, timeRangeOverride)
-      lhsPlan match {
-        case exec: ScalarBinaryOperationExec => Right(exec)
-        case other => throw new IllegalStateException(
-          s"Expected ScalarBinaryOperationExec for left side of ScalarBinaryOperation,"
-            + s" but got ${other.getClass.getSimpleName}. "
-            + s"ScalarBinaryOperation can only contain other ScalarBinaryOperation logical plans in its branches.")
-      }
-    } else {
-      // Left side is a scalar value
-      Left(scalarBinOp.lhs.left.get)
+    val lhs = scalarBinOp.lhs match {
+      case Right(logicalPlan) =>
+        // Left side is a logical plan - materialize it for this assignment
+        val lhsContext = queryContext.copy(origQueryParams =
+          queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan)))
+        val lhsPlan = materializeForScalarBinaryOpAssignment(logicalPlan, assignment, lhsContext, timeRangeOverride)
+        Right(lhsPlan)
+      case Left(scalarValue) =>
+        // Left side is a scalar value
+        Left(scalarValue)
     }
 
     // Materialize right side
-    val rhs = if (scalarBinOp.rhs.isRight) {
-      // Right side is a logical plan - materialize it for this assignment
-      val rhsContext = queryContext.copy(origQueryParams =
-        queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarBinOp.rhs.right.get)))
-      val rhsPlan = materializeForAssignment(scalarBinOp.rhs.right.get, assignment, rhsContext, timeRangeOverride)
-      rhsPlan match {
-        case exec: ScalarBinaryOperationExec => Right(exec)
-        case other => throw new IllegalStateException(
-          s"Expected ScalarBinaryOperationExec for right side of ScalarBinaryOperation," +
-            s" but got ${other.getClass.getSimpleName}. " +
-          s"ScalarBinaryOperation can only contain other ScalarBinaryOperation logical plans in its branches.")
-      }
-    } else {
-      // Right side is a scalar value
-      Left(scalarBinOp.rhs.left.get)
+    val rhs = scalarBinOp.rhs match {
+      case Right(logicalPlan) =>
+        // Right side is a logical plan - materialize it for this assignment
+        val rhsContext = queryContext.copy(origQueryParams =
+          queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan)))
+        val rhsPlan = materializeForScalarBinaryOpAssignment(logicalPlan, assignment, rhsContext, timeRangeOverride)
+        Right(rhsPlan)
+      case Left(scalarValue) =>
+        // Right side is a scalar value
+        Left(scalarValue)
     }
 
     // Create ScalarBinaryOperationExec with materialized sides
