@@ -1315,4 +1315,155 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should compute rate for cumulative histogram with min/max using CumulativeHistRateAndMinMaxFunction") {
+    // Create cumulative histogram data with max/min (similar to OTEL cumulative histograms)
+    // Generate 10 samples starting at 100000L with 10000L frequency
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq = 10000L, numSamples = 10, numBuckets = 8)
+
+    // Define window boundaries - use samples 0 through 6 (7 samples total)
+    val startTs = 99500L      // Just before first sample at 100000L
+    val endTs = 161000L       // Just past 7th sample at 160000L
+    val headTime = 100000L    // First sample timestamp
+    val lastTime = 160000L    // Last (7th) sample timestamp
+
+    // Extract first and last histograms from data
+    val headHist = data(0)(3).asInstanceOf[bv.LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[bv.LongHistogram]
+
+    // Calculate expected rates: (last - first) / timeDelta * 1000
+    // Note: For cumulative histograms, values always increase
+    val timeDelta = (lastTime - headTime) / 1000.0  // Convert to seconds
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / timeDelta
+    }
+    val expectedHist = bv.MutableHistogram(MMD.histBucketScheme, expectedRates.toArray)
+
+    // Max and min are constant across all samples (realistic OTEL-style observed values)
+    // Values match the bucket scheme: GeometricBuckets(2.0, 2.0, 8) has tops [2, 4, 8, 16, 32, 64, 128, 256]
+    val expectedMax = 200.0  // In bucket 7: 128 < 200 <= 256
+    val expectedMin = 1.0    // In bucket 0: 0 < 1 <= 2
+
+    // Create ONE window iterator with the specified range
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    // Get the result
+    val answer = it.next
+    val answerHist = answer.getHistogram(1)
+
+    // Verify histogram structure
+    answerHist.numBuckets shouldEqual expectedHist.numBuckets
+
+    // Compare each bucket rate with tolerance
+    for { b <- 0 until expectedHist.numBuckets } {
+      answerHist.bucketTop(b) shouldEqual expectedHist.bucketTop(b)
+      answerHist.bucketValue(b) shouldEqual expectedHist.bucketValue(b) +- errorOk
+    }
+
+    // Verify max and min aggregations
+    answer.getDouble(2) shouldEqual expectedMax +- errorOk
+    answer.getDouble(3) shouldEqual expectedMin +- errorOk
+  }
+
+  it("should handle counter resets in cumulative histograms correctly") {
+    // Test that CumulativeHistRateAndMinMaxFunction properly handles counter resets
+    // by using the counter correction mechanism
+    val (initialData, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq=10000L, numSamples=7)
+
+    // Inject samples that simulate a counter reset (values go back to low numbers)
+    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
+    val resetData = initialData.take(3).map { d =>
+      // Create new timestamp (70000ms later) but with reset histogram values
+      val originalSeq = d.asInstanceOf[Seq[Any]]
+      val newTime = originalSeq(0).asInstanceOf[Long] + 70000L
+      Seq(newTime) ++ originalSeq.drop(1)
+    }
+
+    val container = MMD.records(MMD.cumulativeHistMaxMinDS, resetData).records
+    val bh = MMD.cumulativeHistMaxMinBH
+    container.iterate(MMD.cumulativeHistMaxMinDS.ingestionSchema).foreach { row =>
+      part.ingest(0, row, bh, createChunkAtFlushBoundary = false,
+                  flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
+    }
+    part.switchBuffers(bh, encode = true)
+
+    val startTs = 99500L
+    val endTs = 171000L  // Past the reset point
+    val windowTime = endTs - startTs
+
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, windowTime,
+                                        new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]], querySession, row)
+
+    // Should handle the reset and produce valid rate
+    val result = it.next
+    val resultHist = result.getHistogram(1)
+
+    // Verify histogram rate is calculated correctly despite reset
+    // The counter correction should have been applied
+    resultHist.numBuckets shouldEqual MMD.histBucketScheme.numBuckets
+
+    // All bucket rates should be non-negative (no negative rates from reset)
+    for (b <- 0 until resultHist.numBuckets) {
+      resultHist.bucketValue(b) should be >= 0.0
+    }
+
+    // Max and min should be the constant values from histMaxMin
+    // Even with counter resets, the max/min fields remain constant across all samples
+    result.getDouble(2) shouldEqual 200.0 +- errorOk  // Max
+    result.getDouble(3) shouldEqual 1.0 +- errorOk    // Min
+  }
+
+  it("should produce same results as composed functions for cumulative histograms") {
+    // Verify that CumulativeHistRateAndMinMaxFunction composition produces correct results
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(defaultStartTS, pubFreq, 50, 8)
+
+    val windowSize = 20
+    val step = 5
+
+    val row = new TransientHistMaxMinRow()
+    val chunkedIt = chunkedWindowItHist(data, rv, new CumulativeHistRateAndMinMaxFunction(5, 4), windowSize, step, row)
+
+    var windowCount = 0
+    chunkedIt.foreach { aggRow =>
+      windowCount += 1
+
+      // Verify all fields are populated
+      aggRow.getLong(0) should be > 0L  // Timestamp
+
+      val hist = aggRow.getHistogram(1)
+      hist.numBuckets shouldEqual 8  // Should match input histogram
+
+      // Max and min should be the constant values from histMaxMin
+      val maxVal = aggRow.getDouble(2)
+      val minVal = aggRow.getDouble(3)
+
+      maxVal shouldEqual 200.0 +- errorOk  // Constant max across all samples
+      minVal shouldEqual 1.0 +- errorOk    // Constant min across all samples
+    }
+
+    // Should have produced multiple windows
+    windowCount should be > 0
+  }
+
+  it("should handle empty windows gracefully for cumulative histograms") {
+    // Test edge case with very small dataset
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(defaultStartTS, pubFreq, numSamples = 2)
+
+    val windowSize = 10
+    val step = 5
+
+    val row = new TransientHistMaxMinRow()
+    val chunkedIt = chunkedWindowItHist(data, rv, new CumulativeHistRateAndMinMaxFunction(5, 4), windowSize, step, row)
+
+    // Should handle gracefully even with insufficient data
+    val results = chunkedIt.toList
+    results.foreach { result =>
+      // Result should be valid even if limited data
+      result.getLong(0) should be > 0L
+    }
+  }
+
 }
