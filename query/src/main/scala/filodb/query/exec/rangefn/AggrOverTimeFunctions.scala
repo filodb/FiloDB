@@ -719,7 +719,7 @@ class CumulativeHistRateAndMinMaxFunction(maxColId: Int, minColId: Int)
     sampleToEmit.setDouble(3, minFunc.min)
   }
 
-  def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = ???
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = ??? // should not be invoked
 }
 
 class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
