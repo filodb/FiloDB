@@ -391,6 +391,7 @@ object RangeFunction {
     case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
                                  () => new SumAndMaxOverTimeFuncHD(schema.colIDs(2))
     case Some(RateAndMinMaxOverTime) if schema.columns(1).isCumulative =>
+                                 require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
                                  () => new CumulativeHistRateAndMinMaxFunction(schema.colIDs(2), schema.colIDs(3))
     case Some(RateAndMinMaxOverTime) if !schema.columns(1).isCumulative =>
                                  require(schema.columns(2).name == "max" && schema.columns(3).name == "min")
