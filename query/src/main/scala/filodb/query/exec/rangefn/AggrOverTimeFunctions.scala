@@ -7,8 +7,9 @@ import debox.Buffer
 
 import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
-import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
+import filodb.memory.format.{BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
@@ -637,6 +638,88 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
       maxFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
     }
   }
+}
+
+/**
+ * Cumulative histogram rate function with min/max column support.
+ * Similar to DeltaRateAndMinMaxOverTimeFuncHD but for cumulative histograms with counter correction.
+ * Composes existing functions for clean implementation.
+ *
+ * @param maxColId Column ID for max values
+ * @param minColId Column ID for min values
+ */
+class CumulativeHistRateAndMinMaxFunction(maxColId: Int, minColId: Int)
+  extends CounterChunkedRangeFunction[TransientHistMaxMinRow] {
+
+  // Reuse existing functions through composition
+  private val histFunc = new HistRateFunction
+  private val maxFunc = new MaxOverTimeChunkedFunctionD
+  private val minFunc = new MinOverTimeChunkedFunctionD
+
+  override def reset(): Unit = {
+    histFunc.reset()
+    maxFunc.reset()
+    minFunc.reset()
+    super.reset()
+  }
+
+  /**
+   * Delegate histogram processing to HistRateFunction.
+   * This is called by parent CounterChunkedRangeFunction.addChunks() after counter correction detection.
+   */
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
+                    startRowNum: Int, endRowNum: Int,
+                    startTime: Long, endTime: Long): Unit = {
+    // Sync correction metadata to histogram function
+    histFunc.correctionMeta = correctionMeta
+    // Delegate to histogram rate function
+    histFunc.addTimeChunks(acc, vector, reader, startRowNum, endRowNum, startTime, endTime)
+  }
+
+  // scalastyle:off parameter.number
+  /**
+   * Override addChunks to also process max and min columns in addition to histogram.
+   * Parent handles histogram with counter correction, we add max/min processing.
+   */
+  override def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                         valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                         startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    // Call parent to handle histogram with counter correction
+    super.addChunks(tsVectorAcc, tsVector, tsReader, valueVectorAcc, valueVector, valueReader,
+      startTime, endTime, info, queryConfig)
+
+    // Binary search for start/end row numbers once for max/min columns (same as DeltaRateAndMinMaxOverTimeFuncHD)
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      // Process max column
+      val maxVectAcc = info.vectorAccessor(maxColId)
+      val maxVectPtr = info.vectorAddress(maxColId)
+      maxFunc.addTimeDoubleChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr),
+        startRowNum, endRowNum)
+
+      // Process min column
+      val minVectAcc = info.vectorAccessor(minColId)
+      val minVectPtr = info.vectorAddress(minColId)
+      minFunc.addTimeDoubleChunks(minVectAcc, minVectPtr, bv.DoubleVector(minVectAcc, minVectPtr),
+        startRowNum, endRowNum)
+    }
+  }
+  // scalastyle:on parameter.number
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistMaxMinRow): Unit = {
+    // Delegate histogram rate calculation to HistRateFunction
+    // TransientHistMaxMinRow extends TransientHistRow, so this works
+    histFunc.apply(windowStart, windowEnd, sampleToEmit)
+
+    // Set max and min values (same pattern as DeltaRateAndMinMaxOverTimeFuncHD)
+    sampleToEmit.setDouble(2, maxFunc.max)
+    sampleToEmit.setDouble(3, minFunc.min)
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxMinRow): Unit = ??? // should not be invoked
 }
 
 class DeltaRateAndMinMaxOverTimeFuncHD(maxColId: Int, minColId: Int)
