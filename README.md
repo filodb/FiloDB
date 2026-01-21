@@ -92,8 +92,10 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 1. [Java 11](https://www.oracle.com/java/technologies/javase-downloads.html#JDK11)
 2. [SBT](http://www.scala-sbt.org/) to build
-3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
-    - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`
+3. **Database** (choose one):
+   - [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
+     - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`
+   - [ScyllaDB](https://www.scylladb.com/) as a drop-in replacement (uses the same DataStax driver with zero code changes)
 4. [Apache Kafka](http://kafka.apache.org/) 0.10.x or above
 5. [Rust](https://www.rust-lang.org/tools/install) to build native components
 6. A working C compiler for your system (GCC or Clang)
@@ -153,6 +155,8 @@ kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 -
 
 Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
 
+**Option 1: Native Cassandra Installation**
+
 ```
 bin/cassandra
 ```
@@ -177,18 +181,46 @@ Start Cassandra
 brew services start cassandra
 ```
 
+**Option 2: ScyllaDB with Docker (Recommended)**
+
+ScyllaDB is a drop-in replacement for Cassandra focusing on performance at scale with zero code changes. To use ScyllaDB:
+
+```bash
+# Start ScyllaDB container
+docker run -d --name scylla-test -p 9042:9042 \
+  scylladb/scylla:2025.1.4 \
+  --smp 1 --memory 1G --overprovisioned 1 --api-address 0.0.0.0
+
+# Wait for ScyllaDB to be ready (30-60 seconds)
+docker exec scylla-test cqlsh -e "describe keyspaces"
+```
+
 Build the required projects
 ```
 sbt standalone/assembly cli/assembly gateway/assembly
 ```
 
-First initialize the keyspaces and tables in Cassandra. 
+First initialize the keyspaces and tables in Cassandra or ScyllaDB.
 ```
 ./scripts/schema-create.sh filodb_admin filodb filodb_downsample prometheus 4 1,5 > /tmp/ddl.cql
+
+# For native Cassandra installation:
 cqlsh -f /tmp/ddl.cql
+
+# For ScyllaDB container:
+docker exec filodb-scylladb cqlsh < /tmp/ddl.cql
 ```
 Verify that tables were created in `filodb`, `filodb_downsample` and `filodb-admin` keyspaces using `cqlsh`:
-First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
+
+```bash
+# For native Cassandra:
+cqlsh
+DESCRIBE keyspaces;
+
+# For ScyllaDB container:
+docker exec scylla-test cqlsh
+DESCRIBE keyspaces;
+```
 
 
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
@@ -756,13 +788,14 @@ Following command can be used to decode a Binary Vector. Valid vector types are 
  
 ## Current Status
 
-| Component | Status     |
-|-----------|------------|
-| FiloDB Standalone | Stable, tested at scale          |
-| Gateway           | Experimental                     |
-| Cassandra         | Stable, works with C-2.x and 3.x |
-| Kafka             | Stable                           |
-| Spark             | Deprecated                       |
+| Component | Status                                   |
+|-----------|------------------------------------------|
+| FiloDB Standalone | Stable, tested at scale                  |
+| Gateway           | Experimental                             |
+| Cassandra         | Stable, works with C-2.x and 3.x         |
+| ScyllaDB          | Drop-in compatible, works with 2025.1.4  |
+| Kafka             | Stable                                   |
+| Spark             | Deprecated                               |
 
 FiloDB PromQL Support: currently FiloDB supports about 60% of PromQL.  We are working to add more support regularly.
 
@@ -819,6 +852,15 @@ Please go to the [architecture](doc/architecture.md) doc.
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
+
+### Testing with ScyllaDB
+
+ScyllaDB-specific test suites are available to validate drop-in compatibility:
+
+```bash
+# Run ScyllaDB-specific tests
+SCYLLADB_HOST=localhost SCYLLADB_PORT=9042 sbt "cassandra/testOnly filodb.cassandra.columnstore.ScyllaDbColumnStoreSpec"
+```
 
 The docs use [mermaid](https://github.com/knsv/mermaid) and [doctoc](https://github.com/thlorenz/doctoc).  On a Mac, to install:
 
