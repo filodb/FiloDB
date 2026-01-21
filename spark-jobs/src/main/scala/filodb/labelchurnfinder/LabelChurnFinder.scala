@@ -28,7 +28,8 @@ object LabelChurnFinderMain extends App {
     .config(sparkConf)
     .getOrCreate()
   private val labelStats = labelChurnFinder.computeLabelStats(spark)
-  labelChurnFinder.actionOnLabelStats(labelStats)
+  private val producer = new LabelStatsKafkaProducer(dsSettings.filodbConfig)
+  labelChurnFinder.actionOnLabelStats(labelStats, producer)
   spark.stop()
 }
 
@@ -168,9 +169,13 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   }
 
   /**
-   * Placeholder for future actions on label stats - example, sending it to a churn monitoring system etc.
+   * Publishes label statistics to Kafka and logs summary information.
    */
-  def actionOnLabelStats(df: DataFrame): Unit = {
+  def actionOnLabelStats(df: DataFrame, producer: LabelStatsKafkaProducer): Unit = {
+    // Publish to Kafka
+    producer.publishLabelStats(df)
+
+    // Also log summary for monitoring
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
     countsFromSketches(df).foreach { r =>
