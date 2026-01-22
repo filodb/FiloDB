@@ -86,8 +86,9 @@ case class TenantIngestionMetering(settings: FilodbSettings,
             // publish a cardinality metric for each namespace
             val data = RowData.fromRowReader(rr)
             val prefix = data.group.toString.split(PREFIX_DELIM)
-            val tags = Map("metric_ws" -> prefix(0),
-                           "metric_ns" -> prefix(1),
+            val tags = Map("_tenant_ws_" -> prefix(0),
+                           "_tenant_ns_" -> prefix(1),
+                           "_audience_" -> "tenants",
                            "dataset" -> dsRef.dataset,
                            "cluster_type" -> CLUSTER_TYPE)
 
