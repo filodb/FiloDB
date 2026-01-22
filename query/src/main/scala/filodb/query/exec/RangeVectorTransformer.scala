@@ -356,7 +356,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 
     val resultRv = source.toListL.map { rvs =>
-      if (rvs.size > 1) {
+      if (rvs.size != 1) {
         Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
         Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap,

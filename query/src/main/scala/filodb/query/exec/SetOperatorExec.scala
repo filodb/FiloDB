@@ -74,8 +74,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           case LAND => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
             setOpAnd(lhsRvs, rhsRvs, rhsSchema, querySession)
           case LOR => setOpOr(lhsRvs, rhsRvs)
-          case LUnless => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
-            setOpUnless(lhsRvs, rhsRvs, rhsSchema, querySession)
+          case LUnless => setOpUnless(lhsRvs, rhsRvs)
           case _ => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
         }
         // check for timeout after dealing with metadata, before dealing with numbers
@@ -377,107 +376,31 @@ final case class SetOperatorExec(queryContext: QueryContext,
   /***
    * Return LHS range vector which have join keys not present in RHS
    */
-  // scalastyle:off method.length
-  private[exec] def setOpUnless(
-                                 lhsRvs: List[RangeVector],
-                                 rhsRvs: List[RangeVector],
-                                 rhsSchema: ResultSchema,
-                                 querySession: QuerySession
-                               ): Iterator[RangeVector] = {
+  private[exec] def setOpUnless(lhsRvs: List[RangeVector],
+                          rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
-    // 1) Prep the serializer
-    lazy val builder      = SerializedRangeVector.newBuilder()
-    lazy val recSchema    = SerializedRangeVector.toSchema(rhsSchema.columns, rhsSchema.brSchemas)
-    lazy val execPlanName = queryWithPlanName(queryContext)
-
-    // 2) Turn every RHS into a SerializedRangeVector
-    val mappedRhs = rhsRvs.map {
-      case srv: SerializedRangeVector => srv
-      case rv: RangeVector =>
-        SerializedRangeVector(rv, builder, recSchema, execPlanName, querySession.queryStats)
-    }
-
-    // 3) Stitch shards of RHS into a single RV per join-key
-    val rhsMap  = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
-    mappedRhs.foreach { rv =>
+    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
+    rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      if (!isEmpty(rv, rhsSchema)) {
-        rhsMap.get(jk) match {
-          case Some(resVal) if resVal.key.labelValues == rv.key.labelValues =>
-            rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal, outputRvRange))
-          case _ =>
-            rhsMap.put(jk, rv)
-        }
-      }
+      rhsKeysSet += jk
     }
+    // Add range vectors which are not present in rhs
 
-    // 4) Prepare result accumulator
-    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], // join‐key
-      mutable.Map[Map[Utf8Str, Utf8Str], RangeVector]]() // inner: full labelValues → RV
-    val period = lhsRvs.headOption.flatMap(_.outputRange)
-
-    // 5) For each LHS, either emit unchanged (if no RHS) or do the “unless”‐zip
-    lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
-
-      if (rhsMap.contains(jk)) {
-        // Fetch (or create) the inner map for this join‐key
-        val innerMap = result.getOrElse(jk, mutable.Map.empty)
-
-        // Stitch any duplicate LHS series by full labelValues
-        val prevRvOpt = innerMap.get(lhs.key.labelValues)
-        val lhsStitched = prevRvOpt match {
-          case Some(prevRv) =>
-            StitchRvsExec.stitch(lhs, prevRv, outputRvRange)
-          case None =>
-            lhs
-        }
-
-        // build an “unless” cursor: NaN where RHS had any sample
-        val lhsRows = lhsStitched.rows()
-        val rhsRows = rhsMap(jk).rows()
-        val cursor  = new RangeVectorCursor {
-          private val cur = new TransientRow()
-          override def hasNext: Boolean = lhsRows.hasNext
-          override def next(): RowReader = {
-            val l = lhsRows.next()
-            val v =
-              if (rhsRows.hasNext) {
-                val r = rhsRows.next()
-                if (!java.lang.Double.isNaN(r.getDouble(1))) Double.NaN
-                else l.getDouble(1)
-              } else l.getDouble(1)
-            cur.setValues(l.getLong(0), v)
-            cur
+    val result = lhsRvs.foldLeft(
+      mutable.Map.empty[Map[Utf8Str, Utf8Str], mutable.Map[Map[Utf8Str, Utf8Str], RangeVector]]) {
+      case (accumulated, lhs) =>
+        val jk = joinKeys(lhs.key)
+        if (!rhsKeysSet.contains(jk)) {
+          val result = accumulated.getOrElseUpdate(jk, mutable.Map.empty)
+          val stitchedOrNewValue = result.get(lhs.key.labelValues) match {
+            case Some(matched)  => StitchRvsExec.stitch(lhs, matched, outputRvRange)
+            case None           => lhs
           }
-          override def close(): Unit = {
-            lhsRows.close()
-            rhsRows.close()
-          }
+          result(lhs.key.labelValues) = stitchedOrNewValue
         }
-
-        val outRv = IteratorBackedRangeVector(lhs.key, cursor, period)
-        innerMap.put(lhs.key.labelValues, outRv)
-        result.put(jk, innerMap)
-      } else {
-        // no RHS for this key ⇒ emit LHS (and stitch duplicates)
-        val innerMap = result.getOrElseUpdate(jk, mutable.Map.empty)
-
-        innerMap.get(lhs.key.labelValues) match {
-          case Some(prevRv) =>
-            val merged = StitchRvsExec.stitch(lhs, prevRv, outputRvRange)
-            innerMap.put(lhs.key.labelValues, merged)
-          case None =>
-            innerMap.put(lhs.key.labelValues, lhs)
-        }
-
-        result.put(jk, innerMap)
-      }
+        accumulated
     }
-
-    // 6) flatten all per-key buffers back into one Iterator
-    result.valuesIterator.flatMap(_.valuesIterator)
+    result.valuesIterator.flatMap( m => m.valuesIterator)
   }
-  // scalastyle:on method.length
 
 }

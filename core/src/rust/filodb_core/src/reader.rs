@@ -276,7 +276,7 @@ fn query_label_values(
     if let Some((f, prefix)) = field_and_prefix {
         if !prefix.is_empty() {
             let field_name = handle.schema.get_field_entry(f).name();
-            field = format!("{}.{}", field_name, prefix);
+            field = format!("{field_name}.{prefix}");
         }
 
         let collector =

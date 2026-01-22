@@ -27,7 +27,9 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
@@ -118,6 +120,17 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it("should generate scalar") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
+    val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
+    resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
+    val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.size shouldEqual (1)
+    resultRows.head.isNaN shouldEqual true
+  }
+
+  it("should return NaN when there are no range vectors") {
+    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
+    val emptySource: Array[RangeVector] = Array.empty
+    val resultObs = scalarFunctionMapper(Observable.fromIterable(emptySource), querySession, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)

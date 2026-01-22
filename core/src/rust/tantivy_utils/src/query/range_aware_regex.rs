@@ -45,7 +45,7 @@ impl RangeAwareRegexQuery {
             prefix: if prefix.is_empty() {
                 String::new()
             } else {
-                format!("{}\0s", prefix)
+                format!("{prefix}\0s")
             },
             field,
         })
