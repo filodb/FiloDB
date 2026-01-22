@@ -820,6 +820,10 @@ Please go to the [architecture](doc/architecture.md) doc.
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
 
+You can invoke a test for just one spec, for example:
+
+sbt "testOnly filodb.coordinator.queryplanner.MultiPartitionPlannerSpec"
+
 The docs use [mermaid](https://github.com/knsv/mermaid) and [doctoc](https://github.com/thlorenz/doctoc).  On a Mac, to install:
 
     brew install yarn
