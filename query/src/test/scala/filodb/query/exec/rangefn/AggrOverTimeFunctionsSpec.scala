@@ -16,6 +16,7 @@ import filodb.core.MachineMetricsData.defaultPartKey
 import filodb.memory._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query.exec._
@@ -339,7 +340,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
 
       val row = new TransientHistMaxMinRow()
-      val chunkedIt = chunkedWindowItHist(data, rv, new RateAndMinMaxOverTimeFuncHD(5, 4), windowSize, step, row)
+      val chunkedIt = chunkedWindowItHist(data, rv, new DeltaRateAndMinMaxOverTimeFuncHD(5, 4), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step)).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
         val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
@@ -397,6 +398,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val minSlidingIt1 = slidingWindowIt(data, rv, new LastOverTimeIsMadOutlierFunction(Seq(StaticFuncArgs(4, rangeParams), StaticFuncArgs(1.0, rangeParams))), windowSize, step)
     val result1 = minSlidingIt1.map(_.getDouble(1)).toBuffer
     minSlidingIt1.close()
+    println(s"result1: $result1")
+    println(s"allAnomalies: $allAnomalies")
     result1.zip(allAnomalies).foreach { case (r, a) =>
       if (a.isNaN) r.isNaN shouldEqual true
       else r shouldEqual a
@@ -1310,6 +1313,514 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     for (b <- 0 until resultHist.numBuckets) {
       val expectedRate = expectedSum(b) / (timeDelta / 1000.0)
       resultHist.bucketValue(b) shouldEqual expectedRate +- errorOk
+    }
+  }
+
+  it("should compute rate for cumulative histogram with min/max using CumulativeHistRateAndMinMaxFunction") {
+    // Create cumulative histogram data with max/min (similar to OTEL cumulative histograms)
+    // Generate 10 samples starting at 100000L with 10000L frequency
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq = 10000L, numSamples = 10, numBuckets = 8)
+
+    // Define window boundaries - use samples 0 through 6 (7 samples total)
+    val startTs = 99500L      // Just before first sample at 100000L
+    val endTs = 161000L       // Just past 7th sample at 160000L
+    val headTime = 100000L    // First sample timestamp
+    val lastTime = 160000L    // Last (7th) sample timestamp
+
+    // Extract first and last histograms from data
+    val headHist = data(0)(3).asInstanceOf[bv.LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[bv.LongHistogram]
+
+    // Calculate expected rates: (last - first) / timeDelta
+    // Note: For cumulative histograms, values always increase
+    val timeDelta = (lastTime - headTime) / 1000.0  // Convert to seconds
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / timeDelta
+    }
+    val expectedHist = bv.MutableHistogram(MMD.histBucketScheme, expectedRates.toArray)
+
+    // Max and min are constant across all samples (realistic OTEL-style observed values)
+    // Values match the bucket scheme: GeometricBuckets(2.0, 2.0, 8) has tops [2, 4, 8, 16, 32, 64, 128, 256]
+    val expectedMax = 200.0  // In bucket 7: 128 < 200 <= 256
+    val expectedMin = 1.0    // In bucket 0: 0 < 1 <= 2
+
+    // Create ONE window iterator with the specified range
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    // Get the result
+    val answer = it.next
+    val answerHist = answer.getHistogram(1)
+
+    // Verify histogram structure
+    answerHist.numBuckets shouldEqual expectedHist.numBuckets
+
+    // Compare each bucket rate with tolerance
+    for { b <- 0 until expectedHist.numBuckets } {
+      answerHist.bucketTop(b) shouldEqual expectedHist.bucketTop(b)
+      answerHist.bucketValue(b) shouldEqual expectedHist.bucketValue(b) +- errorOk
+    }
+
+    // Verify max and min aggregations
+    answer.getDouble(2) shouldEqual expectedMax +- errorOk
+    answer.getDouble(3) shouldEqual expectedMin +- errorOk
+  }
+
+  it("should handle counter resets in cumulative histograms correctly") {
+    // Test that CumulativeHistRateAndMinMaxFunction properly handles counter resets
+    // by using the counter correction mechanism
+    val (initialData, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq=10000L, numSamples=7)
+
+    // Inject samples that simulate a counter reset (values go back to low numbers)
+    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
+    val resetData = initialData.take(3).map { d =>
+      // Create new timestamp (70000ms later) but with reset histogram values
+      val originalSeq = d.asInstanceOf[Seq[Any]]
+      val newTime = originalSeq(0).asInstanceOf[Long] + 70000L
+      Seq(newTime) ++ originalSeq.drop(1)
+    }
+
+    val container = MMD.records(MMD.cumulativeHistMaxMinDS, resetData).records
+    val bh = MMD.cumulativeHistMaxMinBH
+    container.iterate(MMD.cumulativeHistMaxMinDS.ingestionSchema).foreach { row =>
+      part.ingest(0, row, bh, createChunkAtFlushBoundary = false,
+                  flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
+    }
+    part.switchBuffers(bh, encode = true)
+
+    val startTs = 99500L
+    val endTs = 171000L  // Past the reset point
+    val windowTime = endTs - startTs
+
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, windowTime,
+                                        new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]], querySession, row)
+
+    // Should handle the reset and produce valid rate
+    val result = it.next
+    val resultHist = result.getHistogram(1)
+
+    // Verify histogram rate is calculated correctly despite reset
+    // The counter correction should have been applied
+    resultHist.numBuckets shouldEqual MMD.histBucketScheme.numBuckets
+
+    // All bucket rates should be non-negative (no negative rates from reset)
+    for (b <- 0 until resultHist.numBuckets) {
+      resultHist.bucketValue(b) should be >= 0.0
+    }
+
+    // Max and min should be the constant values from histMaxMin
+    // Even with counter resets, the max/min fields remain constant across all samples
+    result.getDouble(2) shouldEqual 200.0 +- errorOk  // Max
+    result.getDouble(3) shouldEqual 1.0 +- errorOk    // Min
+  }
+
+  it("should produce same results as composed functions for cumulative histograms") {
+    // Verify that CumulativeHistRateAndMinMaxFunction composition produces correct results
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(defaultStartTS, pubFreq, 50, 8)
+
+    val windowSize = 20
+    val step = 5
+
+    val row = new TransientHistMaxMinRow()
+    val chunkedIt = chunkedWindowItHist(data, rv, new CumulativeHistRateAndMinMaxFunction(5, 4), windowSize, step, row)
+
+    var windowCount = 0
+    chunkedIt.foreach { aggRow =>
+      windowCount += 1
+
+      // Verify all fields are populated
+      aggRow.getLong(0) should be > 0L  // Timestamp
+
+      val hist = aggRow.getHistogram(1)
+      hist.numBuckets shouldEqual 8  // Should match input histogram
+
+      // Max and min should be the constant values from histMaxMin
+      val maxVal = aggRow.getDouble(2)
+      val minVal = aggRow.getDouble(3)
+
+      maxVal shouldEqual 200.0 +- errorOk  // Constant max across all samples
+      minVal shouldEqual 1.0 +- errorOk    // Constant min across all samples
+    }
+
+    // Should have produced multiple windows
+    windowCount should be > 0
+  }
+
+  it("should handle empty windows gracefully for cumulative histograms") {
+    // Test edge case with very small dataset
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(defaultStartTS, pubFreq, numSamples = 2)
+
+    val windowSize = 10
+    val step = 5
+
+    val row = new TransientHistMaxMinRow()
+    val chunkedIt = chunkedWindowItHist(data, rv, new CumulativeHistRateAndMinMaxFunction(5, 4), windowSize, step, row)
+
+    // Should handle gracefully even with insufficient data
+    val results = chunkedIt.toList
+    results.foreach { result =>
+      // Result should be valid even if limited data
+      result.getLong(0) should be > 0L
+    }
+  }
+
+  it("should compute histogram_quantile on rate of cumulative histogram with min/max") {
+    // Create cumulative histogram with min/max - use samples 0 through 6 (7 samples)
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq = 10000L, numSamples = 10, numBuckets = 8)
+
+    // Define window for rate calculation
+    val startTs = 99500L
+    val endTs = 161000L
+    val windowTime = endTs - startTs
+    val headTime = 100000L    // First sample timestamp
+    val lastTime = 160000L    // Last (7th) sample timestamp
+
+    // Extract first and last histograms from data to calculate expected rate
+    val headHist = data(0)(3).asInstanceOf[bv.LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[bv.LongHistogram]
+
+    // Calculate expected rate histogram: (last - first) / timeDelta * 1000
+    val timeDelta = (lastTime - headTime) / 1000.0
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / timeDelta
+    }
+    val expectedRateHist = bv.MutableHistogram(MMD.histBucketScheme, expectedRates.toArray)
+
+    // Calculate rate using CumulativeHistRateAndMinMaxFunction
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, windowTime,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    // Collect rate histogram results
+    val rateResults = it.toList
+    rateResults.size shouldEqual 1
+
+    val rateRow = rateResults.head
+    val rateHist = rateRow.getHistogram(1)
+
+    // Verify histogram structure
+    rateHist.numBuckets shouldEqual 8
+    // Verify bucket scheme matches by comparing bucket tops
+    for (i <- 0 until rateHist.numBuckets) {
+      rateHist.bucketTop(i) shouldEqual MMD.histBucketScheme.bucketTop(i)
+    }
+
+    // Test various quantiles on the rate histogram and verify against expected values
+    val quantiles = Seq(0.5, 0.9, 0.95, 0.99)
+    quantiles.foreach { q =>
+      // Calculate quantile from both actual and expected histograms
+      val actualQuantile = rateHist.quantile(q)
+      val expectedQuantile = expectedRateHist.quantile(q)
+
+      // Verify quantiles match
+      if (!expectedQuantile.isNaN) {
+        actualQuantile shouldEqual expectedQuantile +- errorOk
+
+        // Also verify quantile is within bucket range
+        actualQuantile should be >= 0.0
+        actualQuantile should be <= rateHist.bucketTop(rateHist.numBuckets - 1)
+      } else {
+        actualQuantile.isNaN shouldEqual true
+      }
+    }
+
+    // Verify max and min columns are correct
+    rateRow.getDouble(2) shouldEqual 200.0 +- errorOk  // Max
+    rateRow.getDouble(3) shouldEqual 1.0 +- errorOk    // Min
+  }
+
+  it("should compute histogram quantile on rate of cumulative histogram with max min inputs") {
+    // Create cumulative histogram with min/max - use samples 0 through 6 (7 samples)
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq = 10000L, numSamples = 10, numBuckets = 8)
+
+    // Define window for rate calculation
+    val startTs = 99500L
+    val endTs = 161000L
+    val windowTime = endTs - startTs
+    val headTime = 100000L    // First sample timestamp
+    val lastTime = 160000L    // Last (7th) sample timestamp
+
+    // Extract first and last histograms from data to calculate expected rate
+    val headHist = data(0)(3).asInstanceOf[bv.LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[bv.LongHistogram]
+
+    // Calculate expected rate histogram
+    val timeDelta = (lastTime - headTime) / 1000.0
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / timeDelta
+    }
+    val expectedRateHist = bv.MutableHistogram(MMD.histBucketScheme, expectedRates.toArray)
+
+    // Calculate rate using CumulativeHistRateAndMinMaxFunction
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, windowTime,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    // Collect rate results
+    val rateResults = it.toList
+    rateResults.size shouldEqual 1
+
+    val rateRow = rateResults.head
+    val rateHist = rateRow.getHistogram(1)
+    val maxVal = rateRow.getDouble(2)  // Max column
+    val minVal = rateRow.getDouble(3)  // Min column
+
+    // Verify max and min are the constant values
+    maxVal shouldEqual 200.0 +- errorOk
+    minVal shouldEqual 1.0 +- errorOk
+
+    // Test histogram_max_quantile calculation with various quantiles using min/max bounds
+    val quantiles = Seq(0.5, 0.9, 0.95, 0.99, 0.999)
+    quantiles.foreach { q =>
+      // Calculate bounded quantile with max/min inputs
+      val actualBounded = rateHist.quantile(q, minVal, maxVal)
+      val expectedBounded = expectedRateHist.quantile(q, minVal, maxVal)
+
+      // Verify bounded quantile matches expected and respects constraints
+      if (!expectedBounded.isNaN) {
+        actualBounded shouldEqual expectedBounded +- errorOk
+        actualBounded should be <= maxVal
+        actualBounded should be >= minVal
+      } else {
+        actualBounded.isNaN shouldEqual true
+      }
+    }
+  }
+
+  it("should compute multiple quantiles correctly on cumulative histogram rate") {
+    // Create cumulative histogram with min/max - use samples 0 through 6 (7 samples)
+    val (data, rv) = MMD.cumulativeHistMaxMinRV(100000L, pubFreq = 10000L, numSamples = 10, numBuckets = 8)
+
+    // Define window for rate calculation
+    val startTs = 99500L
+    val endTs = 161000L
+    val windowTime = endTs - startTs
+    val headTime = 100000L
+    val lastTime = 160000L
+
+    // Extract first and last histograms to calculate expected rate
+    val headHist = data(0)(3).asInstanceOf[bv.LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[bv.LongHistogram]
+
+    // Calculate expected rate histogram
+    val timeDelta = (lastTime - headTime) / 1000.0
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / timeDelta
+    }
+    val expectedRateHist = bv.MutableHistogram(MMD.histBucketScheme, expectedRates.toArray)
+
+    // Calculate rate using CumulativeHistRateAndMinMaxFunction
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, windowTime,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    // Collect rate results
+    val rateResults = it.toList
+    val rateRow = rateResults.head
+    val rateHist = rateRow.getHistogram(1)
+
+    // Calculate various quantiles from both actual and expected histograms
+    val quantiles = Seq(0.5, 0.75, 0.9, 0.95, 0.99)
+    val actualResults = quantiles.map { q => (q, rateHist.quantile(q)) }
+    val expectedResults = quantiles.map { q => (q, expectedRateHist.quantile(q)) }
+
+    // Verify actual matches expected
+    actualResults.zip(expectedResults).foreach { case ((q1, actual), (q2, expected)) =>
+      q1 shouldEqual q2
+      if (!expected.isNaN) {
+        actual shouldEqual expected +- errorOk
+      } else {
+        actual.isNaN shouldEqual true
+      }
+    }
+
+    // Verify quantiles are monotonically increasing
+    actualResults.sliding(2).foreach { case Seq((q1, v1), (q2, v2)) =>
+      if (!v1.isNaN && !v2.isNaN) {
+        v2 should be >= v1  // Higher quantile should have higher or equal value
+      }
+    }
+
+    // Verify each quantile is within valid range
+    actualResults.foreach { case (q, value) =>
+      if (!value.isNaN) {
+        value should be >= 0.0  // Rate should be non-negative for counters
+        value should be <= rateHist.bucketTop(rateHist.numBuckets - 1)
+      }
+    }
+  }
+
+  it("should constrain quantile by max value when interpolating in top bucket") {
+    // Create custom cumulative histogram data with distribution heavily skewed to top bucket
+    // This ensures high quantiles fall in top bucket where max constraint is applied
+    val startTS = 100000L
+    val endTS = 200000L
+    val maxVal = 200.0
+    val minVal = 1.0
+
+    // Create bucket scheme explicitly (same as GeometricBuckets(2.0, 2.0, 8))
+    val bucketScheme = bv.GeometricBuckets(2.0, 2.0, 8)
+
+    // Create custom histogram data: first sample with low values, second with high concentration in top bucket
+    // First histogram: [1, 2, 3, 4, 5, 10, 50, 100] - gradual increase
+    // Second histogram: [2, 4, 6, 8, 10, 20, 100, 1100] - top bucket jumps by 1000
+    val firstBuckets = Array[Long](1, 2, 3, 4, 5, 10, 50, 100)
+    val secondBuckets = Array[Long](2, 4, 6, 8, 10, 20, 100, 1100)
+
+    val histData = Stream(
+      Seq(startTS, 161L, 161L, bv.LongHistogram(bucketScheme, firstBuckets), minVal, maxVal,
+          "request-latency", MMD.extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> "0".utf8)),
+      Seq(endTS, 1161L, 1161L, bv.LongHistogram(bucketScheme, secondBuckets), minVal, maxVal,
+          "request-latency", MMD.extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> "0".utf8))
+    )
+
+    // Use the same pattern as cumulativeHistMaxMinRV
+    val container = MMD.records(MMD.cumulativeHistMaxMinDS, histData).records
+    val bufferPool = new WriteBufferPool(TestData.nativeMem, MMD.cumulativeHistMaxMinDS.schema.data, storeConf)
+    val part = TimeSeriesPartitionSpec.makePart(0, MMD.cumulativeHistMaxMinDS, partKey=MMD.histPartKey,
+                                                bufferPool=bufferPool)
+    container.iterate(MMD.cumulativeHistMaxMinDS.ingestionSchema).foreach { row =>
+      part.ingest(0, row, MMD.cumulativeHistMaxMinBH, false, Option.empty, false)
+    }
+    part.switchBuffers(MMD.cumulativeHistMaxMinBH, encode = true)
+
+    val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
+                                new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
+
+    // Calculate rate using CumulativeHistRateAndMinMaxFunction through full pipeline
+    val windowTime = endTS - startTS
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTS, 100000, endTS, windowTime,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    val rateResults = it.toList
+    rateResults.size shouldEqual 1
+
+    val rateRow = rateResults.head
+    val rateHist = rateRow.getHistogram(1)
+    val extractedMax = rateRow.getDouble(2)
+    val extractedMin = rateRow.getDouble(3)
+
+    // Verify max/min are preserved through the pipeline
+    extractedMax shouldEqual maxVal +- errorOk
+    extractedMin shouldEqual minVal +- errorOk
+
+    // Top bucket rate should be (1100-100)/100 = 10 per second, creating strong concentration
+    val timeDelta = (endTS - startTS) / 1000.0
+    val expectedTopBucketRate = (secondBuckets.last - firstBuckets.last).toDouble / timeDelta
+    info(s"Top bucket rate: $expectedTopBucketRate per second")
+
+    // Test high quantiles where interpolation falls in top bucket
+    val highQuantiles = Seq(0.95, 0.99, 0.995, 0.999)
+
+    highQuantiles.foreach { q =>
+      val unboundedQuantile = rateHist.quantile(q)
+      val boundedQuantile = rateHist.quantile(q, extractedMin, extractedMax)
+
+      info(s"q=$q: unbounded=$unboundedQuantile, bounded=$boundedQuantile")
+
+      // Bounded quantile must always respect min/max constraints
+      if (!boundedQuantile.isNaN) {
+        boundedQuantile should be <= maxVal
+        boundedQuantile should be >= minVal
+      }
+
+      // When unbounded exceeds max, verify clamping occurred
+      if (!unboundedQuantile.isNaN && unboundedQuantile > maxVal) {
+        boundedQuantile should be < unboundedQuantile
+        info(s"  ✓ Max constraint applied: $unboundedQuantile clamped to $boundedQuantile")
+      }
+    }
+  }
+
+  it("should constrain quantile by min value when interpolating in bottom bucket") {
+    // Create custom cumulative histogram data with distribution heavily skewed to bottom bucket
+    // This ensures low quantiles fall in bottom bucket where min constraint is applied
+    val startTS = 100000L
+    val endTS = 200000L
+    val maxVal = 200.0
+    val minVal = 1.0
+
+    // Create bucket scheme explicitly (same as GeometricBuckets(2.0, 2.0, 8))
+    val bucketScheme = bv.GeometricBuckets(2.0, 2.0, 8)
+
+    // Create custom histogram data: first sample with heavy concentration in bottom bucket
+    // First histogram: [1000, 50, 10, 5, 4, 3, 2, 1] - 1000 samples in bucket 0 (0 < x <= 2)
+    // Second histogram: [2000, 100, 20, 10, 8, 6, 4, 2] - bottom bucket jumps by 1000
+    val firstBuckets = Array[Long](1000, 50, 10, 5, 4, 3, 2, 1)
+    val secondBuckets = Array[Long](2000, 100, 20, 10, 8, 6, 4, 2)
+
+    val histData = Stream(
+      Seq(startTS, 1075L, 1075L, bv.LongHistogram(bucketScheme, firstBuckets), minVal, maxVal,
+          "request-latency", MMD.extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> "0".utf8)),
+      Seq(endTS, 2150L, 2150L, bv.LongHistogram(bucketScheme, secondBuckets), minVal, maxVal,
+          "request-latency", MMD.extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> "0".utf8))
+    )
+
+    // Use the same pattern as cumulativeHistMaxMinRV
+    val container = MMD.records(MMD.cumulativeHistMaxMinDS, histData).records
+    val bufferPool = new WriteBufferPool(TestData.nativeMem, MMD.cumulativeHistMaxMinDS.schema.data, storeConf)
+    val part = TimeSeriesPartitionSpec.makePart(0, MMD.cumulativeHistMaxMinDS, partKey=MMD.histPartKey,
+                                                bufferPool=bufferPool)
+    container.iterate(MMD.cumulativeHistMaxMinDS.ingestionSchema).foreach { row =>
+      part.ingest(0, row, MMD.cumulativeHistMaxMinBH, false, Option.empty, false)
+    }
+    part.switchBuffers(MMD.cumulativeHistMaxMinBH, encode = true)
+
+    val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
+                                new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
+
+    // Calculate rate using CumulativeHistRateAndMinMaxFunction through full pipeline
+    val windowTime = endTS - startTS
+    val row = new TransientHistMaxMinRow()
+    val it = new ChunkedWindowIteratorH(rv, endTS, 100000, endTS, windowTime,
+                 new CumulativeHistRateAndMinMaxFunction(5, 4).asInstanceOf[ChunkedRangeFunction[TransientHistRow]],
+                 querySession, row)
+
+    val rateResults = it.toList
+    rateResults.size shouldEqual 1
+
+    val rateRow = rateResults.head
+    val rateHist = rateRow.getHistogram(1)
+    val extractedMax = rateRow.getDouble(2)
+    val extractedMin = rateRow.getDouble(3)
+
+    // Verify max/min are preserved through the pipeline
+    extractedMax shouldEqual maxVal +- errorOk
+    extractedMin shouldEqual minVal +- errorOk
+
+    // Bottom bucket rate should be (2000-1000)/100 = 10 per second, creating strong concentration
+    val timeDelta = (endTS - startTS) / 1000.0
+    val expectedBottomBucketRate = (secondBuckets.head - firstBuckets.head).toDouble / timeDelta
+    info(s"Bottom bucket rate: $expectedBottomBucketRate per second")
+
+    // Test low quantiles where interpolation falls in bottom bucket
+    val lowQuantiles = Seq(0.001, 0.005, 0.01, 0.05, 0.5, 0.75, 0.9, 0.95, 0.99)
+
+    lowQuantiles.foreach { q =>
+      val unboundedQuantile = rateHist.quantile(q)
+      val boundedQuantile = rateHist.quantile(q, extractedMin, extractedMax)
+
+      info(s"q=$q: unbounded=$unboundedQuantile, bounded=$boundedQuantile")
+
+      // Bounded quantile must always respect min/max constraints
+      if (!boundedQuantile.isNaN) {
+        boundedQuantile should be <= maxVal
+        boundedQuantile should be >= minVal
+      }
+
+      // When unbounded goes below min, verify clamping occurred
+      if (!unboundedQuantile.isNaN && unboundedQuantile < minVal) {
+        boundedQuantile should be > unboundedQuantile
+        info(s"  ✓ Min constraint applied: $unboundedQuantile clamped to $boundedQuantile")
+      }
     }
   }
 

@@ -1,17 +1,15 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicLong
-
 import scala.concurrent.duration._
 import scala.io.Source
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
-
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
@@ -50,10 +48,15 @@ object TestData {
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
     }
+    downsample {
+      resolutions = [ 1 minute, 5 minutes ]
+      ttls = [ 32 days, 183 days ]
+    }
   """
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
+  val downsampleConf = DownsampleConfig(sourceConf.getConfig("downsample"))
   val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
 
   val optionsString = """
@@ -269,15 +272,18 @@ object MachineMetricsData {
   }
 
   /**
-    * @param ingestionTimeStep defines the ingestion time increment for each generated
-    * RecordContainer
-    */
+   * @param ingestionTimeStep defines the ingestion time increment for each generated
+   * RecordContainer
+   */
   def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
                      ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
-                     offset: Int = 0): Seq[SomeData] =
-    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
-      case (group, i) => records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
+                     offset: Int = 0): Seq[SomeData] = {
+    val i : Iterator[Stream[Seq[Any]]] = stream.take(n).grouped(groupSize)
+    i.toSeq.zipWithIndex.map {
+      case (group: Stream[Seq[Any]], i: Int) =>
+        records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
+  }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
@@ -425,17 +431,22 @@ object MachineMetricsData {
     Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false", "min:double", "max:double"),
     valueColumn = Some("h")).get
 
+  // Cumulative histogram dataset with counter=true for testing CumulativeHistRateAndMinMaxFunction
+  val cumulativeHistMaxMinDS = Dataset.make("cumulative-histmaxmin",
+    Seq("metric:string", "tags:map"),
+    Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true", "min:double", "max:double"),
+    valueColumn = Some("h")).get
+
   // Pass in the output of linearHistSeries here.
   // Adds in the max and min column before h/hist
+  // Uses constant max/min values to simulate realistic observed min/max in OTEL-style metrics
   def histMaxMin(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
-      val hist = row(3).asInstanceOf[bv.LongHistogram]
-      // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
-      val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
-      val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
-                            .lastOption.getOrElse(hist.numBuckets - 1)
-      val max = hist.bucketTop(lastBucketNum) * 0.8
-      val min = hist.bucketTop(lastBucketNum) * 0.1
+      // Use constant max/min representing actual observed values in the metric
+      // GeometricBuckets(2.0, 2.0, 8) has bucket tops: [2, 4, 8, 16, 32, 64, 128, 256]
+      // Since synthetic data cycles through all buckets, use values spanning the range
+      val max = 200.0  // Maximum observed value (in bucket 7: 128 < x <= 256)
+      val min = 1.0    // Minimum observed value (in bucket 0: 0 < x <= 2)
       ((row take 4):+ min :+ max) ++ (row drop 4)
     }
 
@@ -475,6 +486,26 @@ object MachineMetricsData {
       Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxMinBH, encode = true)
+    // Select timestamp, hist, max, min
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
+      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+  }
+
+  // Buffer pool and BlockMemFactory for cumulative histograms
+  private val cumulativeHistMaxBP = new WriteBufferPool(TestData.nativeMem, cumulativeHistMaxMinDS.schema.data, TestData.storeConf)
+  val cumulativeHistMaxMinBH = new BlockMemFactory(blockStore, cumulativeHistMaxMinDS.schema.data.blockMetaSize,
+                                      dummyContext, true)
+
+  // Generates cumulative histogram RV with min/max columns for testing CumulativeHistRateAndMinMaxFunction
+  def cumulativeHistMaxMinRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = histMaxMin(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(cumulativeHistMaxMinDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, cumulativeHistMaxMinDS, partKey=histPartKey, bufferPool=cumulativeHistMaxBP)
+    container.iterate(cumulativeHistMaxMinDS.ingestionSchema).foreach { row => part.ingest(0, row, cumulativeHistMaxMinBH, false,
+      Option.empty, false, 1.hour.toMillis) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(cumulativeHistMaxMinBH, encode = true)
     // Select timestamp, hist, max, min
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
       new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
