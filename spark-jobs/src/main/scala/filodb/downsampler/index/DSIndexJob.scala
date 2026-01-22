@@ -92,8 +92,10 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     }
 
     // quick & dirty hack to ensure that the completed metric gets published
-    if (dsSettings.shouldSleepForMetricsFlush)
+    if (dsSettings.shouldSleepForMetricsFlush) {
+      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
       Await.result(Kamon.stopModules(), 62.seconds)
+    }
 
   }
 
