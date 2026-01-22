@@ -308,7 +308,7 @@ object CliMain extends StrictLogging {
         val dataset = new Dataset(dsRef.dataset, Schemas.global.schemas.get(args.schema()).get)
         val planner = new SingleClusterPlanner(dataset, Schemas.global,
           mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
-          StaticSpreadProvider(SpreadChange(0, args.spread())),
+          spreadProvider = StaticSpreadProvider(SpreadChange(0, args.spread())),
           _targetSchemaProvider=StaticTargetSchemaProvider(args.targetschema.toOption))
         println(FindShardFormatStr.format("Shards", "Query"))
         args.queries().foreach(query => {

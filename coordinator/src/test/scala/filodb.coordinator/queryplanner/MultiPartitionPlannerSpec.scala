@@ -41,7 +41,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
                               routingConfig = RoutingConfig(supportRemoteRawExport = true))
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, 1)))
+    queryConfig, "raw", spreadProvider = StaticSpreadProvider(SpreadChange(0, 1)))
 
   val startSeconds = 1000
   val endSeconds = 10000

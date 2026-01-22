@@ -519,9 +519,10 @@ object ProtoConverters {
         case filodb.core.query.QueryLimitException(message, queryId)                          =>
                                                       builder.putMetadata("queryId", queryId)
                                                       builder.putMetadata("message", message)
-        case filodb.core.QueryTimeoutException(elapsedQueryTime, timedOutAt)                  =>
+        case filodb.core.QueryTimeoutException(elapsedQueryTime, timedOutAt, e)               =>
                                                       builder.putMetadata("timedOutAt", timedOutAt)
                                                       builder.putMetadata("elapsedQueryTime", s"$elapsedQueryTime")
+                                                      builder.putMetadata("exception", e.map(_.toString).getOrElse(""))
         case SchemaMismatch(expected, found, clazz)                                           =>
                                                       builder.putMetadata("expected", expected)
                                                       builder.putMetadata("found", found)
@@ -978,6 +979,7 @@ object ProtoConverters {
         case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
+        case asrv: ArrowSerializedRangeVector  => ??? // FIXME need to implement before productionizing
       }
     }
   }
