@@ -7,10 +7,10 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.SortedSet
 import scala.concurrent.duration._
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
-
-
 
 trait TsdbQueryParams
 
@@ -236,6 +236,11 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
     } else None
   }
 
+  def queryTimeRemaining: Long = {
+    val timeElapsed = System.currentTimeMillis() - submitTime
+    plannerParams.queryTimeoutMillis - timeElapsed
+  }
+
   def getQueryLogLine(msg: String): String = {
     val promQl = origQueryParams match {
       case PromQlQueryParams(query: String, _, _, _, _, _) => query
@@ -337,6 +342,7 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
+ * QuerySession should never be serialized and sent/recieved over the wire to a peer Filodb or client node.
   *
   * IMPORTANT: The param catchMultipleLockSetErrors should be false
   * only in unit test code for ease of use.
@@ -349,9 +355,10 @@ case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
                         streamingDispatch: Boolean = false,
                         catchMultipleLockSetErrors: Boolean = false,
+                        var flightAllocator: Option[FlightAllocator] = None,
                         // in case of target schemas, when the child Exec plan is run, if the
                         //  the execution happens locally and thus no serialization is necessary
-                        preventRangeVectorSerialization: Boolean = false) {
+                        preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
 
   val queryStats: QueryStats = QueryStats()
   val warnings: QueryWarnings = QueryWarnings()
@@ -368,6 +375,8 @@ case class QuerySession(qContext: QueryContext,
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
+    flightAllocator.foreach(_.close())
+    flightAllocator = None
   }
 }
 

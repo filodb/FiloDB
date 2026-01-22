@@ -83,7 +83,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   val queryConfig = QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dataset, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, "raw",
-                                              functionalSpreadProvider)
+                                              spreadProvider = functionalSpreadProvider)
   val queryScheduler = QueryScheduler.queryScheduler
 
   private val tags = Map("dataset" -> dsRef.toString)
@@ -228,7 +228,12 @@ final class QueryActor(memStore: TimeSeriesStore,
       try {
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
         if (streamResultsEnabled) {
-          val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
+          val querySession = QuerySession(execPlan.queryContext,
+            queryConfig,
+            streamingDispatch = streamResultsEnabled,
+            catchMultipleLockSetErrors = true)
+          val res = queryPlanner.dispatchStreamingExecPlan(execPlan, querySession,
+                                                           Kamon.currentSpan())(queryScheduler, 30.seconds)
           queryengine.Utils.streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
             case Success(resp) => replyTo ! resp
             case Failure(e) => replyTo ! QueryError(q.qContext.queryId, QueryStats(), e)

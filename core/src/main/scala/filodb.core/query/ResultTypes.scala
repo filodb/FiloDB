@@ -82,6 +82,8 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
     // exclude column names
     other.columns.map(_.colType) == columns.map(_.colType)
   }
+
+  def toRecordSchema: RecordSchema = new RecordSchema(columns)
 }
 
 object ResultSchema {

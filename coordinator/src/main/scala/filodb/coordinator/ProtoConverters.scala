@@ -1,19 +1,23 @@
 package filodb.coordinator
 
-import akka.serialization.SerializationExtension
-import com.google.protobuf.ByteString
-import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
+
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.FiniteDuration
 
+import akka.serialization.SerializationExtension
+import com.google.protobuf.ByteString
+import com.typesafe.config.ConfigFactory
+import org.apache.arrow.flight.Location
+
+import filodb.coordinator.flight.SingleClusterFlightPlanDispatcher
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{ComputedColumn, DataColumn}
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
-import filodb.grpc.GrpcMultiPartitionQueryService.{RangeVectorTransformerContainer, RemoteExecPlan}
 import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.grpc.GrpcMultiPartitionQueryService.{RangeVectorTransformerContainer, RemoteExecPlan}
 import filodb.grpc.GrpcMultiPartitionQueryService.ExecPlanContainer.ExecPlanCase
 import filodb.grpc.GrpcMultiPartitionQueryService.FuncArgs.FuncArgTypeCase
 import filodb.query.{AggregationOperator, QueryCommand}
@@ -1314,6 +1318,7 @@ object ProtoConverters {
         case ippd: InProcessPlanDispatcher => builder.setInProcessPlanDispatcher(ippd.toProto)
         case rapd: RemoteActorPlanDispatcher => builder.setRemoteActorPlanDispatcher(rapd.toProto)
         case gpd: GrpcPlanDispatcher => builder.setGrpcPlanDispatcher(gpd.toProto)
+        case fpd: SingleClusterFlightPlanDispatcher => builder.setSingleClusterFlightPlanDispatcher(fpd.toProto)
         case _ => throw new IllegalArgumentException(s"Unexpected PlanDispatcher subclass ${pd.getClass.getName}")
       }
       builder.build()
@@ -1388,6 +1393,21 @@ object ProtoConverters {
   implicit class GrpcPlanDispatcherFromProtoConverter(gpd: GrpcMultiPartitionQueryService.GrpcPlanDispatcher) {
     def fromProto: GrpcPlanDispatcher = {
       val dispatcher = GrpcPlanDispatcher(gpd.getEndpoint, gpd.getRequestTimeoutMs)
+      dispatcher
+    }
+  }
+
+  implicit class SingleClusterFlightPlanDispatcherToProtoConverter(fpd: filodb.coordinator.flight.SingleClusterFlightPlanDispatcher) {
+    def toProto(): GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher = {
+      val builder = GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher.newBuilder()
+      builder.setPlanDispatcher(fpd.asInstanceOf[filodb.query.exec.PlanDispatcher].toProto)
+      builder.build()
+    }
+  }
+
+  implicit class SingleClusterFlightPlanDispatcherFromProtoConverter(fpd: GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher) {
+    def fromProto: SingleClusterFlightPlanDispatcher = {
+      val dispatcher = SingleClusterFlightPlanDispatcher(new Location( fpd.getLocation), fpd.getPlanDispatcher.getClusterName)
       dispatcher
     }
   }
@@ -2967,6 +2987,8 @@ object ProtoConverters {
           pdc.getRemoteActorPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.GRPCPLANDISPATCHER =>
           pdc.getGrpcPlanDispatcher.fromProto
+        case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.SINGLECLUSTERFLIGHTPLANDISPATCHER =>
+          pdc.getSingleClusterFlightPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.DISPATCHER_NOT_SET =>
           throw new IllegalArgumentException("Invalid PlanDispatcherContainer")
       }

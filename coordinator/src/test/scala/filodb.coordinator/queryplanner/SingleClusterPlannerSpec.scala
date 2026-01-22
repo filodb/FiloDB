@@ -4,6 +4,7 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
 import filodb.core.metadata.Column.ColumnType
@@ -20,12 +21,12 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
-
 import scala.concurrent.duration._
 
 object SingleClusterPlannerSpec {
@@ -2096,7 +2097,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     ep4.isInstanceOf[EmptyResultExec] shouldEqual true
     import GlobalScheduler._
     val res = ep4.dispatcher.dispatch(ExecPlanWithClientParams(ep4, ClientParams
-    (ep4.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+    (ep4.queryContext.plannerParams.queryTimeoutMillis), QuerySession(QueryContext(), queryConfig)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     res.result.isEmpty shouldEqual true
   }
 
