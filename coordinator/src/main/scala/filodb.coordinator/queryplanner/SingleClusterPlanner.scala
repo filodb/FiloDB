@@ -209,7 +209,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         throw new RuntimeException(s"Shard: $shard is not available")
     }
     if (flightEnabled) {
-      qLogger.info(s"Converting $targetActor to Flight ... ")
+      qLogger.debug(s"Converting $targetActor to Flight ... ")
       val location = Location.forGrpcInsecure(targetActor.path.address.host.get,
          FiloDBFlightProducer.akkaPortToFlightPort(targetActor.path.address.port.get))
       SingleClusterFlightPlanDispatcher(location, clusterName)
