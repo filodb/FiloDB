@@ -118,6 +118,10 @@ class SingleClusterPlanner(val dataset: Dataset,
           QueryUtils.splitAtUnescapedPipes(regex.value.toString).distinct
         case ColumnFilter(col, equals: Equals) =>
           Seq(equals.value.toString)
+        case ColumnFilter(col, regex: EqualsRegex) =>
+          throw new BadQueryException(s"Queries on shard key column '$col' do not support regular expressions " +
+            "with wildcards. Only exact match (=) or pipe-separated alternatives (=~'val1|val2') are supported. " +
+            s"Received regex: '${regex.value}'")
       }
       (filter.column, values)
     }.toMap

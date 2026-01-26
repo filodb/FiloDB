@@ -2917,4 +2917,83 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     )
     shardsFromValues(tschemaChangesAfter).size shouldEqual 1
   }
+
+  it("should throw BadQueryException when shard key column uses regex with wildcards") {
+    // This test verifies that non-pipe-only regex patterns on shard key columns
+    // result in a BadQueryException (HTTP 400) rather than a MatchError (HTTP 500)
+    val query = """foo{job=~"bar.*"}"""
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+    }
+
+    val thrown = intercept[BadQueryException] {
+      engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(
+        spreadOverride = Some(FunctionalSpreadProvider(_ => Seq(SpreadChange(0, 2)))),
+        targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+        queryTimeoutMillis = 1000000)))
+    }
+
+    thrown.getMessage should include("job")
+    thrown.getMessage should include("do not support regular expressions with wildcards")
+    thrown.getMessage should include("bar.*")
+  }
+
+  it("should throw BadQueryException with correct message for complex regex on shard key") {
+    // Test with a complex regex pattern containing multiple wildcards
+    val query = """up{job=~"my-service.*prod.*region.*"}"""
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+    }
+
+    val thrown = intercept[BadQueryException] {
+      engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(
+        spreadOverride = Some(FunctionalSpreadProvider(_ => Seq(SpreadChange(0, 2)))),
+        targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+        queryTimeoutMillis = 1000000)))
+    }
+
+    thrown.getMessage should include("job")
+    thrown.getMessage should include("pipe-separated alternatives")
+    thrown.getMessage should include("my-service.*prod.*region")
+  }
+
+  it("should allow pipe-only regex on shard key columns") {
+    // Pipe-only regex should work without throwing exceptions
+    val query = """foo{job=~"bar|baz|qux"}"""
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+    }
+
+    // Should not throw any exception
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(
+      spreadOverride = Some(FunctionalSpreadProvider(_ => Seq(SpreadChange(0, 2)))),
+      targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+      queryTimeoutMillis = 1000000)))
+
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should allow exact match on shard key columns") {
+    // Exact match should work without throwing exceptions
+    val query = """foo{job="bar"}"""
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+    }
+
+    // Should not throw any exception
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(
+      spreadOverride = Some(FunctionalSpreadProvider(_ => Seq(SpreadChange(0, 2)))),
+      targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+      queryTimeoutMillis = 1000000)))
+
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
 }
