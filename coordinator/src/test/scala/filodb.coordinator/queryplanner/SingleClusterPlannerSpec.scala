@@ -2936,7 +2936,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     }
 
     thrown.getMessage should include("job")
-    thrown.getMessage should include("do not support regular expressions with wildcards")
+    thrown.getMessage should include("do not support all regular expressions")
     thrown.getMessage should include("bar.*")
   }
 
