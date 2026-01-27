@@ -486,16 +486,29 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   }
 
   it ("test isAllActive with non-byte-aligned number of shards") {
-    // 10 shards = 2 bytes with padding
-    val shardMapper = new ShardMapper(16)  // Must be power of 2, using 16 instead of 10
+    // 2 shards = 1 byte with 6 bits of padding (non-byte-aligned)
+    val shardMapper = new ShardMapper(2)
     shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
 
-    // Make all shards active
-    for (i <- 0 until 16) {
+    // Make both shards active
+    for (i <- 0 until 2) {
       shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
     }
 
-    val shardMapperV2 = ShardMapperV2(2, 16, "host-{}", shardMapper)
+    val shardMapperV2 = ShardMapperV2(1, 2, "host-{}", shardMapper)
+    // Should return true even though 6 bits are padding (00)
+    // Bitmap: 11000000 (shards 0,1 active, rest is padding)
     ShardMapperV2.isAllActive(shardMapperV2) shouldEqual true
+
+    // Now test with one inactive shard
+    val shardMapper2 = new ShardMapper(2)
+    shardMapper2.registerNode(shardMapper2.statuses.indices, TestProbe().ref)
+    shardMapper2.updateFromEvent(IngestionStarted(dataset, 0, TestProbe().ref))
+    // Shard 1 remains inactive
+
+    val shardMapperV2_2 = ShardMapperV2(1, 2, "host-{}", shardMapper2)
+    // Should return false because shard 1 is not active
+    // Bitmap: 10000000 (shard 0 active, shard 1 inactive, rest is padding)
+    ShardMapperV2.isAllActive(shardMapperV2_2) shouldEqual false
   }
 }
