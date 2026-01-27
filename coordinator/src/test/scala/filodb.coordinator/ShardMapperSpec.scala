@@ -399,4 +399,103 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     bitRep = ShardMapperV2.shardMapperBitMapRepresentation(shardMapper)
     bitRep(0) shouldEqual 0x80.toByte // 1000 0000
   }
+
+  it ("test isAllActive returns true when all shards are active") {
+    val shardMapper = new ShardMapper(32)
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make all shards active
+    for (i <- 0 until 32) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual true
+  }
+
+  it ("test isAllActive returns false when some shards are inactive") {
+    val shardMapper = new ShardMapper(32)
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make some shards active, leave others in Assigned state
+    for (i <- 0 until 16) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive returns false when even one shard is inactive") {
+    val shardMapper = new ShardMapper(256)
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make all but one shard active
+    for (i <- 0 until 255) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+
+    val shardMapperV2 = ShardMapperV2(32, 256, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive returns false when shards are in recovery") {
+    val shardMapper = new ShardMapper(32)
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make most shards active
+    for (i <- 0 until 28) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    // Put some in recovery
+    for (i <- 28 until 32) {
+      shardMapper.updateFromEvent(RecoveryInProgress(dataset, i, TestProbe().ref, 50))
+    }
+
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive returns false when shards are down") {
+    val shardMapper = new ShardMapper(64)
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make most shards active
+    for (i <- 0 until 60) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+    // Mark some as down
+    for (i <- 60 until 64) {
+      shardMapper.updateFromEvent(ShardDown(dataset, i, TestProbe().ref))
+    }
+
+    val shardMapperV2 = ShardMapperV2(8, 64, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive returns false for null shard state") {
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", null)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive returns false for incorrectly sized shard state array") {
+    // 32 shards should have 4 bytes, but we'll give it 2
+    val invalidShardState = new Array[Byte](2)
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", invalidShardState)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
+  }
+
+  it ("test isAllActive with non-byte-aligned number of shards") {
+    // 10 shards = 2 bytes with padding
+    val shardMapper = new ShardMapper(16)  // Must be power of 2, using 16 instead of 10
+    shardMapper.registerNode(shardMapper.statuses.indices, TestProbe().ref)
+
+    // Make all shards active
+    for (i <- 0 until 16) {
+      shardMapper.updateFromEvent(IngestionStarted(dataset, i, TestProbe().ref))
+    }
+
+    val shardMapperV2 = ShardMapperV2(2, 16, "host-{}", shardMapper)
+    ShardMapperV2.isAllActive(shardMapperV2) shouldEqual true
+  }
 }

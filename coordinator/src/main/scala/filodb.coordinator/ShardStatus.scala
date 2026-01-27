@@ -89,6 +89,35 @@ object ShardMapperV2 {
   }
 
   /**
+   * Checks if all shards are active in the given ShardMapperV2 instance.
+   * This is useful for validating cluster health before proceeding with complex merge operations.
+   *
+   * @param shardMapperV2 ShardMapperV2 object to check
+   * @return true if all shards are active (all bits set to 1), false otherwise
+   */
+  def isAllActive(shardMapperV2: ShardMapperV2): Boolean = {
+    val expectedByteLength = (shardMapperV2.numShards + 7) / 8
+
+    // Validate shard state array
+    if (shardMapperV2.shardState == null || shardMapperV2.shardState.length != expectedByteLength) {
+      return false
+    }
+
+    // Check each shard's bit
+    for (shardIndex <- 0 until shardMapperV2.numShards) {
+      val byteIndex = shardIndex / 8
+      val bitIndex = shardIndex % 8
+      val bit = (shardMapperV2.shardState(byteIndex) >> (7 - bitIndex)) & 1
+
+      if (bit == 0) {
+        return false  // Found an inactive shard
+      }
+    }
+
+    true  // All shards are active
+  }
+
+  /**
    * Helper function to print the bitmap, node and shard status. This is useful in debugging.
    */
   def prettyPrint(shardMapperV2: ShardMapperV2): Unit = {
