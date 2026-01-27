@@ -474,7 +474,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   }
 
   it ("test isAllActive returns false for null shard state") {
-    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", null)
+    val shardMapperV2 = ShardMapperV2(4, 32, "host-{}", null.asInstanceOf[Array[Byte]])
     ShardMapperV2.isAllActive(shardMapperV2) shouldEqual false
   }
 

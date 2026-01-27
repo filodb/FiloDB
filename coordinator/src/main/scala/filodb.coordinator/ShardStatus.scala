@@ -90,7 +90,7 @@ object ShardMapperV2 {
 
   /**
    * Checks if all shards are active in the given ShardMapperV2 instance.
-   * This is useful for validating cluster health before proceeding with complex merge operations.
+   * This is useful for validating cluster health.
    *
    * @param shardMapperV2 ShardMapperV2 object to check
    * @return true if all shards are active (all bits set to 1), false otherwise
