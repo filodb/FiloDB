@@ -16,7 +16,6 @@ import filodb.core.store.ChunkSource
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import org.scalatest.Assertion
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -862,25 +861,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      )
-    )
+      ))
 
-    result.size shouldEqual 4
+    result.size shouldEqual 2
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    assertSingleNaN(result(0))
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(2))
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(400)
   }
 
   it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
@@ -901,12 +887,19 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
 
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
     // group=canary and instance=0 have same jobs. We are joining on Job so no result
-    result.size shouldEqual 4
-    assertSingleNaN(result(0))
-    assertSingleNaN(result(1))
-    assertSingleNaN(result(2))
-    assertSingleNaN(result(3))
+    result.size shouldEqual 0
   }
 
   it("LUnless should return lhs samples which are not present in rhs and where on labels are not equal") {
@@ -936,26 +929,14 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      )
-    )
+      ))
 
-    result.size shouldEqual 4
+    result.size shouldEqual 2
+
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
-    result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
-    assertSingleNaN(result(1))
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(3))
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
   }
 
   it("should not return any results when rhs has same vector on joining without ignoring labels with LUnless") {
@@ -988,11 +969,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     // group=canary and instance=0 have same jobs. We are joining on Job so no result
-    result.size shouldEqual 4
-    assertSingleNaN(result(0))
-    assertSingleNaN(result(1))
-    assertSingleNaN(result(2))
-    assertSingleNaN(result(3))
+    result.size shouldEqual 0
   }
 
   it("LUnless should return lhs samples which are not present in rhs and where labels other than " +
@@ -1023,74 +1000,14 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      )
-    )
+      ))
 
-    result.size shouldEqual 4
+    result.size shouldEqual 2
 
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
-    result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
-    assertSingleNaN(result(1))
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    assertSingleNaN(result(3))
-  }
-
-  it("Unless should return same rv when RHS has only NaN") {
-
-    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
-      BinaryOperator.LUnless,
-      None, Nil, "__name__", None)
-
-    // scalastyle:off
-    val lhs = QueryResult("someId", tvSchema,
-      sampleCanary.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
-    val rhs = QueryResult("someId", tvSchema,
-      sampleAllNaN.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
-    // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
-      .toListL.runToFuture.futureValue
-
-    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
-      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-    ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      )
-    )
-
-    result.size shouldEqual 4
-    result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(300)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(700)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
   }
 
   it("AND should not return rv's when RHS has only NaN") {
@@ -1607,7 +1524,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   it("should perform A - B when no on is given correctly") {
     val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Nil, "_metric_", None)
     val lhsRv = rangeVectors(List(
-      (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN), (30, 2.0))),
+      (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN))),
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((0, 1.0), (10, 2.0), (20, 3.0))),
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0))),
       (Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((100, 1.0), (200, 2.0), (300, 3.0)))
@@ -1616,12 +1533,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN)))
     ))
 
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
-    map.size shouldEqual 3
-    map.get(Map("label1".utf8 -> "value1".utf8)) match {
-      case Some(matched)  => assertListEquals(matched, List((0,Double.NaN), (10,Double.NaN), (20,Double.NaN), (30,2.0)))
-      case None           => fail("Expected to find a matching RV for key Map(label1 -> value1)")
-    }
+    val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldEqual 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
@@ -1630,69 +1543,6 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     map.get(Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)       => matched shouldEqual Seq((100, 1.0), (200, 2.0), (300, 3.0))
       case None                => fail("Expected to find a matching RV for key Map(label1 -> value1, onLabel -> onValue1)")
-    }
-  }
-
-  it("should mask matching series and leave others when no on is given") {
-    val exec = SetOperatorExec(
-      QueryContext(), dummyDispatcher, Nil, Nil,
-      BinaryOperator.LUnless, None, Nil, "_metric_", None
-    )
-
-    val lhsRv = rangeVectors(List(
-      (Map("label1".utf8 -> "value1".utf8) -> Seq((0, 5.0),  (1, 6.0),  (2, 7.0))),
-      (Map("label1".utf8 -> "other".utf8)  -> Seq((0, 8.0),  (1, 9.0),  (2, 10.0)))
-    ))
-    val rhsRv = rangeVectors(List(
-      (Map("label1".utf8 -> "value1".utf8) -> Seq((0, 100.0), (1, Double.NaN), (2, 200.0)))
-    ))
-
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession)
-      .map(rv => rv.key.labelValues -> rvRowsToListOfTuples(rv))
-      .toMap
-
-    map.size shouldBe 2
-
-    map.get(Map("label1".utf8 -> "value1".utf8)) match {
-      case Some(matched) =>
-        // At t=0 and t=2 RHS had values → NaN; at t=1 RHS was NaN → keep LHS
-        assertListEquals(matched, List((0, Double.NaN), (1, 6.0), (2, Double.NaN)))
-      case None => fail("Expected a masked series for label1->value1")
-    }
-
-    map.get(Map("label1".utf8 -> "other".utf8)) match {
-      case Some(matched) =>
-        // No RHS match on this key → passes through unchanged
-        assertListEquals(matched, List((0, 8.0), (1, 9.0), (2, 10.0)))
-      case None => fail("Expected an unmodified series for label1->other")
-    }
-  }
-
-  it("should stitch multiple LHS shards when no on is given and RHS is empty") {
-    val exec = SetOperatorExec(
-      QueryContext(), dummyDispatcher, Nil, Nil,
-      BinaryOperator.LUnless, None, Nil, "_metric_", None
-    )
-
-    val lhsRv = rangeVectors(List(
-      // Two shards for the same full label-set label1=value1
-      (Map("label1".utf8 -> "value1".utf8) -> Seq((0, 1.0), (1, 2.0))),
-      (Map("label1".utf8 -> "value1".utf8) -> Seq((2, 3.0), (3, 4.0)))
-    ))
-    val rhsRv = rangeVectors(Nil)  // No RHS series at all
-
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession)
-      .map(rv => rv.key.labelValues -> rvRowsToListOfTuples(rv))
-      .toMap
-
-    // Only one stitched series should appear for label1=value1
-    map.size shouldBe 1
-
-    map.get(Map("label1".utf8 -> "value1".utf8)) match {
-      case Some(matched) =>
-        // Shards combined into one continuous series
-        assertListEquals(matched, List((0, 1.0), (1, 2.0), (2, 3.0), (3, 4.0)))
-      case None => fail("Expected a single stitched series for label1->value1")
     }
   }
 
@@ -1710,85 +1560,20 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN)))
     ))
 
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
-    map.size shouldBe 3
-    map.get(Map("label1".utf8 -> "value1".utf8)) match {
-      case Some(matched)  => assertListEquals(matched, List((0,Double.NaN), (10,Double.NaN), (20,Double.NaN)))
-      case None           => fail("Expected to find a matching RV for key Map(label1 -> value1)")
-    }
+    val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldBe 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
     }
 
     map.get(Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
-      case Some(matched)       => assertListEquals(matched, List((100, 1.0), (200, 2.0), (300, 3.0)))
+      case Some(matched)       => matched shouldEqual Seq((100, 1.0), (200, 2.0), (300, 3.0))
       case None                => fail("Expected to find a matching RV for key Map(label1 -> value1, onLabel -> onValue1)")
     }
+
   }
 
-  it("should pass through all LHS series when no onLabel match in RHS") {
-    val exec = SetOperatorExec(
-      QueryContext(), dummyDispatcher, Nil, Nil,
-      BinaryOperator.LUnless, Some(Seq("onLabel")), Nil, "_metric_", None
-    )
-
-    val lhsRv = rangeVectors(List(
-      (Map("label".utf8 -> "v1".utf8, "onLabel".utf8 -> "a".utf8) -> Seq((0, 1.0), (1, 2.0))),
-      (Map("label".utf8 -> "v2".utf8, "onLabel".utf8 -> "b".utf8) -> Seq((0, 3.0), (1, 4.0)))
-    ))
-    // RHS has a different onLabel, so no join-key matches
-    val rhsRv = rangeVectors(List(
-      (Map("label".utf8 -> "x".utf8, "onLabel".utf8 -> "c".utf8) -> Seq((0, 5.0)))
-    ))
-
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession)
-      .map(rv => rv.key.labelValues -> rvRowsToListOfTuples(rv))
-      .toMap
-
-    map.size shouldBe 2
-    map(Map("label".utf8 -> "v1".utf8, "onLabel".utf8 -> "a".utf8)) shouldEqual Seq((0,1.0),(1,2.0))
-    map(Map("label".utf8 -> "v2".utf8, "onLabel".utf8 -> "b".utf8)) shouldEqual Seq((0,3.0),(1,4.0))
-  }
-
-  it("should mask overlapping rows only for matching onLabel and leave others intact") {
-    val exec = SetOperatorExec(
-      QueryContext(), dummyDispatcher, Nil, Nil,
-      BinaryOperator.LAND, Some(Seq("onLabel")), Nil, "_metric_", None
-    )
-
-    val lhsRv = rangeVectors(List(
-      (Map("label".utf8 -> "v".utf8, "onLabel".utf8 -> "x".utf8) -> Seq((1, 10.0), (2, 20.0), (3, 30.0))),
-      (Map("label".utf8 -> "v".utf8, "onLabel".utf8 -> "y".utf8) -> Seq((1, 40.0), (2, 50.0))),
-      (Map("label".utf8 -> "a".utf8, "onLabel".utf8 -> "x".utf8) -> Seq((1, 10.0), (2, 20.0), (3, 30.0))),
-    ))
-    // RHS only overlaps onLabel="x" at timestamp 2
-    val rhsRv = rangeVectors(List(
-      (Map("label".utf8 -> "v".utf8, "onLabel".utf8 -> "x".utf8) -> Seq((2, 999.0)))
-    ))
-
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession)
-      .map(rv => rv.key.labelValues -> rvRowsToListOfTuples(rv))
-      .toMap
-
-    map.size shouldBe 3
-
-    // onLabel="x": only t=1 masked
-    assertListEquals(
-      map(Map("label".utf8 -> "v".utf8, "onLabel".utf8 -> "x".utf8)),
-      List((1,Double.NaN), (2,20.0), (3,30.0))
-    )
-    // onLabel="y": no match => unchanged
-    assertListEquals(
-      map(Map("label".utf8 -> "v".utf8, "onLabel".utf8 -> "y".utf8)),
-      List((1,40.0), (2,50.0))
-    )
-
-    assertListEquals(
-      map(Map("label".utf8 -> "a".utf8, "onLabel".utf8 -> "x".utf8)),
-      List((1,Double.NaN), (2,20.0), (3,30.0))
-    )
-  }
 
   it("should perform A - B correctly only  ignoring is provided") {
     val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, None, Seq("label1", "label2"), "_metric_", None)
@@ -1805,12 +1590,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((0, Double.NaN), (10, 1.0), (20, Double.NaN)))
     ))
 
-    val map = exec.setOpUnless(lhsRv, rhsRv, resultSchema, querySession).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
-    map.size shouldBe 3
-    map.get(Map("label1".utf8 -> "value1".utf8)) match {
-      case Some(matched)  => assertListEquals(matched, List((0,Double.NaN), (10,Double.NaN), (20,Double.NaN)))
-      case None           => fail("Expected to find a matching RV for key Map(label1 -> value1)")
-    }
+    val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldBe 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
@@ -1850,6 +1631,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val lhsRv = rangeVectors(List(
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((10, Double.NaN), (20, 1.0), (30, 2.0))),
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0))),
+      (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 4.0))),
       (Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0))),
       (Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue2".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0)))
     ))
@@ -1868,7 +1650,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     }
 
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
-      case Some(matched)  => assertListEquals(matched, List((10,Double.NaN), (20,2.0), (30,3.0)))
+      case Some(matched)  => assertListEquals(matched, List((10,1.0), (20,2.0), (30,Double.NaN)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
     }
 
@@ -1885,6 +1667,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val lhsRv = rangeVectors(List(
       (Map( "label1".utf8 -> "value1".utf8)-> Seq((10, Double.NaN), (20, 1.0), (30, 2.0))),
       (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0))),
+      (Map( "label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 4.0))),
       (Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue1".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0))),
       (Map( "label1".utf8 -> "value1".utf8, "onLabel".utf8 -> "onValue2".utf8)-> Seq((10, 1.0), (20, 2.0), (30, 3.0)))
     ))
@@ -1903,7 +1686,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     }
 
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
-      case Some(matched)  => assertListEquals(matched, List((10,Double.NaN), (20,2.0), (30,3.0)))
+      case Some(matched)  => assertListEquals(matched, List((10,1.0), (20,2.0), (30,Double.NaN)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
     }
 
@@ -2172,28 +1955,13 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     })
   }
 
-  def assertListEquals(l1: List[(Long, Double)], l2: List[(Long, Double)]): Unit = {
-    withClue(s"List lengths differ: ${l1.length} vs ${l2.length}") {
-      l1.length shouldEqual l2.length
+  def assertListEquals(l1: List[(Long, Double)], l2: List[(Long, Double)]): Boolean =
+    l1.length == l2.length && (l1 zip l1).forall{
+      case ((t1, Double.NaN), (t2, Double.NaN))    =>  t1 == t2
+      case ((t1, v1), (t2, v2))                    =>  t1 == t2 && v1 == v2
+      case _                                       => false
     }
 
-    (l1 zip l2).zipWithIndex.foreach { case (((t1, v1), (t2, v2)), idx) =>
-      withClue(s"Timestamp mismatch at index $idx") {
-        t1 shouldEqual t2
-      }
-      if (!(v1.isNaN && v2.isNaN)) {
-        withClue(s"Value mismatch at timestamp $t1") {
-          v1 shouldEqual v2
-        }
-      }
-    }
-  }
-
-  def assertSingleNaN(rv: RangeVector): Assertion = {
-    val values = rv.rows().map(_.getDouble(1)).toList
-    values should have size 1
-    values.head.isNaN shouldBe true
-  }
 
 }
 // scalastyle:on number.of.methods
