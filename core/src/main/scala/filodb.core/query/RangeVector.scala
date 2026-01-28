@@ -5,16 +5,18 @@ import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.util.Using
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.joda.time.DateTime
-import scala.util.Using
 
 import filodb.core.Utils
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
+import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.metrics.FilodbMetrics
@@ -752,19 +754,19 @@ object ArrowSerializedRangeVector extends StrictLogging {
                                builder: RecordBuilder,
                                queryStats: QueryStats): Unit = {
 
-    vsr.clear()
     val vec = vsr.getVector(0).asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
+    vec.reset()
     var numRows = 0
+    val brIterator = new BRIterator(new BinaryRecordRowReader(recordSchema))
 
     def addFromReader(row: RowReader): Unit = {
       builder.reset()
       builder.addFromReader(row, recordSchema, 0)
-      builder.allContainers.flatMap(_.iterate(recordSchema)).foreach { br =>
-        // TODO ensure capacity only when numRows reaches capacity
+      // avoid allocation by reusing brIterator
+      builder.lastContainer.iterate(brIterator).foreach { br =>
         vec.setSafe(numRows, br.recordBase.asInstanceOf[Array[Byte]],
           br.recordOffset.toInt - UnsafeUtils.arayOffset, br.recordLength)
         numRows += 1
-        vsr.setRowCount(numRows)
       }
     }
 
@@ -781,6 +783,8 @@ object ArrowSerializedRangeVector extends StrictLogging {
             addFromReader(nextRow)
           }
         }
+        vec.setValueCount(numRows)
+        vsr.setRowCount(numRows)
       }
     } finally {
       ChunkMap.releaseAllSharedLocks()

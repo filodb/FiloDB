@@ -472,6 +472,8 @@ class RecordBuilder(memFactory: MemFactory,
    */
   def allContainers: Seq[RecordContainer] = containers
 
+  def lastContainer: RecordContainer = containers.last
+
   // Used for debugging...  throws exception if there is no data.  Be careful here.
   def curContainerBase: Any = currentContainer.get.base
 
