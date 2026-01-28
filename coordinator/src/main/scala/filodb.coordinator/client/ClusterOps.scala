@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import akka.pattern.ask
