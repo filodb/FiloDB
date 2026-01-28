@@ -11,7 +11,7 @@ import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.query.ResultSchema.valueColumnType
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets, MutableHistogram}
+import filodb.memory.format.vectors.{Histogram, HistogramBuckets, HistogramWithBuckets, MutableHistogram}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
@@ -242,19 +242,24 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
             case ColumnType.HistogramColumn =>
               val histResRow = result.asInstanceOf[TransientHistRow]
               val oldHist = next.getHistogram(columnNo = 1).asInstanceOf[HistogramWithBuckets]
-              if (oldHist.numBuckets > histResRow.getHistogram(col = 1).numBuckets) {
-                // If we don't have enough buckets in the TransientHistRow, we initialize and store
-                //   an appropriately-sized histogram. This should only happen once.
-                histResRow.setValues(ts = 0, MutableHistogram(oldHist))
+              if (oldHist.isEmpty) {
+                // Handle empty histogram - set result to empty histogram
+                histResRow.setValues(timestamp, Histogram.empty)
+              } else {
+                if (oldHist.numBuckets > histResRow.getHistogram(col = 1).numBuckets) {
+                  // If we don't have enough buckets in the TransientHistRow, we initialize and store
+                  //   an appropriately-sized histogram. This should only happen once.
+                  histResRow.setValues(ts = 0, MutableHistogram(oldHist))
+                }
+                val resHist = histResRow.getHistogram(col = 1).asInstanceOf[MutableHistogram]
+                (0 until oldHist.numBuckets).foreach{ i =>
+                  val oldVal = oldHist.bucketValue(i)
+                  val resVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
+                               else operatorFunction.calculate(oldVal, sclrVal)
+                  resHist.values(i) = resVal
+                }
+                histResRow.setValues(timestamp, resHist)
               }
-              val resHist = histResRow.getHistogram(col = 1).asInstanceOf[MutableHistogram]
-              (0 until resHist.numBuckets).foreach{ i =>
-                val oldVal = oldHist.bucketValue(i)
-                val resVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
-                             else operatorFunction.calculate(oldVal, sclrVal)
-                resHist.values(i) = resVal
-              }
-              histResRow.setValues(timestamp, resHist)
             case _ =>
               val doubleResRow = result.asInstanceOf[TransientRow]
               val oldVal = next.getDouble(columnNo = 1)
