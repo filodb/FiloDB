@@ -387,12 +387,17 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
 
-    // Verify the result has 3 rows
-    val rows = result.head.rows.toList
-    rows.size shouldEqual 3
+    // Collect isEmpty states during iteration since TransientHistRow is mutable and reused
+    // We need to capture the state as we iterate, not after collecting all rows
+    val isEmptyStates = result.head.rows.map(row => row.getHistogram(1).isEmpty).toList
 
-    // Second row (empty histogram) should return empty histogram
-    rows(1).getHistogram(1).isEmpty shouldEqual true
+    // Verify the result has 3 rows
+    isEmptyStates.size shouldEqual 3
+
+    // Second row (empty histogram) should return empty histogram during iteration
+    isEmptyStates(0) shouldEqual false  // First row: non-empty histogram
+    isEmptyStates(1) shouldEqual true   // Second row: empty histogram
+    isEmptyStates(2) shouldEqual false  // Third row: non-empty histogram
   }
 
 }
