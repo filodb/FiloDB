@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.reflect.ClassTag
@@ -81,6 +81,23 @@ object Client {
     val refFuture = system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(hostPort)).resolveOne(askTimeout)
     val ref = Await.result(refFuture, askTimeout)
     new LocalClient(ref)
+  }
+
+  /**
+   * Async version of standaloneClientV2 that returns a Future instead of blocking.
+   * This allows non-blocking concurrent client creation to multiple nodes.
+   * @param hostPort host:port of the standalone node
+   * @param system the ActorSystem to connect to
+   * @param askTimeout timeout for expecting a response
+   * @return Future of LocalClient that completes when actor reference is resolved
+   */
+  def standaloneClientV2Async(hostPort: String,
+                              system: ActorSystem,
+                              askTimeout: FiniteDuration): Future[LocalClient] = {
+    implicit val ec: ExecutionContext = system.dispatcher  // Use ActorSystem's dispatcher for consistent thread pool
+    system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(hostPort))
+      .resolveOne(askTimeout)
+      .map(ref => new LocalClient(ref))
   }
 
 }
