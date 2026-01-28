@@ -147,6 +147,25 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     resultRows.shouldEqual(List(1, 10, 30))
   }
 
+  it("should return NaN when there is one range vector but with empty rows") {
+    val emptyRowsSample: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = testKey1
+        import filodb.core.query.NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq.empty[TransientRow].iterator
+        override def outputRange: Option[RvRange] = None
+      })
+    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
+    val resultObs = scalarFunctionMapper(Observable.fromIterable(emptyRowsSample), querySession, 1000, resultSchema, Nil)
+    val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
+
+    resultRangeVectors.size shouldEqual 1
+    resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual true
+    val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.size shouldEqual 1
+    resultRows.head.isNaN shouldEqual true
+  }
+
   it("should generate time scalar") {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(10, 10, 100),
       ScalarFunctionId.Time, inProcessDispatcher)

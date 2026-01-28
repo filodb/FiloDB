@@ -359,9 +359,15 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
       if (rvs.size != 1) {
         Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
-        Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap,
-          Some(RvRange(timeStepParams.startSecs * 1000, timeStepParams.stepSecs * 1000,
-                       timeStepParams.endSecs * 1000))))
+        val rowsList = rvs.head.rows.toList
+        if (rowsList.isEmpty) {
+          // Empty rows → return NaN scalar to handle data with no results
+          Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
+        } else {
+          Seq(ScalarVaryingDouble(rowsList.map(r => (r.getLong(0), r.getDouble(1))).toMap,
+            Some(RvRange(timeStepParams.startSecs * 1000, timeStepParams.stepSecs * 1000,
+                         timeStepParams.endSecs * 1000))))
+        }
       }
     }.map(Observable.fromIterable)
     Observable.fromTask(resultRv).flatten
