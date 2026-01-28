@@ -1,8 +1,11 @@
 package filodb.coordinator.client
 
 import scala.concurrent.duration._
+import scala.concurrent.Future
 
 import akka.actor.ActorRef
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator._
@@ -61,6 +64,25 @@ trait ClusterOps extends ClientBase with StrictLogging {
         case ShardSnapshot(shardMapperV2) => Some(shardMapperV2)
         case _ => None
       }
+    }
+  }
+
+  /**
+   * Async version of getShardMapperV2 that returns a Future instead of blocking.
+   * This allows non-blocking concurrent calls to multiple nodes.
+   * @return Future of Option of ShardMapperV2 - Future that completes with Some(ShardMapperV2) if dataset registered,
+   *         None if dataset not found, or fails if actor not available
+   */
+  def getShardMapperV2Async(dataset: DatasetRef, v2Enabled: Boolean,
+                           timeout: FiniteDuration = 10.seconds): Future[Option[ShardMapperV2]] = {
+    require(v2Enabled, s"ClusterV2 ShardAssignment is must for this operation")
+    implicit val askTimeout: Timeout = Timeout(timeout)
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    (nodeCoordinator ? GetShardMapV2(dataset)).mapTo[ShardSnapshot].map { snapshot =>
+      Some(snapshot.map)  // 'map' is the field name in ShardSnapshot case class
+    }.recover {
+      case _: Exception => None
     }
   }
 }
