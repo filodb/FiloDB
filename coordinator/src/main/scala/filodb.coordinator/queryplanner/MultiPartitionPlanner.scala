@@ -435,29 +435,25 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                                  queryContext: QueryContext,
                                                  timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val proportionMap = assignment.proportionMap
+
+    // Materialize left and right sides by delegating to materializeForAssignment
+    // This ensures Aggregates go through materializeForAggregateAssignment
     val leftContext = queryContext.copy(origQueryParams =
       queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.lhs)))
-    val lhsList = proportionMap.map(entry => {
-      val partitionDetails = entry._2
-      materializeForPartition(binaryJoin.lhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, leftContext, timeRangeOverride)
-    }).toSeq
+    val lhsPlan = materializeForAssignment(binaryJoin.lhs, assignment, leftContext, timeRangeOverride)
+
     val rightContext = queryContext.copy(origQueryParams =
       queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.rhs)))
-    val rhsList = proportionMap.map(entry => {
-      val partitionDetails = entry._2
-      materializeForPartition(binaryJoin.rhs, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, rightContext, timeRangeOverride)
-    }).toSeq
-    val dispatcher = PlannerUtil.pickDispatcher(lhsList ++ rhsList)
+    val rhsPlan = materializeForAssignment(binaryJoin.rhs, assignment, rightContext, timeRangeOverride)
+
+    val dispatcher = PlannerUtil.pickDispatcher(Seq(lhsPlan, rhsPlan))
     if (binaryJoin.operator.isInstanceOf[SetOperator])
-      exec.SetOperatorExec(queryContext, dispatcher, lhsList, rhsList, binaryJoin.operator,
+      exec.SetOperatorExec(queryContext, dispatcher, Seq(lhsPlan), Seq(rhsPlan), binaryJoin.operator,
         binaryJoin.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(binaryJoin.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
         rvRangeFromPlan(binaryJoin))
     else
-      BinaryJoinExec(queryContext, dispatcher, lhsList, rhsList, binaryJoin.operator,
+      BinaryJoinExec(queryContext, dispatcher, Seq(lhsPlan), Seq(rhsPlan), binaryJoin.operator,
         binaryJoin.cardinality,
         binaryJoin.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
         LogicalPlanUtils.renameLabels(binaryJoin.ignoring, dsOptions.metricColumn), binaryJoin.include,
@@ -469,28 +465,202 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                                 queryContext: QueryContext,
                                                 timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val proportionMap = assignment.proportionMap
-    val childQueryContext = queryContext.copy(
-      plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
-    val plans = proportionMap.values.map(details => {
+    if (proportionMap.size > 1 && hasJoinOrAggClauseAfterMaterialized(aggregate)) {
+      // Materialize children for this assignment using materializeForAssignment
+      val childQueryContext = queryContext.copy(
+        plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = false))
+      val childExec = materializeForAssignment(aggregate.vectors, assignment, childQueryContext, timeRangeOverride)
+
+      // Add aggregator on top of the child plan
+      val aggregatePlan = addAggregator(aggregate, queryContext, PlanResult(Seq(childExec)))
+      aggregatePlan
+    } else {
+      val childQueryContext = queryContext.copy(
+        plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
+      val plans = proportionMap.values.map(details => {
         materializeForPartition(aggregate, details.partitionName,
           details.grpcEndPoint, details.httpEndPoint, childQueryContext, timeRangeOverride)
-    }).toSeq
-    if (plans.size == 1) plans.head
-    else {
-      plans.filter(_.isInstanceOf[PromQlRemoteExec]).foreach(
-        _.addRangeVectorTransformer(AggregateMapReduce(aggregate.operator, aggregate.params, aggregate.clauseOpt))
-      )
-      val dispatcher = PlannerUtil.pickDispatcher(plans)
-      val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
-        plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-      if (!queryContext.plannerParams.skipAggregatePresent) {
-        val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-        reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
-          RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+      }).toSeq
+      if (plans.size == 1) plans.head
+      else {
+        plans.filter(_.isInstanceOf[PromQlRemoteExec]).foreach(
+          _.addRangeVectorTransformer(AggregateMapReduce(aggregate.operator, aggregate.params, aggregate.clauseOpt))
+        )
+        val dispatcher = PlannerUtil.pickDispatcher(plans)
+        val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
+          plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+        if (!queryContext.plannerParams.skipAggregatePresent) {
+          val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+          reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+            RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+        }
+        reducer
       }
-      reducer
     }
   }
+  /**
+   * Materialize ApplyAbsentFunction for a multi-partition assignment.
+   * This ensures absent() is applied to the aggregated result across all partitions.
+   */
+  private def materializeForAbsentFunctionAssignment(absentFunc: ApplyAbsentFunction,
+                                                     assignment: PartitionAssignmentTrait,
+                                                     queryContext: QueryContext,
+                                                     timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    // Create an aggregate to sum across all partitions
+    val aggregate = Aggregate(AggregationOperator.Sum, absentFunc.vectors)
+    val childQueryContext = queryContext.copy(
+      plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
+    // Create MultiPartitionReduceAggregateExec to aggregate across partitions
+    val reducer = materializeForAggregateAssignment(aggregate, assignment, childQueryContext, timeRangeOverride)
+    // Add AbsentFunctionMapper to the aggregated result
+    val rangeParams = timeRangeOverride match {
+      case Some(tr) => RangeParams(tr.startMs / 1000, absentFunc.stepMs / 1000, tr.endMs / 1000)
+      case None => RangeParams(absentFunc.startMs / 1000, absentFunc.stepMs / 1000, absentFunc.endMs / 1000)
+    }
+    reducer.addRangeVectorTransformer(
+      AbsentFunctionMapper(absentFunc.columnFilters, rangeParams, dsOptions.metricColumn))
+
+    reducer
+  }
+
+  /**
+   * Materialize ScalarBinaryOperation for a multi-partition assignment.
+   * Handles cases where left or right side (or both) are logical plans that span multiple partitions.
+   */
+  private def materializeForScalarBinaryOpAssignment(
+              scalarBinOp: ScalarBinaryOperation, assignment: PartitionAssignmentTrait,
+              queryContext: QueryContext, timeRangeOverride: Option[TimeRange] = None): ScalarBinaryOperationExec = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+
+    // Materialize left side
+    val lhs = scalarBinOp.lhs match {
+      case Right(logicalPlan) =>
+        // Left side is a logical plan - materialize it for this assignment
+        val lhsContext = queryContext.copy(origQueryParams =
+          queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan)))
+        val lhsPlan = materializeForScalarBinaryOpAssignment(logicalPlan, assignment, lhsContext, timeRangeOverride)
+        Right(lhsPlan)
+      case Left(scalarValue) =>
+        // Left side is a scalar value
+        Left(scalarValue)
+    }
+
+    // Materialize right side
+    val rhs = scalarBinOp.rhs match {
+      case Right(logicalPlan) =>
+        // Right side is a logical plan - materialize it for this assignment
+        val rhsContext = queryContext.copy(origQueryParams =
+          queryParams.copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan)))
+        val rhsPlan = materializeForScalarBinaryOpAssignment(logicalPlan, assignment, rhsContext, timeRangeOverride)
+        Right(rhsPlan)
+      case Left(scalarValue) =>
+        // Right side is a scalar value
+        Left(scalarValue)
+    }
+
+    // Create ScalarBinaryOperationExec with materialized sides
+    ScalarBinaryOperationExec(queryContext, dataset.ref,
+      scalarBinOp.rangeParams, lhs, rhs, scalarBinOp.operator, inProcessPlanDispatcher)
+  }
+
+  /**
+   * Materialize ScalarVaryingDoublePlan for a multi-partition assignment.
+   * Materializes the vectors across partitions and adds the scalar function mapper.
+   */
+  private def materializeForScalarVaryingAssignment(scalarVarying: ScalarVaryingDoublePlan,
+                                                    assignment: PartitionAssignmentTrait,
+                                                    queryContext: QueryContext,
+                                                    timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+
+    // Materialize the vectors using materializeForAssignment
+    val vectorContext = queryContext.copy(origQueryParams =
+      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarVarying.vectors)))
+    val topPlan = materializeForAssignment(scalarVarying.vectors, assignment, vectorContext, timeRangeOverride)
+
+    // Add ScalarFunctionMapper to the concatenated/aggregated result
+    val rangeParams = timeRangeOverride match {
+      case Some(tr) => RangeParams(tr.startMs / 1000, scalarVarying.stepMs / 1000, tr.endMs / 1000)
+      case None => RangeParams(scalarVarying.startMs / 1000, scalarVarying.stepMs / 1000, scalarVarying.endMs / 1000)
+    }
+    topPlan.addRangeVectorTransformer(ScalarFunctionMapper(scalarVarying.function, rangeParams))
+    topPlan
+  }
+
+  /**
+   * Materialize absent_over_time for a multi-partition assignment.
+   * Does NOT push down to partitions - materializes locally and adds absent logic.
+   */
+  private def materializeForAbsentOverTimeAssignment(psw: PeriodicSeriesWithWindowing,
+                                                     assignment: PartitionAssignmentTrait,
+                                                     queryContext: QueryContext,
+                                                     timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    // Step 1: Use Last function instead of AbsentOverTime
+    // This gets the last value from the range window
+    val pswWithLast = psw.copy(function = RangeFunctionId.Last)
+
+    // Step 2: Create Sum aggregate to aggregate across partitions
+    val aggregate = Aggregate(AggregationOperator.Sum, pswWithLast, Nil)
+    val childQueryContext = queryContext.copy(
+      plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
+
+    // Step 3: Materialize the aggregate for this assignment
+    val reducer = materializeForAssignment(aggregate, assignment, childQueryContext, timeRangeOverride)
+
+    // Step 4: Add AbsentFunctionMapper to the aggregated result
+    val rangeParams = timeRangeOverride match {
+      case Some(tr) => RangeParams(tr.startMs / 1000, psw.stepMs / 1000, tr.endMs / 1000)
+      case None => RangeParams(psw.startMs / 1000, psw.stepMs / 1000, psw.endMs / 1000)
+    }
+    reducer.addRangeVectorTransformer(
+      AbsentFunctionMapper(psw.columnFilters, rangeParams, dsOptions.metricColumn))
+
+    reducer
+  }
+
+
+  /**
+   * Materialize ScalarVectorBinaryOperation for a multi-partition assignment.
+   * Materializes the vector across partitions (handling aggregates correctly),
+   * then adds the scalar operation mapper to the final result.
+   */
+  private def materializeForScalarVectorBinOpAssignment(scalarVecBinOp: ScalarVectorBinaryOperation,
+                                                        assignment: PartitionAssignmentTrait,
+                                                        queryContext: QueryContext,
+                                                        timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+
+    // Materialize the vector using materializeForAssignment to handle aggregates correctly
+    // This ensures that if the vector is an aggregate, it will be properly aggregated across
+    // all partitions before we apply the scalar operation
+    val vectorContext = queryContext.copy(origQueryParams =
+      queryParams.copy(promQl = LogicalPlanParser.convertToQuery(scalarVecBinOp.vector)))
+    val vectorPlan = materializeForAssignment(scalarVecBinOp.vector, assignment, vectorContext, timeRangeOverride)
+
+    // Materialize the scalar argument
+    val funcArg = materializeFunctionArgsForAssignment(Seq(scalarVecBinOp.scalarArg), assignment, queryContext)
+
+    // Add ScalarOperationMapper to the final aggregated result
+    vectorPlan.addRangeVectorTransformer(
+      ScalarOperationMapper(scalarVecBinOp.operator, scalarVecBinOp.scalarIsLhs, funcArg))
+
+    vectorPlan
+  }
+
+  /**
+   * Materialize VectorPlan for a multi-partition assignment.
+   * VectorPlan creates a constant vector from a scalar, so it should always be materialized
+   * locally using the local planner, not sent to any partition.
+   */
+  private def materializeForVectorPlanAssignment(vectorPlan: VectorPlan,
+                                                 assignment: PartitionAssignmentTrait,
+                                                 queryContext: QueryContext,
+                                                 timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val vectors = materializeForAssignment(vectorPlan.scalars, assignment, queryContext, timeRangeOverride)
+    vectors.addRangeVectorTransformer(VectorFunctionMapper())
+    vectors
+  }
+
   /**
    * materialize a plan that based on a multi-partition assignment.
    *
@@ -512,22 +682,114 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         val details = proportionMap.head._2
         materializeForPartition(logicalPlan, details.partitionName, details.grpcEndPoint, details.httpEndPoint,
           queryContext, timeRangeOverride)
-      case PartitionAssignmentV2(proportionMap, _) =>
+      case PartitionAssignmentV2(_, _) =>
         logicalPlan match {
           case aggregate: Aggregate =>
             materializeForAggregateAssignment(aggregate, assignment, queryContext, timeRangeOverride)
           case binaryJoin: BinaryJoin =>
             materializeForBinaryJoinAssignment(binaryJoin, assignment, queryContext, timeRangeOverride)
-          case _ =>
-            val plans = proportionMap.map(entry => {
-              val partitionDetails = entry._2
-              materializeForPartition(logicalPlan, partitionDetails.partitionName,
-                partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
-            }).toSeq
-            val dispatcher = PlannerUtil.pickDispatcher(plans)
-            MultiPartitionDistConcatExec(queryContext, dispatcher, plans)
+          case absentFunc: ApplyAbsentFunction =>
+            materializeForAbsentFunctionAssignment(absentFunc, assignment, queryContext, timeRangeOverride)
+          case scalarBinOp: ScalarBinaryOperation =>
+            materializeForScalarBinaryOpAssignment(scalarBinOp, assignment, queryContext, timeRangeOverride)
+          case scalarVarying: ScalarVaryingDoublePlan =>
+            materializeForScalarVaryingAssignment(scalarVarying, assignment, queryContext, timeRangeOverride)
+          case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime =>
+            materializeForAbsentOverTimeAssignment(psw, assignment, queryContext, timeRangeOverride)
+          case scalarVecBinOp: ScalarVectorBinaryOperation =>
+            materializeForScalarVectorBinOpAssignment(scalarVecBinOp, assignment, queryContext, timeRangeOverride)
+          case scalarFixed: ScalarFixedDoublePlan => ScalarFixedDoubleExec(queryContext, dataset = dataset.ref,
+            scalarFixed.timeStepParams, scalarFixed.scalar, inProcessPlanDispatcher)
+          case vectorPlan: VectorPlan =>
+            materializeForVectorPlanAssignment(vectorPlan, assignment, queryContext, timeRangeOverride)
+          case aif: ApplyInstantFunction =>
+            materializeForApplyInstantFunctionAssignment(aif, assignment, queryContext, timeRangeOverride)
+          case aifr: ApplyInstantFunctionRaw =>
+            materializeForApplyInstantFunctionRawAssignment(aifr, assignment, queryContext, timeRangeOverride)
+          case asf: ApplySortFunction =>
+            materializeForApplySortFunctionAssignment(asf, assignment, queryContext, timeRangeOverride)
+          case _ => materializeOthersForAssignment(logicalPlan, assignment, queryContext, timeRangeOverride)
         }
     }
+  }
+
+  /**
+   * Materialize function arguments for multi-partition assignment.
+   * Similar to materializeFunctionArgs but uses materializeForAssignment for scalar plans.
+   */
+  private def materializeFunctionArgsForAssignment(functionParams: Seq[FunctionArgsPlan],
+                                                   assignment: PartitionAssignmentTrait,
+                                                   queryContext: QueryContext,
+                                                   timeRangeOverride: Option[TimeRange] = None): Seq[FuncArgs] = {
+    functionParams map {
+      case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+      case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(
+        materializeForScalarVaryingAssignment(s, assignment, queryContext, timeRangeOverride),
+        RangeParams(s.startMs, s.stepMs, s.endMs))
+      case t: ScalarTimeBasedPlan => TimeFuncArgs(t.rangeParams)
+      case s: ScalarBinaryOperation => ExecPlanFuncArgs(
+        materializeForScalarBinaryOpAssignment(s, assignment, queryContext, timeRangeOverride),
+        RangeParams(s.startMs, s.stepMs, s.endMs))
+    }
+  }
+
+  /**
+   * Materialize ApplyInstantFunction for multi-partition assignment.
+   * Materializes child vectors across partitions, then adds the instant function transformer.
+   */
+  private def materializeForApplyInstantFunctionAssignment(lp: ApplyInstantFunction,
+                                                           assignment: PartitionAssignmentTrait,
+                                                           queryContext: QueryContext,
+                                                           timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val childExec = materializeForAssignment(lp.vectors, assignment, queryContext, timeRangeOverride)
+    val paramsExec = materializeFunctionArgsForAssignment(lp.functionArgs, assignment, queryContext, timeRangeOverride)
+    childExec.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec))
+    childExec
+  }
+
+  /**
+   * Materialize ApplyInstantFunctionRaw for multi-partition assignment.
+   * Materializes child vectors across partitions, then adds the instant function transformer.
+   */
+  private def materializeForApplyInstantFunctionRawAssignment(lp: ApplyInstantFunctionRaw,
+                                                              assignment: PartitionAssignmentTrait,
+                                                              queryContext: QueryContext,
+                                                              timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val childExec = materializeForAssignment(lp.vectors, assignment, queryContext, timeRangeOverride)
+    val paramsExec = materializeFunctionArgsForAssignment(lp.functionArgs, assignment, queryContext, timeRangeOverride)
+    childExec.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec))
+    childExec
+  }
+
+  /**
+   * Materialize ApplySortFunction for multi-partition assignment.
+   * Materializes child vectors across partitions, then adds the sort function transformer.
+   */
+  private def materializeForApplySortFunctionAssignment(lp: ApplySortFunction,
+                                                        assignment: PartitionAssignmentTrait,
+                                                        queryContext: QueryContext,
+                                                        timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val childExec = materializeForAssignment(lp.vectors, assignment, queryContext, timeRangeOverride)
+    childExec.addRangeVectorTransformer(SortFunctionMapper(lp.function))
+    childExec
+  }
+
+  /**
+   * Materialize other logical plans for multi-partition assignment by pushing down to each partition
+   * and concatenating results.
+   */
+  private def materializeOthersForAssignment(logicalPlan: LogicalPlan,
+                                            assignment: PartitionAssignmentTrait,
+                                            queryContext: QueryContext,
+                                            timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val proportionMap = assignment.proportionMap
+    val plans = proportionMap.map(entry => {
+      val partitionDetails = entry._2
+      materializeForPartition(logicalPlan, partitionDetails.partitionName,
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
+    }).toSeq
+    val dispatcher = PlannerUtil.pickDispatcher(plans)
+    MultiPartitionDistConcatExec(queryContext, dispatcher, plans)
   }
 
   /**
@@ -773,12 +1035,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           => materializePeriodicAndRawSeries(psw, qContext)
       case psw: PeriodicSeriesWithWindowing if psw.function == AbsentOverTime
           => materializeAbsentOverTimeMultiPartition(psw, qContext)
-      case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
+      case sqw: SubqueryWithWindowing => materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
-      case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
-      case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
-      case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
-      case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
+      case sv: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, sv)
+      case aif: ApplyInstantFunction => materializeApplyInstantFunction(qContext, aif)
+      case svdp: ScalarVaryingDoublePlan => materializeScalarPlan(qContext, svdp)
+      case aaf: ApplyAbsentFunction => materializeAbsentFunction(qContext, aaf)
       case ps: PeriodicSeries => materializePeriodicAndRawSeries(ps, qContext)
       case rcm: RawChunkMeta => materializePeriodicAndRawSeries(rcm, qContext)
       case rs: RawSeries => materializePeriodicAndRawSeries(rs, qContext)
@@ -1031,22 +1293,36 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   private def materializeAbsentOverTimeMultiPartition(psw: PeriodicSeriesWithWindowing,
                                                       qContext: QueryContext): PlanResult = {
     // Step 1: Use Last function instead of AbsentOverTime
-    // This gets the last value from the range window
     val pswWithLast = psw.copy(function = RangeFunctionId.Last)
 
-    // Step 2: Materialize with Last function across partitions
-    val seriesResult = materializePeriodicAndRawSeries(pswWithLast, qContext)
+    // Step 2: Materialize the last function WITHOUT pushdown
+    val childPlanRes = walkLogicalPlanTree(pswWithLast, qContext)
 
-    // Step 3: Create Sum aggregate clause
-    val aggregate = Aggregate(AggregationOperator.Sum, psw, Nil)
-    // Add sum aggregator to aggregate all partition responses
+    // Step 3: Create Sum aggregate and add it on top WITHOUT pushdown
+    val aggregate = Aggregate(AggregationOperator.Sum, pswWithLast, Nil)
+    val aggregatePlanResult = addAggregator(aggregate,
+      qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = true)),
+      childPlanRes)
+
+    // Step 4: Add AbsentFunctionMapper to the aggregated result
+    val rangeParams = RangeParams(psw.startMs / 1000, psw.stepMs / 1000, psw.endMs / 1000)
+    aggregatePlanResult.addRangeVectorTransformer(
+      AbsentFunctionMapper(psw.columnFilters, rangeParams, dsOptions.metricColumn))
+    PlanResult(Seq(aggregatePlanResult))
+  }
+
+  override def materializeAbsentFunction(qContext: QueryContext,
+                                lp: ApplyAbsentFunction,
+                                forceInProcess: Boolean = false): PlanResult = {
+    val aggregate = Aggregate(AggregationOperator.Sum, lp.vectors, Nil)
+
+    // Add sum to aggregate all child responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
-    val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-      qContext.plannerParams.copy(skipAggregatePresent = true)), seriesResult)))
-
-    // Step 4: Add AbsentFunctionMapper
-    addAbsentFunctionMapper(aggregatePlanResult, psw.columnFilters,
-      RangeParams(psw.startMs / 1000, psw.stepMs / 1000, psw.endMs / 1000), qContext)
+    val aggregatePlanResult = PlanResult(Seq(materialize(aggregate,
+      qContext.copy(plannerParams =
+      qContext.plannerParams.copy(skipAggregatePresent = true))))) // No need for present for sum
+    addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
+      RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
