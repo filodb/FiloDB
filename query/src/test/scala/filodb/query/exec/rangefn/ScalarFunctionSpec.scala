@@ -155,7 +155,6 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq.empty[TransientRow].iterator
         override def outputRange: Option[RvRange] = None
       })
-
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(emptyRowsSample), querySession, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
