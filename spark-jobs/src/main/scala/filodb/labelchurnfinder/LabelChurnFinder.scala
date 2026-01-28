@@ -79,7 +79,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.dataset")
   @transient lazy val datasetRef = DatasetRef(datasetName)
   @transient lazy private[labelchurnfinder] val filters = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.mapValues(_.r.pattern).toSeq)
+    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.map { case (k, v) => k -> v.r.pattern }.toSeq)
 
   @transient private[labelchurnfinder] val numShards = dsSettings.filodbSettings.streamConfigs
     .find(_.getString("dataset") == datasetName)

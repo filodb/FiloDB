@@ -91,10 +91,10 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "metricColumn" -> metricColumn,
       "hasDownsampledData" -> hasDownsampledData,
       "ignoreShardKeyColumnSuffixes" ->
-        ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
+        ignoreShardKeyColumnSuffixes.map { case (k, v) => k -> v.asJava }.asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
       "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava,
-      "multiColumnFacets" -> multiColumnFacets.mapValues(_.asJava).asJava)
+      "multiColumnFacets" -> multiColumnFacets.map { case (k, v) => k -> v.asJava }.asJava)
 
     ConfigFactory.parseMap(map.asJava)
   }

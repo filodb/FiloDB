@@ -237,7 +237,7 @@ class DoubleVectorTest extends NativeVectorTest {
   describe("bugs") {
     it("should enumerate same samples regardless of where start enumeration from") {
       val data = scala.io.Source.fromURL(getClass.getResource("/timeseries_bug1.txt"))
-                      .getLines.map(_.split(' '))
+                      .getLines().map(_.split(' '))
                       .map(ArrayStringRowReader).toSeq
       val origValues = data.map(_.getDouble(1))
       val timestampAppender = LongBinaryVector.appendingVectorNoNA(memFactory, data.length)

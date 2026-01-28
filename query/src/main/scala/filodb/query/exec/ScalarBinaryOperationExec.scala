@@ -33,10 +33,10 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
   @transient lazy val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
   def evaluate: Double = {
-    if (lhs.isRight  && rhs.isRight) operatorFunction.calculate(lhs.right.get.evaluate, rhs.right.get.evaluate)
-    else if (lhs.isLeft && rhs.isLeft) operatorFunction.calculate(lhs.left.get, rhs.left.get)
-    else if (lhs.isRight) operatorFunction.calculate(lhs.right.get.evaluate, rhs.left.get)
-    else operatorFunction.calculate(lhs.left.get, rhs.right.get.evaluate)
+    if (lhs.isRight  && rhs.isRight) operatorFunction.calculate(lhs.toOption.get.evaluate, rhs.toOption.get.evaluate)
+    else if (lhs.isLeft && rhs.isLeft) operatorFunction.calculate(lhs.swap.toOption.get, rhs.swap.toOption.get)
+    else if (lhs.isRight) operatorFunction.calculate(lhs.toOption.get.evaluate, rhs.swap.toOption.get)
+    else operatorFunction.calculate(lhs.swap.toOption.get, rhs.toOption.get.evaluate)
   }
 
   /**

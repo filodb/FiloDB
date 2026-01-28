@@ -249,7 +249,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv = successResp.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -340,7 +340,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv = successResp.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -388,7 +388,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     // This deserializedQueryResponse should have the same order for the Rvs as the original
 
     deserializedQueryResponse.result.map(
-      rv => rv.asInstanceOf[SerializedRangeVector].rows.next().getDouble(1).toInt) shouldEqual (0 to 10).toList
+      rv => rv.asInstanceOf[SerializedRangeVector].rows().next().getDouble(1).toInt) shouldEqual (0 to 10).toList
   }
 
   it ("should stream Iterator[StreamingResponse] to a QueryResponse in multiple cases") {
@@ -446,7 +446,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv = response.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -476,7 +476,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv1 = response.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv1.numRows shouldEqual Some(11)
     deserializedSrv1.numRowsSerialized shouldEqual 4
-    val res1 = deserializedSrv1.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res1 = deserializedSrv1.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res1.length shouldEqual 11
     res1.map(_._1) shouldEqual (0 to 1000 by 100)
     res1.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -495,7 +495,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv2 = response.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv2.numRows shouldEqual Some(11)
     deserializedSrv2.numRowsSerialized shouldEqual 4
-    val res2 = deserializedSrv1.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res2 = deserializedSrv1.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res2.length shouldEqual 11
     res2.map(_._1) shouldEqual (0 to 1000 by 100)
     res2.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
@@ -647,7 +647,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val deserializedSrv = builder.build().fromProto.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)

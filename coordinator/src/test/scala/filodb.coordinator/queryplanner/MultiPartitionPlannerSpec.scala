@@ -20,7 +20,7 @@ import filodb.query.exec._
 
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)

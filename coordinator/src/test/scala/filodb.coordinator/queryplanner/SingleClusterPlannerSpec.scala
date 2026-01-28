@@ -55,7 +55,7 @@ object SingleClusterPlannerSpec {
 class SingleClusterPlannerSpec extends AnyFunSpec
   with Matchers with ScalaFutures with BeforeAndAfterEach with  PlanValidationSpec {
 
-  implicit val system = ActorSystem()
+  implicit val system: akka.actor.ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)

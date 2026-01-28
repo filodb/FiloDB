@@ -34,7 +34,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   import GdeltTestData._
   import NodeClusterActor._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.parseString(
@@ -52,7 +52,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   private lazy val memStore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   private lazy val metaStore = cluster.metaStore
 
-  implicit val ec = cluster.ec
+  implicit val ec: scala.concurrent.ExecutionContext = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
   protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
@@ -159,7 +159,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, srvs, _, _, _, _) =>
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (1)
-          srvs(0).rows.toSeq should have length (2)   // 2 samples per series
+          srvs(0).rows().toSeq should have length (2)   // 2 samples per series
       }
 
       // Query nonexisting partition
@@ -206,7 +206,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
 
       // Query the "count" long column, validate schema.  Should be able to translate everything
@@ -219,7 +219,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
 
       // What if filter returns no results?
@@ -258,7 +258,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           case QueryResult(_, schema, vectors, _, _, _, _) =>
             schema.columns shouldEqual valueSchema.columns
             vectors should have length (1)
-            vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+            vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
       }
     }
@@ -288,7 +288,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors, _, _, _, _) =>
           schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
+          vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
       }
     }
 
@@ -314,13 +314,13 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
           groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
-          val lengths = srvs.map(_.rows.toSeq.length)
+          val lengths = srvs.map(_.rows().toSeq.length)
           lengths.min shouldEqual 2
           lengths.max shouldEqual 3
       }
     }
 
-    implicit val askTimeout = Timeout(5.seconds)
+    implicit val askTimeout: akka.util.Timeout = Timeout(5.seconds)
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
@@ -385,9 +385,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn, false),
                                        ColumnInfo("value", DoubleColumn, true))
         vectors should have length (1)
-        // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
+        // vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
-        vectors(0).rows.map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
+        vectors(0).rows().map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
     }
   }
 

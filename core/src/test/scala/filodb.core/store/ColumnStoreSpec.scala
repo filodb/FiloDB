@@ -22,10 +22,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import NamesTestData._
   import TestData._
 
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   def colStore: ColumnStore
@@ -53,7 +53,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   val partScan = SinglePartitionScan(defaultPartKey, 0)
 
-  implicit val keyType = SingleKeyTypes.LongKeyType
+  implicit val keyType: SingleKeyType = SingleKeyTypes.LongKeyType
 
   // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
   // breaks, this test can independently test for write failures
@@ -164,7 +164,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rangeVectors should have length (1)
     rangeVectors.head.key.labelValues.head._1.asNewString shouldEqual "MonthYear"
     rangeVectors.head.key.labelValues.head._2.asNewString shouldEqual "197902"
-    rangeVectors.head.rows.map(_.getInt(0)).sum should equal (22)
+    rangeVectors.head.rows().map(_.getInt(0)).sum should equal (22)
     rangeVectors.head.key.sourceShards shouldEqual Seq(0)
   }
 }

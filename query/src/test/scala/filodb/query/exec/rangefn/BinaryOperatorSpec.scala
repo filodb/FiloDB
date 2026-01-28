@@ -127,51 +127,51 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
   private def fireBinaryOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // Subtraction - prefix
-    val expectedSub1 = samples.map(_.rows.map(v => scalar - v.getDouble(1)))
+    val expectedSub1 = samples.map(_.rows().map(v => scalar - v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedSub1, BinaryOperator.SUB, scalar, true)
 
     // Subtraction - suffix
-    val expectedSub2 = samples.map(_.rows.map(v => v.getDouble(1) - scalar))
+    val expectedSub2 = samples.map(_.rows().map(v => v.getDouble(1) - scalar))
     applyBinaryOperationAndAssertResult(samples, expectedSub2, BinaryOperator.SUB, scalar, false)
 
     // Addition - prefix
-    val expectedAdd1 = samples.map(_.rows.map(v => scalar + v.getDouble(1)))
+    val expectedAdd1 = samples.map(_.rows().map(v => scalar + v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedAdd1, BinaryOperator.ADD, scalar, true)
 
     // Addition - suffix
-    val expectedAdd2 = samples.map(_.rows.map(v => v.getDouble(1) + scalar))
+    val expectedAdd2 = samples.map(_.rows().map(v => v.getDouble(1) + scalar))
     applyBinaryOperationAndAssertResult(samples, expectedAdd2, BinaryOperator.ADD, scalar, false)
 
     // Multiply - prefix
-    val expectedMul1 = samples.map(_.rows.map(v => scalar * v.getDouble(1)))
+    val expectedMul1 = samples.map(_.rows().map(v => scalar * v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedMul1, BinaryOperator.MUL, scalar, true)
 
     // Multiply - suffix
-    val expectedMul2 = samples.map(_.rows.map(v => v.getDouble(1) * scalar))
+    val expectedMul2 = samples.map(_.rows().map(v => v.getDouble(1) * scalar))
     applyBinaryOperationAndAssertResult(samples, expectedMul2, BinaryOperator.MUL, scalar, false)
 
     // Modulo - prefix
-    val expectedMod1 = samples.map(_.rows.map(v => scalar % v.getDouble(1)))
+    val expectedMod1 = samples.map(_.rows().map(v => scalar % v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedMod1, BinaryOperator.MOD, scalar, true)
 
     // Modulo - suffix
-    val expectedMod2 = samples.map(_.rows.map(v => v.getDouble(1) % scalar))
+    val expectedMod2 = samples.map(_.rows().map(v => v.getDouble(1) % scalar))
     applyBinaryOperationAndAssertResult(samples, expectedMod2, BinaryOperator.MOD, scalar, false)
 
     // Division - prefix
-    val expectedDiv1 = samples.map(_.rows.map(v => scalar / v.getDouble(1)))
+    val expectedDiv1 = samples.map(_.rows().map(v => scalar / v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedDiv1, BinaryOperator.DIV, scalar, true)
 
     // Division - suffix
-    val expectedDiv2 = samples.map(_.rows.map(v => v.getDouble(1) / scalar))
+    val expectedDiv2 = samples.map(_.rows().map(v => v.getDouble(1) / scalar))
     applyBinaryOperationAndAssertResult(samples, expectedDiv2, BinaryOperator.DIV, scalar, false)
 
     // power - prefix
-    val expectedPow1 = samples.map(_.rows.map(v => math.pow(scalar, v.getDouble(1))))
+    val expectedPow1 = samples.map(_.rows().map(v => math.pow(scalar, v.getDouble(1))))
     applyBinaryOperationAndAssertResult(samples, expectedPow1, BinaryOperator.POW, scalar, true)
 
     // power - suffix
-    val expectedPow2 = samples.map(_.rows.map(v => math.pow(v.getDouble(1), scalar)))
+    val expectedPow2 = samples.map(_.rows().map(v => math.pow(v.getDouble(1), scalar)))
     applyBinaryOperationAndAssertResult(samples, expectedPow2, BinaryOperator.POW, scalar, false)
 
   }
@@ -181,65 +181,65 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
   private def fireComparatorOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // GTE - prefix
-    val expectedGTE = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
+    val expectedGTE = samples.map(_.rows().map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedGTE, BinaryOperator.GTE, scalar, true)
 
     // GTR - prefix
-    val expectedGTR = samples.map(_.rows.map(v => if (scalar > v.getDouble(1)) scalar else Double.NaN))
+    val expectedGTR = samples.map(_.rows().map(v => if (scalar > v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedGTR, BinaryOperator.GTR, scalar, true)
 
     // LTE - prefix
-    val expectedLTE = samples.map(_.rows.map(v => if (scalar <= v.getDouble(1)) scalar else Double.NaN))
+    val expectedLTE = samples.map(_.rows().map(v => if (scalar <= v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedLTE, BinaryOperator.LTE, scalar, true)
 
     // LTR - prefix
-    val expectedLTR = samples.map(_.rows.map(v => if (scalar < v.getDouble(1)) scalar else Double.NaN))
+    val expectedLTR = samples.map(_.rows().map(v => if (scalar < v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedLTR, BinaryOperator.LSS, scalar, true)
 
     // EQL - prefix
-    val expectedEQL = samples.map(_.rows.map(v => if (scalar == v.getDouble(1)) scalar else Double.NaN))
+    val expectedEQL = samples.map(_.rows().map(v => if (scalar == v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedEQL, BinaryOperator.EQL, scalar, true)
 
     // NEQ - prefix
-    val expectedNEQ = samples.map(_.rows.map(v => if (scalar != v.getDouble(1)) scalar else Double.NaN))
+    val expectedNEQ = samples.map(_.rows().map(v => if (scalar != v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedNEQ, BinaryOperator.NEQ, scalar, true)
 
     // GTE_BOOL - prefix
-    val expectedGTE_BOOL = samples.map(_.rows.map { v =>
+    val expectedGTE_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar >= v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedGTE_BOOL, BinaryOperator.GTE_BOOL, scalar, true)
 
     // GTR_BOOL - prefix
-    val expectedGTR_BOOL = samples.map(_.rows.map { v =>
+    val expectedGTR_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar > v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedGTR_BOOL, BinaryOperator.GTR_BOOL, scalar, true)
 
     // LTE_BOOL - prefix
-    val expectedLTE_BOOL = samples.map(_.rows.map { v =>
+    val expectedLTE_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar <= v.getDouble(1)) 1.0 else 0.0
     })
 
     // LTR_BOOL - prefix
-    val expectedLTR_BOOL = samples.map(_.rows.map { v =>
+    val expectedLTR_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar < v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedLTR_BOOL, BinaryOperator.LSS_BOOL, scalar, true)
 
     // EQL_BOOL - prefix
-    val expectedEQL_BOOL = samples.map(_.rows.map { v =>
+    val expectedEQL_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar == v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedEQL_BOOL, BinaryOperator.EQL_BOOL, scalar, true)
 
     // NEQ_BOOL - prefix
-    val expectedNEQ_BOOL = samples.map(_.rows.map { v =>
+    val expectedNEQ_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar != v.getDouble(1)) 1.0 else 0.0
     })
@@ -250,10 +250,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it ("should fail with wrong calculation") {
     // ceil
-    val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expectedVal = sampleBase.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -292,10 +292,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    val expectedVal = samples.map(_.rows.map(v => v.getDouble(1) * 2))
+    val expectedVal = samples.map(_.rows().map(v => v.getDouble(1) * 2))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(TimeFuncArgs(RangeParams(1,1,4))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     result.foreach(x=> println(x.toList))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -318,10 +318,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    val expectedVal = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expectedVal = samples.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(1571267260, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -336,7 +336,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalarOnLhs, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {

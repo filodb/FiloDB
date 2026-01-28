@@ -130,13 +130,13 @@ object NamesTestData {
  */
 object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
-                         .getLines.toSeq.drop(1)     // drop the header line
+                         .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltUniqueLines = Source.fromURL(getClass.getResource("/GDELT-unique-samples.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val gdeltLines3 = Source.fromURL(getClass.getResource("/GDELT-sample-test3.csv"))
-    .getLines.toSeq.drop(1)     // drop the header line
+    .getLines().toSeq.drop(1)     // drop the header line
 
   val schema = Seq("GLOBALEVENTID:long",
                    "SQLDATE:long",

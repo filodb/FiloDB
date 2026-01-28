@@ -482,7 +482,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       )
       val dispatcher = PlannerUtil.pickDispatcher(plans)
       val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
-        plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+        plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
       if (!queryContext.plannerParams.skipAggregatePresent) {
         val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
         reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
@@ -735,11 +735,11 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         if ((aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
           || aggregate.operator.equals(AggregationOperator.CountValues)
-          ) && !canSupportMultiPartitionCalls(execPlans))
+          ) && !canSupportMultiPartitionCalls(execPlans.toSeq))
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
           if (!queryContext.plannerParams.skipAggregatePresent) {
             reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
               RangeParams(queryParams.startSecs, queryParams.stepSecs, queryParams.endSecs)))

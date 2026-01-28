@@ -304,7 +304,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   private def addToReclaimLog(block: Block): Unit = {
-    val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining)
+    val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining())
     if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
     reclaimLog += event
   }
@@ -326,7 +326,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {
-        val block = entries.next
+        val block = entries.next()
         if (block.canReclaim) {
           entries.remove()
           removed += block

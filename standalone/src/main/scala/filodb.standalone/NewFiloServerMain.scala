@@ -39,7 +39,7 @@ object NewFiloServerMain extends StrictLogging {
 
       val memStore = factory.memStore
 
-      implicit val discoveryScheduler = Scheduler.computation(name = "cluster-ops")
+      implicit val discoveryScheduler: Scheduler = Scheduler.computation(name = "cluster-ops")
       val failureDetectInterval = allConfig.as[FiniteDuration]("filodb.cluster-discovery.failure-detection-interval")
       val clusterDiscovery = new FiloDbClusterDiscovery(settings, system, failureDetectInterval)
 

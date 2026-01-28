@@ -20,7 +20,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._
   import ZeroCopyUTF8String._

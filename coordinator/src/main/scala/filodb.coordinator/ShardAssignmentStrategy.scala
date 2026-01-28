@@ -59,7 +59,7 @@ class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8)
     Try {
       // IMP: This is not an ideal solution as this blocks on actor dispatcher thread. Clustering V2 is the preferred
       // approch but this is acceptable as an interim solution.
-      implicit val timeout = Timeout(5.seconds)
+      implicit val timeout: Timeout = Timeout(5.seconds)
       val coordinatorHostName = coord.path.address.host
         .map(_ => Await.result((coord ? MiscCommands.GetHostName).mapTo[String],
           FilodbSettings.globalOrDefault.DefaultTaskTimeout)).getOrElse(InetAddress.getLocalHost.getHostName)

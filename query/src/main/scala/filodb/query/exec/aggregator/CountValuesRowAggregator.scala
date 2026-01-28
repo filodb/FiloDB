@@ -93,7 +93,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
       try {
         FiloSchedulers.assertThreadName(QuerySchedName)
-        // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
+        // aggRangeVector.rows().take below triggers the ChunkInfoIterator which requires lock/release
         ChunkMap.validateNoSharedLocks(s"CountValues-$label")
         Using.resource(aggRangeVector.rows()) {
           rows => rows.take(limit).foreach { row =>
@@ -128,11 +128,11 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val cols = new Array[ColumnInfo](2)
     cols(0) = source.columns(0)
     cols(1) = ColumnInfo("map", ColumnType.StringColumn)
-    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
+    ResultSchema(cols.toIndexedSeq, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)).toIndexedSeq, 1,
       fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }

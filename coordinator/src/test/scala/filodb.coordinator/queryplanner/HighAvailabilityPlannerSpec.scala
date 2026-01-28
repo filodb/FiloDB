@@ -17,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
 
 class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)

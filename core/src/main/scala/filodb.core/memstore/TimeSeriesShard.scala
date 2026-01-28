@@ -557,7 +557,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val skippedPartIDs = debox.Buffer.empty[Int]
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
-        val nextPartID = intIt.next
+        val nextPartID = intIt.next()
         nextPart = partitions.get(nextPartID)
         if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartID
       }
@@ -1681,13 +1681,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     // Finally, prune partitions and keyMap data structures
     logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
-    val intIt = partIdsToEvict.iterator()
+    val intIt = partIdsToEvict.iterator
     var numPartsEvicted = 0
     var numPartsAlreadyEvicted = 0
     var numPartsIngestingNotEvictable = 0
     val successfullyEvictedParts = new EWAHCompressedBitmap()
     while (intIt.hasNext) {
-      val partitionObj = partitions.get(intIt.next)
+      val partitionObj = partitions.get(intIt.next())
       if (partitionObj != UnsafeUtils.ZeroPointer) {
         if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
           logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
@@ -1973,7 +1973,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
-      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
+      val skippedPartKeys = inMem.skippedPartIDs.iterator.map(partId => {
         convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
       (inMemPartKeys ++ skippedPartKeys)
     }

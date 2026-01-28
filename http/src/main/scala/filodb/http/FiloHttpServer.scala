@@ -48,8 +48,8 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
             clusterProxy: ActorRef,
             v2ClusterEnabled: Boolean,
             externalRoutes: Route = reject): Unit = {
-    implicit val system = actorSystem
-    implicit val materializer = ActorMaterializer()
+    implicit val system: ActorSystem = actorSystem
+    implicit val materializer: ActorMaterializer = ActorMaterializer()
     // This is a preliminary implementation of routes. Will be enhanced later
     val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),

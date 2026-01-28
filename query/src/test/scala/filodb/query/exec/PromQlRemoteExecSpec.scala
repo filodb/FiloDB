@@ -47,7 +47,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(3)
-    val data = queryResult.result.flatMap(x=>x.rows.map{ r => (r.getLong(0) , r.getDouble(1)) }.toList)
+    val data = queryResult.result.flatMap(x=>x.rows().map{ r => (r.getLong(0) , r.getDouble(1)) }.toList)
     data.shouldEqual(expectedResult)
   }
 
@@ -62,7 +62,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(1)
-    val data = queryResult.result.flatMap(x=>x.rows.map{ r => (r.getLong(0) , r.getDouble(1)) }.toList)
+    val data = queryResult.result.flatMap(x=>x.rows().map{ r => (r.getLong(0) , r.getDouble(1)) }.toList)
     data.shouldEqual(expectedResult)
 
   }
@@ -75,7 +75,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
-    val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)
+    val data = queryResult.result.flatMap(x=>x.rows().map{ r => r.getAny(0) }.toList)
     data(0) shouldEqual(map1)
     data(1) shouldEqual(map2)
   }
@@ -88,7 +88,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
-    val data = queryResult.result.flatMap(x => x.rows.map(r => r.getAny(0)).toList)
+    val data = queryResult.result.flatMap(x => x.rows().map(r => r.getAny(0)).toList)
     data(0) shouldEqual(map1)
     data(1) shouldEqual(map2)
   }
@@ -103,7 +103,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(1)
-    val data = queryResult.result.flatMap(x => x.rows.map{r => (r.getLong(0) , r.getHistogram(1))}.toList)
+    val data = queryResult.result.flatMap(x => x.rows().map{r => (r.getLong(0) , r.getHistogram(1))}.toList)
     val hist = data.head._2.asInstanceOf[MutableHistogram]
     data.head._1 shouldEqual 1000000
     hist.buckets.allBucketTops shouldEqual Array(1, Double.PositiveInfinity)

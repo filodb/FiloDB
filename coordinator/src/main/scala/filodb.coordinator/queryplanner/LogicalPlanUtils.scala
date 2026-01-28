@@ -164,11 +164,11 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarFixedDoublePlan       => lp.copy(timeStepParams = RangeParams(timeRange.startMs / 1000,
                                               lp.timeStepParams.stepSecs, timeRange.endMs / 1000))
       case lp: ScalarBinaryOperation       =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
-                                              (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
-                                              Left(lp.lhs.left.get)
+                                              (lp.lhs.toOption.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
+                                              Left(lp.lhs.swap.toOption.get)
                                               val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedTimeRange(
-                                                lp.rhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation])
-                                              else Left(lp.rhs.left.get)
+                                                lp.rhs.toOption.get, timeRange).asInstanceOf[ScalarBinaryOperation])
+                                              else Left(lp.rhs.swap.toOption.get)
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
@@ -362,8 +362,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelCardinality            => None
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
-      case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)
-                                               else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.right.get)
+      case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.toOption.get)
+                                               else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.toOption.get)
                                                else None
       case lp: ScalarFixedDoublePlan       => None
       case lp: RawChunkMeta                => None

@@ -42,7 +42,7 @@ object MemStoreStress extends App {
   }
 
   // read in medallions
-  val medallions = scala.io.Source.fromURL(getClass.getResource("/1000medallions.csv")).getLines.toArray
+  val medallions = scala.io.Source.fromURL(getClass.getResource("/1000medallions.csv")).getLines().toArray
   val numKeys = medallions.size
 
   val sess = SparkSession.builder()

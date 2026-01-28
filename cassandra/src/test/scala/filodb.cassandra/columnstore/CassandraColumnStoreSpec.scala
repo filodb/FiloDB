@@ -150,7 +150,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
         ChunkSetInfo.setNumRows(infoPtr, 10) // fake
         ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-        val set = ChunkSet(info, partKey, Nil, chunks)
+        val set = ChunkSet(info, partKey, Nil, chunks.toSeq)
 
         colStore.write(dataset.ref, Observable.fromIterable(Iterable(set))).futureValue
 
