@@ -400,4 +400,64 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     isEmptyStates(2) shouldEqual false  // Third row: non-empty histogram
   }
 
+  it("should handle shrinking bucket counts without stale data") {
+    import filodb.core.metadata.Column.ColumnType
+    import filodb.memory.format.vectors.{MutableHistogram, GeometricBuckets}
+
+    // Create a histogram schema
+    val histSchema = ResultSchema(
+      Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.HistogramColumn)), 1)
+
+    // Create histograms with different bucket counts
+    val largeBuckets = GeometricBuckets(1.0, 2.0, 8)  // 8 buckets
+    val smallBuckets = GeometricBuckets(1.0, 2.0, 4)  // 4 buckets
+
+    val largeHist = MutableHistogram(largeBuckets, Array.fill(8)(100.0))
+    val smallHist = MutableHistogram(smallBuckets, Array.fill(4)(50.0))
+
+    // Create range vectors: large -> small -> large
+    // This tests that shrinking doesn't leave stale values from the larger histogram
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientHistRow(1L, largeHist),  // 8 buckets with value 100
+          new TransientHistRow(2L, smallHist),  // 4 buckets with value 50
+          new TransientHistRow(3L, largeHist)   // 8 buckets with value 100
+        ).iterator
+        override def outputRange: Option[RvRange] = None
+      }
+    )
+
+    // Apply scalar multiplication (* 2)
+    val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.MUL, false,
+      Seq(StaticFuncArgs(2.0, RangeParams(0, 0, 0))))
+    val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, histSchema)
+
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+
+    // Collect bucket counts and first bucket values during iteration
+    val bucketInfo = result.head.rows.map { row =>
+      val hist = row.getHistogram(1)
+      (hist.numBuckets, if (hist.numBuckets > 0) hist.bucketValue(0) else Double.NaN)
+    }.toList
+
+    bucketInfo.size shouldEqual 3
+
+    // First row: 8 buckets, values should be 100 * 2 = 200
+    bucketInfo(0)._1 shouldEqual 8
+    bucketInfo(0)._2 shouldEqual 200.0
+
+    // Second row: 4 buckets (not 8!), values should be 50 * 2 = 100
+    // If stale data issue exists, this would incorrectly have 8 buckets
+    bucketInfo(1)._1 shouldEqual 4
+    bucketInfo(1)._2 shouldEqual 100.0
+
+    // Third row: 8 buckets, values should be 100 * 2 = 200
+    bucketInfo(2)._1 shouldEqual 8
+    bucketInfo(2)._2 shouldEqual 200.0
+  }
+
 }

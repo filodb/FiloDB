@@ -246,9 +246,10 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
                 // Handle empty histogram - set result to empty histogram
                 histResRow.setValues(timestamp, Histogram.empty)
               } else {
-                if (oldHist.numBuckets > histResRow.getHistogram(col = 1).numBuckets) {
-                  // If we don't have enough buckets in the TransientHistRow, we initialize and store
-                  //   an appropriately-sized histogram. This should only happen once.
+                if (oldHist.numBuckets != histResRow.getHistogram(col = 1).numBuckets) {
+                  // Bucket count changed - reinitialize to match the current histogram's scheme.
+                  // This handles both growing (more buckets) and shrinking (fewer buckets) cases.
+                  // Without this, shrinking would leave stale values in the upper buckets.
                   histResRow.setValues(ts = 0, MutableHistogram(oldHist))
                 }
                 val resHist = histResRow.getHistogram(col = 1).asInstanceOf[MutableHistogram]
