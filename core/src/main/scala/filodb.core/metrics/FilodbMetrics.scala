@@ -33,7 +33,6 @@ import oshi.SystemInfo
 
 import filodb.core.GlobalConfig
 
-
 /**
  * Configuration for OpenTelemetry metrics
  */
@@ -145,6 +144,7 @@ object OTelMetricsConfig {
  */
 sealed trait MetricsInstrument {
   def baseAttributesBuilder: AttributesBuilder
+  lazy val baseAttributes: Attributes = baseAttributesBuilder.build()
   def withAttributes(additionalAttributes: Map[String, String]): Attributes = {
     additionalAttributes.foreach { case (key, value) =>
       baseAttributesBuilder.put(AttributeKey.stringKey(key), value)
@@ -162,11 +162,11 @@ case class MetricsCounter(otelCounter: Option[DoubleCounter],
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
       case None => value
     }
-    otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
-      // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
+      otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
       kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
     } else {
+      otelCounter.foreach(_.add(value2, baseAttributes))
       kamonCounter.foreach(_.increment(value))
     }
   }
@@ -176,12 +176,12 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
                                 kamonCounter: Option[kamon.metric.Gauge],
                                 baseAttributesBuilder: AttributesBuilder) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
-    otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     if (additionalAttributes.nonEmpty) {
-      // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
       kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
+      otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
     } else {
       kamonCounter.foreach(_.increment(value))
+      otelCounter.foreach(_.add(value, baseAttributes))
     }
   }
 }
@@ -189,7 +189,7 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
 case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], Double]],
                         kamonGauge: Option[kamon.metric.Gauge],
                         timeUnit: Option[TimeUnit],
-                        baseAttributes: Map[String, String]
+                        baseAttributes1: Map[String, String]
                         ) extends MetricsInstrument {
   val baseAttributesBuilder: AttributesBuilder = Attributes.builder() // not used
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
@@ -197,11 +197,12 @@ case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], D
       case Some(unit) => unit.toNanos(value.toLong).toDouble / 1e9 // convert to seconds as double
       case None => value
     }
-    otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributes, value2))
     if (additionalAttributes.nonEmpty) {
-      // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
+      // Builder is not consistent with other instruments because of mutable map used for OTel gauge
+      otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributes1, value2))
       kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
     } else {
+      otelGauge.foreach( m => m.put(baseAttributes1, value2))
       kamonGauge.foreach(_.update(value))
     }
   }
@@ -216,13 +217,13 @@ case class MetricsHistogram(otelHistogram: Option[DoubleHistogram],
       case Some(unit) => unit.toNanos(value).toDouble / 1e9 // convert to seconds as double
       case None => value
     }
-    otelHistogram.foreach(_.record(valueInSeconds, withAttributes(additionalAttributes)))
 
     // report original value because instrument is already configured with time unit
     if (additionalAttributes.nonEmpty) {
-      // Kamon withTags creates a new instrument each time, so only do this if there are additional attributes
+      otelHistogram.foreach(_.record(valueInSeconds, withAttributes(additionalAttributes)))
       kamonHistogram.foreach(_.withTags(TagSet.from(additionalAttributes)).record(value))
     } else {
+      otelHistogram.foreach(_.record(valueInSeconds, baseAttributes))
       kamonHistogram.foreach(_.record(value))
     }
   }
