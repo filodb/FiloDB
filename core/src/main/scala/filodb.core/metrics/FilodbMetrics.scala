@@ -189,7 +189,7 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
 case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], Double]],
                         kamonGauge: Option[kamon.metric.Gauge],
                         timeUnit: Option[TimeUnit],
-                        baseAttributes1: Map[String, String]
+                        baseAttributesMap: Map[String, String]
                         ) extends MetricsInstrument {
   val baseAttributesBuilder: AttributesBuilder = Attributes.builder() // not used
   def update(value: Double, additionalAttributes: Map[String, String] = Map.empty): Unit = {
@@ -198,11 +198,10 @@ case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], D
       case None => value
     }
     if (additionalAttributes.nonEmpty) {
-      // Builder is not consistent with other instruments because of mutable map used for OTel gauge
-      otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributes1, value2))
+      otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributesMap, value2))
       kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
     } else {
-      otelGauge.foreach( m => m.put(baseAttributes1, value2))
+      otelGauge.foreach( m => m.put(baseAttributesMap, value2))
       kamonGauge.foreach(_.update(value))
     }
   }
