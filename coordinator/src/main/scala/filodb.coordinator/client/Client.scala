@@ -8,12 +8,13 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem, Address}
 import akka.pattern.ask
 import akka.util.Timeout
+import monix.execution.Scheduler
 
 import filodb.coordinator.ActorName
 import filodb.core._
 
 object Client {
-  implicit val context = GlobalScheduler.globalImplicitScheduler
+  implicit val context: Scheduler = GlobalScheduler.globalImplicitScheduler
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 30 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
@@ -24,17 +25,17 @@ object Client {
    */
   def actorAsk[B](actor: ActorRef, msg: Any,
                   askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }
 
   def asyncAsk(actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[Any] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     actor ? msg
   }
 
   def asyncTypedAsk[T: ClassTag](actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[T] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     (actor ? msg).mapTo[T]
   }
 
@@ -46,7 +47,7 @@ object Client {
 
   def actorsAsk[B](actors: Seq[ActorRef], msg: Any,
                    askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): Seq[B] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     val fut = Future.sequence(actors.map(_ ? msg))
     Await.result(fut, askTimeout).map(f)
   }
