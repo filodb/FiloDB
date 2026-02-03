@@ -1061,10 +1061,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
     // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
     // is a metadata operation and shares common components with other metadata endpoints.
+    val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
+    val shardKeyFilterGroups = LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
     val partitions = lp match {
-      case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-      case _                          => getMetadataPartitions(lp.filters,
-        TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+      case lc: LabelCardinality => getPartitions(lc, queryParams)
+      case _ => shardKeyFilterGroups.collectFirst {
+        case group
+          if group.size == dataset.options.shardKeyColumns.size &&
+            group.forall(_.filter.isInstanceOf[Equals]) => partitionLocationProvider.getPartitions(
+          group.collect { case ColumnFilter(c, Equals(v: String)) => c -> v }.toMap,timeRange)
+      }.getOrElse(getMetadataPartitions(lp.filters, timeRange))
     }
 
     val execPlan = if (partitions.isEmpty) {
