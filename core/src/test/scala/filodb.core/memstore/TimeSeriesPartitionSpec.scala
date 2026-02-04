@@ -536,8 +536,8 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       acceptDuplicateSamples = acceptDuplicateSamples)
     // 8 of first 10 ingested, 2 should be dropped.  Switch buffers, and try ingesting out of order again.
     part.appendingChunkLen shouldEqual 8
-    part.infoLast.numRows shouldEqual 8
-    part.infoLast.endTime shouldEqual data(9).getLong(0)
+    part.infoLast().numRows shouldEqual 8
+    part.infoLast().endTime shouldEqual data(9).getLong(0)
 
     part.switchBuffers(ingestBlockHolder)
     part.appendingChunkLen shouldEqual 0
@@ -602,8 +602,8 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       acceptDuplicateSamples = allowDuplicates)
     // 10 of 12 ingested including duplicates, 2 should be dropped. Switch buffers, and try ingesting out of order again.
     part.appendingChunkLen shouldEqual 10
-    part.infoLast.numRows shouldEqual 10
-    part.infoLast.endTime shouldEqual data(9).getLong(0)
+    part.infoLast().numRows shouldEqual 10
+    part.infoLast().endTime shouldEqual data(9).getLong(0)
 
     part.switchBuffers(ingestBlockHolder)
     part.appendingChunkLen shouldEqual 0

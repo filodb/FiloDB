@@ -17,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
 
 class ScalarQueriesSpec extends AnyFunSpec with Matchers {
 
-  implicit val system = ActorSystem()
+  implicit val system: akka.actor.ActorSystem = ActorSystem()
   val node = TestProbe().ref
 
   val mapper = new ShardMapper(32)

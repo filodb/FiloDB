@@ -26,7 +26,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"

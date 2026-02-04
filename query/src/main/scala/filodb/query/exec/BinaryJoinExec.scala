@@ -173,8 +173,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                 s"reached the limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}. " +
                 s"Try applying more filters.", queryContext.queryId)
 
-            val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows)
-            else binOp(rvOtherCorrect.rows, rvOne.rows)
+            val res = if (lhsIsOneSide) binOp(rvOne.rows(), rvOtherCorrect.rows())
+            else binOp(rvOtherCorrect.rows(), rvOne.rows())
             results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
           }
         }

@@ -92,7 +92,7 @@ object PrometheusModel {
     srv.key.labelValues.foreach {lv =>
       b.addLabels(LabelPair.newBuilder().setName(lv._1.toString).setValue(lv._2.toString))
     }
-    srv.rows.foreach { row =>
+    srv.rows().foreach { row =>
       // no need to remove NaN here.
       b.addSamples(Sample.newBuilder().setTimestampMs(row.getLong(0)).setValue(row.getDouble(1)))
     }
@@ -128,7 +128,7 @@ object PrometheusModel {
 
   def toLabelValuesResponse(qr: FiloQueryResult, verbose: Boolean, typ: QueryResultType,
                          mayBePartial: Option[Boolean]): MetadataSuccessResponse = {
-    val values = qr.result.flatMap(srv => srv.rows.map(row => {
+    val values = qr.result.flatMap(srv => srv.rows().map(row => {
       val br = row.asInstanceOf[BinaryRecordRowReader]
       LabelSampl(br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head)
     }))
@@ -137,7 +137,7 @@ object PrometheusModel {
 
   def toMetadataMapResponse(qr: FiloQueryResult, verbose: Boolean, typ: QueryResultType,
                          mayBePartial: Option[Boolean]): MetadataSuccessResponse = {
-    val values = qr.result.flatMap(srv => srv.rows.map(row => {
+    val values = qr.result.flatMap(srv => srv.rows().map(row => {
       val br = row.asInstanceOf[BinaryRecordRowReader]
       val consumer = new StringifyMapItemConsumer
       br.schema.consumeMapItems(br.recordBase, br.recordOffset, 0, consumer)
@@ -153,7 +153,7 @@ object PrometheusModel {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
-    val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+    val samples = srv.rows().filter(!_.getDouble(1).isNaN).map { r =>
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
     }.toSeq
 
@@ -180,7 +180,7 @@ object PrometheusModel {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
-    val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
+    val samples = srv.rows().map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
       // Don't remove empty histogram for remote query as it is needed for stitching with local results
       case (t, h) if (h.numBuckets > 0 || !processMultiPartition) =>
         val buckets = (0 until h.numBuckets).map { b =>
@@ -206,7 +206,7 @@ object PrometheusModel {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
       (if (verbose) makeVerboseLabels(srv.key)
       else Map.empty)
-    val samples = srv.rows.map { r => AvgSampl(r.getLong(0)/1000, r.getDouble(1),
+    val samples = srv.rows().map { r => AvgSampl(r.getLong(0)/1000, r.getDouble(1),
       r.getLong(2))
     }.toSeq
 
@@ -220,7 +220,7 @@ object PrometheusModel {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
       (if (verbose) makeVerboseLabels(srv.key)
       else Map.empty)
-    val samples = srv.rows.map { r => StdValSampl(r.getLong(0)/1000, r.getDouble(1),
+    val samples = srv.rows().map { r => StdValSampl(r.getLong(0)/1000, r.getDouble(1),
       r.getDouble(2), r.getLong(3))
     }.toSeq
 

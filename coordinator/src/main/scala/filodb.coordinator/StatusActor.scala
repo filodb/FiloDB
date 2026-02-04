@@ -56,7 +56,7 @@ private[coordinator] class StatusActor(clusterProxy: ActorRef, ackTimeout: Finit
                              sendAndScheduleCheck()
     case StatusAck(seqNo) => handleAck(seqNo)
     case CheckAck         => checkAck()
-    case GetCurrentEvents => sender() ! statuses.mapValues(_.values.toBuffer)
+    case GetCurrentEvents => sender() ! statuses.map { case (k, v) => k -> v.values.toSeq }
     case newProxy: ActorRef => _proxy = newProxy
   }
 

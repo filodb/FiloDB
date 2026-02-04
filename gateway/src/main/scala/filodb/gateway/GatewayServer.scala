@@ -122,7 +122,7 @@ object GatewayServer extends StrictLogging {
 
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
-    val userOpts = new GatewayOptions(args)
+    val userOpts = new GatewayOptions(args.toIndexedSeq)
     val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
     val numSeries = userOpts.numSeriesPerMetric()
 
@@ -228,7 +228,7 @@ object GatewayServer extends StrictLogging {
       val finalObservable = Observable.fromIterable(streamsToGen.reduce(_ ++ _))
 
       // Use a blocking call to ensure the main thread waits for all samples to be generated and queued.
-      implicit val scheduler = Scheduler.global // A scheduler is needed for runSyncUnsafe
+      implicit val scheduler: Scheduler = Scheduler.global // A scheduler is needed for runSyncUnsafe
       finalObservable.foreachL { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(rec)) {
@@ -383,7 +383,7 @@ object GatewayServer extends StrictLogging {
     )
     val topicName = sourceConf.getString("sourceconfig.filo-topic-name")
 
-    implicit val io = Scheduler.io("kafka-producer")
+    implicit val io: monix.execution.schedulers.SchedulerService = Scheduler.io("kafka-producer")
     val sink = new KafkaContainerSink(producerCfg, topicName)
     sink.writeTask(containerStream)
       .runToFuture

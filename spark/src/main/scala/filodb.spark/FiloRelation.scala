@@ -19,7 +19,7 @@ import filodb.core.store._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 
 object FiloRelation extends StrictLogging {
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
+  implicit val context: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global
 
   // *** Statistics **
   // For now they are global across all tables.
@@ -43,7 +43,7 @@ object FiloRelation extends StrictLogging {
       case f @ GreaterThanOrEqual(col, _) => col -> f
       case f @ LessThan(col, _) => col -> f
       case f @ LessThanOrEqual(col, _) => col -> f
-    }.groupBy(_._1).mapValues( colFilterPairs => colFilterPairs.map(_._2))
+    }.groupBy(_._1).map { case (k, colFilterPairs) => k -> colFilterPairs.map(_._2) }
   }
 
   // Parses the Spark filters, matching them to partition key columns, and returning

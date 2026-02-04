@@ -2,6 +2,7 @@ package filodb.downsampler
 
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
+import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
@@ -28,9 +29,9 @@ import filodb.memory.MemFactory
   * This test creates its own Cassandra column stores
   */
 class TimeSeriesMemStoreDownsampleIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
 
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   // Configuration that enables chunk-downsampler and write-downsample-index-by-raw-ingesting-store
   val baseConf = ConfigFactory.load("application_test.conf")
