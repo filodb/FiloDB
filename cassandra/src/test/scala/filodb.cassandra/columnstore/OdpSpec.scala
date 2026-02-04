@@ -27,11 +27,11 @@ import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 
 class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
   lazy val downsampleColumnStore = new CassandraColumnStore(config, s, session, true)
@@ -105,7 +105,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples
+      rvs.result.head.rows().toList.size shouldEqual numSamples
     } finally {
       memStore.shutdown()
     }
@@ -128,7 +128,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples
+        rvs.result.head.rows().toList.size shouldEqual numSamples
       }
     } finally {
       memStore.shutdown()
@@ -154,7 +154,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
       val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
       rvs.result.size shouldEqual 1
-      rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+      rvs.result.head.rows().toList.size shouldEqual numSamples * 2
     } finally {
       memStore.shutdown()
     }
@@ -184,7 +184,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
       res.foreach { r =>
         val rvs = r.futureValue.asInstanceOf[QueryResult]
         rvs.result.size shouldEqual 1
-        rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+        rvs.result.head.rows().toList.size shouldEqual numSamples * 2
       }
     } finally {
       memStore.shutdown()

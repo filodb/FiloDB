@@ -4,6 +4,8 @@ import java.lang.ref.Reference
 import java.nio.ByteBuffer
 import java.util
 import com.datastax.driver.core.Row
+import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.apache.spark.SparkConf
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
@@ -26,10 +28,10 @@ import java.io.File
 import scala.collection.mutable.ArrayBuffer
 
 class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience =
+  implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
-  implicit val s = monix.execution.Scheduler.Implicits.global
+  implicit val s: Scheduler = monix.execution.Scheduler.Implicits.global
 
   val sourceConfigPath = "conf/timeseries-filodb-server.conf"
   val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
@@ -156,7 +158,7 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       ChunkSetInfo.setNumRows(infoPtr, 10) // fake
       ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-      val set = ChunkSet(info, partKey, Nil, chunks)
+      val set = ChunkSet(info, partKey, Nil, chunks.toSeq)
 
       sourceColStore.write(datasetRef, Observable.fromIterable(Iterable(set))).futureValue
     }

@@ -37,7 +37,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
 
   class TopKHolder(var timestamp: Long = 0L) extends AggregateHolder {
     val valueOrdering = Ordering.by[RVKeyAndValue, Double](kr => kr.value)
-    implicit val ordering = if (bottomK) valueOrdering else valueOrdering.reverse
+    implicit val ordering: Ordering[RVKeyAndValue] = if (bottomK) valueOrdering else valueOrdering.reverse
     // TODO for later: see if we can use more memory/hava-heap-efficient data structures for this.
     val heap = mutable.PriorityQueue[RVKeyAndValue]()
     val row = new TopBottomKAggTransientRow(k)
@@ -180,11 +180,11 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
       cols(i + 1) = ColumnInfo(s"top${(i + 1)/2}-Val", ColumnType.DoubleColumn)
       i += 2
     }
-    ResultSchema(cols, 1, fixedVectorLen = source.fixedVectorLen)
+    ResultSchema(cols.toIndexedSeq, 1, fixedVectorLen = source.fixedVectorLen)
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1,
+    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)).toIndexedSeq, 1,
       fixedVectorLen = reductionSchema.fixedVectorLen)
   }
 }

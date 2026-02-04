@@ -6,7 +6,7 @@ import vectors._
 
 class RealTimeseriesEncodingTest extends NativeVectorTest {
   val samples = io.Source.fromURL(getClass.getResource("/timeseries_samples.txt"))
-                  .getLines.map(_.split(' '))
+                  .getLines().map(_.split(' '))
                   .map(ArrayStringRowReader).toSeq
   val timestampAppender = LongBinaryVector.appendingVectorNoNA(memFactory, samples.length)
   val valuesAppender = DoubleVector.appendingVectorNoNA(memFactory, samples.length)

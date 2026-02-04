@@ -79,12 +79,12 @@ object PromCirceSupport {
     final def apply(c: HCursor): Decoder.Result[Map[String, Double]]= {
       c.focus match {
         case Some(map) if map.isObject  =>
-          Right(map.asObject.get.toMap.mapValues(x => {
-                if (x.isString)
+          Right(map.asObject.get.toMap.map { case (k, x) =>
+                k -> (if (x.isString)
                   x.asString.get.toDouble
                 else
-                  x.asNumber.get.toDouble
-              }))
+                  x.asNumber.get.toDouble)
+              })
         case None                       => Left(DecodingFailure("Unable to parse the Map[String, Double]", Nil))
       }
     }

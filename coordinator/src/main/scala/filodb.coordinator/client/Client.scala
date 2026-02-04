@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.reflect.ClassTag
@@ -8,12 +8,13 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem, Address}
 import akka.pattern.ask
 import akka.util.Timeout
+import monix.execution.Scheduler
 
 import filodb.coordinator.ActorName
 import filodb.core._
 
 object Client {
-  implicit val context = GlobalScheduler.globalImplicitScheduler
+  implicit val context: Scheduler = GlobalScheduler.globalImplicitScheduler
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 30 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
@@ -24,17 +25,17 @@ object Client {
    */
   def actorAsk[B](actor: ActorRef, msg: Any,
                   askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }
 
   def asyncAsk(actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[Any] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     actor ? msg
   }
 
   def asyncTypedAsk[T: ClassTag](actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[T] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     (actor ? msg).mapTo[T]
   }
 
@@ -46,7 +47,7 @@ object Client {
 
   def actorsAsk[B](actors: Seq[ActorRef], msg: Any,
                    askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): Seq[B] = {
-    implicit val timeout = Timeout(askTimeout)
+    implicit val timeout: Timeout = Timeout(askTimeout)
     val fut = Future.sequence(actors.map(_ ? msg))
     Await.result(fut, askTimeout).map(f)
   }
@@ -81,6 +82,23 @@ object Client {
     val refFuture = system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(hostPort)).resolveOne(askTimeout)
     val ref = Await.result(refFuture, askTimeout)
     new LocalClient(ref)
+  }
+
+  /**
+   * Async version of standaloneClientV2 that returns a Future instead of blocking.
+   * This allows non-blocking concurrent client creation to multiple nodes.
+   * @param hostPort host:port of the standalone node
+   * @param system the ActorSystem to connect to
+   * @param askTimeout timeout for expecting a response
+   * @return Future of LocalClient that completes when actor reference is resolved
+   */
+  def standaloneClientV2Async(hostPort: String,
+                              system: ActorSystem,
+                              askTimeout: FiniteDuration): Future[LocalClient] = {
+    implicit val ec: ExecutionContext = system.dispatcher  // Use ActorSystem's dispatcher for consistent thread pool
+    system.actorSelection(ActorName.nodeCoordinatorPathClusterV2(hostPort))
+      .resolveOne(askTimeout)
+      .map(ref => new LocalClient(ref))
   }
 
 }

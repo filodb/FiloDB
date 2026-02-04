@@ -170,7 +170,7 @@ abstract class PartKeyIndexBenchmark {
     cforRange ( 0 until 8 ) { i =>
       val pIds = debox.Buffer.empty[Int]
       cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
-      partKeyIndex.startTimeFromPartIds(pIds.iterator())
+      partKeyIndex.startTimeFromPartIds(pIds.iterator)
     }
   }
 

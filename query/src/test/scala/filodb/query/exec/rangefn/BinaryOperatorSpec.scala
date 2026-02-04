@@ -127,51 +127,51 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
   private def fireBinaryOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // Subtraction - prefix
-    val expectedSub1 = samples.map(_.rows.map(v => scalar - v.getDouble(1)))
+    val expectedSub1 = samples.map(_.rows().map(v => scalar - v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedSub1, BinaryOperator.SUB, scalar, true)
 
     // Subtraction - suffix
-    val expectedSub2 = samples.map(_.rows.map(v => v.getDouble(1) - scalar))
+    val expectedSub2 = samples.map(_.rows().map(v => v.getDouble(1) - scalar))
     applyBinaryOperationAndAssertResult(samples, expectedSub2, BinaryOperator.SUB, scalar, false)
 
     // Addition - prefix
-    val expectedAdd1 = samples.map(_.rows.map(v => scalar + v.getDouble(1)))
+    val expectedAdd1 = samples.map(_.rows().map(v => scalar + v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedAdd1, BinaryOperator.ADD, scalar, true)
 
     // Addition - suffix
-    val expectedAdd2 = samples.map(_.rows.map(v => v.getDouble(1) + scalar))
+    val expectedAdd2 = samples.map(_.rows().map(v => v.getDouble(1) + scalar))
     applyBinaryOperationAndAssertResult(samples, expectedAdd2, BinaryOperator.ADD, scalar, false)
 
     // Multiply - prefix
-    val expectedMul1 = samples.map(_.rows.map(v => scalar * v.getDouble(1)))
+    val expectedMul1 = samples.map(_.rows().map(v => scalar * v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedMul1, BinaryOperator.MUL, scalar, true)
 
     // Multiply - suffix
-    val expectedMul2 = samples.map(_.rows.map(v => v.getDouble(1) * scalar))
+    val expectedMul2 = samples.map(_.rows().map(v => v.getDouble(1) * scalar))
     applyBinaryOperationAndAssertResult(samples, expectedMul2, BinaryOperator.MUL, scalar, false)
 
     // Modulo - prefix
-    val expectedMod1 = samples.map(_.rows.map(v => scalar % v.getDouble(1)))
+    val expectedMod1 = samples.map(_.rows().map(v => scalar % v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedMod1, BinaryOperator.MOD, scalar, true)
 
     // Modulo - suffix
-    val expectedMod2 = samples.map(_.rows.map(v => v.getDouble(1) % scalar))
+    val expectedMod2 = samples.map(_.rows().map(v => v.getDouble(1) % scalar))
     applyBinaryOperationAndAssertResult(samples, expectedMod2, BinaryOperator.MOD, scalar, false)
 
     // Division - prefix
-    val expectedDiv1 = samples.map(_.rows.map(v => scalar / v.getDouble(1)))
+    val expectedDiv1 = samples.map(_.rows().map(v => scalar / v.getDouble(1)))
     applyBinaryOperationAndAssertResult(samples, expectedDiv1, BinaryOperator.DIV, scalar, true)
 
     // Division - suffix
-    val expectedDiv2 = samples.map(_.rows.map(v => v.getDouble(1) / scalar))
+    val expectedDiv2 = samples.map(_.rows().map(v => v.getDouble(1) / scalar))
     applyBinaryOperationAndAssertResult(samples, expectedDiv2, BinaryOperator.DIV, scalar, false)
 
     // power - prefix
-    val expectedPow1 = samples.map(_.rows.map(v => math.pow(scalar, v.getDouble(1))))
+    val expectedPow1 = samples.map(_.rows().map(v => math.pow(scalar, v.getDouble(1))))
     applyBinaryOperationAndAssertResult(samples, expectedPow1, BinaryOperator.POW, scalar, true)
 
     // power - suffix
-    val expectedPow2 = samples.map(_.rows.map(v => math.pow(v.getDouble(1), scalar)))
+    val expectedPow2 = samples.map(_.rows().map(v => math.pow(v.getDouble(1), scalar)))
     applyBinaryOperationAndAssertResult(samples, expectedPow2, BinaryOperator.POW, scalar, false)
 
   }
@@ -181,65 +181,65 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
   private def fireComparatorOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // GTE - prefix
-    val expectedGTE = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
+    val expectedGTE = samples.map(_.rows().map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedGTE, BinaryOperator.GTE, scalar, true)
 
     // GTR - prefix
-    val expectedGTR = samples.map(_.rows.map(v => if (scalar > v.getDouble(1)) scalar else Double.NaN))
+    val expectedGTR = samples.map(_.rows().map(v => if (scalar > v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedGTR, BinaryOperator.GTR, scalar, true)
 
     // LTE - prefix
-    val expectedLTE = samples.map(_.rows.map(v => if (scalar <= v.getDouble(1)) scalar else Double.NaN))
+    val expectedLTE = samples.map(_.rows().map(v => if (scalar <= v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedLTE, BinaryOperator.LTE, scalar, true)
 
     // LTR - prefix
-    val expectedLTR = samples.map(_.rows.map(v => if (scalar < v.getDouble(1)) scalar else Double.NaN))
+    val expectedLTR = samples.map(_.rows().map(v => if (scalar < v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedLTR, BinaryOperator.LSS, scalar, true)
 
     // EQL - prefix
-    val expectedEQL = samples.map(_.rows.map(v => if (scalar == v.getDouble(1)) scalar else Double.NaN))
+    val expectedEQL = samples.map(_.rows().map(v => if (scalar == v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedEQL, BinaryOperator.EQL, scalar, true)
 
     // NEQ - prefix
-    val expectedNEQ = samples.map(_.rows.map(v => if (scalar != v.getDouble(1)) scalar else Double.NaN))
+    val expectedNEQ = samples.map(_.rows().map(v => if (scalar != v.getDouble(1)) scalar else Double.NaN))
     applyBinaryOperationAndAssertResult(samples, expectedNEQ, BinaryOperator.NEQ, scalar, true)
 
     // GTE_BOOL - prefix
-    val expectedGTE_BOOL = samples.map(_.rows.map { v =>
+    val expectedGTE_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar >= v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedGTE_BOOL, BinaryOperator.GTE_BOOL, scalar, true)
 
     // GTR_BOOL - prefix
-    val expectedGTR_BOOL = samples.map(_.rows.map { v =>
+    val expectedGTR_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar > v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedGTR_BOOL, BinaryOperator.GTR_BOOL, scalar, true)
 
     // LTE_BOOL - prefix
-    val expectedLTE_BOOL = samples.map(_.rows.map { v =>
+    val expectedLTE_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar <= v.getDouble(1)) 1.0 else 0.0
     })
 
     // LTR_BOOL - prefix
-    val expectedLTR_BOOL = samples.map(_.rows.map { v =>
+    val expectedLTR_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar < v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedLTR_BOOL, BinaryOperator.LSS_BOOL, scalar, true)
 
     // EQL_BOOL - prefix
-    val expectedEQL_BOOL = samples.map(_.rows.map { v =>
+    val expectedEQL_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar == v.getDouble(1)) 1.0 else 0.0
     })
     applyBinaryOperationAndAssertResult(samples, expectedEQL_BOOL, BinaryOperator.EQL_BOOL, scalar, true)
 
     // NEQ_BOOL - prefix
-    val expectedNEQ_BOOL = samples.map(_.rows.map { v =>
+    val expectedNEQ_BOOL = samples.map(_.rows().map { v =>
       if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
       else if (scalar != v.getDouble(1)) 1.0 else 0.0
     })
@@ -250,10 +250,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it ("should fail with wrong calculation") {
     // ceil
-    val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expectedVal = sampleBase.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -292,10 +292,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    val expectedVal = samples.map(_.rows.map(v => v.getDouble(1) * 2))
+    val expectedVal = samples.map(_.rows().map(v => v.getDouble(1) * 2))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(TimeFuncArgs(RangeParams(1,1,4))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     result.foreach(x=> println(x.toList))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -318,10 +318,10 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def outputRange: Option[RvRange] = None
       }
     )
-    val expectedVal = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
+    val expectedVal = samples.map(_.rows().map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(1571267260, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -336,7 +336,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalarOnLhs, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows().map(_.getDouble(1)))
 
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -348,6 +348,116 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         }
       }
     }
+  }
+
+  it("should handle empty histograms in ScalarOperationMapper without throwing ArrayIndexOutOfBoundsException") {
+    import filodb.core.metadata.Column.ColumnType
+    import filodb.memory.format.vectors.{Histogram, HistogramBuckets, MutableHistogram}
+
+    // Create a histogram schema
+    val histSchema = ResultSchema(
+      Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.HistogramColumn)), 1)
+
+    // Create histogram buckets
+    val buckets = HistogramBuckets.binaryBuckets64
+
+    // Create a non-empty histogram
+    val nonEmptyHist = MutableHistogram(buckets, Array.fill(buckets.numBuckets)(10.0))
+
+    // Create range vectors with a mix of empty and non-empty histograms
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientHistRow(1L, nonEmptyHist),
+          new TransientHistRow(2L, Histogram.empty),  // Empty histogram
+          new TransientHistRow(3L, nonEmptyHist)
+        ).iterator
+        override def outputRange: Option[RvRange] = None
+      }
+    )
+
+    // Apply scalar comparison (GTR) - this should not throw ArrayIndexOutOfBoundsException
+    val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.GTR, false,
+      Seq(StaticFuncArgs(5.0, RangeParams(0, 0, 0))))
+    val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, histSchema)
+
+    // Should complete without exception
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+
+    // Collect isEmpty states during iteration since TransientHistRow is mutable and reused
+    // We need to capture the state as we iterate, not after collecting all rows
+    val isEmptyStates = result.head.rows.map(row => row.getHistogram(1).isEmpty).toList
+
+    // Verify the result has 3 rows
+    isEmptyStates.size shouldEqual 3
+
+    // Second row (empty histogram) should return empty histogram during iteration
+    isEmptyStates(0) shouldEqual false  // First row: non-empty histogram
+    isEmptyStates(1) shouldEqual true   // Second row: empty histogram
+    isEmptyStates(2) shouldEqual false  // Third row: non-empty histogram
+  }
+
+  it("should handle shrinking bucket counts without stale data") {
+    import filodb.core.metadata.Column.ColumnType
+    import filodb.memory.format.vectors.{MutableHistogram, GeometricBuckets}
+
+    // Create a histogram schema
+    val histSchema = ResultSchema(
+      Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.HistogramColumn)), 1)
+
+    // Create histograms with different bucket counts
+    val largeBuckets = GeometricBuckets(1.0, 2.0, 8)  // 8 buckets
+    val smallBuckets = GeometricBuckets(1.0, 2.0, 4)  // 4 buckets
+
+    val largeHist = MutableHistogram(largeBuckets, Array.fill(8)(100.0))
+    val smallHist = MutableHistogram(smallBuckets, Array.fill(4)(50.0))
+
+    // Create range vectors: large -> small -> large
+    // This tests that shrinking doesn't leave stale values from the larger histogram
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientHistRow(1L, largeHist),  // 8 buckets with value 100
+          new TransientHistRow(2L, smallHist),  // 4 buckets with value 50
+          new TransientHistRow(3L, largeHist)   // 8 buckets with value 100
+        ).iterator
+        override def outputRange: Option[RvRange] = None
+      }
+    )
+
+    // Apply scalar multiplication (* 2)
+    val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.MUL, false,
+      Seq(StaticFuncArgs(2.0, RangeParams(0, 0, 0))))
+    val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, histSchema)
+
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+
+    // Collect bucket counts and first bucket values during iteration
+    val bucketInfo = result.head.rows.map { row =>
+      val hist = row.getHistogram(1)
+      (hist.numBuckets, if (hist.numBuckets > 0) hist.bucketValue(0) else Double.NaN)
+    }.toList
+
+    bucketInfo.size shouldEqual 3
+
+    // First row: 8 buckets, values should be 100 * 2 = 200
+    bucketInfo(0)._1 shouldEqual 8
+    bucketInfo(0)._2 shouldEqual 200.0
+
+    // Second row: 4 buckets (not 8!), values should be 50 * 2 = 100
+    // If stale data issue exists, this would incorrectly have 8 buckets
+    bucketInfo(1)._1 shouldEqual 4
+    bucketInfo(1)._2 shouldEqual 100.0
+
+    // Third row: 8 buckets, values should be 100 * 2 = 200
+    bucketInfo(2)._1 shouldEqual 8
+    bucketInfo(2)._2 shouldEqual 200.0
   }
 
 }

@@ -315,10 +315,10 @@ object ProtoConverters {
         dso.getShardKeyColumnsList.asScala.toSeq,
         dso.getMetricColumn,
         dso.getHasDownsampledData,
-        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.mapValues(rs => rs.fromProto).toMap,
+        dso.getIgnoreShardKeyColumnSuffixesMap.asScala.map { case (k, v) => k -> v.fromProto }.toMap,
         dso.getIgnoreTagsOnPartitionKeyHashList.asScala.toSeq,
-        dso.getCopyTagsList.asScala.map(t => t.fromProto),
-        dso.getMultiColumFacetsMap.asScala.mapValues(rs => rs.fromProto).toMap
+        dso.getCopyTagsList.asScala.map(t => t.fromProto).toSeq,
+        dso.getMultiColumFacetsMap.asScala.map { case (k, v) => k -> v.fromProto }.toMap
       )
     }
   }
@@ -677,8 +677,8 @@ object ProtoConverters {
 
   implicit class DataSchemaFromProtoConverter(ds: GrpcMultiPartitionQueryService.DataSchema) {
     def fromProto: filodb.core.metadata.DataSchema = {
-      val columns : Seq[filodb.core.metadata.Column] = ds.getColumnsList.asScala.map(c => c.fromProto)
-      val downsamplers = ds.getDownsamplersList.asScala.map(d => d.fromProto)
+      val columns : Seq[filodb.core.metadata.Column] = ds.getColumnsList.asScala.map(c => c.fromProto).toSeq
+      val downsamplers = ds.getDownsamplersList.asScala.map(d => d.fromProto).toSeq
       val downsampleSchema = if (ds.hasDownsampleSchema) {Option(ds.getDownsampleSchema)} else {None}
       filodb.core.metadata.DataSchema(
         ds.getName,
@@ -753,7 +753,7 @@ object ProtoConverters {
       val partIdsMemTimeGap = debox.Map.fromIterable(pimtg)
       val pinim = plr.getPartIdsNotInMemoryList.asScala.map(intgr => intgr.intValue())
       val partIdsNotInMemory = debox.Buffer.fromIterable(pinim)
-      val pkRecords = plr.getPkRecordsList.asScala.map(pklir => pklir.fromProto)
+      val pkRecords = plr.getPkRecordsList.asScala.map(pklir => pklir.fromProto).toSeq
       PartLookupResult(
         plr.getShard,
         plr.getChunkMethod.fromProto,
@@ -1537,7 +1537,7 @@ object ProtoConverters {
     def fromProto(): filodb.query.AggregateClause = {
       filodb.query.AggregateClause(
         ac.getClauseType.fromProto,
-        ac.getLabelsList.asScala
+        ac.getLabelsList.asScala.toSeq
       )
     }
   }
@@ -1691,7 +1691,7 @@ object ProtoConverters {
         amr.getAggrOp.fromProto,
         amr.getAggrParamsList().asScala.toSeq.map(ap => ap.fromProto()),
         if (amr.hasClauseOpt) Option(amr.getClauseOpt.fromProto()) else None,
-        amr.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+        amr.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       )
     }
   }
@@ -1722,7 +1722,7 @@ object ProtoConverters {
 
   implicit class LabelCardinalityPresenterFromProtoConverter(lcp: GrpcMultiPartitionQueryService.LabelCardinalityPresenter) {
     def fromProto(queryContext: QueryContext): LabelCardinalityPresenter = {
-      val funcParams = lcp.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+      val funcParams = lcp.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       new LabelCardinalityPresenter(funcParams)
     }
   }
@@ -1738,7 +1738,7 @@ object ProtoConverters {
 
   implicit class HistogramQuantileMapperFromProtoConverter(hqm: GrpcMultiPartitionQueryService.HistogramQuantileMapper) {
     def fromProto(queryContext: QueryContext): HistogramQuantileMapper = {
-      val funcParams = hqm.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext))
+      val funcParams = hqm.getFuncParamsList.asScala.map(fa => fa.fromProto(queryContext)).toSeq
       HistogramQuantileMapper(funcParams)
     }
   }

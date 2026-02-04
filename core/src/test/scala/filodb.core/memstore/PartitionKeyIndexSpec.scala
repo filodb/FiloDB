@@ -30,7 +30,7 @@ class PartitionKeyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter
   implicit class RichIntIterator(ii: IntIterator) {
     def toSeq: Seq[Int] = {
       val newSeq = new collection.mutable.ArrayBuffer[Int]()
-      while (ii.hasNext) { newSeq += ii.next }
+      while (ii.hasNext) { newSeq += ii.next() }
       newSeq
     }
   }
