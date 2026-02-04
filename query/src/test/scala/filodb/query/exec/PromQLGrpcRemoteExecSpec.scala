@@ -35,8 +35,8 @@ import scala.util.Using
 class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures
                                 with StrictLogging with BeforeAndAfter with BeforeAndAfterAll {
 
-  implicit val scheduler = monix.execution.Scheduler.Implicits.global
-  implicit val defaultPatience = PatienceConfig(timeout = Span(60000, Millis))
+  implicit val scheduler: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(60000, Millis))
 
   private def toRv(samples: Seq[(Long, Double)],
                    rangeVectorKey: RangeVectorKey,
@@ -162,7 +162,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val deserializedSrv = qr.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
-    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    val res = deserializedSrv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
     deserializedSrv.key shouldEqual rvKey
     // queryStats ResultBytes counter increment is not done as part of SRV constructor, so skipping that assertion
     (qr.queryStats.getCpuNanosCounter(List()).get() > 0) shouldEqual true

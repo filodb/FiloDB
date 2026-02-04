@@ -61,7 +61,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
 
   private val _clusterActor = new AtomicReference[Option[ActorRef]](None)
 
-  implicit lazy val ec = GlobalScheduler.globalImplicitScheduler
+  implicit lazy val ec: monix.execution.Scheduler = GlobalScheduler.globalImplicitScheduler
 
   lazy val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
                                  reporter = UncaughtExceptionReporter(
@@ -185,7 +185,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
    * Please see https://doc.akka.io/docs/akka/current/actors.html#coordinated-shutdown for details
    */
   CoordinatedShutdown(system).addTask(CoordinatedShutdown.PhaseServiceUnbind, "queryShutdown") { () =>
-    implicit val timeout = Timeout(15.seconds)
+    implicit val timeout: akka.util.Timeout = Timeout(15.seconds)
     // Reset shuts down all ingestion and query actors on this node
     // TODO: be sure that status gets updated across cluster?
     (coordinatorActor ? NodeProtocol.ResetState).map(_ ⇒ Done)
@@ -272,7 +272,7 @@ private[filodb] trait FilodbClusterNode extends KamonInit with NodeConfiguration
 
   lazy val cluster = FilodbCluster(system)
 
-  implicit lazy val ec = cluster.ec
+  implicit lazy val ec: monix.execution.Scheduler = cluster.ec
 
   lazy val metaStore: MetaStore = cluster.metaStore
 

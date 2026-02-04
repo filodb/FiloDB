@@ -87,7 +87,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   private lazy val coordinatorActor = cluster.coordinatorActor
   private lazy val metaStore = cluster.metaStore
 
-  implicit val patience =   // make sure futureValue has long enough time
+  implicit val patience: PatienceConfig =   // make sure futureValue has long enough time
     PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
 
   var clusterActor: ActorRef = _
@@ -157,9 +157,9 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                                        ColumnInfo("value", ColumnType.DoubleColumn, true))
         // query is counting each partition....
         vectors should have length (59 * 2)
-        // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
+        // vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  actually change logicalPlan above to sum up individual counts for us
-        vectors.map(_.rows.map(_.getDouble(1).toInt).toSeq.head).sum shouldEqual (99 * 2)
+        vectors.map(_.rows().map(_.getDouble(1).toInt).toSeq.head).sum shouldEqual (99 * 2)
     }
   }
 }

@@ -117,8 +117,8 @@ object LogicalPlanParser {
   }
 
   private def scalarBinaryOperationToQuery(lp: ScalarBinaryOperation): String = {
-    val rhs = if (lp.rhs.isLeft) lp.rhs.left.get.toString else convertToQuery(lp.rhs.right.get)
-    val lhs = if (lp.lhs.isLeft) lp.lhs.left.get.toString else convertToQuery(lp.lhs.right.get)
+    val rhs = if (lp.rhs.isLeft) lp.rhs.swap.toOption.get.toString else convertToQuery(lp.rhs.toOption.get)
+    val lhs = if (lp.lhs.isLeft) lp.lhs.swap.toOption.get.toString else convertToQuery(lp.lhs.toOption.get)
     s"($lhs$Space${lp.operator.operatorString}$Space$rhs)"
   }
 

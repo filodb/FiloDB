@@ -183,7 +183,7 @@ object TestTimeseriesPrometheusConsumer extends StrictLogging {
     val serialized = writeRequest.toByteArray
     val compressed = Snappy.compress(serialized)
 
-    val entity = HttpEntity(ContentType.parse("application/x-protobuf").right.get, ByteString(compressed))
+    val entity = HttpEntity(ContentType.parse("application/x-protobuf").toOption.get, ByteString(compressed))
 
     val request = HttpRequest(
       method = HttpMethods.POST,

@@ -21,7 +21,7 @@ import filodb.query.exec.{MultiSchemaPartitionsExec, _}
 
 class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
-  implicit val system = ActorSystem()
+  implicit val system: akka.actor.ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)

@@ -170,7 +170,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
   }
 
   private def transformRVs(rv: RangeVector, colType: ColumnType): Iterator[Any] = {
-    val metadataResult = rv.rows.map { rowReader =>
+    val metadataResult = rv.rows().map { rowReader =>
       val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
       rv match {
         case srv: SerializedRangeVector if colType == MapColumn =>
@@ -304,8 +304,10 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
               UTF8MapIteratorRowReader(List.empty.toIterator), None))
           } else {
             val x = for ((key, sketchMap) <- metaDataMutableMap) yield {
-              val labelSketchMapIterator =
-                Seq(sketchMap.mapValues(cpcSketch => ZeroCopyUTF8String(cpcSketch.toByteArray)).toMap).toIterator
+              val convertedSketchMap = sketchMap.map { case (k, cpcSketch) =>
+                k -> ZeroCopyUTF8String(cpcSketch.toByteArray)
+              }.toMap
+              val labelSketchMapIterator = Seq(convertedSketchMap).toIterator
               IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(labelSketchMapIterator), None)
             }
             Observable.fromIterable(x)
