@@ -14,7 +14,7 @@ import monix.kafka.config.AutoOffsetReset
  * To run the test consumer, pass the source config path as the first arg
  */
 object TestTimeseriesConsumer extends StrictLogging {
-  implicit val io = Scheduler.io("kafka-consumer")
+  implicit val io: Scheduler = Scheduler.io("kafka-consumer")
 
   def main(args: Array[String]): Unit = {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(args(0))).resolve()

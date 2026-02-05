@@ -321,7 +321,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = chunkmapSize // inherited from ChunkMap
+  def numChunks: Int = chunkmapSize() // inherited from ChunkMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**
@@ -331,7 +331,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
    */
   def unflushedChunksets: Int = chunkmapSliceToEnd(newestFlushedID + 1).count
 
-  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate)
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate())
 
   // NOT including currently flushing writeBuffer chunks if there are any
   private[memstore] def infosToBeFlushed: ChunkInfoIterator =

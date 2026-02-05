@@ -72,7 +72,7 @@ class BlockMemFactoryPool(blockStore: BlockManager,
   def blocksContainingPtr(ptr: BinaryRegion.NativePointer): Seq[Block] = synchronized {
     factoryPool.flatMap { bmf =>
       val blocks = bmf.fullBlocksToBeMarkedAsReclaimable ++ Option(bmf.currentBlock).toList
-      BlockDetective.containsPtr(ptr, blocks)
+      BlockDetective.containsPtr(ptr, blocks.toSeq)
     }
   }
 

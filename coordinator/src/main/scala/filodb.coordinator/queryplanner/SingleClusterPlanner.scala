@@ -738,7 +738,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val pp = qContext.plannerParams
       eps.map(ep => makeBuddyExecPlanIfNeeded(qContext, ep))
     }
-    PlanResult(plans)
+    PlanResult(plans.toSeq)
   }
   // scalastyle:on method.length
 
@@ -766,7 +766,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], logicalPlanWithoutBucket: PeriodicSeriesWithWindowing) =
       if (queryConfig.translatePromToFilodbHistogram) {
        val result = removeBucket(Right(lp))
-        (result._1, result._2, result._3.right.get)
+        (result._1, result._2, result._3.toOption.get)
     } else (None, None, lp)
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
@@ -852,9 +852,9 @@ class SingleClusterPlanner(val dataset: Dataset,
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
-                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
               else
-                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
           }
         }
@@ -871,7 +871,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
     if (queryConfig.translatePromToFilodbHistogram) {
      val result = removeBucket(Left(lp))
-      (result._1, result._2, result._3.left.get)
+      (result._1, result._2, result._3.swap.toOption.get)
 
     } else (None, None, lp)
 

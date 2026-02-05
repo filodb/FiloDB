@@ -64,7 +64,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
                          .toListL.runToFuture.futureValue
     for { i <- expectedResult.indices } {
         expectedResult(i)._1 shouldEqual result(i).key.labelValues
-        val resultSamples = result(i).rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+        val resultSamples = result(i).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
         resultSamples shouldEqual expectedResult(i)._2
     }
   }
