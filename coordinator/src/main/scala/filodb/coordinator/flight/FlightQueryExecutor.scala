@@ -217,7 +217,7 @@ trait FlightQueryExecutor extends StrictLogging {
               listener.start(vec)
               val rb = SerializedRangeVector.newBuilder()
               Observable.fromIterable(res.result).mapEval { rv =>
-                vec.clear()
+                vec.getFieldVectors.forEach(_.reset()) // reset vectors before each RV is loaded
                 val rvMetadata = RvMetadata(rv.key, rv.outputRange)
                 rv match {
                   case asrv: ArrowSerializedRangeVector =>
