@@ -1061,18 +1061,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
     // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
     // is a metadata operation and shares common components with other metadata endpoints.
-    val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
-    val shardKeyFilterGroups = LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
-    val partitions = lp match {
-      case lc: LabelCardinality => getPartitions(lc, queryParams)
-      case _ => shardKeyFilterGroups.collectFirst {
-        case group
-          if group.size == dataset.options.shardKeyColumns.size &&
-            group.forall(_.filter.isInstanceOf[Equals]) => partitionLocationProvider.getPartitions(
-          group.collect { case ColumnFilter(c, Equals(v: String)) => c -> v }.toMap,timeRange)
-      }.getOrElse(getMetadataPartitions(lp.filters, timeRange))
-    }
-
+    val partitions = resolveMetadataPartitions(lp, queryParams)
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
       localPartitionPlanner.materialize(lp, qContext)
@@ -1109,6 +1098,38 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     PlanResult(execPlan::Nil)
   }
 
+  private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
+    val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
+    val shardKeyFilterGroups =
+      LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
+    val nonMetricCols = dataset.options.nonMetricShardColumns
+
+    def hasAllNonMetricEquals(group: Seq[ColumnFilter]): Boolean =
+      nonMetricCols.forall(col => group.exists {
+        case ColumnFilter(c, Equals(_: String)) if c == col => true
+        case _                                              => false
+      })
+
+    val shouldFallback = shardKeyFilterGroups.exists(g => g.nonEmpty && !hasAllNonMetricEquals(g))
+
+    lp match {
+      case lc: LabelCardinality =>
+        getPartitions(lc, queryParams)
+
+      case _ =>
+        val fallback = getMetadataPartitions(lp.filters, timeRange)
+        if (shouldFallback) fallback
+        else shardKeyFilterGroups.collectFirst {
+          case group if hasAllNonMetricEquals(group) =>
+            val routingMap =
+              nonMetricCols.map(col =>
+                group.collectFirst { case ColumnFilter(c, Equals(v: String)) if c == col => c -> v }.get
+              ).toMap
+            partitionLocationProvider.getPartitions(routingMap, timeRange)
+        }.getOrElse(fallback)
+    }
+  }
+
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
@@ -1117,7 +1138,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       getPartitions(lp, queryParams, infiniteTimeRange = true)
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
-                  s"dispatching to all authorized partitions")
+        s"dispatching to all authorized partitions")
       getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
     }
     val execPlan = if (partitions.isEmpty) {
