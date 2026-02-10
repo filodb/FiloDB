@@ -845,6 +845,41 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should produce consistent results between chunked and iterating PredictLinear implementations") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Chunked implementation
+      val chunkedIt = chunkedWindowIt(data, rv, new PredictLinearChunkedFunctionD(params), windowSize, step)
+      val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+
+      // Iterating implementation
+      val slidingIt = slidingWindowIt(data, rv, new PredictLinearFunction(params), windowSize, step)
+      val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+
+      // Both should produce the same number of results
+      chunkedResults.length shouldEqual slidingResults.length
+
+      // Compare results with tolerance for floating-point differences
+      chunkedResults.zip(slidingResults).zipWithIndex.foreach { case ((chunked, sliding), idx) =>
+        if (chunked.isNaN && sliding.isNaN) {
+          // Both NaN is fine
+        } else if (chunked.isNaN || sliding.isNaN) {
+          fail(s"Mismatch at index $idx: chunked=$chunked, sliding=$sliding (one is NaN)")
+        } else {
+          chunked shouldEqual sliding +- errorOk
+        }
+      }
+    }
+  }
+
   it("it should correctly calculate zscore") {
     val data = (1 to 500).map(_.toDouble)
     val rv = timeValueRV(data)

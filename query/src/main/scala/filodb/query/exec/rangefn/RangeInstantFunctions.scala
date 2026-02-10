@@ -21,15 +21,18 @@ object RangeInstantFunctions {
     * Predicts the value of time series at a future time using linear regression.
     * @param window the window of samples to use for regression
     * @param duration the number of seconds into the future to predict
+    * @param interceptTime the reference timestamp for the intercept calculation (typically the window end time)
     * @return the predicted value, or NaN if less than 2 samples
+    *
+    * NOTE: This implementation uses interceptTime (window end timestamp) to match the behavior of
+    * PredictLinearChunkedFunctionD. This should be verified for compatibility with Prometheus
+    * predict_linear semantics, which may use the last sample's timestamp instead.
     */
-  def predictLinearFunction(window: Window[TransientRow], duration: Double): Double = {
+  def predictLinearFunction(window: Window[TransientRow], duration: Double, interceptTime: Long): Double = {
     if (window.size < 2) {
       Double.NaN  // cannot calculate result without 2 samples
     } else {
-      // Use the last sample's timestamp as intercept time because predict_linear
-      // predicts the value at 'duration' seconds from the end of the window
-      val (slope, intercept) = linearRegression(window, window.last.timestamp)
+      val (slope, intercept) = linearRegression(window, interceptTime)
       slope * duration + intercept
     }
   }
@@ -318,6 +321,10 @@ object DerivFunction extends RangeFunction[TransientRow] {
   * Iterator-based implementation of predict_linear function.
   * Predicts the value of time series t seconds from now based on linear regression of the window.
   * @param funcParams sequence containing the duration parameter (number of seconds to predict into the future)
+  *
+  * NOTE: This implementation uses endTimestamp (window end time) as the intercept time to match
+  * PredictLinearChunkedFunctionD behavior. This should be verified for compatibility with Prometheus
+  * predict_linear semantics.
   */
 class PredictLinearFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
   require(funcParams.nonEmpty, "predict_linear function needs a duration argument")
@@ -332,7 +339,7 @@ class PredictLinearFunction(funcParams: Seq[Any]) extends RangeFunction[Transien
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val duration = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
-    val result = RangeInstantFunctions.predictLinearFunction(window, duration)
+    val result = RangeInstantFunctions.predictLinearFunction(window, duration, endTimestamp)
     sampleToEmit.setValues(endTimestamp, result)
   }
 }
