@@ -327,7 +327,7 @@ object DerivFunction extends RangeFunction[TransientRow] {
   * predict_linear semantics.
   */
 class PredictLinearFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
-  require(funcParams.nonEmpty, "predict_linear function needs a duration argument")
+  require(funcParams.size == 1, "predict_linear function needs a duration argument")
   require(funcParams.head.isInstanceOf[StaticFuncArgs], "duration parameter must be a number")
 
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
