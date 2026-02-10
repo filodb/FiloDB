@@ -1179,4 +1179,171 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       validatePlan(execPlan.children.head, expected)
     }
   }
+
+  // ========== NEW MULTIPARTITION TEST CASES ==========
+
+  it("should route metadata queries to correct partitions with MultiPartitionPlanner") {
+    def testPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val testMppPartitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("_ns_" -> "App-1", "_ws_" -> "demo")))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        else
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        testPartitions(timeRange)
+    }
+
+    val testConfig = QueryConfig(config).copy(plannerSelector = Some("plannerSelector"))
+    val testMpp = new MultiPartitionPlanner(
+      testMppPartitionLocationProvider, localPlanner, "local", dataset, testConfig
+    )
+
+    val testShardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(
+        Seq(
+          ColumnFilter("_ws_", Equals("demo")),
+          ColumnFilter("_ns_", Equals("App-1"))
+        ),
+        Seq(
+          ColumnFilter("_ws_", Equals("demo")),
+          ColumnFilter("_ns_", Equals("App-2"))
+        )
+      )
+    }
+
+    val skrp = new ShardKeyRegexPlanner(dataset, testMpp, testShardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
+
+    val lp = Parser.queryToLogicalPlan("""test{_ws_ = "demo", _ns_ =~ "App.*"}""", 1000, 1000)
+    val execPlan = skrp.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+
+    // Verify both partitions are represented
+    val childFilters = execPlan.children.flatMap(_.children.flatMap {
+      case mspe: MultiSchemaPartitionsExec => mspe.filters
+      case _ => Seq.empty
+    })
+
+    childFilters.count(f => f.column == "_ns_" && f.filter.valuesStrings.contains("App-1")) should be > 0
+    childFilters.count(f => f.column == "_ns_" && f.filter.valuesStrings.contains("App-2")) should be > 0
+  }
+
+  it("should handle multipartition aggregate queries with map-reduce correctly") {
+    val lp = Parser.queryToLogicalPlan("""sum(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1"})""", 1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+      )
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Verify it's a MultiPartitionReduceAggregateExec (reduce phase)
+    execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual true
+    execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].aggrOp shouldEqual Sum
+
+    // Verify we have 2 children (one for each partition: App-1 and App-2)
+    execPlan.children.size shouldEqual 2
+
+    // Verify children contain correct filters for each partition
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual true
+    execPlan.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual true
+  }
+
+  it("should handle multipartition binary join operations correctly") {
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"}""",
+      1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+      )
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Verify root is BinaryJoinExec
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+
+    // Verify both children are MultiPartitionDistConcatExec
+    execPlan.children.size shouldEqual 2
+    execPlan.children.head.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
+    execPlan.children(1).isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
+
+    // Verify each side has 2 children (for App-1 and App-2)
+    val lhs = execPlan.children.head.asInstanceOf[MultiPartitionDistConcatExec]
+    val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
+
+    lhs.children.size shouldEqual 2
+    rhs.children.size shouldEqual 2
+
+    // Verify filters are correct
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual true
+    lhs.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual true
+  }
+
+  it("should correctly propagate filters across multipartition boundaries") {
+    val lp = Parser.queryToLogicalPlan(
+      """test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1"}""",
+      1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+      )
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+
+    // Verify all partitions have the correct filters
+    // Check first child
+    val child0Filters = execPlan.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec].filters
+    child0Filters.exists(f => f.column == "_ws_" && f.filter.valuesStrings.contains("demo")) shouldEqual true
+    child0Filters.exists(f => f.column == "instance" && f.filter.valuesStrings.contains("Inst-1")) shouldEqual true
+    child0Filters.exists(f => f.column == "_ns_" && f.filter.valuesStrings.contains("App-2")) shouldEqual true
+
+    // Check second child
+    val child1Filters = execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters
+    child1Filters.exists(f => f.column == "_ws_" && f.filter.valuesStrings.contains("demo")) shouldEqual true
+    child1Filters.exists(f => f.column == "instance" && f.filter.valuesStrings.contains("Inst-1")) shouldEqual true
+    child1Filters.exists(f => f.column == "_ns_" && f.filter.valuesStrings.contains("App-1")) shouldEqual true
+  }
+
+  it("should handle multipartition queries with different shard key combinations") {
+    val lp = Parser.queryToLogicalPlan("""count(test{_ws_ = "demo", _ns_ =~ "App.*"})""", 1000, 1000)
+
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+      )
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual true
+    execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].aggrOp shouldEqual Count
+    execPlan.children.size shouldEqual 2
+
+    // Verify children have correct filters
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual true
+    execPlan.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual true
+  }
 }
