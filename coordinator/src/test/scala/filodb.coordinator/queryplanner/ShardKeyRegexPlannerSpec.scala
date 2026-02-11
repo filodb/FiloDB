@@ -1340,7 +1340,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].aggrOp shouldEqual Count
     execPlan.children.size shouldEqual 2
 
-    // Verify children have correct filters
+    // Verify children have correct  filters
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual true
     execPlan.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
