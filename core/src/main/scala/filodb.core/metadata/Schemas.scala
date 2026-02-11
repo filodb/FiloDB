@@ -485,6 +485,7 @@ object Schemas extends StrictLogging {
     gauge.name ->                 preaggGaugeV2.name,
     deltaCounter.name ->          preaggDeltaCounter.name,
     deltaHistogram.name ->        preaggDeltaHistogram.name,
+    deltaHistogramV2.name ->      preaggDeltaHistogramV2.name,
     otelDeltaHistogram.name ->    preaggOtelDeltaHistogram.name,
     otelExpDeltaHistogram.name -> preaggOtelExpDeltaHistogram.name
   )
