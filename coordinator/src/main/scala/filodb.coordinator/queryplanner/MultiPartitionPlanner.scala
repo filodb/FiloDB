@@ -1110,23 +1110,28 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         case _                                              => false
       })
 
-    val shouldFallback = shardKeyFilterGroups.exists(g => g.nonEmpty && !hasAllNonMetricEquals(g))
+    def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
+      nonMetricCols.map(col =>
+        group.collectFirst { case ColumnFilter(c, Equals(v: String)) if c == col => c -> v }.get
+      ).toMap
+
+    val shouldFallback = shardKeyFilterGroups.isEmpty || shardKeyFilterGroups.exists(g => !hasAllNonMetricEquals(g))
 
     lp match {
       case lc: LabelCardinality =>
         getPartitions(lc, queryParams)
 
       case _ =>
-        val fallback = getMetadataPartitions(lp.filters, timeRange)
-        if (shouldFallback) fallback
-        else shardKeyFilterGroups.collectFirst {
-          case group if hasAllNonMetricEquals(group) =>
-            val routingMap =
-              nonMetricCols.map(col =>
-                group.collectFirst { case ColumnFilter(c, Equals(v: String)) if c == col => c -> v }.get
-              ).toMap
-            partitionLocationProvider.getPartitions(routingMap, timeRange)
-        }.getOrElse(fallback)
+        if (shouldFallback) {
+          getMetadataPartitions(lp.filters, timeRange)
+        } else {
+          shardKeyFilterGroups
+            .filter(_.nonEmpty)
+            .filter(hasAllNonMetricEquals)
+            .map(buildRoutingMap)
+            .flatMap(routingMap => partitionLocationProvider.getPartitions(routingMap, timeRange))
+            .distinct
+        }
     }
   }
 
