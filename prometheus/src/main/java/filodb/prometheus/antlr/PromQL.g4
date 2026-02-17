@@ -184,6 +184,7 @@ AGGREGATION_OP
     | M I N
     | M A X
     | A V G
+    | H A V G
     | G R O U P
     | S T D D E V
     | S T D V A R

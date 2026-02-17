@@ -9,6 +9,7 @@ import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
 import filodb.core.store._
+import filodb.query.AggregationOperator.HAvg
 import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
@@ -49,6 +50,18 @@ object SelectRawPartitionsExec extends {
     }
     else false
   }
+
+  /**
+   * Checks if an AggregateMapReduce Transformer is attached
+   * to the MSPE and has the aggrOp argument equal to hAvg.
+   * This method is typically used to select sum and count columns for SelectRawPartitionsExec
+   * @param transformers RVTs attached to the ExecPlan node.
+   */
+  def checkHAvgAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
+    transformers.exists {
+      case avghAmr: AggregateMapReduce =>  avghAmr.aggrOp == HAvg
+      case _ =>                            false
+    }
 
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
     transformers.collectFirst { case p: PeriodicSamplesMapper => p.functionId }.flatten
@@ -96,6 +109,13 @@ object SelectRawPartitionsExec extends {
         // query is selecting specific columns
         val colIds = dataSchema.colIDs(colNames: _*)
         require(colIds.isGood, s"$colNames is not a valid column name.")
+        colIds.get
+      } else if (checkHAvgAggExists(transformers)) {
+        // select sum & count columns
+        val hAvgCols = Seq("sum", "count")
+        val colIds = dataSchema.colIDs(hAvgCols: _*)
+        require(colIds.isGood,
+          s"Histogram average can be applied only on types that have both sum & count columns, such as a histogram")
         colIds.get
       } else if (dataSchema != Schemas.dsGauge) {
         // needs to select raw data

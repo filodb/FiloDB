@@ -9,6 +9,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
@@ -177,6 +178,116 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val readyToAggr10 = samples.toList.map(_.rows().toList).transpose
     compareIter(result10(0).rows().map(_.getDouble(1)), readyToAggr10.map { v => 1d }.iterator)
+  }
+
+  it ("should optimize histogram average using the havg function ") {
+
+    def tuple3ToRR(t3: (Long, Double, Double)) = new RowReader() {
+      override def notNull(columnNo: Int): Boolean = ???
+      override def getBoolean(columnNo: Int): Boolean = ???
+      override def getInt(columnNo: Int): Int = ???
+      override def getLong(columnNo: Int): Long = {
+        if(columnNo == 0){
+          t3._1
+        } else {
+          throw new IllegalStateException()
+        }
+      }
+      override def getDouble(columnNo: Int): Double = {
+        if(columnNo == 1){
+          t3._2
+        } else if(columnNo == 2){
+          t3._3
+        } else {
+          throw new IllegalStateException()
+        }
+      }
+      override def getFloat(columnNo: Int): Float = ???
+      override def getString(columnNo: Int): String = ???
+      override def getAny(columnNo: Int): Any = ???
+      override def getBlobBase(columnNo: Int): Any = ???
+      override def getBlobOffset(columnNo: Int): Long = ???
+      override def getBlobNumBytes(columnNo: Int): Int = ???
+    }
+
+    val dps1 = Seq(
+      (200L, 30d, 3d),
+      (220L, 40d, 4d),
+      (240L, 20d, 2d),
+      (260L, 60d, 6d),
+      (280L, 30d, 3d),
+    ).map(tuple3ToRR)
+
+    val dps2 = Seq(
+      (200L, 30d, 3d),
+      (220L, 50d, 5d),
+      (240L, 20d, 2d),
+      (260L, 40d, 4d),
+      (280L, 30d, 3d),
+    ).map(tuple3ToRR)
+
+    val dps3 = Seq(
+      (200L, 50d, 5d),
+      (220L, 40d, 4d),
+      (240L, 30d, 3d),
+      (260L, 40d, 4d),
+      (280L, 20d, 2d),
+    ).map(tuple3ToRR)
+
+    val rv1 = new RangeVector {
+      import NoCloseCursor._
+      override def key: RangeVectorKey = ignoreKey
+      override def rows(): RangeVectorCursor = dps1.iterator
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val rv2 = new RangeVector {
+      import NoCloseCursor._
+      override def key: RangeVectorKey = ignoreKey
+      override def rows(): RangeVectorCursor = dps2.iterator
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val rv3 = new RangeVector {
+      import NoCloseCursor._
+      override def key: RangeVectorKey = ignoreKey
+      override def rows(): RangeVectorCursor = dps3.iterator
+      override def outputRange: Option[RvRange] = None
+    }
+
+    val expectedAvg = Seq(
+      (200L, 10d),
+      (220L, 10d),
+      (240L, 10d),
+      (260L, 10d),
+      (280L, 10d),
+    )
+
+    val rvs = Seq(rv1, rv2, rv3)
+    // HAvg
+    val tscSchema = ResultSchema(Seq(
+      ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn),
+      ColumnInfo("count", ColumnType.DoubleColumn)),
+      1)
+
+    val agg4 = RowAggregator(AggregationOperator.HAvg, Nil, tscSchema)
+    val resultObs4a = RangeVectorAggregator.mapReduce(
+      agg4, false, Observable.fromIterable(rvs), noGrouping,  queryContext = qc, QueryWarnings()
+    )
+    val resultObs4 = RangeVectorAggregator.mapReduce(
+      agg4, true, resultObs4a, rv=>rv.key,  queryContext = qc, QueryWarnings()
+    )
+    val result4 = resultObs4.toListL.runToFuture.futureValue
+    result4.size shouldEqual 1
+    result4(0).key shouldEqual noKey
+
+    val resultAvg = result4(0).rows().map(rr => (rr.getLong(0), rr.getDouble(1))).toList
+
+    resultAvg shouldEqual expectedAvg
+
+    agg4.reductionSchema(tscSchema) shouldEqual tscSchema
+    agg4.presentationSchema(tscSchema) shouldEqual tvSchema
   }
 
   private def stdvar(items: List[Double]): Double = {

@@ -33,7 +33,7 @@ final class NaNRowReader(var timestamp: Long) extends RowReader {
   * IMPORTANT: It is mutable for memory efficiency purposes. Consumers from
   * iterators should be aware of the semantics of ability to save the next() value.
   */
-final class TransientRow(var timestamp: Long, var value: Double) extends MutableRowReader {
+class TransientRow(var timestamp: Long, var value: Double) extends MutableRowReader {
   def this() = this(0L, 0d)
 
   def setValues(ts: Long, valu: Double): Unit = {
@@ -190,6 +190,49 @@ final class AvgAggTransientRow extends MutableRowReader {
                                           timestamp = k.timestamp
                                           avg = k.avg
                                           count = k.count
+    case _                           => throw new IllegalArgumentException("Unknown Row reader")
+  }
+}
+
+/**
+ * Mutable RowReader for transporting histogram average results.
+ * Contains three columns: Timestamp, Mean, and Count.
+ * Timestamp & Mean are part of the superclass, and count is added here.
+ */
+final class HistAvgAggTransientRow extends TransientRow {
+  var count: Double = 0d
+
+  override def setLong(columnNo: Int, valu: Long): Unit =
+    if (columnNo == 0) timestamp = valu
+    else throw new IllegalArgumentException()
+
+  override def setDouble(columnNo: Int, valu: Double): Unit =
+    if (columnNo == 1) super.setDouble(columnNo, valu)
+    else if (columnNo == 2) count = valu
+    else throw new IllegalArgumentException()
+
+  override def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
+  override def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit =
+                                                throw new IllegalArgumentException()
+  override def notNull(columnNo: Int): Boolean = columnNo < 3
+  override def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+  override def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+  override def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
+                                              else throw new IllegalArgumentException()
+  override def getDouble(columnNo: Int): Double = if (columnNo == 1) super.getDouble(columnNo)
+                                                  else if (columnNo == 2) count
+                                                  else throw new IllegalArgumentException()
+  override def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
+  override def getString(columnNo: Int): String = throw new IllegalArgumentException()
+  override def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
+  override def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+  override def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+  override def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  override def copyFrom(r: RowReader): Unit = r match {
+    case k: HistAvgAggTransientRow       =>
+      super.copyFrom(r)
+      count = k.count
     case _                           => throw new IllegalArgumentException("Unknown Row reader")
   }
 }

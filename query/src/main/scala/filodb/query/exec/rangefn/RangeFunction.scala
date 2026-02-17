@@ -8,8 +8,8 @@ import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
-//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
+import filodb.query.exec.aggregator.RowAggregator
 
 /**
   * Container for samples within a window of samples
@@ -334,7 +334,7 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
-  // scalastyle:off cyclomatic.complexity
+  // scalastyle:off cyclomatic.complexity method.length
   def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[InternalRangeFunction],
                             config: QueryConfig,
@@ -342,15 +342,34 @@ object RangeFunction {
     func match {
       case None                                   => () => new LastSampleChunkedFunctionD
       case Some(Last)                             => () => new LastSampleChunkedFunctionD
+      case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountCumulRangeFunctionDD(1, 2,
+                                                                                new ChunkedIncreaseFunction,
+                                                                                new ChunkedIncreaseFunction)
       case Some(Increase) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedIncreaseFunction
+      case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountCumulRangeFunctionDD(1, 2,
+                                                                                new ChunkedRateFunction,
+                                                                                new ChunkedRateFunction)
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                                   => () => new ChunkedRateFunction
+      case Some(Increase)     if config.fasterRateEnabled && !schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+                                                    new SumOverTimeChunkedFunctionD,
+                                                    new SumOverTimeChunkedFunctionD)
       case Some(Increase) if !schema.columns(1).isCumulative
                                                   => () => new SumOverTimeChunkedFunctionD
+      case Some(Rate)     if config.fasterRateEnabled && !schema.columns(1).isCumulative &&
+                          RowAggregator.isHistSumCount(schema)
+                                                  => () => new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+                                                                                new RateOverDeltaChunkedFunctionD,
+                                                                                new RateOverDeltaChunkedFunctionD)
       case Some(Rate)     if !schema.columns(1).isCumulative
                                                   => () => new RateOverDeltaChunkedFunctionD
-
       case Some(CountOverTime)                    => () => new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)                      => () => new SumOverTimeChunkedFunctionD
       case Some(AvgWithSumAndCountOverTime)

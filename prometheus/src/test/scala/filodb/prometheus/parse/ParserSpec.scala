@@ -675,6 +675,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total::foo))),List(bar),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),List(5.0),None)",
       "stdvar(http_requests_total)" ->
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),List(),None)",
+      "havg(rate(http_requests_total[5m]))" ->
+        "Aggregate(HAvg,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,300000,Rate,false,List(),None,None),List(),None)",
       "stddev(http_requests_total)" ->
         "Aggregate(Stddev,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),List(),None)",
       "group(http_requests_total)" ->

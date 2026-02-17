@@ -118,6 +118,15 @@ object RowAggregator {
       schema.columns(3).name == "min"
 
   /**
+   * Checks whether the given result schema has count and sum columns.
+   * This will be the case when querying "havg" on histograms.
+   */
+  def isHistSumCount(schema: ResultSchema): Boolean = {
+    schema.columns.length == 3 && (schema.columns(1).name == "sum" || schema.columns(1).name == "value") &&
+      schema.columns(2).name == "count"
+  }
+
+  /**
     * Factory for RowAggregator
     */
   def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
@@ -127,6 +136,7 @@ object RowAggregator {
       case Max if valColType != ColumnType.HistogramColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
       case Sum if isHistMaxMin(valColType, schema) => HistMaxMinSumAggregator
+      case HAvg if isHistSumCount(schema) => HistAvgRowAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist

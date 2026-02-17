@@ -79,7 +79,7 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
 
   final val numShards = 8
   final val numSamplesPerTs = 720   // 2 hours * 3600 / 10 sec interval
-  final val numSeries = 100
+  final val numSeries = 1000
   final val numQueries = 50
   final val numBuckets = 160
   val spread = 3
@@ -126,6 +126,17 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   val queryCommands = logicalPlans.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
   }
+
+  val histAvgQueryNew = """havg(rate(http_request_latency_delta{_ws_="demo", _ns_="App-0"}[5m]))"""
+  val histAvgQueryOld = """sum(rate(http_request_latency_delta::sum{_ws_="demo", _ns_="App-0"}[5m])) /
+      |sum(rate(http_request_latency_delta::count{_ws_="demo", _ns_="App-0"}[5m]))""".stripMargin
+  val hAvgLPOld = LogicalPlan2Query(
+    dataset.ref, Parser.queryRangeToLogicalPlan(histAvgQueryOld, qParams),
+    QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
+  val hAvgLPNew = LogicalPlan2Query(
+    dataset.ref, Parser.queryRangeToLogicalPlan(histAvgQueryNew, qParams),
+    QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
+
   println(s"Querying data from $queryStartTime to $queryEndTime")
 
   var queriesSucceeded = 0
@@ -147,6 +158,42 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   def histQuantileRangeQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val qCmd = queryCommands(n % queryCommands.length)
+      val time = System.currentTimeMillis
+      val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
+      f.foreach {
+        case q: QueryResult2 => if (q.result.nonEmpty) queriesSucceeded += 1 else queryZeroResults += 1
+        case e: QError       => queriesFailed += 1
+      }
+      f
+    }
+    Await.result(Future.sequence(futures), 60.seconds)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(numQueries)
+  def histAvgOldQueries(): Unit = {
+    val futures = (0 until numQueries).map { n =>
+      val qCmd = hAvgLPOld
+      val time = System.currentTimeMillis
+      val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
+      f.foreach {
+        case q: QueryResult2 => if (q.result.nonEmpty) queriesSucceeded += 1 else queryZeroResults += 1
+        case e: QError       => queriesFailed += 1
+      }
+      f
+    }
+    Await.result(Future.sequence(futures), 60.seconds)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(numQueries)
+  def histAvgNewQueries(): Unit = {
+    val futures = (0 until numQueries).map { n =>
+      val qCmd = hAvgLPNew
       val time = System.currentTimeMillis
       val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.foreach {
