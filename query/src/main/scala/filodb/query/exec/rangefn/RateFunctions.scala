@@ -454,9 +454,6 @@ class ChunkedSumCountDeltaRangeFunctionDD(sumColId: Int, countColId: Int,
                                           sumFunc: ChunkedDoubleRangeFunction,
                                           countFunc: ChunkedDoubleRangeFunction)
                           extends ChunkedRangeFunction[HistAvgAggTransientRow] {
-//
-//  private val sumFunc = new RateOverDeltaChunkedFunctionD
-//  private val countFunc = new RateOverDeltaChunkedFunctionD
   private val tr = new TransientRow()
 
   override final def reset(): Unit = {

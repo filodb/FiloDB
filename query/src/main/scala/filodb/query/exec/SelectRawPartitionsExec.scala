@@ -52,9 +52,9 @@ object SelectRawPartitionsExec extends {
   }
 
   /**
-   * Checks if RVTs attached to an ExecPlan node imply that
-   * the operation called is HAvg (Histogram Average).
-   * Typically used to select columns from MultiSchemaPartitionsExec
+   * Checks if an AggregateMapReduce Transformer is attached
+   * to the MSPE and has the aggrOp argument equal to hAvg.
+   * This method is typically used to select sum and count columns for SelectRawPartitionsExec
    * @param transformers RVTs attached to the ExecPlan node.
    */
   def checkHAvgAggExists(transformers: Seq[RangeVectorTransformer]): Boolean =
