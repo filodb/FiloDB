@@ -66,7 +66,9 @@ class HistogramIngestBenchmark {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val policy = new FixedMaxPartitionsEvictionPolicy(1000)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 100)
   memStore.setup(histDataset.ref, Schemas(histDataset.schema), 0, ingestConf, 1)
   memStore.setup(promDataset.ref, Schemas(promDataset.schema), 0, ingestConf, 1)

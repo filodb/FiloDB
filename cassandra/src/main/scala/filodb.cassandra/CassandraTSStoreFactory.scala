@@ -21,8 +21,9 @@ class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFa
   val cassandraConfig = config.getConfig("cassandra")
   val session = FiloSessionProvider.openSession(cassandraConfig)
   val colStore = new CassandraColumnStore(config, ioPool, session)(ioPool)
+  val downsampleColStore = new CassandraColumnStore(config, ioPool, session, true)(ioPool)
   val metaStore = new CassandraMetaStore(cassandraConfig, session)(ioPool)
-  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
+  val memStore = new TimeSeriesMemStore(config, colStore, downsampleColStore, metaStore)(ioPool)
 }
 
 class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
@@ -48,5 +49,5 @@ class NonPersistentTSStoreFactory(config: Config, ioPool: Scheduler) extends Sto
   val session = FiloSessionProvider.openSession(cassandraConfig)
   val colStore = new NullColumnStore()(ioPool)
   val metaStore = new CassandraMetaStore(cassandraConfig, session)(ioPool)
-  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
+  val memStore = new TimeSeriesMemStore(config, colStore, colStore, metaStore)(ioPool)
 }

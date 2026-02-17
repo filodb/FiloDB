@@ -57,7 +57,7 @@ impl tantivy_utils::query::cache::CachableQuery for FiloDBQuery {
         match self {
             FiloDBQuery::Complex(query_bytes) => {
                 let (_, query) = parse_query(query_bytes, schema, default_field)
-                    .map_err(|e| TantivyError::InternalError(format!("{:#}", e)))?;
+                    .map_err(|e| TantivyError::InternalError(format!("{e:#}")))?;
 
                 Ok(query)
             }
@@ -117,7 +117,7 @@ pub struct CachableQueryWeighter;
 // make space for a new incoming item.
 impl Weighter<(SegmentId, FiloDBQuery), Arc<BitSet>> for CachableQueryWeighter {
     fn weight(&self, key: &(SegmentId, FiloDBQuery), val: &Arc<BitSet>) -> u64 {
-        let bitset_size = ((val.max_value() as usize + 63) / 64) * 8;
+        let bitset_size = (val.max_value() as usize).div_ceil(64) * 8;
         let key_size = std::mem::size_of::<(SegmentId, FiloDBQuery)>();
 
         let type_size = match &key.1 {

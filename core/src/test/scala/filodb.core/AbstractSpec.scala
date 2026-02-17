@@ -15,6 +15,6 @@ trait AbstractSpec extends AnyWordSpec with Matchers
 
 
 trait AsyncTest extends Suite with Matchers with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
-  implicit val defaultPatience =   // TODO: or just use IntegrationPatience, if that's enough
+  implicit val defaultPatience: PatienceConfig =   // TODO: or just use IntegrationPatience, if that's enough
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 }

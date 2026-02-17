@@ -74,7 +74,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     if (pushdownKeys.isDefined) {
       val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true)
         .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
-      Some(PlanResult(plans))
+      Some(PlanResult(plans.toSeq))
     } else None
   }
 
@@ -164,7 +164,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // If !=1 plans were produced, additional high-level coordination may be needed
       //   (e.g. joins / aggregations). In that case, proceed through the logic below.
       if (plans.size == 1) {
-        return PlanResult(plans)
+        return PlanResult(plans.toSeq)
       }
     }
     logicalPlan match {
@@ -452,11 +452,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         if ((aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
           || aggregate.operator.equals(AggregationOperator.CountValues)
-          ) && !canSupportMultiPartitionCalls(execPlans))
+          ) && !canSupportMultiPartitionCalls(execPlans.toSeq))
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
           val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
             RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))

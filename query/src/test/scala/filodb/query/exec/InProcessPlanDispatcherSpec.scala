@@ -73,7 +73,9 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore,new InMemoryMetaStore(), Some(policy)
+  )
 
   val partKeyLabelValues: Map[String, String] =
     Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")

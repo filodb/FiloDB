@@ -37,7 +37,7 @@ final case class LabelReplaceFunction(funcParams: Seq[String]) extends Miscellan
   override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {
     source.map { rv =>
       val newLabel = labelReplaceImpl(rv.key, funcParams)
-      IteratorBackedRangeVector(newLabel, rv.rows, rv.outputRange)
+      IteratorBackedRangeVector(newLabel, rv.rows(), rv.outputRange)
     }
   }
 
@@ -97,7 +97,7 @@ final case class LabelJoinFunction(funcParams: Seq[String]) extends Miscellaneou
   override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {
     source.map { rv =>
       val newLabel = labelJoinImpl(rv.key)
-      IteratorBackedRangeVector(newLabel, rv.rows, rv.outputRange)
+      IteratorBackedRangeVector(newLabel, rv.rows(), rv.outputRange)
     }
   }
 

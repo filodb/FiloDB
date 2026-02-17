@@ -12,7 +12,7 @@ import filodb.coordinator._
 import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
-import filodb.core.memstore.TimeSeriesStore
+import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.query.QueryCommand
@@ -85,6 +85,14 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
           .downsampleDatasetRefs(dataset.ref.dataset)
           .foreach { downsampleDataset =>
             memStore.store.initialize(downsampleDataset, ingestConfig.numShards, ingestConfig.resources) }
+      case rawTSMemStore: TimeSeriesMemStore =>
+        val downsampleDatasetRefs : Seq[DatasetRef] = ingestConfig.downsampleConfig.downsampleDatasetRefs(dataset.name)
+        if (!downsampleDatasetRefs.isEmpty && rawTSMemStore.writeDownsampleIndex) {
+          val highestResDownsampleDatasetRef = downsampleDatasetRefs.last
+          rawTSMemStore.downsampleStore.initialize(
+            highestResDownsampleDatasetRef, ingestConfig.numShards, ingestConfig.resources
+          )
+        }
       case _ =>
     }
 

@@ -25,6 +25,7 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
  */
 class TimeSeriesMemStore(filodbConfig: Config,
                          val store: ColumnStore,
+                         val downsampleStore: ColumnStore,
                          val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
@@ -34,6 +35,9 @@ extends TimeSeriesStore with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
   private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]
+  val writeDownsampleIndex : Boolean =
+    filodbConfig.getBoolean("downsampler.chunk-downsampler-enabled") &&
+    filodbConfig.getBoolean("downsampler.write-downsample-index-by-raw-ingesting-store")
 
   val stats = new ChunkSourceStats
 
@@ -86,8 +90,17 @@ extends TimeSeriesStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, numShards, quotaSource, shard,
-        ingestionMemFactory, store, metastore, partEvictionPolicy, filodbConfig)
+      val tsdb : TimeSeriesShard = if (writeDownsampleIndex) {
+        new DownsamplableOnDemandPagingShard(
+          ref, schemas, storeConf, numShards, quotaSource, shard,
+          ingestionMemFactory, store,
+          downsampleStore,
+          metastore, partEvictionPolicy, downsample, filodbConfig
+        )
+      } else {
+        new OnDemandPagingShard(ref, schemas, storeConf, numShards, quotaSource, shard,
+          ingestionMemFactory, store, metastore, partEvictionPolicy, filodbConfig)
+      }
       shards.put(shard, tsdb)
     }
   }

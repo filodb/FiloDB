@@ -26,6 +26,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
+  lazy val downsampleColStore = new CassandraColumnStore(config, s, session, true)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
 
   val nativeMemoryManager = new NativeMemoryManager(100000000L, Map.empty)
@@ -149,7 +150,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
         ChunkSetInfo.setNumRows(infoPtr, 10) // fake
         ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-        val set = ChunkSet(info, partKey, Nil, chunks)
+        val set = ChunkSet(info, partKey, Nil, chunks.toSeq)
 
         colStore.write(dataset.ref, Observable.fromIterable(Iterable(set))).futureValue
 

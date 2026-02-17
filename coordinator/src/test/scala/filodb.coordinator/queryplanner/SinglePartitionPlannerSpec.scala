@@ -17,7 +17,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val localMapper = new ShardMapper(32)

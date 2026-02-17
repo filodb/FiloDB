@@ -19,7 +19,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb").resolve()
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(config, colStore, colStore, new InMemoryMetaStore(), Some(policy))
   // implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   val sourceConf = ConfigFactory.parseString("""flush-interval = 1h

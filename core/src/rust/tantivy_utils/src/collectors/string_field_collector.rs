@@ -177,8 +177,8 @@ impl IndexCollector for StringFieldCollector<'_> {
         let mut index_reader = index_reader.terms().range();
         if !prefix.is_empty() {
             // Only look at prefix range
-            index_reader = index_reader.ge(format!("{}\0", prefix));
-            index_reader = index_reader.lt(format!("{}\u{001}", prefix));
+            index_reader = index_reader.ge(format!("{prefix}\0"));
+            index_reader = index_reader.lt(format!("{prefix}\u{001}"));
         }
         let mut index_reader = index_reader.into_stream()?;
         while !limiter.at_limit() && index_reader.advance() {
