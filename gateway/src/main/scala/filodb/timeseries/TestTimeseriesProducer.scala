@@ -64,22 +64,22 @@ object TestTimeseriesProducer extends StrictLogging {
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
                    genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
-                   genGaugeMetric: String, genPromCounter: Boolean,
-                   genCounterMetric: String, genOtelCumulativeHistData: Boolean,
+                   genPromCounter: Boolean,
+                   genOtelCumulativeHistData: Boolean,
                    genOtelDeltaHistData: Boolean, genOtelExpDeltaHistData: Boolean,
                    publishIntervalSec: Int, nameSpace: String, workSpace: String): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
 
-    val metricName = if (genGauge) genGaugeMetric
+    val metricName = if (genGauge) "heap_usage0"
                       else if (genHist || genOtelCumulativeHistData) "http_request_latency"
                       else if (genDeltaHist || genOtelDeltaHistData || genOtelExpDeltaHistData)
                         "http_request_latency_delta"
-                      else if (genPromCounter) genCounterMetric
+                      else if (genPromCounter) "heap_usage_counter"
                       else "heap_usage_delta0"
 
-    val promQL = s"""$metricName{_ns_=$nameSpace,_ws_=$workSpace}"""
+    val promQL = s"""$metricName{_ns_="$nameSpace",_ws_="$workSpace"}"""
 
     val cliQuery =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset $dataset """ +

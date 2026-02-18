@@ -59,7 +59,9 @@ class IngestionBenchmark {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val policy = new FixedMaxPartitionsEvictionPolicy(100)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore,new InMemoryMetaStore(), Some(policy)
+  )
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)
   memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, ingestConf, 1)
 

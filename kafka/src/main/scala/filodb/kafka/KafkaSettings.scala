@@ -99,7 +99,7 @@ class KafkaSettings(conf: Config, keys: Set[String]) extends StrictLogging {
   private val customClientConfig: Map[String, AnyRef]  = {
     // if there are custom client configurations, retain them
     val filter = ConsumerConfig.configNames.asScala ++ ProducerConfig.configNames.asScala
-    kafkaConfig.filterKeys(k => !filter.contains(k))
+    kafkaConfig.filter { case (k, _) => !filter.contains(k) }
   }
 
   // workaround for monix/kafka List types that should accept comma-separated strings

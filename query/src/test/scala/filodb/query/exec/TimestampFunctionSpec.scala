@@ -10,7 +10,7 @@ class TimestampFunctionSpec extends RawDataWindowingSpec {
   it("should work for various start times") {
     var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 5000, 120000, w,
       new TimestampChunkedFunction, querySession)
@@ -24,7 +24,7 @@ class TimestampFunctionSpec extends RawDataWindowingSpec {
   it("should work with NaN") {
     var data = Seq(1.5, 2.5, 3.5)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 95000, 50000, 450000, w,
       new TimestampChunkedFunction, querySession)

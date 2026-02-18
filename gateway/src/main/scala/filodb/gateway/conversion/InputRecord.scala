@@ -269,7 +269,7 @@ object InputRecord {
       val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
 
       // Now, write out histogram
-      builder.startNewRecord(lastDeltaHistogram)
+      builder.startNewRecord(deltaHistogramV2)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)

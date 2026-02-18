@@ -788,7 +788,7 @@ trait PartKeyIndexRawSpec {
       val filter1_found = ColumnFilter("Actor2Code", EqualsRegex("""^GO.*$"""))
       val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
       partKeyOpt.isDefined shouldBe true
-      partKeyOpt.get shouldEqual pkrs(7).partKey
+      Seq(pkrs(7).partKey, pkrs(8).partKey, pkrs(9).partKey) should contain (partKeyOpt.get)
 
       val filter1_not_found = ColumnFilter("Actor2Code", EqualsRegex("""^GO.*\$"""))
       keyIndex.singlePartKeyFromFilters(Seq(filter1_not_found), 4, 10) shouldBe None

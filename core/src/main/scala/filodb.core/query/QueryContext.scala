@@ -283,7 +283,7 @@ object QueryContext {
       case (d, v) => d.asScala -> v.toInt
     }
 
-    simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
+    simpleMapSpreadFunc(shardKeyNames.asScala.toSeq, spreadAssignment, defaultSpread)
   }
 
   /**
@@ -330,7 +330,7 @@ object QueryContext {
     val targetSchema: Map[Map[String, String], Seq[TargetSchemaChange]] = targetSchemaMap.asScala.map {
       case (d, v) => d.asScala.toMap -> v.asScala.toSeq
     }.toMap
-    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema, optionalShardKey)
+    mapTargetSchemaFunc(shardKeyNames.asScala.toSeq, targetSchema, optionalShardKey)
   }
 
 }

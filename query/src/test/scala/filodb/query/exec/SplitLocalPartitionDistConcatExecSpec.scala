@@ -49,13 +49,15 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
   import Schemas.promCounter
   import SplitLocalPartitionDistConcatExecSpec._
 
-  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
+  implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val memStore = new TimeSeriesMemStore(
+    config, new NullColumnStore, new NullColumnStore, new InMemoryMetaStore(), Some(policy)
+  )
 
   val metric = "http_req_total"
   val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787")
@@ -83,7 +85,7 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
 
-  implicit val execTimeout = 5.seconds
+  implicit val execTimeout: scala.concurrent.duration.FiniteDuration = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(dsRef, schemas, 0, TestData.storeConf, 1)

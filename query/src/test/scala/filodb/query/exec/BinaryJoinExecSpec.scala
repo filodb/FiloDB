@@ -114,8 +114,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Nil, Nil, "__name__", Some(RvRange(startMs = 0, endMs =  19, stepMs = 1)))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -126,7 +128,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       rv.key.labelValues.contains("tag1".utf8) shouldEqual true
       rv.key.labelValues.contains("tag2".utf8) shouldEqual true
       val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
-      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+      rv.rows().map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
     }
 
     result.map(_.key).toSet.size shouldEqual 200
@@ -144,8 +146,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Nil, Nil, "__name__", Some(RvRange(startMs = 0, endMs = 99, stepMs = 1)))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), tvSchemaTask, querySession)
                          .toListL.runToFuture.futureValue
@@ -155,7 +159,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       rv.key.labelValues.contains("tag1".utf8) shouldEqual true
       rv.key.labelValues.contains("tag2".utf8) shouldEqual true
       val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
-      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+      rv.rows().map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
     }
 
     result.map(_.key).toSet.size shouldEqual 100
@@ -202,8 +206,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Some(Seq("_step_", "_pi_")), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -276,9 +282,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, ignoring = Seq("tag1"), include = Seq("tag2"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     val rhs = QueryResult("someId", null, Seq(rhs1, rhs2, rhs3, rhs4)
-      .map(rv => SerializedRangeVector(rv, schema, queryStats)))
+      .map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -312,8 +319,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Seq("tag1"), Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), tvSchemaTask, querySession)
@@ -345,8 +354,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Seq("tag1"), Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), tvSchemaTask, querySession)
@@ -366,9 +377,11 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Seq("tag2"), Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null,
+      samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -379,7 +392,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       rv.key.labelValues.contains("tag1".utf8) shouldEqual true
       rv.key.labelValues.contains("tag2".utf8) shouldEqual false
       val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
-      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+      rv.rows().map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
     }
 
     result.map(_.key).toSet.size shouldEqual 2
@@ -395,8 +408,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Some(Seq("tag1", "job")), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -407,7 +422,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       rv.key.labelValues.contains("tag1".utf8) shouldEqual true
       rv.key.labelValues.contains("tag2".utf8) shouldEqual false
       val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
-      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+      rv.rows().map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
     }
 
     result.map(_.key).toSet.size shouldEqual 2
@@ -447,8 +462,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(samplesRhs.toList) // they may come out of order
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -459,7 +476,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       rv.key.labelValues.contains("tag1".utf8) shouldEqual true
       rv.key.labelValues.contains("tag2".utf8) shouldEqual true
       val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
-      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+      rv.rows().map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
     }
 
     result.map(_.key).toSet.size shouldEqual 200
@@ -499,8 +516,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Seq("tag2"), Nil, "metric", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector (rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhs.map(rv => SerializedRangeVector (rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
@@ -527,9 +546,11 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       None, Seq("tag2"), Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null,
+      samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -553,8 +574,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Some(Seq("tag1", "job")), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -666,8 +689,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
-    val rhs = QueryResult("someId", null, Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val lhs = QueryResult("someId", null,
+      Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
+    val rhs = QueryResult("someId", null,
+      Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema, queryStats)).toIndexedSeq)
     // scalastyle:on
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
