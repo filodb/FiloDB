@@ -661,6 +661,29 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     }
   }
 
+  // When users specify _type_ with a known schema name, the system should use that schema
+  // and still return the expected results without falling back to schema discovery.
+  it("should use specified valid schema when _type_ filter has known schema value") {
+    import ZeroCopyUTF8String._
+
+    val filters = Seq(
+      ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8))
+    )
+
+    // Use a valid schema name to ensure the validation logic does not break the happy path.
+    val execPlan = MultiSchemaPartitionsExec(
+      QueryContext(), dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_",
+      schema = Some("prom-counter")
+    )
+
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    result.result.size shouldEqual 1
+    val dataRead = result.result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
+    dataRead shouldEqual tuples
+  }
   // Test that when an invalid schema is specified and no partitions match, we get empty results gracefully
   it("should return empty results when invalid schema specified and no partitions match") {
     import ZeroCopyUTF8String._
