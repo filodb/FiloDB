@@ -148,7 +148,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
-    schema.map { s => schemas.schemas(s) }
+    schema.flatMap { s => schemas.schemas.get(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
           .map { sch =>
             // There should not be any unknown schemas at all, as they are filtered out during ingestion and

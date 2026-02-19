@@ -625,5 +625,59 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.head.key.labelValues.get(ZeroCopyUTF8String("metric")).get.toString shouldEqual "request-latency"
     result.result.size shouldEqual 1
   }
+
+  // Test case to verify that invalid _type_ values are handled gracefully.
+  // When users specify _type_="raw" or _type_="guage" (misspelled) or _type_="guard" in their queries,
+  // the system should fall back to schema discovery instead of throwing NoSuchElementException.
+  // This allows _type_ to be used as a literal label filter when the value is not a known schema.
+  it("should handle invalid schema name gracefully when _type_ filter has non-existent schema value") {
+    import ZeroCopyUTF8String._
+
+    // Simulate what happens when a user queries with _type_="raw" - a schema that doesn't exist
+    val filters = Seq(
+      ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8))
+    )
+
+    // These schema names don't exist in the schema map.
+    // The system should fall back to schema discovery from the partition lookup result.
+    val invalidSchemaNames = Seq("raw", "guage", "guard", "nonexistent_schema")
+
+    invalidSchemaNames.foreach { invalidSchema =>
+      val execPlan = MultiSchemaPartitionsExec(
+        QueryContext(), dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_",
+        schema = Some(invalidSchema)
+      )
+
+      // When the schema name is not found in the schema map, the system falls back to schema discovery.
+      // Since the filters match existing data (http_req_total with job=myCoolService), we should get results.
+      val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+      val result = resp.asInstanceOf[QueryResult]
+      result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      result.result.size shouldEqual 1
+      val dataRead = result.result(0).rows().map(r => (r.getLong(0), r.getDouble(1))).toList
+      dataRead shouldEqual tuples
+    }
+  }
+
+  // Test that when an invalid schema is specified and no partitions match, we get empty results gracefully
+  it("should return empty results when invalid schema specified and no partitions match") {
+    import ZeroCopyUTF8String._
+
+    val filters = Seq(
+      ColumnFilter("_metric_", Filter.Equals("nonexistent_metric".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8))
+    )
+
+    val execPlan = MultiSchemaPartitionsExec(
+      QueryContext(), dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_",
+      schema = Some("raw")  // Invalid schema, should fall back to discovery which finds nothing
+    )
+
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.isEmpty shouldEqual true
+    result.result.size shouldEqual 0
+  }
 }
 

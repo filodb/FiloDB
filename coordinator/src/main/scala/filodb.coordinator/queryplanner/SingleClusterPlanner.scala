@@ -926,17 +926,20 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-    * If there is a _type_ filter, return it.
+    * If there is a _type_ filter whose value is a valid schema name, return it.
+    * If the _type_ value does not match any known schema, it is left as a regular filter
+    * for partition lookup and None is returned, falling back to schema discovery.
     */
   private def extractSchemaFilter(filters: Seq[ColumnFilter]): Option[String] = {
     var schemaOpt: Option[String] = None
     filters.foreach { case ColumnFilter(label, filt) =>
       val isTypeFilt = label == TypeLabel
       if (isTypeFilt) filt match {
-        case Filter.Equals(schema) => schemaOpt = Some(schema.asInstanceOf[String])
+        case Filter.Equals(schema) =>
+          val schemaName = schema.asInstanceOf[String]
+          if (schemas.schemas.contains(schemaName)) schemaOpt = Some(schemaName)
         case x: Any                 => throw new IllegalArgumentException(s"Illegal filter $x on _type_")
       }
-      isTypeFilt
     }
     schemaOpt
   }

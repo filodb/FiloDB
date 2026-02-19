@@ -52,7 +52,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
       ExecResult(Observable.empty, Task.eval(ResultSchema.empty))
     } else {
       val schemas = source.schemas(dataset).get
-      val dataSchema = schema.map { s => schemas.schemas(s) }
+      val dataSchema = schema.flatMap { s => schemas.schemas.get(s) }
         .getOrElse(schemas(lookupRes.firstSchemaId.get))
       val colID = colName.map(n => dataSchema.colIDs(n).get.head).getOrElse(dataSchema.data.valueColumn)
       val dataColumn = dataSchema.data.columns(colID)
