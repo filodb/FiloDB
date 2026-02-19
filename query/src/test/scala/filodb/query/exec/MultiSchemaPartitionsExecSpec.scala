@@ -627,19 +627,20 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   }
 
   // Test case to verify that invalid _type_ values are handled gracefully.
-  // When users specify _type_="raw" or _type_="guage" (misspelled) or _type_="guard" in their queries,
-  // the system should fall back to schema discovery instead of throwing NoSuchElementException.
-  // This allows _type_ to be used as a literal label filter when the value is not a known schema.
+  // When users specify _type_="raw" or _type_="guage" (an intentional misspelling used for testing)
+  // or _type_="guard" in their queries, the system should fall back to schema discovery instead of
+  // throwing NoSuchElementException. This allows _type_ to be used as a literal label filter when
+  // the value is not a known schema.
   it("should handle invalid schema name gracefully when _type_ filter has non-existent schema value") {
     import ZeroCopyUTF8String._
 
-    // Simulate what happens when a user queries with _type_="raw" - a schema that doesn't exist
+    // Simulate what happens when a user queries with _type_="raw" - a schema that doesn't exist.
     val filters = Seq(
       ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8))
     )
 
-    // These schema names don't exist in the schema map.
+    // These schema names don't exist in the schema map (including the intentionally misspelled "guage").
     // The system should fall back to schema discovery from the partition lookup result.
     val invalidSchemaNames = Seq("raw", "guage", "guard", "nonexistent_schema")
 
