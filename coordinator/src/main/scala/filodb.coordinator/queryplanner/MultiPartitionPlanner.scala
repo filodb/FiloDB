@@ -1126,8 +1126,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           getMetadataPartitions(lp.filters, timeRange)
         } else {
           shardKeyFilterGroups
-            .filter(_.nonEmpty)
-            .filter(hasAllNonMetricEquals)
             .map(buildRoutingMap)
             .flatMap(routingMap => partitionLocationProvider.getPartitions(routingMap, timeRange))
             .distinct
