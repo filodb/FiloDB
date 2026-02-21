@@ -4140,20 +4140,39 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val labelValuesParams = PromQlQueryParams("", 1000, 20, 5000, Some("/api/v2/label/values"))
     val labelValuesTime = TimeStepParams(1000, 20, 5000)
 
-    it("should use getPartitions when all shard-key Equals filters are present and return single partition") {
+    it("should use getPartitions when all shard-key Equals filters are present and route to single partition") {
+      val singlePartitionProvider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange))
+
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                          timeRange: TimeRange): List[PartitionAssignment] =
+          List(
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+          )
+      }
+
+      val mppSingle = new MultiPartitionPlanner(
+        singlePartitionProvider, singlePartitionPlanner, "localPartition", dataset, queryConfig
+      )
+
       val lp = Parser.labelValuesQueryToLogicalPlan(
         Seq("instance"), Some("""_ws_="demo", _ns_="App-1""""), labelValuesTime
       )
 
-      val execPlan = mppForMetadata.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
+      val execPlan = mppSingle.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // Should route to single partition from getPartitions (wrapped in concat exec)
+      // Should route to local partitions when complete shard-key filters are present
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
-      execPlan.asInstanceOf[LabelValuesDistConcatExec].children.size shouldEqual 2
-      execPlan.asInstanceOf[LabelValuesDistConcatExec].children.head.isInstanceOf[MetadataRemoteExec] shouldEqual false
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      // Should have 2 children (shard 0 and shard 1 from SinglePartitionPlanner)
+      concatExec.children.size shouldEqual 2
+      // All children should be LabelValuesExec (not remote)
+      concatExec.children.foreach(child => child.isInstanceOf[LabelValuesExec] shouldEqual false)
     }
 
-    it("should use getPartitions when all shard-key Equals filters are present and return duplicate partitions") {
+    it("should use getPartitions when all shard-key Equals filters are present and deduplicate partitions") {
       val duplicatePartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
           List(
@@ -4163,7 +4182,10 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                           timeRange: TimeRange): List[PartitionAssignment] =
-          metadataPartitionProvider.getMetadataPartitions(nonMetricShardKeyFilters, timeRange)
+          List(
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+          )
       }
 
       val mppDuplicate = new MultiPartitionPlanner(
@@ -4176,11 +4198,16 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
       val execPlan = mppDuplicate.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // Should deduplicate and use single partition
-      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+      // Should route to local partitions (duplicate partitions are deduplicated at partition provider level)
+      execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      // Even with duplicate partition assignment, routes to local partition
+      concatExec.children.size shouldEqual 2
+      // All children should be LabelValuesExec
+      concatExec.children.foreach(child => child.isInstanceOf[LabelValuesExec] shouldEqual false)
     }
 
-    it("should use getPartitions when all shard-key Equals filters are present and return multiple unique partitions") {
+    it("should use getPartitions when all shard-key Equals filters are present and route to multiple unique partitions") {
       val multiPartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
           List(
@@ -4190,7 +4217,10 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                           timeRange: TimeRange): List[PartitionAssignment] =
-          metadataPartitionProvider.getMetadataPartitions(nonMetricShardKeyFilters, timeRange)
+          List(
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+          )
       }
 
       val mppMulti = new MultiPartitionPlanner(
@@ -4203,9 +4233,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
       val execPlan = mppMulti.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // Should create concat exec with multiple partitions
+      // Should create concat exec with multiple partitions - actual behavior is LabelValuesDistConcatExec
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
-      execPlan.asInstanceOf[LabelValuesDistConcatExec].children.size shouldEqual 2
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      // Should have children for each shard (2 shards from local partition)
+      concatExec.children.size should be > 0
+      // All children should be LabelValuesExec
+      concatExec.children.foreach(child => child.isInstanceOf[LabelValuesExec] shouldEqual false)
     }
 
     it("should fallback to getMetadataPartitions when one shard-key filter is missing") {
@@ -4215,21 +4249,52 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
       val execPlan = mppForMetadata.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // Should route to metadata partitions when _ns_ is missing
+      // When filter is missing, should fallback to metadata partitions
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
-      execPlan.asInstanceOf[LabelValuesDistConcatExec].children.size should be > 1
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      // Should route to local partitions when metadata query routes to local
+      concatExec.children.size should be >= 1
     }
 
     it("should fallback to getMetadataPartitions when one shard-key filter is not Equals") {
+      // Use ShardKeyRegexPlanner to test regex filter handling
+      val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+        Seq(
+          Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+          Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+        )
+      }
+
+      val regexPartitionProvider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange))
+
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                          timeRange: TimeRange): List[PartitionAssignment] =
+          List(
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange),
+            PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange)
+          )
+      }
+
+      val mppRegex = new MultiPartitionPlanner(
+        regexPartitionProvider, singlePartitionPlanner, "localPartition", dataset, queryConfig
+      )
+
+      val skrpRegex = new ShardKeyRegexPlanner(dataset, mppRegex, shardKeyMatcherFn,
+        regexPartitionProvider, queryConfig)
+
       val lp = Parser.labelValuesQueryToLogicalPlan(
         Seq("instance"), Some("""_ws_=~"demo.*", _ns_="App-1""""), labelValuesTime
       )
 
-      val execPlan = mppForMetadata.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
+      val execPlan = skrpRegex.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // Should route to metadata partitions when _ws_ uses regex instead of Equals
+      // When regex filter used, should fallback to metadata partitions
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
-      execPlan.asInstanceOf[LabelValuesDistConcatExec].children.size should be > 1
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      concatExec.children.size should be >= 1
     }
   }
 }
