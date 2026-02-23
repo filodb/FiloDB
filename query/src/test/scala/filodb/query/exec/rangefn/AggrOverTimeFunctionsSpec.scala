@@ -791,6 +791,95 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly calculate predict_linear using iterator-based function") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    val duration = 50
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
+
+    def predict_linear_iter(s: Seq[Double], interceptTime: Long, startTime: Long): Double = {
+      val n = s.length.toDouble
+      var sumY = 0.0
+      var sumX = 0.0
+      var sumXY = 0.0
+      var sumX2 = 0.0
+      var x = 0.0
+      if (n >= 2) {
+        for (i <- 0 until n.toInt) {
+          x = (startTime + i * pubFreq - interceptTime) / 1000.0
+          sumY += s(i)
+          sumX += x
+          sumXY += x * s(i)
+          sumX2 += x * x
+        }
+        val covXY = sumXY - (sumX * sumY) / n.toDouble
+        val varX = sumX2 - (sumX * sumX) / n.toDouble
+        val slope = covXY.toDouble / varX.toDouble
+        val intercept = sumY / n - (slope * sumX) / n.toDouble
+        slope * duration + intercept
+      } else {
+        Double.NaN
+      }
+    }
+
+    val step = rand.nextInt(50) + 5
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      info(s"iteration $x windowSize=$windowSize step=$step")
+      val slidingIt = slidingWindowIt(data, rv2, new PredictLinearFunction(params), windowSize, step)
+      val aggregated2 = slidingIt.map(_.getDouble(1)).toBuffer
+      var res = new ArrayBuffer[Double]
+      var startTime = defaultStartTS
+      var endTime = startTime + (windowSize - 1) * pubFreq
+      // sliding iterator includes all samples in the window (no .drop(1))
+      for (item <- data.sliding(windowSize, step)) {
+        res += predict_linear_iter(item, endTime, startTime)
+        startTime += step * pubFreq
+        endTime += step * pubFreq
+      }
+      // Compare all except the last window (edge case with partial windows at end)
+      val compareLength = Math.min(aggregated2.length, res.length) - 1
+      if (compareLength > 0) {
+        aggregated2.take(compareLength) shouldEqual res.take(compareLength)
+      }
+    }
+  }
+
+  it("should produce consistent results between chunked and iterating PredictLinear implementations") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Chunked implementation
+      val chunkedIt = chunkedWindowIt(data, rv, new PredictLinearChunkedFunctionD(params), windowSize, step)
+      val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+
+      // Iterating implementation
+      val slidingIt = slidingWindowIt(data, rv, new PredictLinearFunction(params), windowSize, step)
+      val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+
+      // Both should produce the same number of results
+      chunkedResults.length shouldEqual slidingResults.length
+
+      // Compare results with tolerance for floating-point differences
+      chunkedResults.zip(slidingResults).zipWithIndex.foreach { case ((chunked, sliding), idx) =>
+        if (chunked.isNaN && sliding.isNaN) {
+          // Both NaN is fine
+        } else if (chunked.isNaN || sliding.isNaN) {
+          fail(s"Mismatch at index $idx: chunked=$chunked, sliding=$sliding (one is NaN)")
+        } else {
+          chunked shouldEqual sliding +- errorOk
+        }
+      }
+    }
+  }
+
   it("it should correctly calculate zscore") {
     val data = (1 to 500).map(_.toDouble)
     val rv = timeValueRV(data)

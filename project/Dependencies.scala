@@ -25,7 +25,7 @@ object Dependencies {
   val kamonBundleVersion = "2.7.3"
   val otelVersion       = "1.54.1"
   val otelInstVersion   = "2.20.1-alpha"
-  val monixKafkaVersion = "1.0.0-RC6"
+  val monixKafkaVersion = "1.0.0-RC7"
   val sparkVersion      = "3.4.0"
   val sttpVersion       = "1.3.3"
   val grpcVersion       = "1.50.0"
@@ -160,7 +160,7 @@ object Dependencies {
 
   lazy val kafkaDeps = Seq(
     "io.monix"          %% "monix-kafka-1x" % monixKafkaVersion,
-    "org.apache.kafka"  % "kafka-clients"   % "1.0.0"     % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
+    "org.apache.kafka"  % "kafka-clients"   % "3.6.2"     % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
     "com.typesafe.akka" %% "akka-testkit"   % akkaVersion % "test,it",
     scalaTest  % "test,it",
     logbackDep % "test,it")
