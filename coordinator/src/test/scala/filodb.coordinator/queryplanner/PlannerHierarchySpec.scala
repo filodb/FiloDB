@@ -3116,10 +3116,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         Nil
       }  // i.e. filters for a scalar
     }
-
-    // Case 7: top k with regex, the resolved regex should all be two remote partition, one using PromQLRemoteExec and other PromQLGrpcRemoteExec, should fail
     // TODO
-    // Case 8: top k with regex, the resolved regex should all be two remote partition, both use PromQLGrpcRemoteExec, should be supported
     val twoRemoteGrpcPartitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         routingKey("_ns_") match {
@@ -4137,8 +4134,15 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       metadataPartitionProvider, singlePartitionPlanner, "localPartition", dataset, queryConfig
     )
 
-    val labelValuesParams = PromQlQueryParams("", 1000, 20, 5000, Some("/api/v2/label/values"))
-    val labelValuesTime = TimeStepParams(1000, 20, 5000)
+      val labelValuesParams = PromQlQueryParams("", 1000, 20, 5000, Some("/api/v2/label/values"))
+      val labelValuesTime = TimeStepParams(1000, 20, 5000)
+
+      def extractMetadataEndpoints(plan: ExecPlan): Seq[String] = plan match {
+        case m: MetadataRemoteExec => Seq(m.queryEndpoint)
+        case c: LabelValuesDistConcatExec =>
+          c.children.collect { case m: MetadataRemoteExec => m.queryEndpoint }
+        case _ => Seq.empty
+      }
 
     it("should use getPartitions when all shard-key Equals filters are present and route to single partition") {
       val singlePartitionProvider = new PartitionLocationProvider {
