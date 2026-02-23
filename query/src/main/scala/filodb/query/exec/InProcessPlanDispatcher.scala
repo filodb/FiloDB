@@ -25,6 +25,7 @@ import filodb.query.Query.qLogger
 case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
+  lazy val partition = extractPartition(clusterName)
 
   override def dispatch(plan: ExecPlanWithClientParams,
                         source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
@@ -52,7 +53,8 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
               "dispatcher" -> "in-process",
               "dataset" -> plan.execPlan.dataset.dataset,
               "cluster" -> clusterName,
-              "query_type" -> plan.execPlan.getClass.getSimpleName))
+              "query_type" -> plan.execPlan.getClass.getSimpleName,
+              "partition" -> partition))
          if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
            qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
              s"since partial result was enabled: ${e.getMessage}")
@@ -61,6 +63,14 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
            Task.raiseError(e)
          }
       }
+    }
+  }
+
+  private def extractPartition(hostname: String): String = {
+    val pattern = """.*?(tsdb\d+).*""".r
+    hostname match {
+      case pattern(partition) => partition
+      case _ => hostname
     }
   }
 

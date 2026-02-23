@@ -26,6 +26,8 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
  */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
+  lazy val (partition, pod) = extractPartitionAndPod(target.path.toString)
+
   def getCaseClassOrProtoExecPlan(execPlan: filodb.query.exec.ExecPlan): QueryCommand = {
     val doProto = execPlan.queryContext.plannerParams.useProtoExecPlans
     val ep =
@@ -75,7 +77,9 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
                   "dispatcher" -> "actor-plan",
                   "dataset" -> plan.execPlan.dataset.dataset,
                   "cluster" -> clusterName,
-                  "target" -> target.path.toString))
+                  "target" -> target.path.toString,
+                  "partition" -> partition,
+                  "pod" -> pod))
               if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
                 qLogger.warn(s"Swallowed AskTimeoutException since partial results are enabled.")
                 Future.successful(emptyPartialResult)
@@ -117,6 +121,25 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
          .takeWhileInclusive(!_.isLast)
         // TODO timeout query if response stream not completed in time
       }
+    }
+  }
+
+  private[coordinator] def extractHostname(actorPath: String): String = {
+    val hostnamePattern = """.*@([^.:]+).*""".r
+    actorPath match {
+      case hostnamePattern(hostname) => hostname
+      case _ => actorPath
+    }
+  }
+
+  private[coordinator] def extractPartitionAndPod(actorPath: String): (String, String) = {
+    val hostname = extractHostname(actorPath)
+    val pattern = """.*?(tsdb\d+)-(\d+).*""".r
+    hostname match {
+      case pattern(partition, podNum) => (partition, podNum)
+      case _ =>
+        qLogger.warn(s"Unexpected hostname format in actor path, expected StatefulSet: $hostname")
+        (hostname, "unknown")
     }
   }
 
