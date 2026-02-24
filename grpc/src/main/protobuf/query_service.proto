@@ -932,6 +932,15 @@ message GenericRemoteExec {
   ExecPlanContainer execPlan         = 2;
 }
 
+message PromQLGrpcRemoteExec {
+  string queryEndpoint               = 1;
+  int64 requestTimeoutMs             = 2;
+  QueryContext queryContext          = 3;
+  PlanDispatcherContainer dispatcher = 4;
+  DatasetRef dataset                 = 5;
+  string plannerSelector             = 6;
+}
+
 //
 // leaf exec plans
 //
@@ -1090,6 +1099,7 @@ message ExecPlanContainer {
     PartKeysDistConcatExec partKeysDistConcatExec = 12;
     LabelNamesDistConcatExec labelNamesDistConcatExec = 13;
     GenericRemoteExec genericRemoteExec = 14;
+    PromQLGrpcRemoteExec promQLGrpcRemoteExec = 15;
 
     //leaf plans
     LabelNamesExec labelNamesExec = 20;

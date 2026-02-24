@@ -2454,6 +2454,29 @@ object ProtoConverters {
     }
   }
 
+  // PromQLGrpcRemoteExec
+  implicit class PromQLGrpcRemoteExecToProtoConverter(pgre: PromQLGrpcRemoteExec) {
+    def toProto(): GrpcMultiPartitionQueryService.PromQLGrpcRemoteExec = {
+      val builder = GrpcMultiPartitionQueryService.PromQLGrpcRemoteExec.newBuilder()
+      builder.setQueryEndpoint(pgre.queryEndpoint)
+      builder.setRequestTimeoutMs(pgre.requestTimeoutMs)
+      builder.setQueryContext(pgre.queryContext.toProto)
+      builder.setDispatcher(pgre.dispatcher.toPlanDispatcherContainer)
+      builder.setDataset(pgre.dataset.toProto)
+      builder.setPlannerSelector(pgre.plannerSelector)
+      builder.build()
+    }
+  }
+
+  implicit class PromQLGrpcRemoteExecFromProtoConverter(
+    pgre: GrpcMultiPartitionQueryService.PromQLGrpcRemoteExec) {
+    def fromProto(queryContext: QueryContext): PromQLGrpcRemoteExec = {
+      // Note: channel cannot be deserialized, so this is only for debugging/observability
+      throw new UnsupportedOperationException(
+        "PromQLGrpcRemoteExec cannot be deserialized from proto (channel field is not serializable)")
+    }
+  }
+
   //
   //
   // Leaf Plans
@@ -2968,7 +2991,8 @@ object ProtoConverters {
         case tsge: TimeScalarGeneratorExec => b.setTimeScalarGeneratorExec(tsge.toProto)
         case srpe: SelectRawPartitionsExec => b.setSelectRawPartitionsExec(srpe.toProto)
         case gre: GenericRemoteExec => b.setGenericRemoteExec(gre.toProto)
-        //case _ => throw new IllegalArgumentException(s"Unknown execution plan ${ep.getClass.getName}")
+        case pgre: PromQLGrpcRemoteExec => b.setPromQLGrpcRemoteExec(pgre.toProto)
+        case _ => throw new IllegalArgumentException(s"Unknown execution plan ${ep.getClass.getName}")
       }
       b.build()
     }
@@ -3028,6 +3052,7 @@ object ProtoConverters {
         case ExecPlanCase.TIMESCALARGENERATOREXEC => epc.getTimeScalarGeneratorExec.fromProto(queryContext)
         case ExecPlanCase.SELECTRAWPARTITIONSEXEC => epc.getSelectRawPartitionsExec.fromProto(queryContext)
         case ExecPlanCase.GENERICREMOTEEXEC => epc.getGenericRemoteExec.fromProto(queryContext)
+        case ExecPlanCase.PROMQLGRPCREMOTEEXEC => epc.getPromQLGrpcRemoteExec.fromProto(queryContext)
         case ExecPlanCase.EXECPLAN_NOT_SET =>
           throw new RuntimeException("Received Proto Execution Plan with null value")
       }
