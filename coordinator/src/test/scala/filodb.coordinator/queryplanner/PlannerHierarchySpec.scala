@@ -4354,3 +4354,4 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     result.size should be > 0
   }
 }
+
