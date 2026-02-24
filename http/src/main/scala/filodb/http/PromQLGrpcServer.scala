@@ -257,9 +257,11 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
             queryServerConfig.hasPath("flight-client-enabled") &&
             queryServerConfig.getBoolean("flight-client-enabled")
           ) {
-            Some(new FlightAllocator(FlightAllocator.serverAllocator.newChildAllocator(
-              s"grpc-execplan-${queryContext.queryId}", 0, queryServerConfig.getInt("flight-per-request-max-memory-bytes")))
-            )
+            Some(new FlightAllocator(
+              FlightAllocator.serverAllocator.newChildAllocator(
+              s"grpc-execplan-${queryContext.queryId}", 0,
+              queryServerConfig.getInt("flight-per-request-max-memory-bytes"))
+            ))
           } else None
 
           val querySession = QuerySession(queryContext, queryConfig, catchMultipleLockSetErrors = true,
