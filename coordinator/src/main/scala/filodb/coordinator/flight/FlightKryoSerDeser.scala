@@ -86,6 +86,12 @@ object FlightKryoSerDeser {
     k.register(::.getClass, 68)
     k.register(ArrayBuffer.getClass, 69)
     k.register(Vector.getClass, 70)
+
+    // Register Guava classes used by Arrow Flight exceptions
+    k.register(classOf[com.google.common.collect.LinkedListMultimap[_, _]])
+    k.register(classOf[org.apache.arrow.flight.FlightRuntimeException])
+    k.register(classOf[org.apache.arrow.flight.CallStatus])
+    k.register(classOf[org.apache.arrow.flight.ErrorFlightMetadata])
   }
 
   def deserialize(bytes: Array[Byte]): Any = {

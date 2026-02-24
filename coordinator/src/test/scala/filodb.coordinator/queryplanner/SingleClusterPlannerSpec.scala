@@ -2997,4 +2997,16 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
+
+  it("should throw BadQueryException when _type_ filter has an invalid schema value") {
+    val query = """foo{_type_="nonexistent_schema", _ws_="demo", _ns_="localNs"}"""
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+
+    val thrown = intercept[BadQueryException] {
+      engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    }
+
+    thrown.getMessage should include("Invalid value 'nonexistent_schema' for _type_ filter")
+    thrown.getMessage should include("Valid values are:")
+  }
 }
