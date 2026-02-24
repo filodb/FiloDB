@@ -15,7 +15,7 @@ import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExpor
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, QueryUtils, RangeParams, RvRange}
-import filodb.core.query.Filter.{Equals, EqualsRegex}
+import filodb.core.query.Filter.Equals
 import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._

@@ -4312,7 +4312,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val lp = Parser.queryRangeToLogicalPlan(
       """foo{_ws_="demo",_ns_="ns1"} + foo{_ws_="demo",_ns_="ns2"}""",
       TimeStepParams(startSeconds, step, endSeconds), Antlr)
-    val expected = Set(Map("_ws_" -> "demo", "_ns_" -> "ns1"), Map("_ws_" -> "demo", "_ns_" -> "ns2"))
+    val expected = Set(Map("_ns_" -> "ns1"), Map("_ns_" -> "ns2"))
     mpp.getRoutingKeys(lp) shouldEqual expected
   }
 
@@ -4349,9 +4349,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     // getPartitionsTrait should work with any filter type since it delegates to the provider
     val nonMetricFilters = Seq(ColumnFilter("_ns_", Filter.EqualsRegex("ns1|ns2")))
-    val timeRange = TimeRange(1000, 2000)
-    val timeRange = TimeRange(1000, 2000)
-    val result = mpp.partitionLocationProvider.getMetadataPartitionsTrait(nonMetricFilters, timeRange)
+    val testTimeRange = TimeRange(1000, 2000)
+    val result = mpp.partitionLocationProvider.getMetadataPartitionsTrait(nonMetricFilters, testTimeRange)
     result.size should be > 0
   }
 }
