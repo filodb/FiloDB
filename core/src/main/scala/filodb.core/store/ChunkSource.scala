@@ -7,7 +7,8 @@ import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.memstore.{PartLookupResult, PopulateResult, SchemaMismatch, TimeSeriesShard}
+import filodb.core.memstore.{AggregatingTimeSeriesPartition, PartLookupResult, PopulateResult,
+  SchemaMismatch, TimeSeriesShard}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -168,7 +169,21 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     val partCols = schema.infosFromIDs(schema.partition.columns.map(_.id))
     val numGroups = groupsInDataset(ref)
 
-    val filteredParts = if (filterSchemas) {
+    val filteredParts = filterPartitions(ref, lookupRes, columnIDs, schema, filterSchemas, querySession)
+
+    filteredParts.map { partition =>
+      createRangeVector(partition, schema, partCols, numGroups, lookupRes, ids, querySession)
+    }
+  }
+
+  // Helper to filter partitions by schema
+  private def filterPartitions(ref: DatasetRef,
+                               lookupRes: PartLookupResult,
+                               columnIDs: Seq[Types.ColumnId],
+                               schema: Schema,
+                               filterSchemas: Boolean,
+                               querySession: QuerySession): Observable[ReadablePartition] = {
+    if (filterSchemas) {
       scanPartitions(ref, lookupRes, columnIDs, querySession)
         .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
     } else {
@@ -189,18 +204,37 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
           Observable.empty
       }
     }
+  }
 
-    filteredParts.map { partition =>
-      stats.incrReadPartitions(1)
-      val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
-                                                  partition.partKeyOffset, numGroups)
-      val key = PartitionRangeVectorKey(Left(partition),
-                                        schema.partKeySchema, partCols, partition.shard,
-                                        subgroup, partition.partID, schema.name)
-      RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, lookupRes.samplesScannedCtr,
-        querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
-      )
+  // Helper to create appropriate RangeVector for a partition
+  private def createRangeVector(partition: ReadablePartition,
+                                schema: Schema,
+                                partCols: Seq[ColumnInfo],
+                                numGroups: Int,
+                                lookupRes: PartLookupResult,
+                                ids: Array[Int],
+                                querySession: QuerySession): RangeVector = {
+    stats.incrReadPartitions(1)
+    val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
+                                                partition.partKeyOffset, numGroups)
+    val key = PartitionRangeVectorKey(Left(partition),
+                                      schema.partKeySchema, partCols, partition.shard,
+                                      subgroup, partition.partID, schema.name)
+
+    // Use AggregatingRangeVector for partitions that have active aggregation buckets
+    partition match {
+      case aggPart: AggregatingTimeSeriesPartition if aggPart.bucketAggregationStats.activeBucketCount > 0 =>
+        AggregatingRangeVector(
+          key, aggPart, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr,
+          lookupRes.samplesScannedCtr,
+          querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
+        )
+      case _ =>
+        RawDataRangeVector(
+          key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr,
+          lookupRes.samplesScannedCtr,
+          querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
+        )
     }
   }
 

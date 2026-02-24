@@ -111,6 +111,157 @@ How much to allocate for `ingestion-buffer-mem-size` and `shard-mem-size` as wel
 * **Ingestion buffer** - The ingestion buffer is a per-dataset offheap memory area for ingestion write buffers and some other time series-specific data structures.  It needs to be scaled with the number of time series actively ingesting in the system, a few KB for each series.  Once the ingestion buffer runs out, no more time series can be added and eviction of existing time series starting with the oldest non-actively ingesting time series will begin to free up room.  If not enough room can be freed, new time series and in extreme cases even new data may not be ingested.
 * `shard-mem-size` - this is the offheap block storage used to store encoded chunks for the time series data samples and metadata for each chunk.  This should be sized for the number of time series as well as the length of retention desired for all the time series.  The configuration is currently **per-shard**.  When this memory runs out, the oldest blocks will be reclaimed automatically and those chunks will be dropped from time series.
 
+## Aggregating Buffers for Out-of-Order Tolerance
+
+FiloDB supports time-bucketed aggregation buffers to handle samples that arrive out-of-order. This feature is particularly useful in distributed systems where network delays, retries, or replication can cause samples to arrive slightly out of sequence.
+
+### Overview
+
+By default, FiloDB's ingestion drops samples that arrive with timestamps older than the most recent sample (out-of-order samples). Aggregating buffers solve this by:
+
+1. Collecting samples into time buckets
+2. Aggregating values within each bucket (sum, avg, min, max, last, first, count)
+3. Accepting late-arriving samples within a configurable tolerance window
+4. Emitting aggregated results when buckets are complete
+
+### Configuration
+
+Aggregation is configured per-column in the schema definition using three parameters:
+
+```yaml
+schema = "aggregating-gauge"
+
+# Example schema with aggregation
+schemas {
+  aggregating-gauge {
+    columns = [
+      "timestamp:ts",
+      "value:double:{aggregation=sum,interval=30s,ooo-tolerance=60s}"
+    ]
+    value-column = "value"
+  }
+}
+```
+
+**Parameters:**
+- `aggregation` - Type of aggregation: sum, avg, min, max, last, first, or count
+- `interval` - Time bucket interval (e.g., 30s, 1m, 5m, 1h)
+- `ooo-tolerance` - Maximum out-of-order tolerance window (e.g., 60s, 2m, 5m)
+
+### Aggregation Types
+
+- **sum**: Adds all values in the bucket
+- **avg**: Computes the mean of all values
+- **min**: Finds the smallest value
+- **max**: Finds the largest value
+- **last**: Keeps the most recent value (by timestamp)
+- **first**: Keeps the earliest value (by timestamp)
+- **count**: Counts the number of samples
+
+### Multi-Column Aggregation
+
+Different columns can have different aggregation types:
+
+```yaml
+aggregating-multi {
+  columns = [
+    "timestamp:ts",
+    "min:double:{aggregation=min,interval=1m,ooo-tolerance=2m}",
+    "max:double:{aggregation=max,interval=1m,ooo-tolerance=2m}",
+    "sum:double:{aggregation=sum,interval=1m,ooo-tolerance=2m}",
+    "count:long:{aggregation=count,interval=1m,ooo-tolerance=2m}"
+  ]
+  value-column = "sum"
+}
+```
+
+### Memory Considerations
+
+Aggregating buffers maintain a bounded number of active time buckets per partition (default: 3):
+- Current bucket: receiving new samples
+- Previous bucket: accepting late-arriving samples within tolerance
+- Transition bucket: handling edge cases during bucket boundaries
+
+**Memory per partition** (approximate):
+```
+3 buckets × (8 bytes + num_columns × 16 bytes + 4 bytes)
+Example: 3 × (8 + 5 × 16 + 4) = 276 bytes per partition
+```
+
+For 1 million partitions with 5 aggregated columns: ~263 MB additional memory
+
+### Trade-offs
+
+**Pros:**
+- Handles out-of-order samples gracefully
+- Configurable per-column aggregation
+- Bounded memory usage
+- Backward compatible with existing schemas
+
+**Cons:**
+- Increased ingestion complexity
+- Additional memory overhead
+- Latency in data availability (samples buffered until bucket emission)
+- Loss of original sample timestamps (ceiled to bucket boundary)
+
+### Performance Characteristics
+
+- **Latency**: Samples delayed until bucket emission (max delay = interval + tolerance)
+  - Example: 30s interval + 60s tolerance = up to 90s delay
+- **CPU**: O(1) per sample for bucket lookup and aggregation
+- **Memory**: Bounded to 3 buckets per partition regardless of out-of-order patterns
+
+### Usage Examples
+
+**Simple gauge with sum aggregation:**
+```yaml
+aggregating-gauge {
+  columns = [
+    "timestamp:ts",
+    "value:double:{aggregation=sum,interval=30s,ooo-tolerance=60s}"
+  ]
+  value-column = "value"
+}
+```
+
+**Counter with last aggregation:**
+```yaml
+aggregating-counter {
+  columns = [
+    "timestamp:ts",
+    "count:double:{aggregation=last,interval=30s,ooo-tolerance=60s}"
+  ]
+  value-column = "count"
+}
+```
+
+**Latency metrics with average:**
+```yaml
+aggregating-avg {
+  columns = [
+    "timestamp:ts",
+    "latency:double:{aggregation=avg,interval=1m,ooo-tolerance=2m}"
+  ]
+  value-column = "latency"
+}
+```
+
+### Behavior
+
+When a sample arrives:
+1. Timestamp is ceiled to the bucket boundary (e.g., 12:00:05 with 30s interval → 12:00:30)
+2. Bucket is retrieved or created
+3. If sample timestamp is within tolerance window, it's aggregated into the bucket
+4. If sample is outside tolerance, it's dropped (logged and counted in out-of-order stats)
+5. Buckets older than (current time - tolerance) are emitted and persisted
+
+### Monitoring
+
+Track aggregation behavior with these metrics:
+- Out-of-order samples dropped: `shardInfo.stats.outOfOrderDropped`
+- Active buckets per partition: Available via partition stats
+- Aggregated samples count: Per bucket sample count
+
 ## Recovery and Persistence
 
 Datasets are divided into shards.  One shard must wholly fit into one node/process.  Within each shard, individual time series or "partitions" are further grouped into sub-groups.  The number of groups per shard is configurable.

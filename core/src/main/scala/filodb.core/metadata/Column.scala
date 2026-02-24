@@ -12,6 +12,7 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.SingleKeyTypes._
 import filodb.core.Types._
+import filodb.core.memstore.aggregation.{AggregationConfig, AggregationType}
 import filodb.memory.format.{vectors => bv, VectorInfo, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader.TypedFieldExtractor
 
@@ -41,9 +42,23 @@ trait Column {
 case class DataColumn(id: Int,
                       name: String,
                       columnType: Column.ColumnType,
-                      params: Config = ConfigFactory.empty) extends Column {
+                      params: Config = ConfigFactory.empty,
+                      aggregationConfig: Option[AggregationConfig] = None) extends Column {
 
   def isCumulativeTemporality: Boolean = params.hasPath("detectDrops") && params.getBoolean("detectDrops")
+
+  /**
+   * Returns true if this column has aggregation configured.
+   */
+  def hasAggregation: Boolean = aggregationConfig.isDefined
+
+  /**
+   * Gets the aggregation config, throwing if not present.
+   */
+  def getAggregationConfig: AggregationConfig =
+    aggregationConfig.getOrElse(
+      throw new IllegalStateException(s"Column $name has no aggregation config")
+    )
 
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.
@@ -121,7 +136,7 @@ object Column extends StrictLogging {
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
-    case Seq(DataColumn(_, _, columnType, _)         )  => columnType.keyType
+    case Seq(DataColumn(_, _, columnType, _, _)         )  => columnType.keyType
     case Seq(ComputedColumn(_, _, _, columnType, _, _)) => columnType.keyType
     case cols: Seq[Column] =>
       val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
@@ -132,7 +147,7 @@ object Column extends StrictLogging {
    * Converts a list of data columns to Filo VectorInfos for building Filo vectors
    */
   def toFiloSchema(columns: Seq[Column]): Seq[VectorInfo] = columns.collect {
-    case DataColumn(_, name, colType, _) => VectorInfo(name, colType.clazz)
+    case DataColumn(_, name, colType, _, _) => VectorInfo(name, colType.clazz)
   }
 
   import OptionSugar._
@@ -156,8 +171,58 @@ object Column extends StrictLogging {
    */
   def validateColumn(name: String, typeName: String, nextId: Int, params: Config): DataColumn Or One[BadSchema] =
     for { nothing <- validateColumnName(name)
-          colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName))) }
-    yield { DataColumn(nextId, name, colType, params) }
+          colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName)))
+          aggConfig = parseAggregationConfig(params, nextId) }
+    yield { DataColumn(nextId, name, colType, params, aggConfig) }
+
+  /**
+   * Parses aggregation configuration from column parameters.
+   * Expected params format: "aggregation=sum,interval=30s,ooo-tolerance=60s"
+   *
+   * @param params the Config containing aggregation parameters
+   * @param columnIndex the index of the column in the schema
+   * @return Some(AggregationConfig) if all required params are present and valid, None otherwise
+   */
+  def parseAggregationConfig(params: Config, columnIndex: Int): Option[AggregationConfig] = {
+    try {
+      for {
+        aggTypeStr    <- if (params.hasPath("aggregation")) Some(params.getString("aggregation")) else None
+        aggType       <- AggregationType.parse(aggTypeStr)
+        intervalStr   <- if (params.hasPath("interval")) Some(params.getString("interval")) else None
+        intervalMs    = parseTimeString(intervalStr)
+        toleranceStr  <- if (params.hasPath("ooo-tolerance")) Some(params.getString("ooo-tolerance")) else None
+        toleranceMs   = parseTimeString(toleranceStr)
+      } yield AggregationConfig(columnIndex, aggType, intervalMs, toleranceMs)
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to parse aggregation config for column $columnIndex: ${ex.getMessage}")
+        None
+    }
+  }
+
+  /**
+   * Parses a time string like "30s", "1m", "5m", "1h", "1d" to milliseconds.
+   * @param s the time string to parse
+   * @return time in milliseconds
+   * @throws IllegalArgumentException if the format is invalid
+   */
+  def parseTimeString(s: String): Long = {
+    val pattern = """(\d+)([smhd])""".r
+    s match {
+      case pattern(value, unit) =>
+        val v = value.toLong
+        unit match {
+          case "s" => v * 1000
+          case "m" => v * 60 * 1000
+          case "h" => v * 60 * 60 * 1000
+          case "d" => v * 24 * 60 * 60 * 1000
+        }
+      case _ =>
+        throw new IllegalArgumentException(
+          s"Invalid time string: $s. Expected format: <number><unit> where unit is s,m,h,d"
+        )
+    }
+  }
 
   import Accumulation._
 

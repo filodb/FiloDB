@@ -306,6 +306,26 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
     if (reader.notNull(col)) { addFromReaderNoNA(reader, col) }
     else                     { addNA() }
 
+  /**
+   * Overwrites the value at a specific index position in the vector.
+   * This method is used to update values in-place, particularly for handling
+   * out-of-order samples in aggregating time series partitions.
+   *
+   * @param index the index position to overwrite (0-based)
+   * @param value the new value to write at that position
+   * @return Ack if successful, or an error response if index is out of bounds
+   */
+  def overwriteAt(index: Int, value: A): AddResponse = ???
+
+  /**
+   * Overwrites the value at a specific index from a RowReader.
+   * @param index the index position to overwrite (0-based)
+   * @param reader the RowReader containing the value
+   * @param col the column index in the reader
+   * @return Ack if successful, or an error response if index is out of bounds
+   */
+  def overwriteFromReaderNoNA(index: Int, reader: RowReader, col: Int): AddResponse = ???
+
   /** Returns a reader that can be used to read from this vect */
   def reader: VectorDataReader
 
