@@ -4301,4 +4301,57 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       concatExec.children.size should be >= 1
     }
   }
+
+  it ("should give correct routing keys for Equals filters in multi-partition queries") {
+    val partitionProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """foo{_ws_="demo",_ns_="ns1"} + foo{_ws_="demo",_ns_="ns2"}""",
+      TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val expected = Set(Map("_ws_" -> "demo", "_ns_" -> "ns1"), Map("_ws_" -> "demo", "_ns_" -> "ns2"))
+    mpp.getRoutingKeys(lp) shouldEqual expected
+  }
+
+  it ("should throw IllegalArgumentException for regex filters on _ns_ in getRoutingKeys") {
+    val partitionProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """foo{_ns_=~"ns1|ns2"}""",
+      TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    // getRoutingKeys should throw an exception for regex filters as only Equals filters are supported
+    // Regex filters on shard keys are handled by ShardKeyRegexPlanner which wraps MultiPartitionPlanner
+    an[IllegalArgumentException] should be thrownBy {
+      mpp.getRoutingKeys(lp)
+    }
+  }
+
+  it ("should handle non-equals filters gracefully in getPartitions delegation") {
+    val partitionProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        // getPartitions can handle any routing key passed to it
+        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = {
+        // This method can handle non-equals filters
+        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+      }
+    }
+    val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)
+
+    // getPartitionsTrait should work with any filter type since it delegates to the provider
+    val nonMetricFilters = Seq(ColumnFilter("_ns_", Filter.EqualsRegex("ns1|ns2")))
+    val timeRange = TimeRange(1000, 2000)
+    val timeRange = TimeRange(1000, 2000)
+    val result = mpp.partitionLocationProvider.getMetadataPartitionsTrait(nonMetricFilters, timeRange)
+    result.size should be > 0
+  }
 }

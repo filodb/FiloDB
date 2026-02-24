@@ -310,11 +310,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           val valueSet = acc.getOrElseUpdate(colFilter.column, new mutable.HashSet[String])
           colFilter.filter match {
             case eq: Equals => valueSet.add(eq.value.toString)
-            case re: EqualsRegex if QueryUtils.containsPipeOnlyRegex(re.value.toString) =>
-              val values = QueryUtils.splitAtUnescapedPipes(re.value.toString)
-              values.foreach(valueSet.add)
             case _ => throw new IllegalArgumentException(
-              s"""shard keys must be filtered by equality or "|"-only regex. filter=$colFilter""")
+              s"""shard keys must be filtered by equality. filter=$colFilter""")
           }
           acc
         }
