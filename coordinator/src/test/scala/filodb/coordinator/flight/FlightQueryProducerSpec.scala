@@ -37,7 +37,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
   private val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
-  private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 100000)
+  private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 3000000)
   private var querySession: QuerySession = _
   private val location = Location.forGrpcInsecure("localhost", 38815)
 
@@ -103,6 +103,25 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       metricColumn = "_metric_",
       Some(RvRange(0, 1000, 100000)))
 
+    it("should be able to run a single MSPE query plan over flight server") {
+
+      val allocatedMemBeforeQuery = allocator.getAllocatedMemory
+      val qRes2 = mspe1.dispatcher.dispatch(ExecPlanWithClientParams(mspe1, ClientParams(60000), querySession),
+        UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+      val rvRows2 = qRes2.result.map { rv =>
+        val rows = rv.rows().map(r => (r.getLong(0))).toList
+        rows
+      }
+      rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
+
+      qRes2.result.map(_.key.toString) shouldEqual
+        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
+          "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+    }
+
     it("should be able to run a LocalPartitionDistConcatExec query plan over flight server") {
 
       /*
@@ -127,7 +146,6 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows2 = qRes2.result.map { rv =>
         val rows = rv.rows().map(r => (r.getLong(0))).toList
-        rv.asInstanceOf[ArrowSerializedRangeVector].close()
         rows
       }
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList,
@@ -139,6 +157,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
 
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -160,7 +179,6 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows2 = qRes2.result.map { rv =>
         val rows = rv.rows().map(r => (r.getLong(0))).toList
-        rv.asInstanceOf[ArrowSerializedRangeVector].close()
         rows
       }
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
@@ -168,6 +186,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       qRes2.result.map(_.key.toString) shouldEqual
         List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -202,7 +221,6 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
         UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
       val rvRows = qRes.result.map { rv =>
         val rows = rv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
-        rv.asInstanceOf[ArrowSerializedRangeVector].close()
         rows
       }
       rvRows shouldEqual List((0 to 100000 by 1000).map(_ -> 2).toList)
@@ -210,6 +228,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       qRes.result.map(_.key.toString) shouldEqual
         List("/shard:/Map()")
 
+      qRes.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -235,11 +254,11 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val rvRows3 = qRes3.result.map { rv =>
         val rows = rv.rows().map(_.getString(0)).toList
-        rv.asInstanceOf[ArrowSerializedRangeVector].close()
         rows
       }
       rvRows3 shouldEqual List(List("host1", "host2"))
 
+      qRes3.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
 //      println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
@@ -266,13 +285,13 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val rvRows4 = qRes4.result.map { rv =>
         val rows = rv.rows().map(_.getAny(0).asInstanceOf[Map[String, String]]).toList
-        rv.asInstanceOf[ArrowSerializedRangeVector].close()
         rows
       }
       rvRows4 shouldEqual List(List(
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host2", "region" -> "region1"),
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
 
+      qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
       // println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }

@@ -5,12 +5,13 @@ import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.jdk.CollectionConverters.asScalaBufferConverter
 import scala.util.Using
 
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.apache.arrow.memory.BufferAllocator
-import org.apache.arrow.vector.VectorSchemaRoot
+import org.apache.arrow.vector.{VarBinaryVector, VectorSchemaRoot}
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.joda.time.DateTime
 
@@ -27,7 +28,7 @@ import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8S
 import filodb.memory.format.vectors.Histogram
 
 // scalastyle:off number.of.types
-
+// scalastyle:off file.size.limit
 /**
   * Identifier for a single RangeVector.
   * Sub-classes must be a case class or override equals/hashcode since this class is used in a
@@ -693,8 +694,7 @@ final class ArrowSerializedRangeVector(val key: RangeVectorKey,
   }
 
   override def estimateSerializedRowBytes: Long = {
-    val vec = vectorSchemaRoot.getVector(0).asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
-    vec.getOffsetBuffer().getInt(vec.getValueCount() * 4);
+    vectorSchemaRoot.getFieldVectors.asScala.map(_.getBufferSize.toLong).sum
   }
 
   override def close(): Unit = {
@@ -791,4 +791,112 @@ object ArrowSerializedRangeVector extends StrictLogging {
       queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }
   }
+}
+
+class ArrowSerializedRangeVector2(val key: RangeVectorKey,
+                                  val vsrs: Seq[VectorSchemaRoot],
+                                  val schema: RecordSchema,
+                                  val startVsrIndex: Int,
+                                  val rvkRowIndex: Int,
+                                  val numRowsSerialized: Int,
+                                  val outputRange: Option[RvRange]) extends RangeVector with SerializableRangeVector {
+
+  // scalastyle:off method.length
+  private def toRowReaderIterator: RangeVectorCursor = {
+    new RangeVectorCursor {
+      private val array = new Array[Byte](ArrowSerializedRangeVector2.maxBrSize)
+      private val reader = new BinaryRecordRowReader(schema, array, UnsafeUtils.arayOffset)
+      private var currentVsrIndex = startVsrIndex
+      // Start at startRowIndex + 1 to skip the RV key row
+      private var currentRowInVsr = rvkRowIndex + 1
+      private var rowsRead = 0
+      private val emptyDouble = new TransientRow(0L, Double.NaN)
+      private val emptyHist = new TransientHistRow(0L, Histogram.empty)
+      private var curTimestamp = outputRange.map(_.startMs).getOrElse(0L)
+      private val step = outputRange.map(_.stepMs).getOrElse(1L)
+
+      final def hasNext: Boolean = rowsRead < numRowsSerialized
+
+      final def next(): RowReader = {
+        // Move to next VSR if we've exhausted current VSR
+        while (currentVsrIndex < vsrs.length &&
+          currentRowInVsr >= vsrs(currentVsrIndex).getRowCount) {
+          currentVsrIndex += 1
+          currentRowInVsr = 0
+        }
+
+        if (currentVsrIndex >= vsrs.length || rowsRead >= numRowsSerialized) {
+          throw new NoSuchElementException("No more rows")
+        }
+
+        val vsr = vsrs(currentVsrIndex)
+        val brVec = vsr.getVector(1).asInstanceOf[VarBinaryVector]
+
+        // Check if this is a null row (empty data that was filtered out during serialization)
+        val retRow = if (brVec.isNull(currentRowInVsr)) {
+          if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
+            schema.columns(1).colType == DoubleColumn) {
+            emptyDouble.timestamp = curTimestamp
+            currentRowInVsr += 1
+            rowsRead += 1
+            emptyDouble
+          } else if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
+            schema.columns(1).colType == HistogramColumn) {
+            emptyHist.timestamp = curTimestamp
+            currentRowInVsr += 1
+            rowsRead += 1
+            emptyHist
+          } else {
+            throw new IllegalStateException("Encountered null row schema that cannot be removed")
+          }
+        } else {
+          // Read the binary record from the vector
+          val start = brVec.getStartOffset(currentRowInVsr)
+          val end = brVec.getStartOffset(currentRowInVsr + 1)
+          val length = end - start
+          brVec.getDataBuffer.getBytes(start, array, 0, length)
+
+          currentRowInVsr += 1
+          rowsRead += 1
+          reader
+        }
+        curTimestamp += step
+        retRow
+      }
+
+      override def close(): Unit = {
+        // VSRs are owned by ArrowSerializedRangeVector2 and managed externally
+        // Don't close them here
+      }
+    }
+  }
+
+  override def rows(): RangeVectorCursor = {
+    val it = toRowReaderIterator
+    new RangeVectorCursor {
+      override def hasNext: Boolean = it.hasNext
+
+      override def next(): RowReader = it.next()
+
+      override def close(): Unit = it.close()
+    }
+  }
+
+  /**
+   * Estimates the total size (in bytes) of all rows after serialization.
+   */
+  override def estimateSerializedRowBytes: Long = {
+    // FIXME since multiple RVs can be serialized into the same VSR, this may not be accurate for all RVs.
+    0L
+  }
+
+}
+
+object ArrowSerializedRangeVector2 {
+
+  val maxBrSize = 5000
+  // FIXME this should not be hard-coded
+  val maxVecLen = 1048576 // 1 MB
+  val maxNumRows = maxVecLen / 15
+
 }

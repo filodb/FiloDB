@@ -980,6 +980,7 @@ object ProtoConverters {
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
         case asrv: ArrowSerializedRangeVector  => ??? // FIXME need to implement before productionizing
+        case asrv2: ArrowSerializedRangeVector2  => ??? // FIXME need to implement before productionizing
       }
     }
   }

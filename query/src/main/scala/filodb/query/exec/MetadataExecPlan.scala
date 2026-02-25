@@ -61,6 +61,9 @@ trait MetadataDistConcatExec extends NonLeafExecPlan with MetadataExecPlan {
             case srv: ArrowSerializedRangeVector =>
               srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
                 .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+            case srv: ArrowSerializedRangeVector2 =>
+              srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
             case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
           }
         }
@@ -186,6 +189,9 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
           srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
             .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
         case srv: ArrowSerializedRangeVector if colType == StringColumn =>
+          srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (_._2).head
+        case srv: ArrowSerializedRangeVector2 if colType == StringColumn =>
           srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
             .map (_._2).head
         case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")

@@ -19,11 +19,14 @@ import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 
 import filodb.coordinator.QueryScheduler
+import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationState
 import filodb.core.QueryTimeoutException
+import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConfig, QueryContext, QueryLimitException,
-  QuerySession, QueryStats, RangeVector, SerializedRangeVector}
+import filodb.core.query.{ArrowSerializedRangeVector, ArrowSerializedRangeVector2, FlightAllocator, QueryConfig,
+  QueryContext, QueryLimitException, QuerySession, QueryStats, RangeVector, RvRange, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
@@ -112,15 +115,17 @@ trait FlightQueryExecutor extends StrictLogging {
                   throw QueryTimeoutException(System.currentTimeMillis() - q.queryContext.submitTime,
                                                 this.getClass.getName, Some(f))
                 } // convert to QueryTimeoutException for circuit breaker handling
-                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(f))
+                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
+                                          querySession.queryStats, None, Some(f))
               case qte: QueryTimeoutException =>
                 throw qte // rethrow so circuit breaker can handle
               case e =>
-                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(e))
+                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
+                                          querySession.queryStats, None, Some(e))
           }
         circuitBreaker.protect(execTask).onErrorRecover { case t =>
           // typically a logged QueryTimeout will be thrown here; all other errors are already handled above
-          sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(t))
+          sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, None, Some(t))
         }.guarantee(Task.eval {
             SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
             val timeTaken = System.nanoTime() - startTime
@@ -182,8 +187,8 @@ trait FlightQueryExecutor extends StrictLogging {
 
       // Order of messages to be sent as part of Flight response:
       // 1. Header: ResultSchema
-      // 2. zero or more RVs with metadata (the vector schema roots)
-      // 3. Footer: QueryStats, Throwable (if error)
+      // 2. zero or more VSRs containing collection of RVs
+      // 3. Footer: QueryStats, RVRange, Throwable (if error)
       queryResult match {
         case qe: QueryError =>
           Task.eval {
@@ -191,9 +196,10 @@ trait FlightQueryExecutor extends StrictLogging {
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
             // rethrow so circuit breaker can handle
             if (qe.t.isInstanceOf[QueryTimeoutException]) throw qe.t
-            sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
+            sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, None, Some(qe.t))
           }
         case res: QueryResult =>
+          var outputRange: Option[RvRange] = None
           Task.eval {
             logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
@@ -204,56 +210,105 @@ trait FlightQueryExecutor extends StrictLogging {
             logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
             listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, flightAllocator))
           }.flatMap { _ =>
-            logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
             Task.eval {
+              logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-              flightAllocator.withRequestAllocator(a => ArrowSerializedRangeVector.emptyVectorSchemaRoot(a)) {
+              // here we initialize the state object with emoty flightVsr which
+              // will be populated when we need to send VSR over the wire as response
+              flightAllocator.withRequestAllocator { a =>
+                VsrPopulationState(flightVsr = ArrowSerializedRangeVectorOps.emptyVectorSchemaRoot(a))
+              } {
                 throw new IllegalStateException("FlightAllocator is already closed, cannot create VectorSchemaRoot")
               }
-            }.bracket { vec =>
+            }.bracket { state =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-              // yes all of the operations below is ideally done within flightAllocator. withRequestAllocator, but since
-              // this code never races with session close, we choose monix simplicity over trying to make that happen
-              listener.start(vec)
+              listener.start(state.flightVsr)
               val rb = SerializedRangeVector.newBuilder()
-              Observable.fromIterable(res.result).mapEval { rv =>
-                vec.getFieldVectors.forEach(_.reset()) // reset vectors before each RV is loaded
-                val rvMetadata = RvMetadata(rv.key, rv.outputRange)
-                rv match {
-                  case asrv: ArrowSerializedRangeVector =>
-                    Task.eval {
-                      FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-                      checkAllocatorLimits(flightAllocator, execPlan.queryContext)
-                      val unloader = new VectorUnloader(asrv.vectorSchemaRoot)
-                      val loader = new VectorLoader(vec)
-                      Using.resource(unloader.getRecordBatch) { rb =>
-                        loader.load(rb)
+              if (res.result.nonEmpty && res.result.forall(_.isInstanceOf[ArrowSerializedRangeVector2])) {
+                logger.debug(s"Applying direct VSR streaming optimization for queryPlanId=${execPlan.planId} " +
+                  s"since all RVs in result are ArrowSerializedRangeVector2")
+                outputRange = res.result.head.outputRange
+                // need to convert to set to avoid duplicates since multiple RVs can point to the same VSR
+                val resultVsrs = res.result.iterator.flatMap(_.asInstanceOf[ArrowSerializedRangeVector2].vsrs).toSet
+                Observable.fromIterable(resultVsrs).map { vsr =>
+                  val unloader = new VectorUnloader(vsr)
+                  val loader = new VectorLoader(state.flightVsr)
+                  Using.resource(unloader.getRecordBatch) { rb =>
+                    loader.load(rb)
+                  }
+                  logger.debug(s"Putting next arrow vsr into flight response for queryPlanId=${execPlan.planId} ")
+                  listener.putNext()
+                }.completedL
+              } else if (res.result.exists(_.isInstanceOf[ArrowSerializedRangeVector])) {
+                throw new IllegalStateException("Unexpected ArrowSerializedRangeVector in query result," +
+                  "should have been handled by direct VSR streaming optimization since all RVs are " +
+                  "not ArrowSerializedRangeVector2")
+              } else {
+                val recSchema = res.resultSchema.toRecordSchema
+                val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
+                Observable.fromIterable(res.result).mapEval { rv =>
+                  state.flightVsr.getFieldVectors.forEach(_.reset()) // reset vectors before each RV is loaded
+                  rv match {
+                    case _: ArrowSerializedRangeVector =>
+                      throw new IllegalStateException("Unexpected ArrowSerializedRangeVector in query result," +
+                        "should have been handled by direct VSR streaming optimization")
+                    case rv: RangeVector =>
+                      outputRange = rv.outputRange
+                      Task.eval {
+                        // This lambda triggers intensive iterators and calculations and should be done on query sched
+                        FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
+                        checkAllocatorLimits(flightAllocator, execPlan.queryContext)
+                        logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
+                        flightAllocator.withRequestAllocator { allocator =>
+                          ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
+                            s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats,
+                            allocator, state, brIterator)
+                        } {
+                          throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
+                        }
+                      }.executeOn(queryScheduler).asyncBoundary.map { _ =>
+                        FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                        // unload each finishedVsr into vec and putNext to listener
+                        state.finishedVsrs.foreach { vsr =>
+                          val unloader = new VectorUnloader(vsr)
+                          val loader = new VectorLoader(state.flightVsr)
+                          Using.resource(unloader.getRecordBatch) { rb =>
+                            loader.load(rb)
+                          }
+                          logger.debug(s"Putting next vsr into flight response for queryPlanId=${execPlan.planId} ")
+                          listener.putNext()
+                          state.freeVsrs.offer(vsr) // add to free pool after sending over flight
+                        }
+                        state.finishedVsrs.clear() // clear finished list after sending all over flight
                       }
-                      listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, flightAllocator))
-                      asrv.close()
+                  }
+                }.completedL.map { _ =>
+                  FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                  if (state.currentVsr != null) {
+                    val unloader = new VectorUnloader(state.currentVsr)
+                    val loader = new VectorLoader(state.flightVsr)
+                    Using.resource(unloader.getRecordBatch) { rb =>
+                      loader.load(rb)
                     }
-                  case rv: RangeVector =>
-                    Task.eval {
-                      // This lambda triggers intensive iterators and calculations and should be done on query scheduler
-                      FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
-                      checkAllocatorLimits(flightAllocator, execPlan.queryContext)
-                      logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
-                      ArrowSerializedRangeVector.populateVectorSchemaRoot(rv, res.resultSchema.toRecordSchema,
-                        vec, s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats)
-                      // TODO update metrics & query statistics on result bytes during RV serialization
-                    }.executeOn(queryScheduler).asyncBoundary.map { _ =>
-                      FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-                      logger.debug(s"Putting RV into flight response for queryPlanId=${execPlan.planId} ")
-                      listener.putNext(FlightKryoSerDeser.serializeToArrowBuf(rvMetadata, flightAllocator))
-                    }
+                    logger.debug(s"Putting final vsr into flight response for queryPlanId=${execPlan.planId} ")
+                    listener.putNext()
+                    state.freeVsrs.offer(state.currentVsr) // add to free pool after sending over flight
+                  }
                 }
-              }.completedL
-            } { vec =>
+              }
+            } { state =>
+              // this lambda is the finally clause for bracket method
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-              Task.eval(vec.close())
+              Task.eval {
+                state.flightVsr.close()
+                while (!state.freeVsrs.isEmpty) {
+                  state.freeVsrs.poll().close()
+                }
+              }
             }.map { _ =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-              sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, res.queryStats, None)
+              sendRespFooterAndComplete(listener, flightAllocator, execPlan,
+                                        querySpan, res.queryStats, outputRange, None)
             }
           }
       }
@@ -264,6 +319,7 @@ trait FlightQueryExecutor extends StrictLogging {
                                   execPlan: ExecPlan,
                                   queryExecuteSpan: Span,
                                   s: QueryStats,
+                                  outputRange: Option[RvRange],
                                   t: Option[Throwable]): Unit = {
       t.foreach { e =>
         logQueryErrors(e, execPlan)
@@ -274,7 +330,7 @@ trait FlightQueryExecutor extends StrictLogging {
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
-      val respFooter = RespFooter(s, t)
+      val respFooter = RespFooter(s, outputRange, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
       // and hence not closed here
       listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))
