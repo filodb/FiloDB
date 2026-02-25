@@ -118,7 +118,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
         List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
           "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
 
-      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -157,7 +157,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
              "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
 
-      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -186,7 +186,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       qRes2.result.map(_.key.toString) shouldEqual
         List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
 
-      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -228,7 +228,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       qRes.result.map(_.key.toString) shouldEqual
         List("/shard:/Map()")
 
-      qRes.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
 
@@ -258,7 +258,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       }
       rvRows3 shouldEqual List(List("host1", "host2"))
 
-      qRes3.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes3.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
 //      println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }
@@ -291,7 +291,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host2", "region" -> "region1"),
         Map("_metric_" -> "cpu_usage", "_type_" -> "schemaID:60110", "host" -> "host1", "region" -> "region1")))
 
-      qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector2].vsrs.foreach(_.close())
+      qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       // println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
     }

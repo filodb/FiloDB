@@ -12,11 +12,17 @@ import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.{CustomBuckets, Histogram, HistogramWithBuckets, LongHistogram}
 
-class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
+class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
   System.setProperty("arrow.memory.debug.allocator", "true")
   private val allocator = new RootAllocator(10000000)
   private val rb = SerializedRangeVector.newBuilder()
+
+  val resSchema = new ResultSchema(Seq(
+    ColumnInfo("time", ColumnType.TimestampColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn)
+  ), 1)
+  val recSchema = resSchema.toRecordSchema
 
   override def afterAll(): Unit = {
     allocator.close()
@@ -48,11 +54,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
 
   describe("ArrowSerializedRangeVector2") {
 
-    it("should deserialize single RangeVector from single VSR with double values") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
+    it("should deserialize ArrowSerializedRangeVector & ScalarFixedDouble RV from single VSR with double values") {
 
       val keysMap = Map(UTF8Str("metric") -> UTF8Str("temperature"),
                         UTF8Str("host") -> UTF8Str("server1"))
@@ -74,11 +76,16 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
         rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
       )
 
+      val srv2 = ScalarFixedDouble(RangeParams(1, 1, 5), 100.0)
+      ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
+        srv2, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+      )
+
       // Convert to ArrowSerializedRangeVector2 instances
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
-      srvs.length shouldEqual 1
+      srvs.length shouldEqual 2
       val srv = srvs.head
 
       // Verify key
@@ -90,15 +97,12 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
         (1000, 10.0), (2000, 20.0), (3000, 30.0), (4000, 40.0), (5000, 50.0)
       )
 
+      srvs(1) shouldEqual srv2
       // Cleanup
       allVsrs.foreach(_.close())
     }
 
     it("should handle NaN values and reconstruct them during deserialization") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
 
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("cpu")))
 
@@ -120,7 +124,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       srvs.length shouldEqual 1
       val srv = srvs.head
@@ -138,10 +142,11 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should handle histogram values and empty histograms") {
-      val recSchema = new RecordSchema(Seq(
+      val resSchema = new ResultSchema(Seq(
         ColumnInfo("time", ColumnType.TimestampColumn),
         ColumnInfo("value", ColumnType.HistogramColumn)
-      ))
+      ), 1)
+      val recSchema = resSchema.toRecordSchema
 
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("latency")))
       val h1 = LongHistogram(CustomBuckets(Array(1.0, 5.0, 10.0, Double.PositiveInfinity)),
@@ -163,7 +168,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       srvs.length shouldEqual 1
       val srv = srvs.head
@@ -181,11 +186,6 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should handle multiple RangeVectors in multiple VSRs") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
-
       val key1 = CustomRangeVectorKey(Map(UTF8Str("host") -> UTF8Str("server1")))
       val key2 = CustomRangeVectorKey(Map(UTF8Str("host") -> UTF8Str("server2")))
       val key3 = CustomRangeVectorKey(Map(UTF8Str("host") -> UTF8Str("server3")))
@@ -211,7 +211,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       srvs.length shouldEqual 3
 
@@ -231,15 +231,11 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should handle RangeVector spanning multiple VSRs") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
 
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      val largeDataset = (1 to ArrowSerializedRangeVector2.maxNumRows + 100).map { i =>
+      val largeDataset = (1 to ArrowSerializedRangeVectorOps.maxNumRows + 100).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -259,7 +255,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       // Should have created multiple VSRs
       allVsrs.length shouldEqual 2
 
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
       srvs.length shouldEqual 1
 
       val srv = srvs.head
@@ -273,15 +269,13 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should handle RVK at last row of VSR with data rows in next VSR") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
-
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      val largeDataset = (1 to 52417).map { i =>
+      // we choose 52408 because next RVK is written at row 52409, and new VSR is created for 52410
+      // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
+      // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR
+      val largeDataset = (1 to 52408).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -310,7 +304,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       val rvkBrVec2 = allVsrs.last.getVector(1).asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
       rvkBrVec2.get(0) should not be null
 
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
       srvs.length shouldEqual 2
 
       val srv = srvs.head
@@ -325,10 +319,6 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should handle empty RangeVector") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
 
       val outputRange = Some(RvRange(0, 1000, 0))
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("empty")))
@@ -343,7 +333,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       srvs.length shouldEqual 1
       srvs.head.key shouldEqual key
@@ -372,7 +362,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       val srv = srvs.head
       val cursor = srv.rows()
@@ -394,10 +384,6 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
     }
 
     it("should throw NoSuchElementException when iterating beyond available rows") {
-      val recSchema = new RecordSchema(Seq(
-        ColumnInfo("time", ColumnType.TimestampColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)
-      ))
 
       val outputRange = Some(RvRange(1000, 1000, 1000))
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("test")))
@@ -412,7 +398,7 @@ class ArrowSerializedRangeVector2Spec extends AnyFunSpec with Matchers with Befo
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, outputRange, recSchema)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
       val cursor = srvs.head.rows()
       cursor.hasNext shouldEqual true

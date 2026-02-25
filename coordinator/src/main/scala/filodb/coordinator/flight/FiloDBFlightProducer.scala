@@ -45,7 +45,7 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
       throw new UnsupportedOperationException("Only Command FlightDescriptors are supported")
     } else {
       val flightEndpoint = new FlightEndpoint(new Ticket(descriptor.getCommand), location)
-      new FlightInfo(ArrowSerializedRangeVector.arrowSrvSchema,
+      new FlightInfo(ArrowSerializedRangeVectorOps.arrowSrvSchema,
         descriptor, Collections.singletonList(flightEndpoint), -1, -1)
     }
   }

@@ -15,17 +15,35 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.query._
-import filodb.core.query.ArrowSerializedRangeVector2.{maxNumRows, maxVecLen}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils}
+
+case class RespHeader(resultSchema: ResultSchema)
+case class RespFooter(queryStats: QueryStats, throwable: Option[Throwable])
+
+/**
+ * Written in RVK vector
+ * @param srv if present, this is the entire SRV and no data rows will follow. Other case class fields will be ignored.
+ * @param key if present, this is the RVK for the following data rows
+ * @param outputRange the output range for the RV, needed reconstructing the RV
+ */
+case class RvMetadata(srv: Option[SerializableRangeVector], key: Option[RangeVectorKey], outputRange: Option[RvRange])
 
 object ArrowSerializedRangeVectorOps {
   // scalastyle:off null
   val arrowSrvSchema: Schema = {
-    val isRvk = new Field("rvk", FieldType.notNullable(new ArrowType.Bool()), null)
+    // stores boolean value indicating whether the row contains RVK or data, and
+    // if RVK then the RVK is stored in the second column as binary
+    val isRvk = new Field("isRvk", FieldType.notNullable(new ArrowType.Bool()), null)
+    // if isRvk is true, then this column stores the serialized RVK
+    // if isRvk is false, then this column stores the serialized BR for the data row
     val rvkBr = new Field("rvkBr", FieldType.nullable(new ArrowType.Binary()), null)
     new Schema(util.Arrays.asList(isRvk, rvkBr))
   }
+
+  // FIXME this should not be hard-coded
+  val maxVecLen = 1048576 // 1 MB
+  val maxNumRows = maxVecLen / 15
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
     VectorSchemaRoot.create(arrowSrvSchema, allocator)
@@ -80,14 +98,13 @@ object ArrowSerializedRangeVectorOps {
         state.currentIsRvkVec.allocateNew(maxNumRows)
         state.currentRvkBrVec = state.currentVsr.getVector(1)
           .asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
-        state.currentRvkBrVec.allocateNew(maxNumRows)
         state.currentRvkBrVec.allocateNew(maxVecLen, maxNumRows)
       } else {
         state.currentVsr = state.freeVsrs.poll()
         state.currentIsRvkVec = state.currentVsr.getVector(0).asInstanceOf[org.apache.arrow.vector.BitVector]
         state.currentRvkBrVec = state.currentVsr.getVector(1)
           .asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
-        state.currentVsr.getFieldVectors.forEach(_.clear())
+        state.currentVsr.getFieldVectors.forEach(_.reset())
       }
 
       state.rowNum = 0
@@ -96,8 +113,8 @@ object ArrowSerializedRangeVectorOps {
 
     def addFromReader(row: RowReader): Unit = {
       // TODO - we should write the BR record directly to Arrow buffers instead of using on-heap RecordBuilder and
-      // hen copying to Arrow buffers. This is just a temporary solution to get the data into Arrow format for now.
-      builder.reset()
+      // then copying to Arrow buffers. This is just a temporary solution to get the data into Arrow format for now.
+      builder.reset(true)
       builder.addFromReader(row, recordSchema, 0)
       // avoid allocation by reusing brIterator
       builder.lastContainer.iterate(brIterator).foreach { br =>
@@ -116,44 +133,60 @@ object ArrowSerializedRangeVectorOps {
 
     if (state.currentVsr == null) addNewVsr()
 
-    // Begin by serializing the RangeVector key into the VSR.
-    FlightKryoSerDeser.serializeToArrowVsr(rv.key, state) { () =>
-      addNewVsr()
-    }
-
-    val startNs = Utils.currentThreadCpuTimeNanos
-    try {
-      ChunkMap.validateNoSharedLocks(execPlan)
-      Using.resource(rv.rows()) { rows =>
-        while (rows.hasNext) {
-          val nextRow = rows.next()
-          // Don't encode empty / NaN data over the wire
-          if (!SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema) ||
-            recordSchema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
-            recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
-            addFromReader(nextRow)
-          } else {
-            state.currentRvkBrVec.setNull(state.rowNum)
-            state.currentIsRvkVec.set(state.rowNum, 0)
-            state.rowNum += 1
-          }
+    rv match {
+      case srv: SerializableRangeVector if srv.hasFormulatedRows =>
+        // If the RV has formulated rows, we can serialize the entire RV as a single object
+        // and skip the row iteration and BR building
+        val rvMetadata = RvMetadata(Some(srv), None, None)
+        FlightKryoSerDeser.serializeToArrowVsr(rvMetadata, state) { () =>
+          addNewVsr()
         }
         state.currentIsRvkVec.setValueCount(state.rowNum)
         state.currentRvkBrVec.setValueCount(state.rowNum)
         state.currentVsr.setRowCount(state.rowNum)
-      }
-    } finally {
-      ChunkMap.releaseAllSharedLocks()
-      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
+      case _ =>
+        // If the RV does not have formulated rows, serialize the RV key and output range separately, and then
+        // iterate through the rows to build the BR records
+        // Begin by serializing the RangeVector key into the VSR.
+        val rvMetadata = RvMetadata(None, Some(rv.key), rv.outputRange)
+        FlightKryoSerDeser.serializeToArrowVsr(rvMetadata, state) { () =>
+          addNewVsr()
+        }
+        // now add the rows
+        val startNs = Utils.currentThreadCpuTimeNanos
+        try {
+          ChunkMap.validateNoSharedLocks(execPlan)
+          Using.resource(rv.rows()) { rows =>
+            while (rows.hasNext) {
+              val nextRow = rows.next()
+              // Don't encode empty-histogram / NaN data over the wire
+              if (!SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema) ||
+                recordSchema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
+                recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
+                addFromReader(nextRow)
+              } else {
+                state.currentRvkBrVec.setNull(state.rowNum)
+                state.currentIsRvkVec.set(state.rowNum, 0)
+                state.rowNum += 1
+              }
+            }
+            state.currentIsRvkVec.setValueCount(state.rowNum)
+            state.currentRvkBrVec.setValueCount(state.rowNum)
+            state.currentVsr.setRowCount(state.rowNum)
+          }
+        } finally {
+          ChunkMap.releaseAllSharedLocks()
+          queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
+        }
     }
+
   }
 
   def convertVsrsIntoArrowSrvs(vsrs: Seq[VectorSchemaRoot],
-                               outputRange: Option[RvRange],
-                               schema: RecordSchema): Seq[ArrowSerializedRangeVector2] = {
-    val result = ArrayBuffer[ArrowSerializedRangeVector2]()
+                               schema: ResultSchema): Seq[SerializableRangeVector] = {
+    val result = ArrayBuffer[SerializableRangeVector]()
 
-    var currentKey: RangeVectorKey = null
+    var currentAsrvMetdata: RvMetadata = null
     var currentStartVsrIndex = 0
     var currentStartRowIndex = 0
     var currentNumDataRows = 0
@@ -167,19 +200,27 @@ object ArrowSerializedRangeVectorOps {
       for (rowIndex <- 0 until vsr.getRowCount) {
         if (isRvkVec.get(rowIndex) == 1) {
           // Found a new RV key row
-          if (currentKey != null) {
+          if (currentAsrvMetdata != null) {
             // Save the previous RV
-            result += new ArrowSerializedRangeVector2(
-              currentKey, vsrs, schema, currentStartVsrIndex,
-              currentStartRowIndex, currentNumDataRows, outputRange)
+            result += new ArrowSerializedRangeVector(
+              currentAsrvMetdata.key.get, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+              currentStartRowIndex, currentNumDataRows, currentAsrvMetdata.outputRange)
           }
 
           // Deserialize the new RV key
           val keyBytes = rvkBrVec.get(rowIndex)
-          currentKey = FlightKryoSerDeser.deserialize(keyBytes).asInstanceOf[RangeVectorKey]
-          currentStartVsrIndex = vsrIndex
-          currentStartRowIndex = rowIndex
-          currentNumDataRows = 0 // Reset data row count
+          val md = FlightKryoSerDeser.deserialize(keyBytes).asInstanceOf[RvMetadata]
+          if (md.srv.isDefined) {
+            currentAsrvMetdata = null
+            result += md.srv.get
+          } else if (md.key.isDefined) {
+            currentAsrvMetdata = md
+            currentStartVsrIndex = vsrIndex
+            currentStartRowIndex = rowIndex
+            currentNumDataRows = 0 // Reset data row count
+          } else {
+            throw new IllegalStateException(s"Invalid RV metadata in VSR at index $vsrIndex, row $rowIndex")
+          }
         } else {
           // Data row (rvkVec is null)
           currentNumDataRows += 1
@@ -188,10 +229,10 @@ object ArrowSerializedRangeVectorOps {
     }
 
     // Don't forget the last RV
-    if (currentKey != null) {
-      result += new ArrowSerializedRangeVector2(
-        currentKey, vsrs, schema, currentStartVsrIndex,
-        currentStartRowIndex, currentNumDataRows, outputRange)
+    if (currentAsrvMetdata != null) {
+      result += new ArrowSerializedRangeVector(
+        currentAsrvMetdata.key.get, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+        currentStartRowIndex, currentNumDataRows, currentAsrvMetdata.outputRange)
     }
 
     result

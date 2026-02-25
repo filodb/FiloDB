@@ -25,8 +25,8 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{ArrowSerializedRangeVector, ArrowSerializedRangeVector2, FlightAllocator, QueryConfig,
-  QueryContext, QueryLimitException, QuerySession, QueryStats, RangeVector, RvRange, SerializedRangeVector}
+import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConfig, QueryContext,
+  QueryLimitException, QuerySession, QueryStats, RangeVector, SerializableRangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
@@ -116,16 +116,16 @@ trait FlightQueryExecutor extends StrictLogging {
                                                 this.getClass.getName, Some(f))
                 } // convert to QueryTimeoutException for circuit breaker handling
                 sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
-                                          querySession.queryStats, None, Some(f))
+                                          querySession.queryStats, Some(f))
               case qte: QueryTimeoutException =>
                 throw qte // rethrow so circuit breaker can handle
               case e =>
                 sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
-                                          querySession.queryStats, None, Some(e))
+                                          querySession.queryStats, Some(e))
           }
         circuitBreaker.protect(execTask).onErrorRecover { case t =>
           // typically a logged QueryTimeout will be thrown here; all other errors are already handled above
-          sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, None, Some(t))
+          sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(t))
         }.guarantee(Task.eval {
             SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
             val timeTaken = System.nanoTime() - startTime
@@ -196,10 +196,9 @@ trait FlightQueryExecutor extends StrictLogging {
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
             // rethrow so circuit breaker can handle
             if (qe.t.isInstanceOf[QueryTimeoutException]) throw qe.t
-            sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, None, Some(qe.t))
+            sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
           }
         case res: QueryResult =>
-          var outputRange: Option[RvRange] = None
           Task.eval {
             logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
@@ -224,12 +223,13 @@ trait FlightQueryExecutor extends StrictLogging {
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               listener.start(state.flightVsr)
               val rb = SerializedRangeVector.newBuilder()
-              if (res.result.nonEmpty && res.result.forall(_.isInstanceOf[ArrowSerializedRangeVector2])) {
+              if (res.result.forall(rv => rv.isInstanceOf[ArrowSerializedRangeVector] ||
+                                            (rv.isInstanceOf[SerializableRangeVector] &&
+                                            rv.asInstanceOf[SerializableRangeVector].hasFormulatedRows))) {
                 logger.debug(s"Applying direct VSR streaming optimization for queryPlanId=${execPlan.planId} " +
                   s"since all RVs in result are ArrowSerializedRangeVector2")
-                outputRange = res.result.head.outputRange
                 // need to convert to set to avoid duplicates since multiple RVs can point to the same VSR
-                val resultVsrs = res.result.iterator.flatMap(_.asInstanceOf[ArrowSerializedRangeVector2].vsrs).toSet
+                val resultVsrs = res.result.iterator.flatMap(_.asInstanceOf[ArrowSerializedRangeVector].vsrs).toSet
                 Observable.fromIterable(resultVsrs).map { vsr =>
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
@@ -239,21 +239,17 @@ trait FlightQueryExecutor extends StrictLogging {
                   logger.debug(s"Putting next arrow vsr into flight response for queryPlanId=${execPlan.planId} ")
                   listener.putNext()
                 }.completedL
-              } else if (res.result.exists(_.isInstanceOf[ArrowSerializedRangeVector])) {
-                throw new IllegalStateException("Unexpected ArrowSerializedRangeVector in query result," +
-                  "should have been handled by direct VSR streaming optimization since all RVs are " +
-                  "not ArrowSerializedRangeVector2")
               } else {
                 val recSchema = res.resultSchema.toRecordSchema
                 val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
                 Observable.fromIterable(res.result).mapEval { rv =>
-                  state.flightVsr.getFieldVectors.forEach(_.reset()) // reset vectors before each RV is loaded
+                  state.flightVsr.getFieldVectors.forEach(_.setValueCount(0)) // reset vectors before each RV is loaded
+                  state.flightVsr.setRowCount(0)
                   rv match {
                     case _: ArrowSerializedRangeVector =>
                       throw new IllegalStateException("Unexpected ArrowSerializedRangeVector in query result," +
                         "should have been handled by direct VSR streaming optimization")
                     case rv: RangeVector =>
-                      outputRange = rv.outputRange
                       Task.eval {
                         // This lambda triggers intensive iterators and calculations and should be done on query sched
                         FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
@@ -308,7 +304,7 @@ trait FlightQueryExecutor extends StrictLogging {
             }.map { _ =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               sendRespFooterAndComplete(listener, flightAllocator, execPlan,
-                                        querySpan, res.queryStats, outputRange, None)
+                                        querySpan, res.queryStats, None)
             }
           }
       }
@@ -319,7 +315,6 @@ trait FlightQueryExecutor extends StrictLogging {
                                   execPlan: ExecPlan,
                                   queryExecuteSpan: Span,
                                   s: QueryStats,
-                                  outputRange: Option[RvRange],
                                   t: Option[Throwable]): Unit = {
       t.foreach { e =>
         logQueryErrors(e, execPlan)
@@ -330,7 +325,7 @@ trait FlightQueryExecutor extends StrictLogging {
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
-      val respFooter = RespFooter(s, outputRange, t)
+      val respFooter = RespFooter(s, t)
       // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
       // and hence not closed here
       listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))

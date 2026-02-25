@@ -16,9 +16,6 @@ import filodb.coordinator.client.KryoInit
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationState
 import filodb.core.query._
 
-case class RespHeader(resultSchema: ResultSchema)
-case class RespFooter(queryStats: QueryStats, outputRange: Option[RvRange], throwable: Option[Throwable])
-
 object FlightKryoSerDeser {
 
   private val minBufSize = 16000
