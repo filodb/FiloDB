@@ -2041,9 +2041,22 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
     val mpp = new MultiPartitionPlanner(dummyPartitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan("""foo{job=~"abc|def"} + foo{job="ghi"}""", TimeStepParams(1000, 100, 2000))
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="abc"} + foo{job="def"} + foo{job="ghi"}""", TimeStepParams(1000, 100, 2000))
     val expected = Set(Map("job" -> "abc"), Map("job" -> "def"), Map("job" -> "ghi"))
     mpp.getRoutingKeys(lp) shouldEqual expected
+  }
+
+  it ("should throw IllegalArgumentException for regex filters on shard keys") {
+    val dummyPartitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val mpp = new MultiPartitionPlanner(dummyPartitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job=~"abc|def"}""", TimeStepParams(1000, 100, 2000))
+    // getRoutingKeys should throw an exception for regex filters on shard keys
+    an[IllegalArgumentException] should be thrownBy {
+      mpp.getRoutingKeys(lp)
+    }
   }
 
   describe("supportRemoteRawExport") {
