@@ -1,7 +1,6 @@
 package filodb.labelchurnfinder
 
 import com.typesafe.config.ConfigFactory
-
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.OffHeapMemory
 import filodb.core.metadata.{Dataset, Schemas}
@@ -11,18 +10,20 @@ import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.ZeroCopyUTF8String._
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.mockito.MockitoSugar
+import org.scalatest.{BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import java.io.File
 import java.time.Instant
-
 import LabelChurnFinder._
+import org.mockito.ArgumentMatchers.any
 
-class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
+class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures with MockitoSugar {
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
@@ -190,6 +191,47 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2)
     )
+    spark.stop()
+  }
+
+  it ("should call publishLabelStats when actionOnLabelStats is invoked") {
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    val spark = SparkSession.builder()
+      .appName("LabelChurnFinder")
+      .config(sparkConf)
+      .getOrCreate()
+
+    val mockProducer = mock[LabelStatsKafkaProducer]
+    val lcf = new LabelChurnFinder(settings)
+
+    // Create valid HLL sketch bytes for the test
+    import org.apache.datasketches.hll.{HllSketch, TgtHllType}
+    val sketch1h = new HllSketch(12, TgtHllType.HLL_4)
+    sketch1h.update("value1")
+    val sketch3d = new HllSketch(12, TgtHllType.HLL_4)
+    sketch3d.update("value1")
+    sketch3d.update("value2")
+    val sketch7d = new HllSketch(12, TgtHllType.HLL_4)
+    sketch7d.update("value1")
+    sketch7d.update("value2")
+    sketch7d.update("value3")
+
+    // Create a test DataFrame with valid HLL sketches
+    import spark.implicits._
+    val testDf = Seq(
+      ("ws1", "All", "pod", 100L, 200L, 300L,
+        sketch1h.toCompactByteArray, sketch3d.toCompactByteArray, sketch7d.toCompactByteArray)
+    ).toDF(WsCol, NsGroupCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
+      LabelSketch1hCol, LabelSketch3dCol, LabelSketch7dCol)
+
+    // Call actionOnLabelStats
+    lcf.actionOnLabelStats(testDf, mockProducer)
+
+    // Verify publishLabelStats was called once
+    verify(mockProducer, times(1)).publishLabelStats(any[DataFrame])
+
     spark.stop()
   }
 
