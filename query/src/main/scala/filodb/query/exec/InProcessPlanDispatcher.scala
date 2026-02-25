@@ -24,6 +24,8 @@ import filodb.query.Query.qLogger
   */
 case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
+  import InProcessPlanDispatcher._
+
   val clusterName = InetAddress.getLocalHost().getHostName()
   lazy val partition = extractPartition(clusterName)
 
@@ -67,9 +69,9 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
   }
 
   private def extractPartition(hostname: String): String = {
-    val pattern = """.*?(tsdb\d+).*""".r
+
     hostname match {
-      case pattern(partition) => partition
+      case partitionPattern(partition) => partition
       case _ => hostname
     }
   }
@@ -79,6 +81,10 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
   override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                  source: ChunkSource)
                                 (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
+}
+
+object InProcessPlanDispatcher {
+  private val partitionPattern = """.*?(tsdb\d+).*""".r
 }
 
 /**

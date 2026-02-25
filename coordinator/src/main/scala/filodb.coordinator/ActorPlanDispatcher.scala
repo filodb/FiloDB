@@ -26,6 +26,8 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
  */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
+  import ActorPlanDispatcher._
+
   lazy val (partition, pod) = extractPartitionAndPod(target.path.toString)
 
   def getCaseClassOrProtoExecPlan(execPlan: filodb.query.exec.ExecPlan): QueryCommand = {
@@ -125,7 +127,6 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
   }
 
   private[coordinator] def extractHostname(actorPath: String): String = {
-    val hostnamePattern = """.*@([^.:]+).*""".r
     actorPath match {
       case hostnamePattern(hostname) => hostname
       case _ => actorPath
@@ -134,9 +135,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
 
   private[coordinator] def extractPartitionAndPod(actorPath: String): (String, String) = {
     val hostname = extractHostname(actorPath)
-    val pattern = """.*?(tsdb\d+)-(\d+).*""".r
     hostname match {
-      case pattern(partition, podNum) => (partition, podNum)
+      case statefulSetPattern(partition, podNum) => (partition, podNum)
       case _ =>
         qLogger.warn(s"Unexpected hostname format in actor path, expected StatefulSet: $hostname")
         (hostname, "unknown")
@@ -144,4 +144,9 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
   }
 
   override def isLocalCall: Boolean = false
+}
+
+object ActorPlanDispatcher {
+  private val hostnamePattern = """.*@([^.:]+).*""".r
+  private val statefulSetPattern = """.*?(tsdb\d+)-(\d+).*""".r
 }

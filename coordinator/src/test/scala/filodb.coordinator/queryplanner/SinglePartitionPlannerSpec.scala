@@ -225,7 +225,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   it("should extract partition and pod from StatefulSet actor path") {
     val dispatcher = ActorPlanDispatcher(node, "test-cluster")
 
-    val actorPath = "akka.tcp://filo-standalone@filodb-raw-tsdb21-62.filodb-raw-tsdb21-srv.aci-telemetry-prod-1.svc.kube.us-central-1p.k8s.cloud.apple.com:30001/user/coordinator"
+    val actorPath = "akka.tcp://test-system@some-tsdb21-62.test.local:2552/user/coordinator"
     val (partition, pod) = dispatcher.extractPartitionAndPod(actorPath)
 
     partition shouldEqual "tsdb21"
