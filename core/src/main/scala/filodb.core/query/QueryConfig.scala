@@ -38,14 +38,15 @@ object QueryConfig {
     val tenantsWithDisabledRemoteStitch : Set[String] =
       queryConfig.getStringList("routing.disabled-remote-stitch-tenants").asScala.toSet
     val stitchDisabledTenantColumn = queryConfig.getString("routing.disabled-remote-stitch-tenant-column-name")
-
+    val forceMetadataRegexFallback = queryConfig.as[Option[Boolean]]("routing.force-metadata-regex-fallback").getOrElse(false)
     val rc = RoutingConfig(
         supportRemoteRawExport,
         maxRemoteRawExportTimeRange,
         enableApproximatelyEqualCheckInStitch,
         periodOfUncertaintyMs,
         tenantsWithDisabledRemoteStitch,
-        stitchDisabledTenantColumn
+        stitchDisabledTenantColumn,
+        forceMetadataRegexFallback
     )
 
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
@@ -94,7 +95,8 @@ case class RoutingConfig(
                           enableApproximatelyEqualCheckInStitch: Boolean = true,
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis,
                           tenantsWithDisabledRemoteStitch: Set[String]   = Set.empty,
-                          stitchDisabledTenantColumn: String             = ""
+                          stitchDisabledTenantColumn: String             = "",
+                          forceMetadataRegexFallback: Boolean            = false
 
                         )
 

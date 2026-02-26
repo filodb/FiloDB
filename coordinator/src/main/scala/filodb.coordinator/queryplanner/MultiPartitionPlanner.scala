@@ -1101,18 +1101,15 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
     val nonMetricCols = dataset.options.nonMetricShardColumns
 
-    def hasAllNonMetricEquals(group: Seq[ColumnFilter]): Boolean =
-      nonMetricCols.forall(col => group.exists {
-        case ColumnFilter(c, Equals(_: String)) if c == col => true
-        case _                                              => false
-      })
-
     def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
-      nonMetricCols.map(col =>
-        group.collectFirst { case ColumnFilter(c, Equals(v: String)) if c == col => c -> v }.get
+      nonMetricCols.flatMap(col =>
+        group.collectFirst {
+          case ColumnFilter(c, Equals(v: String)) if c == col => c -> v
+          case ColumnFilter(c, filodb.core.query.Filter.EqualsRegex(v: String)) if c == col => c -> v
+        }
       ).toMap
 
-    val shouldFallback = shardKeyFilterGroups.isEmpty || shardKeyFilterGroups.exists(g => !hasAllNonMetricEquals(g))
+    val shouldFallback = queryConfig.routingConfig.forceMetadataRegexFallback || shardKeyFilterGroups.isEmpty
 
     lp match {
       case lc: LabelCardinality =>
