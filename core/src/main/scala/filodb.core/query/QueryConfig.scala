@@ -38,7 +38,8 @@ object QueryConfig {
     val tenantsWithDisabledRemoteStitch : Set[String] =
       queryConfig.getStringList("routing.disabled-remote-stitch-tenants").asScala.toSet
     val stitchDisabledTenantColumn = queryConfig.getString("routing.disabled-remote-stitch-tenant-column-name")
-    val forceMetadataRegexFallback = queryConfig.as[Option[Boolean]]("routing.force-metadata-regex-fallback").getOrElse(false)
+    val forceMetadataRegexFallback = queryConfig.as[Option[Boolean]]("routing.force-metadata-regex-fallback").
+      getOrElse(false)
     val rc = RoutingConfig(
         supportRemoteRawExport,
         maxRemoteRawExportTimeRange,

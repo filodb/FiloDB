@@ -1178,4 +1178,5 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient, queryConfig)
   }
 }
+
 //scalastyle:on file.size.limit
