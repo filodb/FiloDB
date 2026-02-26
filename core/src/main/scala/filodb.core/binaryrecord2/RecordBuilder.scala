@@ -59,9 +59,9 @@ class RecordBuilder(memFactory: MemFactory,
   def currentTimeMillis: Long = System.currentTimeMillis()
 
   // Reset last container and all pointers
-  def reset(): Unit = if (containers.nonEmpty) {
+  def reset(skipTime: Boolean = false): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
-    containers.last.updateTimestamp(currentTimeMillis)
+    if (!skipTime) containers.last.updateTimestamp(currentTimeMillis)
     fieldNo = -1
     mapOffset = -1L
     recHash = -1

@@ -979,7 +979,13 @@ object ProtoConverters {
         case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
-        case asrv: ArrowSerializedRangeVector  => ??? // FIXME need to implement before productionizing
+        case asrv2: ArrowSerializedRangeVector  =>
+          // FIXME This is behind feature flag and should be activated in prod since performance will be bad, but we
+          //  need this for testing and prototyping. We will add a more efficient way to convert Arrow vectors to proto
+          //  in the future.
+          val srvBuilder = SerializedRangeVector.newBuilder()
+          val srv = SerializedRangeVector(asrv2, srvBuilder, asrv2.schema, "", QueryStats())
+          builder.setSerializedRangeVector(srv.toProto).build()
       }
     }
   }
