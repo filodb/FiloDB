@@ -528,10 +528,11 @@ object SerializedRangeVector extends StrictLogging {
           rows => while (rows.hasNext) {
               val nextRow = rows.next()
               // Don't encode empty / NaN data over the wire
-              if (schema.columns(1).colType == StringColumn && nextRow.isInstanceOf[NaNRowReader] ||
+              if (schema.columns.size > 1 &&
+                (schema.columns(1).colType == StringColumn && nextRow.isInstanceOf[NaNRowReader] ||
                 canRemoveEmptyRows(rv.outputRange, schema) &&
                   (schema.columns(1).colType == DoubleColumn && java.lang.Double.isNaN(nextRow.getDouble(1)) ||
-                   schema.columns(1).colType == HistogramColumn && nextRow.getHistogram(1).isEmpty)) {
+                   schema.columns(1).colType == HistogramColumn && nextRow.getHistogram(1).isEmpty))) {
                 // skip this row
               } else {
                 numRows += 1
