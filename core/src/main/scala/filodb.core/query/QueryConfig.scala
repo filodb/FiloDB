@@ -38,16 +38,17 @@ object QueryConfig {
     val tenantsWithDisabledRemoteStitch : Set[String] =
       queryConfig.getStringList("routing.disabled-remote-stitch-tenants").asScala.toSet
     val stitchDisabledTenantColumn = queryConfig.getString("routing.disabled-remote-stitch-tenant-column-name")
-    val forceMetadataRegexFallback = queryConfig.as[Option[Boolean]]("routing.force-metadata-regex-fallback").
-      getOrElse(false)
+    val useLegacyMetadataRouting = queryConfig.as[Option[Boolean]](
+      "routing.use-legacy-metadata-routing").getOrElse(false)
+
     val rc = RoutingConfig(
-        supportRemoteRawExport,
-        maxRemoteRawExportTimeRange,
-        enableApproximatelyEqualCheckInStitch,
-        periodOfUncertaintyMs,
-        tenantsWithDisabledRemoteStitch,
-        stitchDisabledTenantColumn,
-        forceMetadataRegexFallback
+      supportRemoteRawExport,
+      maxRemoteRawExportTimeRange,
+      enableApproximatelyEqualCheckInStitch,
+      periodOfUncertaintyMs,
+      tenantsWithDisabledRemoteStitch,
+      stitchDisabledTenantColumn,
+      useLegacyMetadataRouting
     )
 
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
@@ -97,8 +98,8 @@ case class RoutingConfig(
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis,
                           tenantsWithDisabledRemoteStitch: Set[String]   = Set.empty,
                           stitchDisabledTenantColumn: String             = "",
-                          forceMetadataRegexFallback: Boolean            = false
-
+                          forceMetadataRegexFallback: Boolean            = false,
+                          useLegacyMetadataRouting: Boolean              = false
                         )
 
 case class CachingConfig(

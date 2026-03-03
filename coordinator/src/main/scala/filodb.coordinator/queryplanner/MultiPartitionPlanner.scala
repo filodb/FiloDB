@@ -7,6 +7,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 
+import akka.util.Helpers.Requiring
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
@@ -1102,14 +1103,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val nonMetricCols = dataset.options.nonMetricShardColumns
 
     def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
-      nonMetricCols.flatMap(col =>
+      nonMetricCols.flatMap(shardKeyCol =>
         group.collectFirst {
-          case ColumnFilter(c, Equals(v: String)) if c == col => c -> v
-          case ColumnFilter(c, filodb.core.query.Filter.EqualsRegex(v: String)) if c == col => c -> v
+          case ColumnFilter(c, filter) if c == shardKeyCol => c -> filter.value.toString
         }
       ).toMap
 
-    val shouldFallback = queryConfig.routingConfig.forceMetadataRegexFallback || shardKeyFilterGroups.isEmpty
+    val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || shardKeyFilterGroups.isEmpty
 
     lp match {
       case lc: LabelCardinality =>
