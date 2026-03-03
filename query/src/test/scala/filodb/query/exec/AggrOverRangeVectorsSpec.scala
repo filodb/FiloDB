@@ -855,7 +855,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   // StringColumn for the T-Digest blob, and the NaN row filtering in SerializedRangeVector.apply
   // doesn't handle StringColumn — so NaNRowReader reaches RecordBuilder which calls filoUTF8String,
   // and NaNRowReader.getAny returns Double.NaN which doesn't match any case in the pattern match.
-  it ("should not fail when serializing quantile reduction result containing NaN rows") {
+  it("should not fail when serializing quantile reduction result containing NaN rows") {
     // Produce a quantile map-reduce result (reduction schema: [TimestampColumn, StringColumn for tdigest])
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
@@ -872,7 +872,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Now build a RangeVector that interleaves real reduction rows with NaNRowReader rows,
     // simulating what happens when a shard has gaps in data.
-    val realRows = reducedResult(0).rows().toList
+    // The aggregation pipeline reuses the same QuantileAggTransientRow instance across next() calls,
+    // so we must copy each row into a fresh immutable snapshot before collecting.
+    val realRows = reducedResult(0).rows().map { r =>
+      val copy = new QuantileAggTransientRow()
+      copy.copyFrom(r)
+      copy
+    }.toList
     val mixedRows: Seq[RowReader] = Seq(
       new NaNRowReader(0L),  // gap before data
       realRows(0),           // timestamp 1
