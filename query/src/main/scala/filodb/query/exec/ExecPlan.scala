@@ -2,10 +2,12 @@ package filodb.query.exec
 
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -18,6 +20,7 @@ import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
+import filodb.core.query.QueryUtils
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
@@ -26,9 +29,12 @@ import filodb.query.Query.qLogger
 // scalastyle:off file.size.limit
 
 /**
- * The observable of vectors and the schema that is returned by ExecPlan doExecute
+ * The observable of vectors and the schema that is returned by ExecPlan doExecute.
+ * samples-scanned counters are used to count intermediate scans at e.g. joins/aggregations/etc.
  */
-final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSchema])
+final case class ExecResult(rvs: Observable[RangeVector],
+                            schema: Task[ResultSchema],
+                            samplesScannedCounters: Task[List[AtomicLong]] = Task.now(Nil))
 
 /**
   * This is the Execution Plan tree node interface.
@@ -182,14 +188,25 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Observable[StreamQueryResponse] = {
-      val task = res.schema.map { resSchema =>
+      val task = Task.parZip2(res.schema, res.samplesScannedCounters)
+            .map { case (resSchema, samplesScannedCounters) =>
+        val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+        val intermediateSamplesEnabled = samplesScannedConfig.intermediateSamplesEnabled
         // avoid any work when plan has waited in executor queue for long
         queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
         FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
           Map("plan" -> getClass.getSimpleName))
           .record(Math.max(0, System.currentTimeMillis - startExecute))
         FiloSchedulers.assertThreadName(QuerySchedName)
-        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+        // Track samples returned from the ExecPlan's doExecute.
+        val resRvs = if (intermediateSamplesEnabled) {
+          res.rvs.map { rv =>
+            QueryUtils.trackSamplesScanned(
+              rv, this.getClass, samplesScannedCounters, resSchema, samplesScannedConfig)
+            rv
+          }
+        } else res.rvs
+        val finalRes = allTransformers.foldLeft((resRvs, resSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
             transf.funcParams.map(_.getResult(querySession, source))
           val resultSchema : ResultSchema = acc._2
@@ -198,11 +215,29 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
-            val rangeVector : Observable[RangeVector] = transf.apply(
-              acc._1, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
-            )
+            // Track child samples input to the transformer as samples.
+            val inputRvs = if (intermediateSamplesEnabled) {
+              acc._1.map { rv =>
+                QueryUtils.trackChildSamplesScanned(
+                  rv, transf.getClass, samplesScannedCounters, acc._2, samplesScannedConfig)
+                rv
+              }
+            } else acc._1
+            val transformedRvs: Observable[RangeVector] = {
+              val transformed = transf.apply(inputRvs, querySession,
+                queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
+              )
+              // Track samples output from the transformer.
+              if (intermediateSamplesEnabled) {
+                transformed.map { rv =>
+                  QueryUtils.trackSamplesScanned(
+                    rv, transf.getClass, samplesScannedCounters, resultSchema, samplesScannedConfig)
+                  rv
+                }
+              } else transformed
+            }
             val schema = transf.schema(resultSchema)
-            (rangeVector, schema)
+            (transformedRvs, schema)
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
@@ -226,14 +261,16 @@ trait ExecPlan extends QueryCommand {
               Map("plan" -> getClass.getSimpleName)
             )
             .record(Math.max(0, System.currentTimeMillis - startExecute))
-          makeResult(finalRes._1, recSchema, finalRes._2)
+          makeResult(finalRes._1, recSchema, finalRes._2, samplesScannedCounters)
         }
       }
       Observable.fromTask(task).flatten
     }
 
-    def makeResult(rv: Observable[RangeVector], recordSchema: RecordSchema,
-                   resultSchema: ResultSchema): Observable[StreamQueryResponse] = {
+    def makeResult(rv: Observable[RangeVector],
+                   recordSchema: RecordSchema,
+                   resultSchema: ResultSchema,
+                   samplesScannedCounters: List[AtomicLong]): Observable[StreamQueryResponse] = {
       @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       @volatile var resultSize = 0L
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
@@ -246,7 +283,18 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector if querySession.preventRangeVectorSerialization  => rv
             case rv: RangeVector =>
               val execPlanString = queryWithPlanName(queryContext)
-              SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
+              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
+              // We count scanned samples here for two reasons:
+              //   1) Serialization is not free.
+              //   2) Some RangeVectors may return None from both numRows() and outputRange().
+              //      This means their samples are significantly undercounted until this
+              //      SerializedRangeVector is passed to trackSamplesScanend; SRVs implement numRows.
+              if (querySession.queryConfig.samplesScannedConfig.intermediateSamplesEnabled) {
+                QueryUtils.trackSamplesScanned(
+                  srv, this.getClass, samplesScannedCounters, resultSchema,
+                  querySession.queryConfig.samplesScannedConfig)
+              }
+              srv
           }
           .map {
             case srv: SerializedRangeVector =>
@@ -334,7 +382,6 @@ trait ExecPlan extends QueryCommand {
     }
   }
 
-
   /**
   * Facade for the execution orchestration of the plan sub-tree
   * starting from this node.
@@ -392,7 +439,10 @@ trait ExecPlan extends QueryCommand {
     }
 
     // Step 2: Append transformer execution to step1 result, materialize the final result
-    def step2(res: ExecResult): Task[QueryResponse] = res.schema.flatMap { resSchema =>
+    def step2(res: ExecResult): Task[QueryResponse] =
+            Task.parZip2(res.schema, res.samplesScannedCounters).flatMap { case (resSchema, samplesScannedCounters) =>
+      val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+      val intermediateSamplesEnabled = samplesScannedConfig.intermediateSamplesEnabled
       // avoid any work when plan has waited in executor queue for long
       queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
       FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
@@ -401,7 +451,15 @@ trait ExecPlan extends QueryCommand {
       span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       val resultTask = {
-        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+        // Track samples returned from the ExecPlan's doExecute.
+        val resRvs = if (intermediateSamplesEnabled) {
+          res.rvs.map { rv =>
+            QueryUtils.trackSamplesScanned(
+              rv, this.getClass, samplesScannedCounters, resSchema, samplesScannedConfig)
+            rv
+          }
+        } else res.rvs
+        val finalRes = allTransformers.foldLeft((resRvs, resSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
                 transf.funcParams.map(_.getResult(querySession, source))
           val resultSchema : ResultSchema = acc._2
@@ -410,11 +468,29 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
-            val rangeVector : Observable[RangeVector] = transf.apply(
-              acc._1, querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
-            )
+            // Track child samples input to the transformer as samples.
+            val inputRvs = if (intermediateSamplesEnabled) {
+              acc._1.map { rv =>
+                QueryUtils.trackChildSamplesScanned(
+                  rv, transf.getClass, samplesScannedCounters, acc._2, samplesScannedConfig)
+                rv
+              }
+            } else acc._1
+            val transformedRvs : Observable[RangeVector] = {
+              val transformed = transf.apply(inputRvs, querySession,
+                  queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
+                )
+              // Track samples output from the transformer.
+              if (intermediateSamplesEnabled) {
+                transformed.map { rv =>
+                  QueryUtils.trackSamplesScanned(
+                    rv, transf.getClass, samplesScannedCounters, resultSchema, samplesScannedConfig)
+                  rv
+                }
+              } else transformed
+            }
             val schema = transf.schema(resultSchema)
-            (rangeVector, schema)
+            (transformedRvs, schema)
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
@@ -437,7 +513,7 @@ trait ExecPlan extends QueryCommand {
               Map("plan" -> getClass.getSimpleName)
             )
             .record(Math.max(0, System.currentTimeMillis - startExecute))
-          makeResult(finalRes._1, recSchema, finalRes._2)
+          makeResult(finalRes._1, recSchema, finalRes._2, samplesScannedCounters)
         }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
@@ -446,7 +522,10 @@ trait ExecPlan extends QueryCommand {
     }
 
     def makeResult(
-      rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
+      rv : Observable[RangeVector],
+      recordSchema: RecordSchema,
+      resultSchema: ResultSchema,
+      samplesScannedCounters: List[AtomicLong]
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         @volatile var resultSize = 0L
@@ -459,6 +538,16 @@ trait ExecPlan extends QueryCommand {
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
+              // We count scanned samples here for two reasons:
+              //   1) Serialization is not free.
+              //   2) Some RangeVectors may return None from both numRows() and outputRange().
+              //      This means their samples are significantly undercounted until this
+              //      SerializedRangeVector is passed to trackSamplesScanend; SRVs implement numRows.
+              if (querySession.queryConfig.samplesScannedConfig.intermediateSamplesEnabled) {
+                QueryUtils.trackSamplesScanned(
+                  srv, this.getClass, samplesScannedCounters, resultSchema,
+                  querySession.queryConfig.samplesScannedConfig)
+              }
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -670,7 +759,7 @@ final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
   }
 }
 
-abstract class NonLeafExecPlan extends ExecPlan {
+abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
 
   /**
     * For now we do not support cross-dataset queries
@@ -794,16 +883,31 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
       case (QueryResult(_, schema, _, _, _, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
+
+    // Track all child samples scanned by this non-leaf plan.
+    val intermediateSamplesEnabled = querySession.queryConfig.samplesScannedConfig.intermediateSamplesEnabled
+    val samplesScannedCounters = if (intermediateSamplesEnabled) {
+      processedTasks.flatMap { case (qRes, _) =>
+        val scanCtrs = qRes.queryStats.stat.map { case (key, _) => querySession.queryStats.stat(key).samplesScanned }
+        qRes.result.foreach { rv =>
+          QueryUtils.trackChildSamplesScanned(rv, this.getClass, scanCtrs.toList,
+            qRes.resultSchema, querySession.queryConfig.samplesScannedConfig)
+        }
+        Observable.fromIterable(scanCtrs)
+      }.toListL
+    } else Task.now(Nil)
+
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       val outputRvs = compose(processedTasks, outputSchema, querySession)
         .guaranteeCase { _ =>
           Task.eval(span.mark(s"execute-step1-child-result-composition-end-${this.getClass.getSimpleName}"))
         }
-      ExecResult(outputRvs, outputSchema)
+      ExecResult(outputRvs, outputSchema, samplesScannedCounters)
     }
   }
 
+  // scalastyle:off cyclomatic.complexity
   private def doExecuteStreamingDispatch(source: ChunkSource, querySession: QuerySession, span: Span, parallelism: Int)
                                         (implicit sched: Scheduler) = {
     // Create tasks for all results.
@@ -842,26 +946,86 @@ abstract class NonLeafExecPlan extends ExecPlan {
           (respWithoutErrors, i)
         }
       }
+      .map { case (responseObs, index) =>
+        // Fork each response into a stream according to its class, then build a
+        //   ResultSchema, QueryStats, and List[RangeVector] from the streams.
+        val resultObs = responseObs
+          .groupBy(elt => elt.getClass)
+          .toListL
+          .flatMap { groupedObservables =>
+            var headerObs: Observable[StreamQueryResultHeader] = Observable.empty
+            var resObs: Observable[StreamQueryResult] = Observable.empty
+            var footerObs: Observable[StreamQueryResultFooter] = Observable.empty
+            for (groupObs <- groupedObservables) {
+              groupObs.key match {
+                case c if c == classOf[StreamQueryResultHeader] =>
+                  headerObs = groupObs.asInstanceOf[Observable[StreamQueryResultHeader]]
+                case c if c == classOf[StreamQueryResult] =>
+                  resObs = groupObs.asInstanceOf[Observable[StreamQueryResult]]
+                case c if c == classOf[StreamQueryResultFooter] =>
+                  footerObs = groupObs.asInstanceOf[Observable[StreamQueryResultFooter]]
+                case unk => logger.error("Unrecognized class while marshalling stream: " + unk)
+              }
+            }
 
-    val schemas = childResults.flatMap { obs =>
-      obs._1.find(_.isInstanceOf[StreamQueryResultHeader])
-        .map(_.asInstanceOf[StreamQueryResultHeader].resultSchema)
-        .map(rs => (rs, obs._2))
-    }
+            val schemaTask = headerObs
+              .map(header => header.resultSchema)
+              .firstL
 
-    val rvs = childResults.map { obs =>
-      val rvs = obs._1.flatMap {
-        case s: StreamQueryResult => Observable.fromIterable(s.result)
-        case _ => Observable.empty
+            val rvTask = resObs
+              .flatMap(res => Observable.fromIterable(res.result))
+              .toListL
+
+            val statsTask = footerObs
+              .map(footer => footer.queryStats)
+              .foldLeftL(QueryStats()) { (accStats, nextStats) =>
+                accStats.add(nextStats)
+                accStats
+              }
+
+            Task.parZip3(schemaTask, rvTask, statsTask)
+          }
+        (index, resultObs)
       }
-      (rvs, obs._2)
+      .cache
+
+    val schemas = childResults.flatMap { case (index, resultTask) =>
+      Observable.fromTask(resultTask)
+        .map { case (schema, _, _) =>
+          (schema, index)
+        }
     }
+
+    // Track all child samples scanned by this non-leaf plan.
+    val intermediateSamplesEnabled = querySession.queryConfig.samplesScannedConfig.intermediateSamplesEnabled
+    val samplesScannedCounters = if (intermediateSamplesEnabled) {
+      childResults.flatMap { case (_, resultTask) =>
+        Observable.fromTask(resultTask)
+          .flatMap { case (schema, rvs, queryStats) =>
+            val scanCtrs = queryStats.stat.map { case (key, _) => querySession.queryStats.stat(key).samplesScanned }
+            rvs.foreach { rv =>
+              QueryUtils.trackChildSamplesScanned(rv, this.getClass, scanCtrs.toList,
+                schema, querySession.queryConfig.samplesScannedConfig)
+            }
+            Observable.fromIterable(scanCtrs)
+          }
+      }.toListL
+    } else Task.now(Nil)
+
+    val rvs = childResults.flatMap { case (index, resultTask) =>
+      Observable.fromTask(resultTask)
+        .map { case (_, rvs, _) =>
+          (Observable.fromIterable(rvs), index)
+        }
+    }
+
     // find first non-empty result schema. If all of them are empty, then return empty
     val outputSchema = schemas.findL(!_._1.isEmpty).map(_.map(_._1).getOrElse(ResultSchema.empty))
 
     val results = composeStreaming(rvs, schemas, querySession)
-    ExecResult(results, outputSchema)
+    ExecResult(results, outputSchema, samplesScannedCounters)
   }
+  // scalastyle:on cyclomatic.complexity
 
   /**
    * Reduces the different ResultSchemas coming from each child to a single one.

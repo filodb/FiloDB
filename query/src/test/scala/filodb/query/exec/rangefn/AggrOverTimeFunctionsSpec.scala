@@ -162,7 +162,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), (rowCount) => {}, Long.MaxValue, "query-id")
   }
 
   def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
@@ -176,7 +176,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
+    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicLong(), (rowCount) => {}, Long.MaxValue, "query-id")
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
@@ -1780,7 +1780,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     part.switchBuffers(MMD.cumulativeHistMaxMinBH, encode = true)
 
     val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-                                new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
+                                new AtomicLong, (rowCount) => {}, Long.MaxValue, "query-id")
 
     // Calculate rate using CumulativeHistRateAndMinMaxFunction through full pipeline
     val windowTime = endTS - startTS
@@ -1864,7 +1864,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     part.switchBuffers(MMD.cumulativeHistMaxMinBH, encode = true)
 
     val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-                                new AtomicLong, new AtomicLong, Long.MaxValue, "query-id")
+                                new AtomicLong, (rowCount) => {}, Long.MaxValue, "query-id")
 
     // Calculate rate using CumulativeHistRateAndMinMaxFunction through full pipeline
     val windowTime = endTS - startTS

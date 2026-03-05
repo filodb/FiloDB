@@ -8,6 +8,7 @@ import scala.jdk.CollectionConverters._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.metadata.Column.ColumnType
 
 object QueryConfig {
   val DefaultVectorsLimit = 150
@@ -103,6 +104,70 @@ case class CachingConfig(
                         singleClusterPlannerCachingSize: Int = 2048
                         )
 
+/**
+ * Defines how counts of "samples scanned" are computed.
+ *
+ * A "scanned sample" is a unit that should correlate well with partition saturation.
+ *   In other words: if any partition is saturated with a samples-scanned rate R, all other partitions--
+ *   regardless of their distinct ingestion/query loads-- should also become saturated at
+ *   that same samples-scanned rate.
+ *
+ * Scanned samples are counted for various dimensions of a query: rows, series, partition-key bytes, etc.
+ *   These parameters should be tuned so partition samples-scanned rates correlate well with partition saturation.
+ *
+ * All default values maintain legacy behavior.
+ *
+ * *** NOTE!!! *******************************************************************************
+ * All Class values are serialized as their .getName() strings.
+ * Deserialization will fail if class names and packages are not consistent across partitions.
+ * *******************************************************************************************
+ *
+ * @param intermediateSamplesEnabled toggle whether-or-not anything above leaf scans are counted.
+ * @param valueColumnToRowMultiplier maps value column types to multipliers applied to samples added per row.
+ * @param defaultSamplesPerRow the default count of samples added per row; overridden by classToSamplesPerRow.
+ * @param defaultSamplesPerSeries the count of samples added per time-series; overridden by classToSamplesPerSeries.
+ * @param defaultSamplesPerPartKeyByte the count of samples added per partition key byte;
+ *                                     overridden by classToSamplesPerPartKeyByte.
+ * @param classToSamplesPerRow maps classes to the count of samples added per row; overrides defaultSamplesPerRow.
+ * @param classToSamplesPerSeries maps classes to the count of samples added per time-series;
+ *                                overrides defaultSamplesPerSeries.
+ * @param classToSamplesPerPartKeyByte maps classes to the count of samples added per partition-key byte;
+ *                                     overrides defaultSamplesPerRow.
+ * @param defaultSamplesPerChildRow the default count of samples added per child row;
+ *                                  overridden by classToChildSamplesPerRow.
+ * @param defaultSamplesPerChildSeries the default count of samples added per child time-series;
+ *                                     overridden by classToChildSamplesPerSeries.
+ * @param defaultSamplesPerChildPartKeyByte the default count of samples added per child partition key byte;
+ *                                          overridden by classToChildSamplesPerPartyKeyByte.
+ * @param classToSamplesPerChildRow maps classes to the count of samples added per child row;
+ *                                  overrides defaultChildSamplesPerRow.
+ * @param classToSamplesPerChildSeries maps classes to the count of samples added per child time-series;
+ *                                     overrides defaultChildSamplesPerSeries.
+ * @param classToSamplesPerChildPartKeyByte maps classes to the count of samples added per child partition-key byte;
+ *                                          overrides defaultChildSamplesPerPartKeyByte.
+ */
+case class SamplesScannedConfig(
+                                 intermediateSamplesEnabled: Boolean = false,
+
+                                 valueColumnToRowMultiplier: Map[ColumnType, Double] = Map(
+                                   ColumnType.HistogramColumn -> 20
+                                 ),
+
+                                 defaultSamplesPerRow: Double = 1.0,
+                                 defaultSamplesPerSeries: Double = 0.0,
+                                 defaultSamplesPerPartKeyByte: Double = 0.0,
+                                 classToSamplesPerRow: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerSeries: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerPartKeyByte: Map[Class[_], Double] = Map(),
+
+                                 defaultSamplesPerChildRow: Double = 0.0,
+                                 defaultSamplesPerChildSeries: Double = 0.0,
+                                 defaultSamplesPerChildPartKeyByte: Double = 0.0,
+                                 classToSamplesPerChildRow: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerChildSeries: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerChildPartKeyByte: Map[Class[_], Double] = Map()
+                               )
+
 case class QueryConfig(askTimeout: FiniteDuration,
                        staleSampleAfterMs: Long,
                        minStepMs: Long,
@@ -123,4 +188,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
                        routingConfig: RoutingConfig               = RoutingConfig(),
                        cachingConfig: CachingConfig               = CachingConfig(),
-                       enableLocalDispatch: Boolean = false)
+                       enableLocalDispatch: Boolean = false,
+                       samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig())

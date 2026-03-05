@@ -353,13 +353,17 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
   }
 }
 
-// First column of columnIDs should be the timestamp column
+/**
+ * @param columnIDs First column should be the timestamp column.
+ * @param samplesScannedRowCountConsumer accepts a total row count; tracks the samples scanned
+ *                                       (see {@link filodb.core.query.SamplesScannedConfig} for details).
+ */
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
                                     dataBytesScannedCtr: AtomicLong,
-                                    samplesScannedCtr: AtomicLong,
+                                    samplesScannedRowCountConsumer: Long => Unit,
                                     maxBytesScanned: Long,
                                     queryId: String) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
@@ -369,14 +373,16 @@ final case class RawDataRangeVector(key: RangeVectorKey,
     chunkMethod,
     columnIDs,
     new CountingChunkInfoIterator(
-      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId)
+      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr,
+      samplesScannedRowCountConsumer, maxBytesScanned, queryId)
   )
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
     new CountingChunkInfoIterator(
       partition.infos(
-        windowStart, windowEnd), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId
+        windowStart, windowEnd), columnIDs, dataBytesScannedCtr,
+        samplesScannedRowCountConsumer, maxBytesScanned, queryId
     )
   }
 

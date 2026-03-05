@@ -1,8 +1,11 @@
 package filodb.core.query
 
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
+import java.util.concurrent.atomic.AtomicLong
+
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 
 /**
  * Storage for utility functions.
@@ -106,5 +109,120 @@ object QueryUtils {
       // Zip the ordered keys with the ordered values.
       combos.map(keys.zip(_).toMap)
     })
+  }
+
+  /**
+   * Estimates the count of rows in a {@link RangeVector}.
+   * This may be wildly inaccurate; the implementation as of this writing relies
+   *   on either numRows() or outputRange()-- both of which typically do not have values.
+   */
+  private def estimateNumRows(rv: RangeVector): Long = {
+    rv.numRows
+      .map(_.asInstanceOf[Long])
+      .orElse(
+        rv.outputRange
+          .filter(range => range.stepMs > 0)
+          .map(range => (range.endMs - range.startMs) / range.stepMs)
+      )
+      // Worst-case: at least count the time-series.
+      .getOrElse(1)
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument counters; the total is divided evenly across all counters.
+   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   *
+   * @param clazz The class that produced these samples.
+   */
+  def trackSamplesScanned(seriesScanned: Long,
+                          rowsScanned: Long,
+                          partKeyBytes: Long,
+                          clazz: Class[_],
+                          samplesScannedCounters: List[AtomicLong],
+                          schema: ResultSchema,
+                          config: SamplesScannedConfig): Unit = {
+    // Exit early if there are no counters to update.
+    if (samplesScannedCounters.isEmpty) {
+      return
+    }
+
+    val valueColumnType = ResultSchema.valueColumnType(schema)
+    val rowSamples = rowsScanned *
+      config.valueColumnToRowMultiplier.getOrElse(valueColumnType, 1.0) *
+      config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
+
+    val seriesSamples = seriesScanned *
+      config.classToSamplesPerSeries.getOrElse(clazz, config.defaultSamplesPerSeries)
+
+    val partKeySamples = partKeyBytes *
+      config.classToSamplesPerPartKeyByte.getOrElse(clazz, config.defaultSamplesPerPartKeyByte)
+
+    val totalSamples = Math.ceil(
+      rowSamples + seriesSamples + partKeySamples
+    ).asInstanceOf[Long]
+
+    val samplesPerCounter = Math.ceil(
+      totalSamples.asInstanceOf[Double] / samplesScannedCounters.size
+    ).asInstanceOf[Long]
+    samplesScannedCounters.foreach(ctr => ctr.addAndGet(samplesPerCounter))
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument counters; the total is divided evenly across all counters.
+   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   *
+   * @param class The class that produced these samples.
+   */
+  def trackSamplesScanned(rv: RangeVector,
+                          clazz: Class[_],
+                          samplesScannedCounters: List[AtomicLong],
+                          schema: ResultSchema,
+                          config: SamplesScannedConfig): Unit = {
+    val seriesScanned = 1
+    val rowsScanned = estimateNumRows(rv)
+    val partKeyBytes = rv.key.keySize
+    trackSamplesScanned(seriesScanned, rowsScanned, partKeyBytes,
+      clazz, samplesScannedCounters, schema, config)
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument counters; the total is divided evenly across all counters.
+   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   *
+   * @param childRv The {@link RangeVector} that was scanned by the parent.
+   * @param parentClass The class that scanned the child {@link RangeVector}.
+   */
+  def trackChildSamplesScanned(childRv: RangeVector,
+                               parentClass: Class[_],
+                               samplesScannedCounters: List[AtomicLong],
+                               schema: ResultSchema,
+                               config: SamplesScannedConfig): Unit = {
+    // Exit early if there are no counters to update.
+    if (samplesScannedCounters.isEmpty) {
+      return
+    }
+
+    val valueColumnType = ResultSchema.valueColumnType(schema)
+    val rowSamples = estimateNumRows(childRv) *
+      config.valueColumnToRowMultiplier.getOrElse(valueColumnType, 1.0) *
+      config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
+
+    val seriesSamples = config.classToSamplesPerChildSeries.getOrElse(
+      parentClass, config.defaultSamplesPerChildSeries)
+
+    val partKeySamples = childRv.key.keySize *
+      config.classToSamplesPerChildPartKeyByte.getOrElse(parentClass, config.defaultSamplesPerChildPartKeyByte)
+
+    val totalSamples = Math.ceil(
+      rowSamples + seriesSamples + partKeySamples
+    ).asInstanceOf[Long]
+
+    val samplesPerCounter = Math.ceil(
+      totalSamples.asInstanceOf[Double] / samplesScannedCounters.size
+    ).asInstanceOf[Long]
+    samplesScannedCounters.foreach(ctr => ctr.addAndGet(samplesPerCounter))
   }
 }

@@ -165,7 +165,8 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas, querySession)
     }.getOrElse(Observable.empty)
-    ExecResult(rvs, Task.eval(schemaOfDoExecute()))
+    ExecResult(rvs, Task.eval(schemaOfDoExecute()),
+      lookupRes.map(res => Task.now(List(res.samplesScannedCtr))).getOrElse(Task.now(Nil)))
   }
 
   protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +

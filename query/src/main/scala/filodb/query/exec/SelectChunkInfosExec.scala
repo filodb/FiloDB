@@ -69,7 +69,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
             subgroup, partition.partID, dataSchema.name)
           ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
         }
-      ExecResult(rvs, Task.eval(ChunkInfosSchema))
+      ExecResult(rvs, Task.eval(ChunkInfosSchema), Task.now(List(lookupRes.samplesScannedCtr)))
     }
   }
 

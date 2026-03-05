@@ -406,6 +406,23 @@ message PlanDispatcherContainer {
 
 }
 
+message SamplesScannedConfig {
+  bool intermediateSamplesEnabled                       = 1;
+  map<string, double> valueColumnToRowMultiplier        = 2;
+  double defaultSamplesPerRow                           = 3;
+  double defaultSamplesPerSeries                        = 4;
+  double defaultSamplesPerPartKeyByte                   = 5;
+  map<string, double> classToSamplesPerRow              = 6;
+  map<string, double> classToSamplesPerSeries           = 7;
+  map<string, double> classToSamplesPerPartKeyByte      = 8;
+  double defaultSamplesPerChildRow                      = 9;
+  double defaultSamplesPerChildSeries                   = 10;
+  double defaultSamplesPerChildPartKeyByte              = 11;
+  map<string, double> classToSamplesPerChildRow         = 12;
+  map<string, double> classToSamplesPerChildSeries      = 13;
+  map<string, double> classToSamplesPerChildPartKeyByte = 14;
+}
+
 message QueryConfig {
   int64 askTimeoutSeconds                    = 1;
   int64 staleSampleAfterMs                   = 2;
@@ -415,7 +432,7 @@ message QueryConfig {
   bool translatePromToFilodbHistogram        = 6;
   bool fasterRateEnabled                     = 7;
   optional string partitionName              = 8;
-  optional int64 remoteHttpTimeoutMs          = 9;
+  optional int64 remoteHttpTimeoutMs         = 9;
   optional string remoteHttpEndpoint         = 10;
   optional string remoteGrpcEndpoint         = 11;
   int32 numRvsPerResultMessage               = 12;
@@ -425,6 +442,7 @@ message QueryConfig {
   repeated string grpcPartitionsDenyList     = 16;
   optional string plannerSelector            = 17;
   map<string,int32> recordContainerOverrides = 18;
+  SamplesScannedConfig samplesScannedConfig  = 19;
 }
 
 enum ChunkScanType {

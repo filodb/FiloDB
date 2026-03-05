@@ -103,7 +103,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     val data = singleSeriesReaders().take(5)
     var i = 0
     val dataBytesScannedCtr = new AtomicLong
-    val samplesScannedCtr = new AtomicLong
+    val rowCountConsumer = (rowCount: Long) => {}
 
     // populating ReadablePartition `part`
     for (i <- 0 until 5) {
@@ -124,7 +124,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       WriteBufferChunkScan,
       Array(1),
       new CountingChunkInfoIterator(
-        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, samplesScannedCtr, Long.MaxValue, "query-id"
+        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, rowCountConsumer, Long.MaxValue, "query-id"
       )
     )
 

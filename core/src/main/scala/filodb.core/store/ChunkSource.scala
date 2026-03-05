@@ -12,7 +12,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
-
+import filodb.core.query.QueryUtils
 
 /**
  * RawChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
@@ -148,6 +148,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult
 
+  // scalastyle:off method.length
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
@@ -200,12 +201,23 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val key = PartitionRangeVectorKey(Left(partition),
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
+
+      val resultSchema = {
+        val numRowKeyCols = 1
+        ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
+      }
+
+      val samplesScannedRowCountConsumer = (rowsScanned: Long) => QueryUtils.trackSamplesScanned(
+        seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
+        List(lookupRes.samplesScannedCtr), resultSchema, querySession.queryConfig.samplesScannedConfig)
+
       RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, lookupRes.samplesScannedCtr,
+        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, samplesScannedRowCountConsumer,
         querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
       )
     }
   }
+  // scalastyle:on method.length
 
   val FILODB_PARTITION_KEY = "filodb.partition"
 
