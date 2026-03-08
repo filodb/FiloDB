@@ -80,7 +80,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
                             doExecuteParamAssertion: (ChunkSource, QuerySession) => Boolean = (_, _) => true,
                             samplesScannedCounters: List[AtomicLong] = Nil): ExecPlan = {
     new TestLeafPlan(qContext, planDispatcher, doExecuteFunc = (src: ChunkSource, session: QuerySession) => {
-      assert(doExecuteParamAssertion(src, querySession), "Failed in parameter assertion in doExecute")
+      assert(doExecuteParamAssertion(src, session), "Failed in parameter assertion in doExecute")
       ExecResult(Observable.fromIterable(rvs), Task.now(schema), Task.now(samplesScannedCounters))
     })
   }

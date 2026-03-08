@@ -104,7 +104,7 @@ object ProtoConverters extends StrictLogging {
       val builder = GrpcMultiPartitionQueryService.SamplesScannedConfig.newBuilder()
       builder.setIntermediateSamplesEnabled(config.intermediateSamplesEnabled)
       config.valueColumnToRowMultiplier.foreach { case (colType, mult) =>
-        builder.putValueColumnToRowMultiplier(colType.typeName, mult)
+        builder.putValueColumnToRowMultiplier(colType.toString, mult)
       }
       builder.setDefaultSamplesPerRow(config.defaultSamplesPerRow)
       builder.setDefaultSamplesPerSeries(config.defaultSamplesPerSeries)
