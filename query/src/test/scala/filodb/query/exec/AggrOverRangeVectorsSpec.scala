@@ -908,6 +908,17 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       RangeParams(0, 1, 0), queryStats)
     val finalResult = presented.toListL.runToFuture.futureValue
     finalResult.size shouldEqual 1
+
+    // Verify that NaNRowReader gaps were skipped and only the valid reduction rows survived.
+    // Expect exactly two rows, at timestamps 1L and 2L, with non-NaN quantile values.
+    val resultRows = finalResult.head.rows().map { r =>
+      val ts = r.getLong(0)
+      val q  = r.getDouble(1)
+      (ts, q)
+    }.toList
+    resultRows.size shouldEqual 2
+    resultRows.map(_._1) shouldEqual Seq(1L, 2L)
+    resultRows.foreach { case (_, q) => q.isNaN shouldEqual false }
   }
 
   @tailrec
