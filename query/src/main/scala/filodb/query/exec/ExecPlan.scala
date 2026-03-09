@@ -996,28 +996,34 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
         }
     }
 
-    // Track all child samples scanned by this non-leaf plan.
     val intermediateSamplesEnabled = querySession.queryConfig.samplesScannedConfig.intermediateSamplesEnabled
+
+    val rvs = childResults.flatMap { case (index, resultTask) =>
+      Observable.fromTask(resultTask)
+        .map { case (schema, rvs, qStats) =>
+          val scanCtrs = qStats.stat.map { case (key, _) => querySession.queryStats.stat(key).samplesScanned }
+          // Track all child samples scanned by this non-leaf plan.
+          val rvObs = if (intermediateSamplesEnabled) {
+            Observable.fromIterable(rvs)
+              .map { rv =>
+                QueryUtils.trackChildSamplesScanned(rv, this.getClass, scanCtrs.toList,
+                  schema, querySession.queryConfig.samplesScannedConfig)
+                rv
+              }
+          } else Observable.fromIterable(rvs)
+          (rvObs, index)
+        }
+    }
+
     val samplesScannedCounters = if (intermediateSamplesEnabled) {
       childResults.flatMap { case (_, resultTask) =>
         Observable.fromTask(resultTask)
-          .flatMap { case (schema, rvs, queryStats) =>
+          .flatMap { case (_, _, queryStats) =>
             val scanCtrs = queryStats.stat.map { case (key, _) => querySession.queryStats.stat(key).samplesScanned }
-            rvs.foreach { rv =>
-              QueryUtils.trackChildSamplesScanned(rv, this.getClass, scanCtrs.toList,
-                schema, querySession.queryConfig.samplesScannedConfig)
-            }
             Observable.fromIterable(scanCtrs)
           }
       }.toListL
     } else Task.now(Nil)
-
-    val rvs = childResults.flatMap { case (index, resultTask) =>
-      Observable.fromTask(resultTask)
-        .map { case (_, rvs, _) =>
-          (Observable.fromIterable(rvs), index)
-        }
-    }
 
     // find first non-empty result schema. If all of them are empty, then return empty
     val outputSchema = schemas.findL(!_._1.isEmpty).map(_.map(_._1).getOrElse(ResultSchema.empty))
