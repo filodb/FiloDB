@@ -146,7 +146,7 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
           |partition = "us-east-1-p1"
           |labelchurnfinder.kafka {
           |  topic = "test-topic"
-          |  bootstrap-servers = "localhost:9092"
+          |  pie.queue.kaffe.connect = "localhost:9092"
           |}
           |""".stripMargin)
 
@@ -212,14 +212,14 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
           |partition = "us-east-1-p1"
           |labelchurnfinder.kafka {
           |  topic = "test-topic"
-          |  bootstrap-servers = "test-server:9092"
+          |  pie.queue.kaffe.connect = "test-server:9092"
           |}
           |""".stripMargin)
 
       val producer = new LabelStatsKafkaProducer(config)
 
       producer.topic shouldBe "test-topic"
-      producer.bootstrapServers shouldBe "test-server:9092"
+      producer.kafkaProps("pie.queue.kaffe.connect") shouldBe "test-server:9092"
       producer.mosaicPartition shouldBe "us-east-1-p1"
     }
   }

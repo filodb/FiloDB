@@ -26,11 +26,17 @@ class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
 
   private[labelchurnfinder] val kafkaConfig = config.getConfig("labelchurnfinder.kafka")
   private[labelchurnfinder] val topic = kafkaConfig.getString("topic")
-  private[labelchurnfinder] val bootstrapServers = kafkaConfig.getString("bootstrap-servers")
   private[labelchurnfinder] val mosaicPartition = config.getString("partition")
 
-  logger.info(s"Initialized distributed Kafka producer: topic=$topic," +
-    s" bootstrapServers=$bootstrapServers, partition=$mosaicPartition")
+  // Collect all kafka config properties to broadcast to executors
+  private[labelchurnfinder] val kafkaProps: Map[String, String] = {
+    import scala.collection.JavaConverters._
+    kafkaConfig.entrySet().asScala
+      .map(e => e.getKey -> e.getValue.unwrapped().toString)
+      .toMap
+  }
+
+  logger.info(s"Initialized distributed Kafka producer: topic=$topic, partition=$mosaicPartition")
 
   /**
    * Publishes label statistics from a DataFrame using distributed processing.
@@ -48,13 +54,13 @@ class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
 
     // Broadcast config to executors (read-only, serializable)
     val broadcastTopic = df.sparkSession.sparkContext.broadcast(topic)
-    val broadcastBootstrapServers = df.sparkSession.sparkContext.broadcast(bootstrapServers)
+    val broadcastKafkaProps = df.sparkSession.sparkContext.broadcast(kafkaProps)
     val broadcastPartition = df.sparkSession.sparkContext.broadcast(mosaicPartition)
 
     logger.info(s"Starting distributed publishing to Kafka topic '$topic'")
 
     val groupedByWorkspace = groupLabelsByWorkspace(df)
-    processPartitions(groupedByWorkspace, broadcastTopic, broadcastBootstrapServers, broadcastPartition, jobTimestamp)
+    processPartitions(groupedByWorkspace, broadcastTopic, broadcastKafkaProps, broadcastPartition, jobTimestamp)
 
     logger.info(s"Distributed publishing complete for topic '$topic'")
   }
@@ -87,12 +93,12 @@ class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
   private def processPartitions(
     groupedData: DataFrame,
     broadcastTopic: org.apache.spark.broadcast.Broadcast[String],
-    broadcastBootstrapServers: org.apache.spark.broadcast.Broadcast[String],
+    broadcastKafkaProps: org.apache.spark.broadcast.Broadcast[Map[String, String]],
     broadcastPartition: org.apache.spark.broadcast.Broadcast[String],
     jobTimestamp: Instant
   ): Unit = {
     groupedData.foreachPartition { (partition: Iterator[Row]) =>
-      val localProducer = LabelStatsKafkaProducer.createKafkaProducer(broadcastBootstrapServers.value)
+      val localProducer = LabelStatsKafkaProducer.createKafkaProducer(broadcastKafkaProps.value)
 
       try {
         partition.foreach { row =>
@@ -121,30 +127,19 @@ object LabelStatsKafkaProducer {
   @transient lazy val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
   /**
-   * Creates a Kafka producer with configuration optimized for periodic batch jobs.
-   *
-   * Configuration rationale:
-   * - Message size: 30-80KB compressed (workspace + all labels + HLL sketches)
-   * - Workload: Periodic Spark batch job (not real-time streaming)
-   * - Concurrency: N producers (one per Spark partition)
-   * - Priority: Reliability and throughput over latency
-   *
-   * Key settings:
-   * - 128KB batch size: Fits 1-3 workspace messages per batch
-   * - 200ms linger: Batch multiple workspaces (no real-time requirement)
-   * - gzip compression: 65-75% ratio for large JSON messages
-   * - Idempotence: Prevents duplicates on retry
-   * - 16MB buffer: Conservative for N concurrent producers on executors
+   * Creates a Kafka producer from config properties.
+   * All connection, security and PIE Kaffe properties come from config (passed via broadcast).
    */
-  private def createKafkaProducer(bootstrapServers: String): KafkaProducer[String, String] = {
+  private[labelchurnfinder] def createKafkaProducer(kafkaProps: Map[String, String]): KafkaProducer[String, String] = {
     val producerConfig = new Properties()
 
-    // Connection and serialization
-    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers)
+    // Serializers
     producerConfig.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[StringSerializer].getName)
     producerConfig.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[StringSerializer].getName)
 
-    // Reliability - critical for label statistics
+    // Defaults — can be overridden via labelchurnfinder.kafka in helm values
+
+    // Reliability
     producerConfig.put(ProducerConfig.ACKS_CONFIG, "all")                    // Wait for all replicas
     producerConfig.put(ProducerConfig.RETRIES_CONFIG, "5")                   // Higher retries for batch job
     producerConfig.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true")     // Prevent duplicates on retry
@@ -152,16 +147,18 @@ object LabelStatsKafkaProducer {
     // Batching - optimize for throughput over latency
     producerConfig.put(ProducerConfig.BATCH_SIZE_CONFIG, "131072")           // 128KB batches (1-3 messages)
     producerConfig.put(ProducerConfig.LINGER_MS_CONFIG, "200")               // Wait 200ms to batch workspaces
-
-    // Compression - gzip works well for large JSON messages with Base64 data
     producerConfig.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip")
 
-    // Timeouts - balanced for batch job with large messages
+    // Timeouts
     producerConfig.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "30000")    // 30s request timeout
     producerConfig.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, "60000")          // 60s max block time
 
-    // Memory - conservative for multiple concurrent Spark producers
+    // Memory
     producerConfig.put(ProducerConfig.BUFFER_MEMORY_CONFIG, "16777216")      // 16MB per producer
+
+    // Config overrides defaults (includes pie.queue.kaffe.*, security.protocol,
+    // interceptor.classes, sasl.*, ssl.* and any tuning overrides from helm)
+    kafkaProps.foreach { case (k, v) => producerConfig.put(k, v) }
 
     new KafkaProducer[String, String](producerConfig)
   }
