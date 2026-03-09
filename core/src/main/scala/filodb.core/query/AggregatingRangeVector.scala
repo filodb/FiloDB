@@ -81,6 +81,7 @@ final case class AggregatingRangeVector(
     }
 
     // Collect rows from active buckets
+    // scalastyle:off null
     bucketsInRange.flatMap { bucketTs =>
       partition.getBucketColumnValues(bucketTs).map { allColumnValues =>
         // Map column values to the requested column IDs
@@ -99,13 +100,14 @@ final case class AggregatingRangeVector(
               values(i) = allColumnValues(colIdx)
             }
           } else {
-            values(i) = None.orNull
+            values(i) = null
           }
           i += 1
         }
         BucketRowData(bucketTs, values)
       }
     }
+    // scalastyle:on null
   }
 
   def publishInterval: Option[Long] = partition.publishInterval
@@ -139,8 +141,8 @@ private[query] class MergingRangeVectorCursor(
   private var exhaustedBase = false
   private var currentBucketRow: Option[BucketRowData] = None
 
-  // Buffer to hold bucket rows that we haven't returned yet
-  private val pendingBucketRows = bucketRowsIter.toBuffer
+  // Use a BufferedIterator to advance through sorted bucket rows without eager materialization
+  private val sortedBucketRows = bucketRowsIter.buffered
 
   // The current row reader for bucket data
   private val bucketRowReader = new BucketDataRowReader(columnIDs)
@@ -176,15 +178,13 @@ private[query] class MergingRangeVectorCursor(
     }
   }
 
+  // Advance past bucket rows that are <= lastFinalizedTimestamp, then return the next one.
+  // Since bucket rows are sorted by timestamp, we only need to skip forward (O(1) amortized).
   private def findNextBucketRow(): Option[BucketRowData] = {
-    val idx = pendingBucketRows.indexWhere(_.timestamp > lastFinalizedTimestamp)
-    if (idx >= 0) {
-      val row = pendingBucketRows(idx)
-      pendingBucketRows.remove(idx)
-      Some(row)
-    } else {
-      None
+    while (sortedBucketRows.hasNext && sortedBucketRows.head.timestamp <= lastFinalizedTimestamp) {
+      sortedBucketRows.next() // skip rows already covered by finalized data
     }
+    if (sortedBucketRows.hasNext) Some(sortedBucketRows.next()) else None
   }
 
   override def close(): Unit = {
@@ -196,10 +196,17 @@ private[query] class MergingRangeVectorCursor(
  * A RowReader that reads from bucket data (in-memory aggregated values).
  */
 private[query] class BucketDataRowReader(columnIDs: Array[Int]) extends RowReader {
+  // scalastyle:off null
   private var data: BucketRowData = _
+
+  // Cache for serialized histogram buffers to avoid re-serializing per accessor call
+  private var cachedBlobColumn: Int = -1
+  private var cachedBlobBuffer: org.agrona.DirectBuffer = _
 
   def setData(bucketData: BucketRowData): Unit = {
     data = bucketData
+    cachedBlobColumn = -1
+    cachedBlobBuffer = null
   }
 
   override def notNull(columnNo: Int): Boolean = {
@@ -253,48 +260,44 @@ private[query] class BucketDataRowReader(columnIDs: Array[Int]) extends RowReade
   }
 
   override def getHistogram(columnNo: Int): filodb.memory.format.vectors.Histogram = {
-    // scalastyle:off null
     data.values(columnNo) match {
       case h: MutableHistogram => h
       case h: filodb.memory.format.vectors.Histogram => h
       case null => filodb.memory.format.vectors.Histogram.empty
       case _ => throw new IllegalArgumentException(s"Cannot get histogram from ${data.values(columnNo)}")
     }
-    // scalastyle:on null
+  }
+
+  // Lazily serialize and cache the blob buffer for a given column
+  private def getOrCacheBlobBuffer(columnNo: Int): org.agrona.DirectBuffer = {
+    if (cachedBlobColumn == columnNo && cachedBlobBuffer != null) {
+      return cachedBlobBuffer
+    }
+    val buf = data.values(columnNo) match {
+      case h: MutableHistogram => h.serialize()
+      case buf: org.agrona.DirectBuffer => buf
+      case _ => null
+    }
+    cachedBlobColumn = columnNo
+    cachedBlobBuffer = buf
+    buf
   }
 
   override def getBlobBase(columnNo: Int): Any = {
-    data.values(columnNo) match {
-      case h: MutableHistogram =>
-        val buf = h.serialize()
-        buf.byteArray()
-      case buf: org.agrona.DirectBuffer =>
-        buf.byteArray()
-      case _ => None.orNull
-    }
+    val buf = getOrCacheBlobBuffer(columnNo)
+    if (buf != null) buf.byteArray() else null
   }
 
   override def getBlobOffset(columnNo: Int): Long = {
-    data.values(columnNo) match {
-      case h: MutableHistogram =>
-        val buf = h.serialize()
-        buf.addressOffset()
-      case buf: org.agrona.DirectBuffer =>
-        buf.addressOffset()
-      case _ => 0L
-    }
+    val buf = getOrCacheBlobBuffer(columnNo)
+    if (buf != null) buf.addressOffset() else 0L
   }
 
   override def getBlobNumBytes(columnNo: Int): Int = {
-    data.values(columnNo) match {
-      case h: MutableHistogram =>
-        val buf = h.serialize()
-        (buf.getShort(0) & 0xFFFF) + 2
-      case buf: org.agrona.DirectBuffer =>
-        (buf.getShort(0) & 0xFFFF) + 2
-      case _ => 0
-    }
+    val buf = getOrCacheBlobBuffer(columnNo)
+    if (buf != null) (buf.getShort(0) & 0xFFFF) + 2 else 0
   }
 
-  override def filoUTF8String(i: Int): filodb.memory.format.ZeroCopyUTF8String = None.orNull
+  override def filoUTF8String(i: Int): filodb.memory.format.ZeroCopyUTF8String = null
+  // scalastyle:on null
 }

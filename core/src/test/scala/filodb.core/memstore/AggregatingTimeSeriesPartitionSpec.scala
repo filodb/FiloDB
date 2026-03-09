@@ -24,10 +24,10 @@ object AggregatingTimeSeriesPartitionSpec {
   private val timeAlignedChunksEnabled = TestData.storeConf.timeAlignedChunksEnabled
   private val acceptDuplicateSamples = false
 
-  // Dataset with aggregation config for scalar columns
+  // Dataset with aggregation config for scalar columns (schema-level)
   val scalarColumns = Seq(
     "timestamp:ts",
-    "value:double:{aggregation=sum,interval=1m,ooo-tolerance=30s}"
+    "value:double"
   )
 
   val scalarDatasetOptions = DatasetOptions.DefaultOptions.copy(
@@ -35,35 +35,51 @@ object AggregatingTimeSeriesPartitionSpec {
     shardKeyColumns = Seq("series")
   )
 
-  val scalarDataset = Dataset("scalar_metrics", Seq("series:string"), scalarColumns, scalarDatasetOptions)
+  val scalarDataset = Dataset("scalar_metrics", Seq("series:string"), scalarColumns,
+    scalarDatasetOptions,
+    aggregatorNames = Seq("dSum(1)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 30000L)
   val scalarSchema = scalarDataset.schema
 
-  // Dataset with histogram aggregation
+  // Dataset with histogram aggregation (schema-level)
   val histogramColumns = Seq(
     "timestamp:ts",
-    "hist:hist:{counter=true,aggregation=histogram_sum,interval=1m,ooo-tolerance=30s}"
+    "hist:hist:{counter=true}"
   )
 
-  val histogramDataset = Dataset("histogram_metrics", Seq("series:string"), histogramColumns, scalarDatasetOptions)
+  val histogramDataset = Dataset("histogram_metrics", Seq("series:string"), histogramColumns,
+    scalarDatasetOptions,
+    aggregatorNames = Seq("hSum(1)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 30000L)
   val histogramSchema = histogramDataset.schema
 
-  // Dataset with histogram_last aggregation
+  // Dataset with histogram_last aggregation (schema-level)
   val histogramLastColumns = Seq(
     "timestamp:ts",
-    "hist:hist:{counter=true,aggregation=histogram_last,interval=1m,ooo-tolerance=30s}"
+    "hist:hist:{counter=true}"
   )
 
-  val histogramLastDataset = Dataset("histogram_last_metrics", Seq("series:string"), histogramLastColumns, scalarDatasetOptions)
+  val histogramLastDataset = Dataset("histogram_last_metrics", Seq("series:string"), histogramLastColumns,
+    scalarDatasetOptions,
+    aggregatorNames = Seq("hLast(1)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 30000L)
   val histogramLastSchema = histogramLastDataset.schema
 
-  // Mixed dataset with both scalar and histogram columns
+  // Mixed dataset with both scalar and histogram columns (schema-level)
   val mixedColumns = Seq(
     "timestamp:ts",
-    "value:double:{aggregation=avg,interval=1m,ooo-tolerance=30s}",
-    "hist:hist:{counter=true,aggregation=histogram_sum,interval=1m,ooo-tolerance=30s}"
+    "value:double",
+    "hist:hist:{counter=true}"
   )
 
-  val mixedDataset = Dataset("mixed_metrics", Seq("series:string"), mixedColumns, scalarDatasetOptions)
+  val mixedDataset = Dataset("mixed_metrics", Seq("series:string"), mixedColumns,
+    scalarDatasetOptions,
+    aggregatorNames = Seq("dAvg(1)", "hSum(2)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 30000L)
   val mixedSchema = mixedDataset.schema
 
   val partKeyBuilder = new filodb.core.binaryrecord2.RecordBuilder(TestData.nativeMem, 2048)
@@ -579,13 +595,9 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(hist1))), ingestBlockHolder,
         timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
-      // Should have histogram stats
-      val stats = part.histogramAggStats
-      stats should not be empty
-
-      // Should have at least one active bucket
-      val histStats = stats.values.head
-      histStats.activeBucketCount should be > 0
+      // Should have at least one active bucket via bucketAggregationStats
+      val stats = part.bucketAggregationStats
+      stats.activeBucketCount should be > 0
     }
   }
 

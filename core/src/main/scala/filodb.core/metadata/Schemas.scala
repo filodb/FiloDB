@@ -10,6 +10,7 @@ import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
 import filodb.core.memstore.PartKeyLuceneIndexRecord
+import filodb.core.memstore.aggregation.{ColumnAggregator, SchemaAggregationConfig}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.ColumnInfo
 import filodb.core.store.{ChunkScanMethod, ChunkSetInfo}
@@ -29,11 +30,16 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
 final case class DataSchema private(name: String,
                                     columns: Seq[Column],
                                     downsamplers: Seq[ChunkDownsampler],
+                                    aggregators: Seq[ColumnAggregator],
+                                    aggregationIntervalMs: Long,
+                                    aggregationOooToleranceMs: Long,
                                     hash: Int,
                                     valueColumn: ColumnId,
                                     downsampleSchema: Option[String] = None,
                                     downsamplePeriodMarker: DownsamplePeriodMarker) {
   val timestampColumn  = columns.head
+
+  def hasAggregation: Boolean = aggregators.nonEmpty
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID
   def reader(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
@@ -85,17 +91,43 @@ object DataSchema {
            downsamplerNames: Seq[String] = Seq.empty,
            dowsamplerPeriodMarker: Option[String] = None,
            valueColumn: String,
-           downsampleSchema: Option[String] = None): DataSchema Or BadSchema = {
+           downsampleSchema: Option[String] = None,
+           aggConfig: SchemaAggregationConfig = SchemaAggregationConfig.empty): DataSchema Or BadSchema = {
 
     for { dataColumns  <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
           downsamplers <- validateDownsamplers(downsamplerNames, downsampleSchema)
           periodMarker <- validatedDownsamplerPeriodMarker(dowsamplerPeriodMarker)
+          aggregators  <- validateAggregators(aggConfig.aggregators, aggConfig.intervalMs,
+                                              aggConfig.oooToleranceMs, dataColumns)
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns),
+      DataSchema(name, dataColumns, downsamplers, aggregators,
+                 aggConfig.intervalMs, aggConfig.oooToleranceMs,
+                 Schemas.genHash(dataColumns, aggregators),
                  valueColID, downsampleSchema, periodMarker)
     }
+  }
+
+  private def validateAggregators(aggregators: Seq[ColumnAggregator],
+                                  intervalMs: Long,
+                                  toleranceMs: Long,
+                                  dataColumns: Seq[Column]): Seq[ColumnAggregator] Or BadSchema = {
+    import Dataset._
+    if (aggregators.nonEmpty) {
+      if (intervalMs <= 0)
+        return Bad(BadColumnParams(
+          s"aggregation-interval must be positive when aggregators are defined, got $intervalMs"))
+      if (toleranceMs < 0)
+        return Bad(BadColumnParams(
+          s"aggregation-ooo-tolerance must be non-negative when aggregators are defined, got $toleranceMs"))
+      for (agg <- aggregators) {
+        if (agg.columnId < 1 || agg.columnId >= dataColumns.length)
+          return Bad(BadColumnParams(
+            s"Aggregator column id ${agg.columnId} is out of range (1 to ${dataColumns.length - 1})"))
+      }
+    }
+    Good(aggregators)
   }
 
   /**
@@ -114,13 +146,26 @@ object DataSchema {
    * From the example above, pass in "prometheus" as the schemaName.
    * It is advisable to parse the outer config of all schemas using `.as[Map[String, Config]]`
    */
-  def fromConfig(schemaName: String, conf: Config): DataSchema Or BadSchema =
+  def fromConfig(schemaName: String, conf: Config): DataSchema Or BadSchema = {
+    val aggregatorNames = conf.as[Option[Seq[String]]]("aggregators").getOrElse(Seq.empty)
+    val intervalMs = conf.as[Option[String]]("aggregation-interval")
+                         .map(Column.parseTimeString).getOrElse(0L)
+    val toleranceMs = conf.as[Option[String]]("aggregation-ooo-tolerance")
+                          .map(Column.parseTimeString).getOrElse(0L)
+    val aggConfig = try {
+      SchemaAggregationConfig(ColumnAggregator.parseAll(aggregatorNames), intervalMs, toleranceMs)
+    } catch {
+      case e: Exception =>
+        return Bad(Dataset.BadColumnParams(s"Invalid aggregator: ${e.getMessage}"))
+    }
     make(schemaName,
          conf.as[Seq[String]]("columns"),
          conf.as[Seq[String]]("downsamplers"),
          conf.as[Option[String]]("downsample-period-marker"),
          conf.getString("value-column"),
-         conf.as[Option[String]]("downsample-schema"))
+         conf.as[Option[String]]("downsample-schema"),
+         aggConfig)
+  }
 }
 
 object PartitionSchema {
@@ -392,12 +437,17 @@ object Schemas extends StrictLogging {
 
   /**
    * Generates a unique 16-bit hash from the column names, types, params.  Sensitive to order.
+   * Optionally includes aggregator info to differentiate aggregating schemas from non-aggregating ones
+   * with the same columns.
    */
-  def genHash(columns: Seq[Column]): Int = {
+  def genHash(columns: Seq[Column], aggregators: Seq[ColumnAggregator] = Seq.empty): Int = {
     var hash = 7
     for { col <- columns } {
       // Use XXHash to get high quality hash for column name.  String.hashCode is _horrible_
       hash = 31 * hash + (BinaryRegion.hash32(col.name.getBytes(UTF_8)) * col.columnType.hashCode + col.params.hashCode)
+    }
+    for { agg <- aggregators } {
+      hash = 31 * hash + (agg.columnId * 17 + agg.aggType.hashCode)
     }
     hash & 0x0ffff
   }

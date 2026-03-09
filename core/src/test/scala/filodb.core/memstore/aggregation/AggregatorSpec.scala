@@ -1,9 +1,21 @@
 package filodb.core.memstore.aggregation
 
+import org.agrona.DirectBuffer
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+
 class AggregatorSpec extends AnyFunSpec with Matchers {
+
+  // Helper to create a serialized histogram as DirectBuffer
+  // Serialize into a fresh buffer each call to avoid shared BinaryHistogram.histBuf being overwritten
+  private def createHistogramBuffer(bucketCounts: Seq[(Double, Long)]): DirectBuffer = {
+    val boundaries = bucketCounts.map(_._1).toArray :+ Double.PositiveInfinity
+    val counts = bucketCounts.map(_._2).toArray :+ 0L
+    LongHistogram(CustomBuckets(boundaries), counts)
+      .serialize(Some(new org.agrona.concurrent.UnsafeBuffer(new Array[Byte](4096))))
+  }
 
   describe("SumAggregator") {
     it("should sum numeric values correctly") {
@@ -240,6 +252,8 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       Aggregator.create(AggregationType.Last) shouldBe a[LastAggregator]
       Aggregator.create(AggregationType.First) shouldBe a[FirstAggregator]
       Aggregator.create(AggregationType.Count) shouldBe a[CountAggregator]
+      Aggregator.create(AggregationType.HistogramSum) shouldBe a[HistogramAggregator]
+      Aggregator.create(AggregationType.HistogramLast) shouldBe a[HistogramLastAggregator]
     }
   }
 
@@ -253,6 +267,9 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       AggregationType.parse("last") shouldEqual Some(AggregationType.Last)
       AggregationType.parse("first") shouldEqual Some(AggregationType.First)
       AggregationType.parse("count") shouldEqual Some(AggregationType.Count)
+      AggregationType.parse("histogram") shouldEqual Some(AggregationType.HistogramSum)
+      AggregationType.parse("histogram_sum") shouldEqual Some(AggregationType.HistogramSum)
+      AggregationType.parse("histogram_last") shouldEqual Some(AggregationType.HistogramLast)
     }
 
     it("should be case-insensitive") {
@@ -265,6 +282,159 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       AggregationType.parse("invalid") shouldEqual None
       AggregationType.parse("") shouldEqual None
       AggregationType.parse("median") shouldEqual None
+    }
+  }
+
+  describe("HistogramAggregator") {
+    it("should accumulate histograms from DirectBuffer") {
+      val agg = new HistogramAggregator
+      val hist1 = createHistogramBuffer(Seq((1.0, 5L), (2.0, 10L)))
+      val hist2 = createHistogramBuffer(Seq((1.0, 3L), (2.0, 7L)))
+
+      agg.add(hist1)
+      agg.add(hist2)
+
+      val resultAgg = agg.asInstanceOf[HistogramAggregator]
+      resultAgg.getAccumulator shouldBe defined
+
+      val hist = resultAgg.getAccumulator.get
+      hist.numBuckets shouldEqual 3 // 2 user-defined + infinity
+      hist.bucketValue(0) shouldEqual 8.0  // 5 + 3
+      hist.bucketValue(1) shouldEqual 17.0 // 10 + 7
+    }
+
+    it("should handle single histogram") {
+      val agg = new HistogramAggregator
+      val hist = createHistogramBuffer(Seq((1.0, 5L), (2.0, 10L)))
+
+      agg.add(hist)
+
+      val resultAgg = agg.asInstanceOf[HistogramAggregator]
+      resultAgg.getAccumulator shouldBe defined
+      resultAgg.getAccumulator.get.bucketValue(0) shouldEqual 5.0
+    }
+
+    it("should return serialized buffer from result()") {
+      val agg = new HistogramAggregator
+      val hist = createHistogramBuffer(Seq((1.0, 5L)))
+
+      agg.add(hist)
+
+      val result = agg.result()
+      result shouldBe a[DirectBuffer]
+    }
+
+    it("should return empty histogram for no data") {
+      val agg = new HistogramAggregator
+      val result = agg.result()
+      result shouldBe a[DirectBuffer]
+    }
+
+    it("should reset correctly") {
+      val agg = new HistogramAggregator
+      val hist = createHistogramBuffer(Seq((1.0, 5L)))
+
+      agg.add(hist)
+      agg.reset()
+
+      agg.asInstanceOf[HistogramAggregator].getAccumulator shouldEqual None
+    }
+
+    it("should create independent copies") {
+      val agg = new HistogramAggregator
+      val copy = agg.copy()
+      copy shouldBe a[HistogramAggregator]
+      copy should not be theSameInstanceAs(agg)
+    }
+
+    it("should ignore non-histogram values") {
+      val agg = new HistogramAggregator
+      agg.add(42.0)
+      agg.add("string")
+      agg.add(null)
+
+      agg.asInstanceOf[HistogramAggregator].getAccumulator shouldEqual None
+    }
+  }
+
+  describe("HistogramLastAggregator") {
+    it("should keep last histogram without timestamp") {
+      val agg = new HistogramLastAggregator
+      val hist1 = createHistogramBuffer(Seq((1.0, 5L)))
+      val hist2 = createHistogramBuffer(Seq((1.0, 99L)))
+
+      agg.add(hist1)
+      agg.add(hist2)
+
+      // Last added should win
+      val resultAgg = agg.asInstanceOf[HistogramLastAggregator]
+      resultAgg.getCurrentHistogram shouldBe defined
+      resultAgg.getCurrentHistogram.get.bucketValue(0) shouldEqual 99.0
+    }
+
+    it("should keep histogram with latest timestamp") {
+      val agg = new HistogramLastAggregator
+      val hist1 = createHistogramBuffer(Seq((1.0, 10L)))
+      val hist2 = createHistogramBuffer(Seq((1.0, 20L)))
+      val hist3 = createHistogramBuffer(Seq((1.0, 30L)))
+
+      agg.addWithTimestamp(hist1, 1000L)
+      agg.addWithTimestamp(hist3, 3000L) // Latest
+      agg.addWithTimestamp(hist2, 2000L) // Older, should not replace
+
+      val resultAgg = agg.asInstanceOf[HistogramLastAggregator]
+      resultAgg.getCurrentHistogram.get.bucketValue(0) shouldEqual 30.0
+    }
+
+    it("should replace histogram with equal timestamp") {
+      val agg = new HistogramLastAggregator
+      val hist1 = createHistogramBuffer(Seq((1.0, 10L)))
+      val hist2 = createHistogramBuffer(Seq((1.0, 20L)))
+
+      agg.addWithTimestamp(hist1, 1000L)
+      agg.addWithTimestamp(hist2, 1000L) // Same timestamp, should update
+
+      val resultAgg = agg.asInstanceOf[HistogramLastAggregator]
+      resultAgg.getCurrentHistogram.get.bucketValue(0) shouldEqual 20.0
+    }
+
+    it("should return serialized buffer from result()") {
+      val agg = new HistogramLastAggregator
+      val hist = createHistogramBuffer(Seq((1.0, 5L)))
+      agg.add(hist)
+
+      val result = agg.result()
+      result shouldBe a[DirectBuffer]
+    }
+
+    it("should return empty histogram for no data") {
+      val agg = new HistogramLastAggregator
+      val result = agg.result()
+      result shouldBe a[DirectBuffer]
+    }
+
+    it("should reset correctly") {
+      val agg = new HistogramLastAggregator
+      val hist = createHistogramBuffer(Seq((1.0, 5L)))
+      agg.add(hist)
+      agg.reset()
+
+      agg.asInstanceOf[HistogramLastAggregator].getCurrentHistogram shouldEqual None
+    }
+
+    it("should create independent copies") {
+      val agg = new HistogramLastAggregator
+      val copy = agg.copy()
+      copy shouldBe a[HistogramLastAggregator]
+      copy should not be theSameInstanceAs(agg)
+    }
+
+    it("should ignore non-histogram values") {
+      val agg = new HistogramLastAggregator
+      agg.add(42.0)
+      agg.add("string")
+
+      agg.asInstanceOf[HistogramLastAggregator].getCurrentHistogram shouldEqual None
     }
   }
 

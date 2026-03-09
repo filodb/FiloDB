@@ -127,38 +127,6 @@ class MinAggregator extends Aggregator {
   def copy(): Aggregator = new MinAggregator
 }
 
-
-/**
- * Histogram aggregator - finds the smallest numeric value.
- */
-class HistAggregator extends Aggregator {
-  private var min: Double = Double.MaxValue
-  private var initialized: Boolean = false
-
-  def add(value: Any): Unit = {
-    val d = value match {
-      case d: Double if !d.isNaN && !d.isInfinity => d
-      case l: Long                                 => l.toDouble
-      case i: Int                                  => i.toDouble
-      case f: Float if !f.isNaN && !f.isInfinity   => f.toDouble
-      case _                                       => return
-    }
-    if (!initialized || d < min) {
-      min = d
-      initialized = true
-    }
-  }
-
-  def result(): Any = if (initialized) min else Double.NaN
-
-  def reset(): Unit = {
-    min = Double.MaxValue
-    initialized = false
-  }
-
-  def copy(): Aggregator = new MinAggregator
-}
-
 /**
  * Maximum aggregator - finds the largest numeric value.
  */

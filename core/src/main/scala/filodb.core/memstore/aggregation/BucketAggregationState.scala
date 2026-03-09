@@ -2,9 +2,7 @@ package filodb.core.memstore.aggregation
 
 import scala.collection.mutable
 
-import org.agrona.DirectBuffer
-
-import filodb.memory.format.vectors.{BinaryHistogram, MutableHistogram}
+import filodb.memory.format.vectors.MutableHistogram
 
 /**
  * Manages in-memory aggregation state for ALL columns across time buckets.
@@ -204,78 +202,34 @@ class BucketAggregationState(
 
 /**
  * State for a single time bucket, holding aggregated values for all columns.
+ * Uses the Aggregator interface uniformly for all column types (scalar and histogram).
  */
 private class BucketState(numColumns: Int) {
-  // Aggregators for aggregating columns
+  // Aggregators for all aggregating columns (scalar and histogram)
   private val aggregators = new Array[Aggregator](numColumns)
 
   // Raw values for non-aggregating columns
   private val rawValues = new Array[Any](numColumns)
 
-  // Histogram accumulators for histogram columns
-  private val histogramAccumulators = new Array[MutableHistogram](numColumns)
-
-  // Track latest timestamp per column for Last aggregation
-  private val latestTimestamps = new Array[Long](numColumns)
-  java.util.Arrays.fill(latestTimestamps, Long.MinValue)
-
   def aggregate(colIdx: Int, config: AggregationConfig, value: Any, sampleTimestamp: Long): Unit = {
-    config.aggType match {
-      case AggregationType.HistogramSum =>
-        aggregateHistogramSum(colIdx, value)
-
-      case AggregationType.HistogramLast =>
-        aggregateHistogramLast(colIdx, value, sampleTimestamp)
-
-      case scalarType =>
-        // Scalar aggregation
-        if (aggregators(colIdx) == null) {
-          aggregators(colIdx) = Aggregator.create(scalarType)
-        }
-        aggregators(colIdx).addWithTimestamp(value, sampleTimestamp)
+    if (aggregators(colIdx) == null) {
+      aggregators(colIdx) = Aggregator.create(config.aggType)
     }
-  }
-
-  private def aggregateHistogramSum(colIdx: Int, value: Any): Unit = {
-    val hist = valueToHistogram(value)
-    if (histogramAccumulators(colIdx) == null) {
-      histogramAccumulators(colIdx) = MutableHistogram(hist)
-    } else {
-      histogramAccumulators(colIdx).add(hist)
-    }
-  }
-
-  private def aggregateHistogramLast(colIdx: Int, value: Any, sampleTimestamp: Long): Unit = {
-    if (sampleTimestamp >= latestTimestamps(colIdx)) {
-      val hist = valueToHistogram(value)
-      histogramAccumulators(colIdx) = MutableHistogram(hist)
-      latestTimestamps(colIdx) = sampleTimestamp
-    }
-  }
-
-  private def valueToHistogram(value: Any): filodb.memory.format.vectors.HistogramWithBuckets = {
-    value match {
-      case buf: DirectBuffer =>
-        BinaryHistogram.BinHistogram(buf).toHistogram
-      case h: filodb.memory.format.vectors.HistogramWithBuckets =>
-        h
-      case _ =>
-        throw new IllegalArgumentException(s"Cannot convert $value to histogram")
-    }
+    aggregators(colIdx).addWithTimestamp(value, sampleTimestamp)
   }
 
   def getAggregatedValue(colIdx: Int, config: AggregationConfig): Any = {
-    config.aggType match {
-      case AggregationType.HistogramSum | AggregationType.HistogramLast =>
-        Option(histogramAccumulators(colIdx)).map(_.serialize()).orNull
-
-      case _ =>
-        Option(aggregators(colIdx)).map(_.result()).orNull
-    }
+    // scalastyle:off null
+    Option(aggregators(colIdx)).map(_.result()).orNull
+    // scalastyle:on null
   }
 
   def getHistogram(colIdx: Int): Option[MutableHistogram] = {
-    Option(histogramAccumulators(colIdx))
+    Option(aggregators(colIdx)).flatMap {
+      case ha: HistogramAggregator => ha.getAccumulator
+      case hla: HistogramLastAggregator => hla.getCurrentHistogram
+      case _ => None
+    }
   }
 
   def hasValue(colIdx: Int): Boolean = rawValues(colIdx) != null

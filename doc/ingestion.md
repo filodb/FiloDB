@@ -126,27 +126,48 @@ By default, FiloDB's ingestion drops samples that arrive with timestamps older t
 
 ### Configuration
 
-Aggregation is configured per-column in the schema definition using three parameters:
+Aggregation is configured at schema level using three config keys alongside the column definitions:
 
 ```yaml
-schema = "aggregating-gauge"
+schema = "aggregating-delta-histogram-v2"
 
 # Example schema with aggregation
 schemas {
-  aggregating-gauge {
-    columns = [
-      "timestamp:ts",
-      "value:double:{aggregation=sum,interval=30s,ooo-tolerance=60s}"
+  aggregating-delta-histogram-v2 {
+    columns = ["timestamp:ts",
+      "sum:double:{detectDrops=false,delta=true}",
+      "count:double:{detectDrops=false,delta=true}",
+      "h:hist:{counter=false,delta=true}",
+      "min:double:{detectDrops=false,delta=true}",
+      "max:double:{detectDrops=false,delta=true}",
+      "sumLast:double:{detectDrops=false,delta=true}"
     ]
-    value-column = "value"
+    aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+    aggregation-interval = 1m
+    aggregation-ooo-tolerance = 2m
+    value-column = "h"
+    downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+    downsample-schema = "delta-histogram-v2"
+    downsample-period-marker = "time(0)"
   }
 }
 ```
 
-**Parameters:**
-- `aggregation` - Type of aggregation: sum, avg, min, max, last, first, or count
-- `interval` - Time bucket interval (e.g., 30s, 1m, 5m, 1h)
-- `ooo-tolerance` - Maximum out-of-order tolerance window (e.g., 60s, 2m, 5m)
+**Schema-level parameters:**
+- `aggregators` - List of column aggregators in `"name(colId)"` format (same syntax as downsamplers)
+- `aggregation-interval` - Time bucket interval (e.g., 30s, 1m, 5m, 1h)
+- `aggregation-ooo-tolerance` - Maximum out-of-order tolerance window (e.g., 60s, 2m, 5m)
+
+**Aggregator names:**
+- `dSum` - sum of double values
+- `dMin` - minimum double value
+- `dMax` - maximum double value
+- `dLast` - last double value by timestamp
+- `dFirst` - first double value by timestamp
+- `dAvg` - average of double values
+- `dCount` - count of samples
+- `hSum` - element-wise sum of delta histograms
+- `hLast` - last histogram by timestamp
 
 ### Aggregation Types
 
@@ -157,21 +178,32 @@ schemas {
 - **last**: Keeps the most recent value (by timestamp)
 - **first**: Keeps the earliest value (by timestamp)
 - **count**: Counts the number of samples
+- **histogram_sum**: Sums delta histograms element-wise
+- **histogram_last**: Keeps the most recent histogram (by timestamp)
 
 ### Multi-Column Aggregation
 
-Different columns can have different aggregation types:
+Different columns can have different aggregation types. The `aggregating-delta-histogram-v2`
+schema demonstrates this — sum/count columns use `dSum`, the histogram uses `hSum`,
+min/max use their respective aggregations, and sumLast uses `dLast`:
 
 ```yaml
-aggregating-multi {
-  columns = [
-    "timestamp:ts",
-    "min:double:{aggregation=min,interval=1m,ooo-tolerance=2m}",
-    "max:double:{aggregation=max,interval=1m,ooo-tolerance=2m}",
-    "sum:double:{aggregation=sum,interval=1m,ooo-tolerance=2m}",
-    "count:long:{aggregation=count,interval=1m,ooo-tolerance=2m}"
+aggregating-delta-histogram-v2 {
+  columns = ["timestamp:ts",
+    "sum:double:{detectDrops=false,delta=true}",
+    "count:double:{detectDrops=false,delta=true}",
+    "h:hist:{counter=false,delta=true}",
+    "min:double:{detectDrops=false,delta=true}",
+    "max:double:{detectDrops=false,delta=true}",
+    "sumLast:double:{detectDrops=false,delta=true}"
   ]
-  value-column = "sum"
+  aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  aggregation-interval = 1m
+  aggregation-ooo-tolerance = 2m
+  value-column = "h"
+  downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  downsample-schema = "delta-histogram-v2"
+  downsample-period-marker = "time(0)"
 }
 ```
 
@@ -207,42 +239,30 @@ For 1 million partitions with 5 aggregated columns: ~263 MB additional memory
 ### Performance Characteristics
 
 - **Latency**: Samples delayed until bucket emission (max delay = interval + tolerance)
-  - Example: 30s interval + 60s tolerance = up to 90s delay
+  - Example: 1m interval + 2m tolerance = up to 3m delay
 - **CPU**: O(1) per sample for bucket lookup and aggregation
 - **Memory**: Bounded to 3 buckets per partition regardless of out-of-order patterns
 
-### Usage Examples
+### Usage Example
 
-**Simple gauge with sum aggregation:**
+**Delta histogram with out-of-order tolerance:**
 ```yaml
-aggregating-gauge {
-  columns = [
-    "timestamp:ts",
-    "value:double:{aggregation=sum,interval=30s,ooo-tolerance=60s}"
+aggregating-delta-histogram-v2 {
+  columns = ["timestamp:ts",
+    "sum:double:{detectDrops=false,delta=true}",
+    "count:double:{detectDrops=false,delta=true}",
+    "h:hist:{counter=false,delta=true}",
+    "min:double:{detectDrops=false,delta=true}",
+    "max:double:{detectDrops=false,delta=true}",
+    "sumLast:double:{detectDrops=false,delta=true}"
   ]
-  value-column = "value"
-}
-```
-
-**Counter with last aggregation:**
-```yaml
-aggregating-counter {
-  columns = [
-    "timestamp:ts",
-    "count:double:{aggregation=last,interval=30s,ooo-tolerance=60s}"
-  ]
-  value-column = "count"
-}
-```
-
-**Latency metrics with average:**
-```yaml
-aggregating-avg {
-  columns = [
-    "timestamp:ts",
-    "latency:double:{aggregation=avg,interval=1m,ooo-tolerance=2m}"
-  ]
-  value-column = "latency"
+  aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  aggregation-interval = 1m
+  aggregation-ooo-tolerance = 2m
+  value-column = "h"
+  downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  downsample-schema = "delta-histogram-v2"
+  downsample-period-marker = "time(0)"
 }
 ```
 

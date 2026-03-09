@@ -39,13 +39,14 @@ class AggregatingTimeSeriesPartition(
 
   import AggregatingTimeSeriesPartition._
 
-  // Extract aggregation configs from schema data columns
+  // Build aggregation configs from schema-level aggregators
   private val aggConfigs: Array[Option[AggregationConfig]] = {
-    schema.data.columns.zipWithIndex.map { case (col, idx) =>
-      col match {
-        case dc: filodb.core.metadata.DataColumn => dc.aggregationConfig.map(_.copy(columnIndex = idx))
-        case _ => None
-      }
+    val configMap = schema.data.aggregators.map(a => a.columnId -> a.aggType).toMap
+    schema.data.columns.indices.map { idx =>
+      configMap.get(idx).map(aggType =>
+        AggregationConfig(idx, aggType,
+          schema.data.aggregationIntervalMs,
+          schema.data.aggregationOooToleranceMs))
     }.toArray
   }
 
@@ -196,15 +197,6 @@ class AggregatingTimeSeriesPartition(
   }
 
   /**
-   * Returns statistics about active buckets.
-   * Useful for debugging and monitoring.
-   */
-  def bucketStats: Map[Int, BucketManagerStats] = {
-    // For compatibility, return empty map - use bucketAggregationStats instead
-    Map.empty
-  }
-
-  /**
    * Returns statistics about the bucket aggregation state.
    */
   def bucketAggregationStats: BucketAggregationStats = bucketState.stats
@@ -231,25 +223,6 @@ class AggregatingTimeSeriesPartition(
    * Returns None if no aggregation is configured.
    */
   def aggregationConfig: Option[AggregationConfig] = primaryConfig
-
-  /**
-   * Returns statistics about histogram aggregation state.
-   * For compatibility with existing interface.
-   */
-  def histogramAggStats: Map[Int, HistogramAggregationStats] = {
-    // Extract histogram stats from bucket state
-    val stats = bucketState.stats
-    aggConfigs.zipWithIndex.flatMap { case (configOpt, idx) =>
-      configOpt match {
-        case Some(config) if isHistogramColumn(idx) =>
-          Some(idx -> HistogramAggregationStats(
-            stats.activeBucketCount,
-            stats.finalizedBucketCount
-          ))
-        case _ => None
-      }
-    }.toMap
-  }
 
   /**
    * Forces emission of all active buckets.
@@ -289,9 +262,10 @@ class AggregatingTimeSeriesPartition(
    */
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
     if (hasAnyAggregation) {
-      // Flush all active buckets before switching
-      val currentTime = System.currentTimeMillis()
-      flushAllBuckets(currentTime, blockHolder, createChunkAtFlushBoundary = false,
+      // Use the latest sample timestamp from bucket state instead of wall clock
+      val latestTs = bucketState.stats.latestSampleTimestamp
+      val flushTime = if (latestTs == Long.MinValue) 0L else latestTs
+      flushAllBuckets(flushTime, blockHolder, createChunkAtFlushBoundary = false,
         flushIntervalMillis = None, acceptDuplicateSamples = true)
     }
 
@@ -311,9 +285,10 @@ object AggregatingTimeSeriesPartition {
     isHistogramColumn: Array[Boolean]
   ) extends RowReader {
 
+    // scalastyle:off null
     def notNull(columnNo: Int): Boolean = {
       if (columnNo == 0) true
-      else if (columnNo < columnValues.length) columnValues(columnNo) != None.orNull
+      else if (columnNo < columnValues.length) columnValues(columnNo) != null
       else false
     }
 
@@ -357,22 +332,22 @@ object AggregatingTimeSeriesPartition {
 
     def getString(columnNo: Int): String = {
       val value = if (columnNo == 0) timestamp.toString else columnValues(columnNo)
-      if (value == None.orNull) "" else value.toString
+      if (value == null) "" else value.toString
     }
 
     def getAny(columnNo: Int): Any = {
       if (columnNo == 0) timestamp
       else if (columnNo < columnValues.length) columnValues(columnNo)
-      else None.orNull
+      else null
     }
 
     def getBlobBase(columnNo: Int): Any = {
-      if (columnNo == 0 || columnNo >= columnValues.length) None.orNull
+      if (columnNo == 0 || columnNo >= columnValues.length) null
       else {
         columnValues(columnNo) match {
           case buf: org.agrona.MutableDirectBuffer => buf.byteArray()
           case buf: org.agrona.DirectBuffer => buf.byteArray()
-          case _ => None.orNull
+          case _ => null
         }
       }
     }
@@ -402,6 +377,7 @@ object AggregatingTimeSeriesPartition {
       }
     }
 
-    override def filoUTF8String(i: Int): filodb.memory.format.ZeroCopyUTF8String = None.orNull
+    override def filoUTF8String(i: Int): filodb.memory.format.ZeroCopyUTF8String = null
+    // scalastyle:on null
   }
 }

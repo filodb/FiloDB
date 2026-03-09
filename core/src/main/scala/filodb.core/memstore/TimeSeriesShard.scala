@@ -1199,10 +1199,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
 
       // Check if schema has aggregation configured
-      val hasAggregation = schema.data.columns.exists {
-        case dc: filodb.core.metadata.DataColumn => dc.hasAggregation
-        case _ => false
-      }
+      val hasAggregation = schema.data.hasAggregation
 
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
