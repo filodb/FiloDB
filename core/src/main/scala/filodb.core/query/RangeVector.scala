@@ -505,6 +505,10 @@ object SerializedRangeVector extends StrictLogging {
       (sch.columns(1).colType == DoubleColumn || sch.columns(1).colType == HistogramColumn)
   }
 
+  /** Skip NaNRowReader rows when schema has a StringColumn (e.g. quantile t-digest blobs). */
+  private def shouldSkipNaNStringRow(schema: RecordSchema, row: RowReader): Boolean =
+    schema.columns.lift(1).exists(_.colType == StringColumn) && row.isInstanceOf[NaNRowReader]
+
   /**
     * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
     * The most efficient option when you need to create multiple SRVs as the containers are automatically
@@ -528,13 +532,12 @@ object SerializedRangeVector extends StrictLogging {
           rows => while (rows.hasNext) {
               val nextRow = rows.next()
               // Don't encode empty / NaN data over the wire
-              val shouldSkip = schema.columns.lift(1).exists { col =>
-                val isStringNanRow   = col.colType == StringColumn && nextRow.isInstanceOf[NaNRowReader]
-                val isNanDouble      = col.colType == DoubleColumn && java.lang.Double.isNaN(nextRow.getDouble(1))
-                val isEmptyHistogram = col.colType == HistogramColumn && nextRow.getHistogram(1).isEmpty
-                isStringNanRow || canRemoveEmptyRows(rv.outputRange, schema) && (isNanDouble || isEmptyHistogram)
-              }
-              if (!shouldSkip) {
+              if (!shouldSkipNaNStringRow(schema, nextRow) && (
+                !canRemoveEmptyRows(rv.outputRange, schema) ||
+                schema.columns(1).colType == DoubleColumn &&
+                  !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
+                schema.columns(1).colType == HistogramColumn &&
+                  !nextRow.getHistogram(1).isEmpty)) {
                 numRows += 1
                 builder.addFromReader(nextRow, schema, 0)
               }
