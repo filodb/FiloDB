@@ -284,10 +284,12 @@ final class QuantileAggTransientRow() extends MutableRowReader {
     else throw new IllegalArgumentException()
   }
 
+  // Deep-copies blobBase to avoid corruption when the source QuantileRowAggregator reuses its
+  // shared ByteBuffer. Only called from tests (AggrOverRangeVectorsSpec), so no prod perf impact.
   override def copyFrom(r: RowReader): Unit = r match {
     case k: QuantileAggTransientRow =>
       timestamp = k.timestamp
-      blobBase = k.blobBase
+      blobBase = java.util.Arrays.copyOf(k.blobBase, k.blobBase.length)
       blobOffset = k.blobOffset
       blobLength = k.blobLength
     case _ => throw new IllegalArgumentException("Unknown Row reader")
