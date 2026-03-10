@@ -17,7 +17,7 @@ import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.memstore.PartKeyIndexRaw.{bytesRefToUnsafeOffset, createTempDir, END_TIME, START_TIME}
 import filodb.core.memstore.PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset
-import filodb.core.memstore.PartKeyQueryBuilder.removeRegexAnchors
+import filodb.core.memstore.PartKeyQueryBuilder.{removeRegexAnchors, validateNoUnescapedMiddleDollar}
 import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
@@ -586,7 +586,9 @@ abstract class PartKeyQueryBuilder {
 
     filter match {
       case EqualsRegex(value) =>
-        val regex = removeRegexAnchors(value.toString)
+        val originalRegex = value.toString
+        val regex = removeRegexAnchors(originalRegex)
+        validateNoUnescapedMiddleDollar(regex, originalRegex)
         if (regex == "") {
           // if label=~"" then match empty string or label not present condition too
           visitFilter(column, NotEqualsRegex(".+"))
@@ -609,7 +611,9 @@ abstract class PartKeyQueryBuilder {
         }
 
       case NotEqualsRegex(value) =>
-        val term = removeRegexAnchors(value.toString)
+        val originalRegex = value.toString
+        val term = removeRegexAnchors(originalRegex)
+        validateNoUnescapedMiddleDollar(term, originalRegex)
         visitStartBooleanQuery()
         visitMatchAllQuery()
         visitRegexQuery(column, term, OccurMustNot)
@@ -655,6 +659,40 @@ object PartKeyQueryBuilder {
    */
   def removeRegexAnchors(regex: String): String = {
     removeRegexTailDollarSign(regex.stripPrefix("^"))
+  }
+
+  /**
+   * Validates that the regex does not contain unescaped $ anchors after leading ^ and trailing $
+   * have been stripped by removeRegexAnchors. An unescaped $ in the middle of a regex is
+   * semantically nonsensical for full-string matching (e.g. .*$.* from an unresolved Grafana
+   * template variable) and will cause errors in the Tantivy index engine.
+   *
+   * @param regex the regex string after removeRegexAnchors has been applied.
+   * @param originalRegex the original regex string before anchor removal, used for error messages.
+   * @throws IllegalArgumentException if the regex contains unescaped $ characters.
+   */
+  def validateNoUnescapedMiddleDollar(regex: String, originalRegex: String): Unit = {
+    if (!regex.contains('$')) return
+    var i = 0
+    while (i < regex.length) {
+      if (regex.charAt(i) == '$') {
+        // Count preceding backslashes to determine if $ is escaped
+        var backslashes = 0
+        var j = i - 1
+        while (j >= 0 && regex.charAt(j) == '\\') {
+          backslashes += 1
+          j -= 1
+        }
+        // Even number of backslashes (including 0) means $ is an unescaped anchor
+        if (backslashes % 2 == 0) {
+          throw new IllegalArgumentException(
+            s"Invalid regex '$originalRegex': contains unescaped " +
+            s"$$ anchor in the middle of the pattern. This is likely caused by an unresolved " +
+            s"template variable. Use ${"\"\\$\""} for a literal dollar sign.")
+        }
+      }
+      i += 1
+    }
   }
 
   private def removeRegexTailDollarSign(regex: String): String = {
