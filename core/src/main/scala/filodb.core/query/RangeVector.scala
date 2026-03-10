@@ -712,6 +712,8 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
     }
   }
 
+  override def numRows: Option[Int] = Some(numRowsSerialized)
+
   /**
    * Estimates the total size (in bytes) of all rows after serialization.
    */
