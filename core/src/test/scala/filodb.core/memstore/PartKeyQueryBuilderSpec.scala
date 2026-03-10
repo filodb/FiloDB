@@ -210,6 +210,6 @@ class PartKeyQueryBuilderSpec extends AnyFunSpec with Matchers {
 
   it("should accept regex where $ appears only as escaped within character classes") {
     expectAcceptance("""[\$]""")       // escaped $ inside character class
-    expectAcceptance("""[\$a-z]+""")   // escaped $ in char class with range
+    expectAcceptance("[\\$" + "a-z]+")   // escaped $ in char class with range
   }
 }
