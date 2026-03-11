@@ -63,7 +63,7 @@ case class LabelValRow(ws: String, ns: String, label: String, labelVal: String, 
  *     _ws_ = "tag_value_as_regex"
  *  }
  * ]
- * filodb.labelchurnfinder.dataset = "dataset_name"
+ * filodb.labelchurnfinder.raw-dataset-name = "dataset_name"
  * }}}
  */
 class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable with StrictLogging {
@@ -77,7 +77,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
   @transient lazy private[labelchurnfinder] val colStore =
     new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
-  @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.dataset")
+  @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.raw-dataset-name")
   @transient lazy val datasetRef = DatasetRef(datasetName)
   @transient lazy private[labelchurnfinder] val filters = dsSettings.filodbConfig
     .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.map { case (k, v) => k -> v.r.pattern }.toSeq)
