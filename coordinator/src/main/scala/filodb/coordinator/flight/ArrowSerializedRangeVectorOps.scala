@@ -57,7 +57,21 @@ object ArrowSerializedRangeVectorOps {
                                 var bytesRemaining: Int = maxVecLen,
                                 // FIXME hard coded 5
                                 freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](5),
-                                finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)
+                                finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
+
+    def finishAndGetCurrentVsr(): VectorSchemaRoot = {
+      if (currentVsr != null) {
+        currentIsRvkVec.setValueCount(rowNum)
+        currentRvkBrVec.setValueCount(rowNum)
+        currentVsr.setRowCount(rowNum)
+        val result = currentVsr
+        currentVsr = null
+        result
+      } else {
+        null
+      }
+    }
+  }
 
   /**
    * Populates the given VectorSchemaRoot data from the given RangeVector
@@ -86,10 +100,12 @@ object ArrowSerializedRangeVectorOps {
     // TODO update metrics & query statistics on result bytes during RV serialization
 
     def addNewVsr(): Unit = {
-      if (state.currentIsRvkVec != null) state.currentIsRvkVec.setValueCount(state.rowNum)
-      if (state.currentRvkBrVec != null) state.currentRvkBrVec.setValueCount(state.rowNum)
-      if (state.currentVsr != null) state.currentVsr.setRowCount(state.rowNum)
-      if (state.currentVsr != null) state.finishedVsrs += state.currentVsr
+      if (state.currentVsr != null) {
+        state.currentIsRvkVec.setValueCount(state.rowNum)
+        state.currentRvkBrVec.setValueCount(state.rowNum)
+        state.currentVsr.setRowCount(state.rowNum)
+        state.finishedVsrs += state.currentVsr
+      }
 
       if (state.freeVsrs.isEmpty) {
         state.currentVsr = VectorSchemaRoot.create(arrowSrvSchema, allocator)
@@ -165,6 +181,7 @@ object ArrowSerializedRangeVectorOps {
                 recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
                 addFromReader(nextRow)
               } else {
+                if (state.rowNum > maxNumRows) addNewVsr()
                 state.currentRvkBrVec.setNull(state.rowNum)
                 state.currentIsRvkVec.set(state.rowNum, 0)
                 state.rowNum += 1

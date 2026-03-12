@@ -82,6 +82,11 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
               Using.resource(unloader.getRecordBatch) { rb =>
                 loader.load(rb)
               }
+              qLogger.debug(s"Got next vsr from flight response for vsrHash=${reqVsr.hashCode()}" +
+                s"queryPlanId=${plan.planId} rowCount=${reqVsr.getRowCount} " +
+                s"vectorSize0=${reqVsr.getVector(0).getValueCount} " +
+                s"vectorSize1=${reqVsr.getVector(1).getValueCount}")
+
               require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
               vsrs += reqVsr
               qLogger.debug(s"FlightPlanDispatcher received VSR planId=${plan.planId}")

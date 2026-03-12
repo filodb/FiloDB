@@ -228,15 +228,23 @@ trait FlightQueryExecutor extends StrictLogging {
                                             rv.asInstanceOf[SerializableRangeVector].hasFormulatedRows))) {
                 logger.debug(s"Applying direct VSR streaming optimization for queryPlanId=${execPlan.planId} " +
                   s"since all RVs in result are ArrowSerializedRangeVector2")
-                // need to convert to set to avoid duplicates since multiple RVs can point to the same VSR
-                val resultVsrs = res.result.iterator.flatMap(_.asInstanceOf[ArrowSerializedRangeVector].vsrs).toSet
+                // need to deduplicate to avoid sending the same VSR twice (multiple RVs can point to same VSR)
+                // use distinct (preserves order, deduplicates by identity) instead of toSet (reorders)
+                val resultVsrs = res.result.iterator.flatMap {
+                  case asrv: ArrowSerializedRangeVector => asrv.vsrs  // only cast ArrowSerializedRangeVector
+                  case _ => Iterator.empty  // skip SRVs like ScalarFixedDouble (they are already in VSRs)
+                }.toSeq.distinct
                 Observable.fromIterable(resultVsrs).map { vsr =>
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
                   Using.resource(unloader.getRecordBatch) { rb =>
                     loader.load(rb)
                   }
-                  logger.debug(s"Putting next arrow vsr into flight response for queryPlanId=${execPlan.planId} ")
+                  logger.debug(s"Putting arrow vsr directly into flight response queryPlanId=${execPlan.planId} " +
+                    s"rowCount=${state.flightVsr.getRowCount} " +
+                    s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                    s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
+
                   listener.putNext()
                 }.completedL
               } else {
@@ -271,7 +279,10 @@ trait FlightQueryExecutor extends StrictLogging {
                           Using.resource(unloader.getRecordBatch) { rb =>
                             loader.load(rb)
                           }
-                          logger.debug(s"Putting next vsr into flight response for queryPlanId=${execPlan.planId} ")
+                          logger.debug(s"Putting next vsr into flight response for " +
+                            s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
+                            s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                            s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
                           listener.putNext()
                           state.freeVsrs.offer(vsr) // add to free pool after sending over flight
                         }
@@ -281,14 +292,18 @@ trait FlightQueryExecutor extends StrictLogging {
                 }.completedL.map { _ =>
                   FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
                   if (state.currentVsr != null) {
-                    val unloader = new VectorUnloader(state.currentVsr)
+                    val lastVsr = state.finishAndGetCurrentVsr()
+                    val unloader = new VectorUnloader(lastVsr)
                     val loader = new VectorLoader(state.flightVsr)
                     Using.resource(unloader.getRecordBatch) { rb =>
                       loader.load(rb)
                     }
-                    logger.debug(s"Putting final vsr into flight response for queryPlanId=${execPlan.planId} ")
+                    logger.debug(s"Putting last vsr into flight response for " +
+                      s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
+                      s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                      s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
                     listener.putNext()
-                    state.freeVsrs.offer(state.currentVsr) // add to free pool after sending over flight
+                    state.freeVsrs.offer(lastVsr) // add to free pool after sending over flight
                   }
                 }
               }

@@ -635,6 +635,7 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
                                  val outputRange: Option[RvRange]) extends RangeVector with SerializableRangeVector {
 
   val hasFormulatedRows: Boolean = false
+  val thisAsrv = this
 
   // scalastyle:off method.length
   override def rows(): RangeVectorCursor = {
@@ -690,7 +691,9 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
             emptyHist.timestamp = curTimestamp
             emptyHist
           } else {
-            throw new IllegalStateException("Encountered null row schema that cannot be removed")
+            VSRDebug.debug(thisAsrv)
+            throw new IllegalStateException(s"Encountered null at row $currentRowInVsr that cannot" +
+              s" be removed. Debug info is available above.")
           }
         } else {
           // Read the binary record from the vector
@@ -721,5 +724,13 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
     // FIXME since multiple RVs can be serialized into the same VSR, this may not be accurate for all RVs.
     0L
   }
+}
 
+object VSRDebug extends StrictLogging {
+  def debug(asrv: ArrowSerializedRangeVector): Unit = {
+    logger.info(s"Debugging ArrowSerializedRangeVector: key=${asrv.key}, " +
+      s"numRowsSerialized=${asrv.numRowsSerialized}, outputRange=${asrv.outputRange}, " +
+      s"schema=${asrv.schema}, startVsrIndex=${asrv.startVsrIndex}, rvkRowIndex=${asrv.rvkRowIndex}")
+    logger.info(s"Rows: \n ${asrv.vsrs.map(_.contentToTSVString()).mkString("\n")}")
+  }
 }

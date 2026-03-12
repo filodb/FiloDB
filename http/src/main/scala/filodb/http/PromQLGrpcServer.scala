@@ -21,8 +21,8 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.metrics.{FilodbMetrics, MetricsHistogram}
-import filodb.core.query.{FlightAllocator, IteratorBackedRangeVector, QueryConfig, QueryContext, QuerySession,
-                          QueryStats, SerializedRangeVector}
+import filodb.core.query.{FlightAllocator, IteratorBackedRangeVector, QueryConfig, QueryContext,
+                          QuerySession, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
@@ -188,20 +188,16 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           val qContext = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
 
-          // Create FlightAllocator if flight is enabled
-          val flightAllocator = if (
-            queryServerConfig.hasPath("flight-client-enabled") &&
-              queryServerConfig.getBoolean("flight-client-enabled")
-          ) {
-            Some(new FlightAllocator(FlightAllocator.serverAllocator.newChildAllocator(
-              s"grpc-query-${qContext.queryId}", 0, queryServerConfig.getInt("flight-per-request-max-memory-bytes")
-            )))
-          } else None
-
-          val querySession = QuerySession(qContext, queryConfig, catchMultipleLockSetErrors = true,
-            flightAllocator = flightAllocator)
-
-          val eval = Try {
+          Task.eval {
+            // Create FlightAllocator if flight is enabled
+            val flightAllocator = if (queryServerConfig.hasPath("flight-client-enabled") &&
+                                      queryServerConfig.getBoolean("flight-client-enabled")) {
+              Some(new FlightAllocator(FlightAllocator.serverAllocator.newChildAllocator(
+                s"grpc-query-${qContext.queryId}", 0, queryServerConfig.getInt("flight-per-request-max-memory-bytes")
+              )))
+            } else None
+            QuerySession(qContext, queryConfig, catchMultipleLockSetErrors = true, flightAllocator = flightAllocator)
+          }.bracket { querySession =>
             val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
             // Catch parsing errors, query materialization and errors in dispatch
             val logicalPlan = Parser.queryRangeToLogicalPlan(
@@ -210,16 +206,15 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
             val exec = queryPlanner.materialize(logicalPlan, qContext)
             queryPlanner.dispatchExecPlan(exec, querySession, rp.span)
-              .doOnFinish(_ => Task.eval(querySession.close()))  // Ensure cleanup
-              .foreach((qr: QueryResponse) => rp.processQueryResponse(qr))
-          }
-          eval match {
-            case Failure(t)   =>
-              querySession.close()  // Cleanup on failure
+              .map((qr: QueryResponse) => rp.processQueryResponse(qr))
+          } { querySession =>
+            Task.eval(querySession.close())
+          }.runAsync {
+            case Left(t) =>
               logger.error("Caught failure while executing query", t)
               rp.processQueryResponse(QueryError(qContext.queryId, QueryStats(), t))
               rp.span.fail("Query execution failed", t)
-            case _            =>  rp.span.mark("query execution successful")
+            case Right(_) => rp.span.mark("query execution successful")
           }
         }
 
