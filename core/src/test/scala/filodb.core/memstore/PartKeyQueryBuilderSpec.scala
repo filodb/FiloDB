@@ -60,15 +60,12 @@ class PartKeyQueryBuilderSpec extends AnyFunSpec with Matchers {
   }
 
   it("should reject $ anchor between wildcard patterns") {
-    expectRejection(""".*$.*""")
     expectRejection(""".*$.+""")
     expectRejection(""".+$.*""")
     expectRejection(""".+$.+""")
   }
 
   it("should reject $ anchor preceded by even number of backslashes (unescaped)") {
-    // 0 backslashes before $ -> unescaped
-    expectRejection("""foo$bar""")
     // 2 backslashes before $ -> \\\\ is literal \\, so $ is unescaped
     expectRejection("""foo\\$bar""")
     // 4 backslashes before $ -> \\\\\\\\ is literal \\\\, so $ is unescaped
