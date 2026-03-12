@@ -673,23 +673,35 @@ object PartKeyQueryBuilder {
    */
   def validateNoUnescapedMiddleDollar(regex: String, originalRegex: String): Unit = {
     if (!regex.contains('$')) return
+
     var i = 0
+    var inCharClass = false
+    var escaped = false
+
     while (i < regex.length) {
-      if (regex.charAt(i) == '$') {
-        // Count preceding backslashes to determine if $ is escaped
-        var backslashes = 0
-        var j = i - 1
-        while (j >= 0 && regex.charAt(j) == '\\') {
-          backslashes += 1
-          j -= 1
-        }
-        // Even number of backslashes (including 0) means $ is an unescaped anchor
-        if (backslashes % 2 == 0) {
+      val ch = regex.charAt(i)
+
+      if (escaped) {
+        // Current character is escaped; treat it as literal.
+        escaped = false
+      } else ch match {
+        case '\\' =>
+          // Escape the next character.
+          escaped = true
+        case '[' if !inCharClass =>
+          // Entering a character class.
+          inCharClass = true
+        case ']' if inCharClass =>
+          // Leaving a character class.
+          inCharClass = false
+        case '$' if !inCharClass =>
+          // Unescaped $ outside of a character class is treated as an invalid anchor.
           throw new IllegalArgumentException(
             s"Invalid regex '$originalRegex': contains unescaped " +
             s"$$ anchor in the middle of the pattern. This is likely caused by an unresolved " +
             s"template variable. Use ${"\"\\$\""} for a literal dollar sign.")
-        }
+        case _ =>
+          // Other characters are treated as literals for the purposes of this validation.
       }
       i += 1
     }
