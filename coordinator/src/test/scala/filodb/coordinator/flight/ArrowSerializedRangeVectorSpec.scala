@@ -126,6 +126,8 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
 
+      srvs.foreach(s => VSRDebug.debug(s.asInstanceOf[ArrowSerializedRangeVector]))
+
       srvs.length shouldEqual 1
       val srv = srvs.head
 

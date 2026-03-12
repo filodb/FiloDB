@@ -46,6 +46,7 @@ object FlightKryoSerDeser {
 
     def release(ctx: KryoCtx): Unit = {
       ctx.out.clear()
+      ctx.kryo.reset()
       q.offer(ctx)
       // consider dropping the instance and not adding back to pool if buffer is over a capacity limit
     }
@@ -91,13 +92,16 @@ object FlightKryoSerDeser {
   }
 
   private def otherInit(k: Kryo): Unit = {
-    k.register(Some.getClass, 64)
-    k.register(Tuple2.getClass, 65)
+    k.register(classOf[Some[AnyRef]], 64)
+    k.register(classOf[Tuple2[_, _]], 65)
     k.register(None.getClass, 66)
     k.register(Nil.getClass, 67)
     k.register(::.getClass, 68)
-    k.register(ArrayBuffer.getClass, 69)
-    k.register(Vector.getClass, 70)
+    k.register(classOf[ArrayBuffer[_]], 69)
+    k.register(classOf[Vector[_]], 70)
+    // Register Flight-specific classes with stable IDs for deterministic serialization
+    k.register(classOf[RvRange], 71)
+    k.register(classOf[RvMetadata], 72)
 
     // Register Guava classes used by Arrow Flight exceptions
     k.register(classOf[com.google.common.collect.LinkedListMultimap[_, _]])

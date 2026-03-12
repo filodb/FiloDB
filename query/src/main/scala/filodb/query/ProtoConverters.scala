@@ -980,7 +980,7 @@ object ProtoConverters {
         case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
         case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
         case asrv2: ArrowSerializedRangeVector  =>
-          // FIXME This is behind feature flag and should be activated in prod since performance will be bad, but we
+          // FIXME This is behind feature flag and should not be activated in prod since performance will be bad, but we
           //  need this for testing and prototyping. We will add a more efficient way to convert Arrow vectors to proto
           //  in the future.
           val srvBuilder = SerializedRangeVector.newBuilder()
