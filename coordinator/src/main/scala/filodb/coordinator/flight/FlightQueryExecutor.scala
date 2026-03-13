@@ -26,7 +26,7 @@ import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConfig, QueryContext,
-  QueryLimitException, QuerySession, QueryStats, RangeVector, SerializableRangeVector, SerializedRangeVector}
+  QueryLimitException, QuerySession, QueryStats, SerializableRangeVector, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
@@ -250,44 +250,47 @@ trait FlightQueryExecutor extends StrictLogging {
               } else {
                 val recSchema = res.resultSchema.toRecordSchema
                 val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
+                // Track sent VSRs to avoid duplicates when ASRVs are mixed with non-ASRV types
+                // (e.g., or-join combining Arrow Flight-dispatched and Kryo-dispatched sub-query results)
+                val sentVsrs = scala.collection.mutable.Set.empty[AnyRef]
                 Observable.fromIterable(res.result).mapEval { rv =>
+                  if (rv.isInstanceOf[ArrowSerializedRangeVector]) {
+                    // Mixed is unexpected but we should still be able to handle it - just log at
+                    // debug level since it is not an error. We will continue to serialize them into ASRVs again
+                    // to avoid errors. Dont send the VSRs out since it will break the state continuity across VSRs
+                    logger.debug(s"Understand why we see SRV and Arrow Results: queryContext=${execPlan.queryContext}")
+                  }
                   state.flightVsr.getFieldVectors.forEach(_.setValueCount(0)) // reset vectors before each RV is loaded
                   state.flightVsr.setRowCount(0)
-                  rv match {
-                    case _: ArrowSerializedRangeVector =>
-                      throw new IllegalStateException("Unexpected ArrowSerializedRangeVector in query result," +
-                        "should have been handled by direct VSR streaming optimization")
-                    case rv: RangeVector =>
-                      Task.eval {
-                        // This lambda triggers intensive iterators and calculations and should be done on query sched
-                        FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
-                        checkAllocatorLimits(flightAllocator, execPlan.queryContext)
-                        logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
-                        flightAllocator.withRequestAllocator { allocator =>
-                          ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
-                            s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats,
-                            allocator, state, brIterator)
-                        } {
-                          throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
-                        }
-                      }.executeOn(queryScheduler).asyncBoundary.map { _ =>
-                        FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-                        // unload each finishedVsr into vec and putNext to listener
-                        state.finishedVsrs.foreach { vsr =>
-                          val unloader = new VectorUnloader(vsr)
-                          val loader = new VectorLoader(state.flightVsr)
-                          Using.resource(unloader.getRecordBatch) { rb =>
-                            loader.load(rb)
-                          }
-                          logger.debug(s"Putting next vsr into flight response for " +
-                            s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
-                            s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
-                            s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
-                          listener.putNext()
-                          state.freeVsrs.offer(vsr) // add to free pool after sending over flight
-                        }
-                        state.finishedVsrs.clear() // clear finished list after sending all over flight
+                  Task.eval {
+                    // This lambda triggers intensive iterators and calculations and should be done on query sched
+                    FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
+                    checkAllocatorLimits(flightAllocator, execPlan.queryContext)
+                    logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
+                    flightAllocator.withRequestAllocator { allocator =>
+                      ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
+                        s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats,
+                        allocator, state, brIterator)
+                    } {
+                      throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
+                    }
+                  }.executeOn(queryScheduler).asyncBoundary.map { _ =>
+                    FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                    // unload each finishedVsr into vec and putNext to listener
+                    state.finishedVsrs.foreach { vsr =>
+                      val unloader = new VectorUnloader(vsr)
+                      val loader = new VectorLoader(state.flightVsr)
+                      Using.resource(unloader.getRecordBatch) { rb =>
+                        loader.load(rb)
                       }
+                      logger.debug(s"Putting next vsr into flight response for " +
+                        s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
+                        s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                        s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
+                      listener.putNext()
+                      state.freeVsrs.offer(vsr) // add to free pool after sending over flight
+                    }
+                    state.finishedVsrs.clear() // clear finished list after sending all over flight
                   }
                 }.completedL.map { _ =>
                   FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)

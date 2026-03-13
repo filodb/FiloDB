@@ -372,11 +372,13 @@ case class QuerySession(qContext: QueryContext,
     lock = Some(toSet)
   }
 
-  def close(): Unit = {
+  def close(skipAllocatorClose: Boolean = false): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
-    flightAllocator.foreach(_.close())
-    flightAllocator = None
+    if (!skipAllocatorClose) {
+      flightAllocator.foreach(_.close())
+      flightAllocator = None
+    }
   }
 }
 
