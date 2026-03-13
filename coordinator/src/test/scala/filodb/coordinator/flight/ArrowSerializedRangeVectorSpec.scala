@@ -277,7 +277,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       // we choose 52408 because next RVK is written at row 52409, and new VSR is created for 52410
       // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
       // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR
-      val largeDataset = (1 to 52408).map { i =>
+      val largeDataset = (1 to 52415).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -296,7 +296,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
 
       // Should have created multiple VSRs
       allVsrs.length shouldEqual 2
