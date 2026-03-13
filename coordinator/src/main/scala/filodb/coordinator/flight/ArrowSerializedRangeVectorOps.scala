@@ -136,7 +136,7 @@ object ArrowSerializedRangeVectorOps {
       builder.lastContainer.iterate(brIterator).foreach { br =>
         // check and ensure br.recordLength is available in vector capacity,
         // if not then create a new vector and add to vsrs
-        if (state.bytesRemaining < br.recordLength || state.rowNum > maxNumRows) {
+        if (state.bytesRemaining < br.recordLength || state.rowNum >= maxNumRows) {
           addNewVsr()
         }
         state.currentIsRvkVec.set(state.rowNum, 0)

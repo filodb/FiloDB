@@ -44,7 +44,8 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
                               preventRangeVectorSerialization = plan.clientParams.preventRangeVectorSerialization)
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadlineMs.milliseconds)
-        .guarantee(Task.eval(querySession.close()))
+        // skip closing flight allocator since it is owned by caller and simply passed down
+        .guarantee(Task.eval(querySession.close(skipAllocatorClose = true)))
         .onErrorRecoverWith {
         case e: TimeoutException =>
          qLogger.error(s"TimeoutException for query id: ${plan.execPlan.queryContext.queryId}: ${e.getMessage}")

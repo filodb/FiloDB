@@ -13,7 +13,7 @@ import org.jctools.queues.MpmcArrayQueue
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import filodb.coordinator.client.KryoInit
-import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationState
+import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.{maxNumRows, VsrPopulationState}
 import filodb.core.query._
 
 object FlightKryoSerDeser {
@@ -160,7 +160,7 @@ object FlightKryoSerDeser {
       val k = kryoPool.borrow()
       try {
         k.kryo.writeClassAndObject(k.out, obj)
-        if (state.bytesRemaining < k.out.position()) needNewVec()
+        if (state.bytesRemaining < k.out.position() || state.rowNum >= maxNumRows) needNewVec()
         state.currentRvkBrVec.set(state.rowNum, k.out.getBuffer, 0, k.out.position())
         state.currentIsRvkVec.set(state.rowNum, 1)
         state.bytesRemaining -= k.out.position()
