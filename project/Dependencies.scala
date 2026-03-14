@@ -42,8 +42,9 @@ object Dependencies {
   val circeParser       = "io.circe"                   %% "circe-parser"         % "0.9.3"
 
   lazy val commonDeps = Seq(
-    "io.kamon" %% "kamon-bundle"  % kamonBundleVersion,
-    "io.kamon" %% "kamon-testkit" % kamonBundleVersion % Test,
+    "io.kamon" %% "kamon-bundle"                        % kamonBundleVersion,
+    "io.kamon" %% "kamon-testkit"                       % kamonBundleVersion % Test,
+    "io.kamon" %% "kamon-opentelemetry"                 % kamonBundleVersion excludeAll(excludegrpc),
     "io.opentelemetry"             % "opentelemetry-api"                    % otelVersion,
     "io.opentelemetry"             % "opentelemetry-sdk-metrics"            % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-otlp"          % otelVersion,
