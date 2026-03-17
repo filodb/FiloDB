@@ -212,10 +212,14 @@ class SingleClusterPlanner(val dataset: Dataset,
       else
         throw new RuntimeException(s"Shard: $shard is not available")
     }
+    getAkkaOrFlightDispatcher(targetActor)
+  }
+
+  private def getAkkaOrFlightDispatcher(targetActor: ActorRef): PlanDispatcher = {
     if (flightEnabled) {
       qLogger.debug(s"Converting $targetActor to Flight ... ")
       val location = Location.forGrpcInsecure(targetActor.path.address.host.get,
-         FiloDBFlightProducer.akkaPortToFlightPort(targetActor.path.address.port.get))
+        FiloDBFlightProducer.akkaPortToFlightPort(targetActor.path.address.port.get))
       SingleClusterFlightPlanDispatcher(location, clusterName)
     } else {
       ActorPlanDispatcher(targetActor, clusterName)
@@ -241,7 +245,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       if (targetActor == ActorRef.noSender) {
         getRemoteDispatcherForShard(shard, queryContext)
       } else {
-        ActorPlanDispatcher(targetActor, clusterName)
+        getAkkaOrFlightDispatcher(targetActor)
       }
     } else {
       getRemoteDispatcherForShard(shard, queryContext)
