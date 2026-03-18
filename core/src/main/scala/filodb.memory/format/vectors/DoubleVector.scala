@@ -235,6 +235,9 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
                 start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
+    if (SimdNativeMethods.enabled) {
+      return SimdNativeMethods.simdSumDouble(vector + OffsetData, start, end, ignoreNaN)
+    }
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = Double.NaN
@@ -261,6 +264,9 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
+    if (SimdNativeMethods.enabled) {
+      return SimdNativeMethods.simdCountDouble(vector + OffsetData, start, end)
+    }
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var count = 0
