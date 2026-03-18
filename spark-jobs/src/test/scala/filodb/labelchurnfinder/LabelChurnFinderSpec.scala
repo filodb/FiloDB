@@ -227,7 +227,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       LabelSketch1hCol, LabelSketch3dCol, LabelSketch7dCol)
 
     // Call actionOnLabelStats
-    lcf.actionOnLabelStats(testDf, mockProducer)
+    lcf.actionOnLabelStats(testDf, Some(mockProducer))
 
     // Verify publishLabelStats was called once
     verify(mockProducer, times(1)).publishLabelStats(any[DataFrame])
