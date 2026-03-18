@@ -207,9 +207,15 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
         ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
       }
 
-      val samplesScannedRowCountConsumer = (rowsScanned: Long) => QueryUtils.trackSamplesScanned(
-        seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
-        List(lookupRes.samplesScannedCtr), resultSchema, querySession.queryConfig.samplesScannedConfig)
+      // Add leaf-level samples-scanned into the QueryStats.
+      val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+      def samplesScannedRowCountConsumer(rowsScanned: Long) = {
+        if (samplesScannedConfig.leafSamplesEnabled) {
+          QueryUtils.trackSamplesScanned(
+            seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
+            querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+        }  // else no-op
+      }
 
       RawDataRangeVector(
         key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, samplesScannedRowCountConsumer,

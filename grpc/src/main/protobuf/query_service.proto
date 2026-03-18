@@ -407,20 +407,25 @@ message PlanDispatcherContainer {
 }
 
 message SamplesScannedConfig {
-  bool intermediateSamplesEnabled                       = 1;
-  map<string, double> valueColumnToRowMultiplier        = 2;
-  double defaultSamplesPerRow                           = 3;
-  double defaultSamplesPerSeries                        = 4;
-  double defaultSamplesPerPartKeyByte                   = 5;
-  map<string, double> classToSamplesPerRow              = 6;
-  map<string, double> classToSamplesPerSeries           = 7;
-  map<string, double> classToSamplesPerPartKeyByte      = 8;
-  double defaultSamplesPerChildRow                      = 9;
-  double defaultSamplesPerChildSeries                   = 10;
-  double defaultSamplesPerChildPartKeyByte              = 11;
-  map<string, double> classToSamplesPerChildRow         = 12;
-  map<string, double> classToSamplesPerChildSeries      = 13;
-  map<string, double> classToSamplesPerChildPartKeyByte = 14;
+  bool leafSamplesEnabled                               = 1;
+  bool execResultSamplesEnabled                         = 2;
+  bool execChildSamplesEnabled                          = 3;
+  bool rvtSamplesEnabled                                = 4;
+  bool rvtChildSamplesEnabled                           = 5;
+  bool srvSamplesEnabled                                = 6;
+  map<string, double> valueColumnToRowMultiplier        = 7;
+  double defaultSamplesPerRow                           = 8;
+  double defaultSamplesPerSeries                        = 9;
+  double defaultSamplesPerPartKeyByte                   = 10;
+  map<string, double> classToSamplesPerRow              = 11;
+  map<string, double> classToSamplesPerSeries           = 12;
+  map<string, double> classToSamplesPerPartKeyByte      = 13;
+  double defaultSamplesPerChildRow                      = 14;
+  double defaultSamplesPerChildSeries                   = 15;
+  double defaultSamplesPerChildPartKeyByte              = 16;
+  map<string, double> classToSamplesPerChildRow         = 17;
+  map<string, double> classToSamplesPerChildSeries      = 18;
+  map<string, double> classToSamplesPerChildPartKeyByte = 19;
 }
 
 message QueryConfig {

@@ -122,7 +122,12 @@ case class CachingConfig(
  * Deserialization will fail if class names and packages are not consistent across partitions.
  * *******************************************************************************************
  *
- * @param intermediateSamplesEnabled toggle whether-or-not anything above leaf scans are counted.
+ * @param leafSamplesEnabled toggle whether-or-not leaf samples are counted.
+ * @param execResultSamplesEnabled toggle whether-or-not immediate doExecute samples are counted.
+ * @param execChildSamplesEnabled toggle whether-or-not ExecPlan child samples are counted.
+ * @param rvtSamplesEnabled toggle whether-or-not RangeVectorTransformer samples are counted.
+ * @param rvtChildSamplesEnabled toggle whether-or-not RangeVectorTransformer child samples are counted.
+ * @param srvSamplesEnabled toggle whether-or-not SerializedRangeVector samples are counted.
  * @param valueColumnToRowMultiplier maps value column types to multipliers applied to samples added per row.
  * @param defaultSamplesPerRow the default count of samples added per row; overridden by classToSamplesPerRow.
  * @param defaultSamplesPerSeries the count of samples added per time-series; overridden by classToSamplesPerSeries.
@@ -147,7 +152,12 @@ case class CachingConfig(
  *                                          overrides defaultChildSamplesPerPartKeyByte.
  */
 case class SamplesScannedConfig(
-                                 intermediateSamplesEnabled: Boolean = false,
+                                 leafSamplesEnabled: Boolean = true,
+                                 execResultSamplesEnabled: Boolean = false,
+                                 execChildSamplesEnabled: Boolean = false,
+                                 rvtSamplesEnabled: Boolean = false,
+                                 rvtChildSamplesEnabled: Boolean = false,
+                                 srvSamplesEnabled: Boolean = false,
 
                                  valueColumnToRowMultiplier: Map[ColumnType, Double] = Map(
                                    ColumnType.HistogramColumn -> 20

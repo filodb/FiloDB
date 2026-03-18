@@ -102,7 +102,12 @@ object ProtoConverters extends StrictLogging {
   implicit class SamplesScannedConfigToProtoConverter(config: SamplesScannedConfig) {
     def toProto: GrpcMultiPartitionQueryService.SamplesScannedConfig = {
       val builder = GrpcMultiPartitionQueryService.SamplesScannedConfig.newBuilder()
-      builder.setIntermediateSamplesEnabled(config.intermediateSamplesEnabled)
+      builder.setLeafSamplesEnabled(config.leafSamplesEnabled)
+      builder.setExecResultSamplesEnabled(config.execResultSamplesEnabled)
+      builder.setExecChildSamplesEnabled(config.execChildSamplesEnabled)
+      builder.setRvtSamplesEnabled(config.rvtSamplesEnabled)
+      builder.setRvtChildSamplesEnabled(config.rvtChildSamplesEnabled)
+      builder.setSrvSamplesEnabled(config.srvSamplesEnabled)
       config.valueColumnToRowMultiplier.foreach { case (colType, mult) =>
         builder.putValueColumnToRowMultiplier(colType.toString, mult)
       }
@@ -138,7 +143,12 @@ object ProtoConverters extends StrictLogging {
   implicit class SamplesScannedConfigFromProtoConverter(config: GrpcMultiPartitionQueryService.SamplesScannedConfig) {
     def fromProto: SamplesScannedConfig = {
       SamplesScannedConfig(
-        config.getIntermediateSamplesEnabled,
+        config.getLeafSamplesEnabled,
+        config.getExecResultSamplesEnabled,
+        config.getExecChildSamplesEnabled,
+        config.getRvtSamplesEnabled,
+        config.getRvtChildSamplesEnabled,
+        config.getSrvSamplesEnabled,
         config.getValueColumnToRowMultiplierMap.asScala
           .filter { case (colTypeName, _) =>
             val parseTry = Try(ColumnType.withName(colTypeName))

@@ -77,9 +77,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       val rvObs = Observable.fromTask(qResTask)
         .map(_.result)
         .flatMap(Observable.fromIterable(_))
-      val samplesScannedCounters = qResTask.map(qRes =>
-        qRes.queryStats.stat.map{ case (_, stat) => stat.samplesScanned }.toList)
-      ExecResult(rvObs, schemaTask, samplesScannedCounters)
+      ExecResult(rvObs, schemaTask)
     }
   }
 

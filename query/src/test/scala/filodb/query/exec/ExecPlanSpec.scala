@@ -5,7 +5,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStor
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.DatasetRef
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PerQueryLimits, PlannerParams, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, SamplesScannedConfig, SerializedRangeVector, Stat, TransientHistRow, TransientRow}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PerQueryLimits, PlannerParams, QueryConfig, QueryContext, QuerySession, QueryStats, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, SamplesScannedConfig, SerializedRangeVector, TransientHistRow, TransientRow}
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.vectors.{GeometricBuckets, HistogramBuckets, LongHistogram}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -19,9 +19,6 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import ZeroCopyUTF8String._
-
-
-import java.util.concurrent.atomic.AtomicLong
 
 // scalastyle:off number.of.methods
 class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -77,11 +74,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
   def makeFixedLeafExecPlan(rvs: Seq[RangeVector], schema: ResultSchema,
                             qContext: QueryContext = QueryContext(),
                             planDispatcher: Option[PlanDispatcher] = None,
-                            doExecuteParamAssertion: (ChunkSource, QuerySession) => Boolean = (_, _) => true,
-                            samplesScannedCounters: List[AtomicLong] = Nil): ExecPlan = {
+                            doExecuteParamAssertion: (ChunkSource, QuerySession) => Boolean = (_, _) => true):
+  ExecPlan = {
     new TestLeafPlan(qContext, planDispatcher, doExecuteFunc = (src: ChunkSource, session: QuerySession) => {
       assert(doExecuteParamAssertion(src, session), "Failed in parameter assertion in doExecute")
-      ExecResult(Observable.fromIterable(rvs), Task.now(schema), Task.now(samplesScannedCounters))
+      ExecResult(Observable.fromIterable(rvs), Task.now(schema))
     })
   }
 
@@ -317,6 +314,18 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
   describe("samples-scanned accounting tests") {
+
+    def assertSamplesScanned(queryStats: QueryStats, expectedCounts: Map[String, Long]): Unit = {
+      // Subtracting one to account for the Nil key; Nil is always added.
+      assert(queryStats.stat.size - 1 == expectedCounts.size)
+      for ((key, value) <- expectedCounts) {
+        assert(value == queryStats.stat(Seq(key)).samplesScanned.get())
+      }
+      // Better also have the Nil key sine we asserted different sizes above.
+      assert(queryStats.stat.contains(Nil))
+      assert(queryStats.stat(Nil).samplesScanned.get() == 0)
+    }
+
     it("should correctly count single-plan samples") {
       val numRvRows = 10
       val range = Some(RvRange(0, 1, numRvRows - 1))
@@ -343,7 +352,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         // -> 10*2*3=60 row samples; 1*5=5 series samples; 6*7=42 pk samples
         // -> 107 total samples before serialization
         // -> 214 total samples after serialization
-        intermediateSamplesEnabled = true,
+        execResultSamplesEnabled = true,
+        execChildSamplesEnabled = true,
+        rvtSamplesEnabled = true,
+        rvtChildSamplesEnabled = true,
+        srvSamplesEnabled = true,
         valueColumnToRowMultiplier = Map(ColumnType.DoubleColumn -> 2),
         defaultSamplesPerRow = 999,
         defaultSamplesPerSeries = 999,
@@ -364,17 +377,16 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
       val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
 
-      samplesScannedQuerySession.queryStats.stat.put(List(), Stat())
-      val samplesScannedCounter = samplesScannedQuerySession.queryStats.stat(List()).samplesScanned
-
       val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
       val plan = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter))
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        })
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assert(samplesScannedCounter.get() == 214,
-            "unexpected counter value: " + samplesScannedCounter.get())
+          assertSamplesScanned(res.queryStats, Map("key" -> 214))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -422,7 +434,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         //   -> 256 child samples
         //   -> 390 total samples
         // -> 887 total samples
-        intermediateSamplesEnabled = true,
+        execResultSamplesEnabled = true,
+        execChildSamplesEnabled = true,
+        rvtSamplesEnabled = true,
+        rvtChildSamplesEnabled = true,
+        srvSamplesEnabled = true,
         valueColumnToRowMultiplier = Map(ColumnType.DoubleColumn -> 2),
 
         // All 999 values should not be used.
@@ -443,20 +459,19 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
       val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
 
-      samplesScannedQuerySession.queryStats.stat.put(List(), Stat())
-      val samplesScannedCounter = samplesScannedQuerySession.queryStats.stat(List()).samplesScanned
-
       val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
       val plan = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter))
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        })
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assert(samplesScannedCounter.get() == 887,
-            "unexpected counter value: " + samplesScannedCounter.get())
+          assertSamplesScanned(res.queryStats, Map("key" -> 887))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -511,7 +526,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       //   -> 1603 total samples
       // -> 2351 total samples
       val samplesScannedConfig = SamplesScannedConfig(
-        intermediateSamplesEnabled = true,
+        execResultSamplesEnabled = true,
+        execChildSamplesEnabled = true,
+        rvtSamplesEnabled = true,
+        rvtChildSamplesEnabled = true,
+        srvSamplesEnabled = true,
         valueColumnToRowMultiplier = Map(ColumnType.DoubleColumn -> 2),
 
         // All 9999 values should not be used.
@@ -532,22 +551,23 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
       val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
 
-      samplesScannedQuerySession.queryStats.stat.put(List(), Stat())
-      val samplesScannedCounter = samplesScannedQuerySession.queryStats.stat(List()).samplesScanned
-
       val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
       val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          // Slightly more are added due to Math.ceil in trackSamplesScanned.
-          assert(samplesScannedCounter.get() == 2352,
-            "unexpected counter value: " + samplesScannedCounter.get())
+          assertSamplesScanned(res.queryStats, Map("key" -> 2351))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -606,9 +626,13 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       //   20*1*5=100 child row samples; 2*6=12 child series samples; 15*7=105 child pk samples
       //   -> 217 child samples
       //   -> 323 total samples
-      // -> 858 total samples
+      // -> 858 total samples; lhsKey=~421, rhsKey=~436
       val samplesScannedConfig = SamplesScannedConfig(
-        intermediateSamplesEnabled = true,
+        execResultSamplesEnabled = true,
+        execChildSamplesEnabled = true,
+        rvtSamplesEnabled = true,
+        rvtChildSamplesEnabled = true,
+        srvSamplesEnabled = true,
         defaultSamplesPerRow = 2,
         defaultSamplesPerSeries = 3,
         defaultSamplesPerPartKeyByte = 4,
@@ -620,24 +644,30 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
       val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
 
-      samplesScannedQuerySession.queryStats.stat.put(List(), Stat())
-      val samplesScannedCounter = samplesScannedQuerySession.queryStats.stat(List()).samplesScanned
-
       val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
       val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("lhsKey"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("rhsKey"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          // Slightly more are added due to Math.ceil in trackSamplesScanned.
-          assert(samplesScannedCounter.get() == 863,
-            "unexpected counter value: " + samplesScannedCounter.get())
+          // Values slightly larger than expected here due to integer-snapping
+          //   after division during trackSamplesScanned.
+          assertSamplesScanned(res.queryStats, Map(
+            "lhsKey" -> 424,
+            "rhsKey" -> 439,
+          ))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -683,7 +713,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       )
 
       val samplesScannedConfig = SamplesScannedConfig(
-        intermediateSamplesEnabled = false,
+        execResultSamplesEnabled = false,
+        execChildSamplesEnabled = false,
+        rvtSamplesEnabled = false,
+        rvtChildSamplesEnabled = false,
+        srvSamplesEnabled = false,
         defaultSamplesPerRow = 2,
         defaultSamplesPerSeries = 3,
         defaultSamplesPerPartKeyByte = 4,
@@ -695,25 +729,453 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
       val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
 
-      samplesScannedQuerySession.queryStats.stat.put(List(), Stat())
-      val samplesScannedCounter = samplesScannedQuerySession.queryStats.stat(List()).samplesScanned
-
       val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
       val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
-        doExecuteParamAssertion = (_, qs) => !qs.preventRangeVectorSerialization,
-        samplesScannedCounters = List(samplesScannedCounter)) :: Nil
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
       val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          // Note: leaf-level counts would be included if CountingChunkInfoIterators
-          //   were used during plan execution.
-          assert(samplesScannedCounter.get() == 0,
-            "unexpected counter value: " + samplesScannedCounter.get())
+          assertSamplesScanned(res.queryStats, Map("key"-> 0))
+        case error: QueryError =>
+          assert(false, "expected QueryResult got " + error)
+      }
+    }
+
+    it("should count only immediate doExecute result samples when all others are disabled") {
+      val numRvRows = 10
+      val range = Some(RvRange(0, 1, numRvRows - 1))
+      val lhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("lhs".utf8 -> "left".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val rhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("rhs".utf8 -> "right".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val schema = ResultSchema(
+        Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)),
+        1 // numRowKeyColumns
+      )
+
+      // LHS Leaf:
+      //   10*1*2=20 row samples; 1*3=3 series samples; 7*4=28 pk samples
+      //   -> 51 samples
+      // RHS Leaf:
+      //   10*1*2=20 row samples; 1*3=3 series samples; 8*4=32 pk samples
+      //   -> 55 samples
+      // Join:
+      //   20*1*2=40 row samples; 2*3=6 series samples; 15*4=60 pk samples
+      //   -> 106 samples
+      // -> 212 total samples
+      val samplesScannedConfig = SamplesScannedConfig(
+        execResultSamplesEnabled = true,
+        execChildSamplesEnabled = false,
+        rvtSamplesEnabled = false,
+        rvtChildSamplesEnabled = false,
+        srvSamplesEnabled = false,
+        defaultSamplesPerRow = 2,
+        defaultSamplesPerSeries = 3,
+        defaultSamplesPerPartKeyByte = 4,
+        defaultSamplesPerChildRow = 5,
+        defaultSamplesPerChildSeries = 6,
+        defaultSamplesPerChildPartKeyByte = 7
+      )
+
+      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
+      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+
+      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
+
+      plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
+        case res: QueryResult =>
+          assertSamplesScanned(res.queryStats, Map("key" -> 212))
+        case error: QueryError =>
+          assert(false, "expected QueryResult got " + error)
+      }
+    }
+
+    it("should count only ExecPlan child samples when all others are disabled") {
+      val numRvRows = 10
+      val range = Some(RvRange(0, 1, numRvRows - 1))
+      val lhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("lhs".utf8 -> "left".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val rhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("rhs".utf8 -> "right".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val schema = ResultSchema(
+        Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)),
+        1 // numRowKeyColumns
+      )
+
+      // Join:
+      //   20*1*5=100 child row samples; 2*6=12 child series samples; 15*7=105 child pk samples
+      //   -> 217 child samples
+      // -> 217 total samples
+      val samplesScannedConfig = SamplesScannedConfig(
+        execResultSamplesEnabled = false,
+        execChildSamplesEnabled = true,
+        rvtSamplesEnabled = false,
+        rvtChildSamplesEnabled = false,
+        srvSamplesEnabled = false,
+        defaultSamplesPerRow = 2,
+        defaultSamplesPerSeries = 3,
+        defaultSamplesPerPartKeyByte = 4,
+        defaultSamplesPerChildRow = 5,
+        defaultSamplesPerChildSeries = 6,
+        defaultSamplesPerChildPartKeyByte = 7
+      )
+
+      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
+      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+
+      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
+
+      plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
+        case res: QueryResult =>
+          assertSamplesScanned(res.queryStats, Map("key" -> 217))
+        case error: QueryError =>
+          assert(false, "expected QueryResult got " + error)
+      }
+    }
+
+    it("should count only RangeVectorTransformer samples when all others are disabled") {
+      val numRvRows = 10
+      val range = Some(RvRange(0, 1, numRvRows - 1))
+      val lhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("lhs".utf8 -> "left".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val rhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("rhs".utf8 -> "right".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val schema = ResultSchema(
+        Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)),
+        1 // numRowKeyColumns
+      )
+
+      // RVT:
+      //   20*1*2=40 row samples; 2*3=6 series samples; 15*4=60 pk samples
+      //   -> 106 samples
+      // -> 106 total samples
+      val samplesScannedConfig = SamplesScannedConfig(
+        execResultSamplesEnabled = false,
+        execChildSamplesEnabled = false,
+        rvtSamplesEnabled = true,
+        rvtChildSamplesEnabled = false,
+        srvSamplesEnabled = false,
+        defaultSamplesPerRow = 2,
+        defaultSamplesPerSeries = 3,
+        defaultSamplesPerPartKeyByte = 4,
+        defaultSamplesPerChildRow = 5,
+        defaultSamplesPerChildSeries = 6,
+        defaultSamplesPerChildPartKeyByte = 7
+      )
+
+      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
+      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+
+      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
+
+      plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
+        case res: QueryResult =>
+          assertSamplesScanned(res.queryStats, Map("key" -> 106))
+        case error: QueryError =>
+          assert(false, "expected QueryResult got " + error)
+      }
+    }
+
+    it("should count only RangeVectorTransformer child samples when all others are disabled") {
+      val numRvRows = 10
+      val range = Some(RvRange(0, 1, numRvRows - 1))
+      val lhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("lhs".utf8 -> "left".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val rhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("rhs".utf8 -> "right".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = range
+
+        override def numRows: Option[Int] = Some(numRvRows)
+      }
+
+      val schema = ResultSchema(
+        Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)),
+        1 // numRowKeyColumns
+      )
+
+      // RVT:
+      //   20*1*5=100 child row samples; 2*6=12 child series samples; 15*7=105 child pk samples
+      //   -> 217 child samples
+      // -> 217 total samples
+      val samplesScannedConfig = SamplesScannedConfig(
+        execResultSamplesEnabled = false,
+        execChildSamplesEnabled = false,
+        rvtSamplesEnabled = false,
+        rvtChildSamplesEnabled = true,
+        srvSamplesEnabled = false,
+        defaultSamplesPerRow = 2,
+        defaultSamplesPerSeries = 3,
+        defaultSamplesPerPartKeyByte = 4,
+        defaultSamplesPerChildRow = 5,
+        defaultSamplesPerChildSeries = 6,
+        defaultSamplesPerChildPartKeyByte = 7
+      )
+
+      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
+      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+
+      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
+
+      plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
+        case res: QueryResult =>
+          assertSamplesScanned(res.queryStats, Map("key" -> 217))
+        case error: QueryError =>
+          assert(false, "expected QueryResult got " + error)
+      }
+    }
+
+    it("should count only SerializedRangeVector samples when all others are disabled") {
+      // NOTE: no meaningful numRows() or outputRange() implementations so we
+      //   can be reasonably certain QueryStats counts reported during this test
+      //   are sourced from SerializedRangeVectors exclusively.
+      val numRvRows = 10
+      val range = Some(RvRange(0, 1, numRvRows - 1))
+      val lhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("lhs".utf8 -> "left".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = None
+      }
+
+      val rhsRv = new RangeVector {
+        override def key: RangeVectorKey =
+          CustomRangeVectorKey(Map("rhs".utf8 -> "right".utf8))
+
+        override def rows(): RangeVectorCursor =
+          new NoCloseCursor(
+            (0 until numRvRows).zipWithIndex.map { case (obs, i) =>
+              new TransientRow(i.toLong, obs)
+            }.toIterator)
+
+        override def outputRange: Option[RvRange] = None
+      }
+
+      val schema = ResultSchema(
+        Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)),
+        1 // numRowKeyColumns
+      )
+
+      // LHS Leaf:
+      //   10*1*2=20 row samples; 1*3=3 series samples; 7*4=28 pk samples
+      //   -> 51 samples
+      // RHS Leaf:
+      //   10*1*2=20 row samples; 1*3=3 series samples; 8*4=32 pk samples
+      //   -> 55 samples
+      // -> 106 total samples
+      val samplesScannedConfig = SamplesScannedConfig(
+        execResultSamplesEnabled = false,
+        execChildSamplesEnabled = false,
+        rvtSamplesEnabled = false,
+        rvtChildSamplesEnabled = false,
+        srvSamplesEnabled = true,
+        defaultSamplesPerRow = 2,
+        defaultSamplesPerSeries = 3,
+        defaultSamplesPerPartKeyByte = 4,
+        defaultSamplesPerChildRow = 5,
+        defaultSamplesPerChildSeries = 6,
+        defaultSamplesPerChildPartKeyByte = 7
+      )
+
+      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
+      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+
+      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+        doExecuteParamAssertion = (_, qs) => {
+          // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
+          qs.queryStats.getSamplesScannedCounter(Seq("key"))
+          !qs.preventRangeVectorSerialization
+        }) :: Nil
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
+
+      plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
+        case res: QueryResult =>
+          assertSamplesScanned(res.queryStats, Map("key" -> 106))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }

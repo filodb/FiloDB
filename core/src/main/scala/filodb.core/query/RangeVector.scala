@@ -136,6 +136,24 @@ trait RangeVector {
   // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None
 
+  /**
+   * Estimates the count of rows in a [[RangeVector]].
+   * This may be wildly inaccurate; the implementation as of this writing
+   *   relies on either numRows() or outputRange()-- both of which often
+   *   do not have implementations.
+   */
+  def estimateNumRows(): Long = {
+    this.numRows
+      .map(_.asInstanceOf[Long])
+      .orElse(
+        this.outputRange
+          .filter(range => range.stepMs > 0)
+          .map(range => (range.endMs - range.startMs) / range.stepMs)
+      )
+      // Worst-case: at least count the time-series.
+      .getOrElse(1)
+  }
+
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 

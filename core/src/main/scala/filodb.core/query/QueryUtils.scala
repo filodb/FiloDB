@@ -1,7 +1,5 @@
 package filodb.core.query
 
-import java.util.concurrent.atomic.AtomicLong
-
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
@@ -112,26 +110,9 @@ object QueryUtils {
   }
 
   /**
-   * Estimates the count of rows in a {@link RangeVector}.
-   * This may be wildly inaccurate; the implementation as of this writing relies
-   *   on either numRows() or outputRange()-- both of which typically do not have values.
-   */
-  private def estimateNumRows(rv: RangeVector): Long = {
-    rv.numRows
-      .map(_.asInstanceOf[Long])
-      .orElse(
-        rv.outputRange
-          .filter(range => range.stepMs > 0)
-          .map(range => (range.endMs - range.startMs) / range.stepMs)
-      )
-      // Worst-case: at least count the time-series.
-      .getOrElse(1)
-  }
-
-  /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument counters; the total is divided evenly across all counters.
-   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
    *
    * @param clazz The class that produced these samples.
    */
@@ -139,13 +120,20 @@ object QueryUtils {
                           rowsScanned: Long,
                           partKeyBytes: Long,
                           clazz: Class[_],
-                          samplesScannedCounters: List[AtomicLong],
+                          queryStats: QueryStats,
                           schema: ResultSchema,
                           config: SamplesScannedConfig): Unit = {
-    // Exit early if there are no counters to update.
-    if (samplesScannedCounters.isEmpty) {
+    // Exit early if there are no stats to update.
+    if (queryStats.stat.isEmpty) {
       return
     }
+
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is always added to QueryStats.
+    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
+    val statKeys = if (!hasSingleEmptyKey) {
+      queryStats.stat.keys.filter(_.nonEmpty).toSeq
+    } else Nil
 
     val valueColumnType = ResultSchema.valueColumnType(schema)
     val rowSamples = rowsScanned *
@@ -163,50 +151,58 @@ object QueryUtils {
     ).asInstanceOf[Long]
 
     val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / samplesScannedCounters.size
+      totalSamples.asInstanceOf[Double] / statKeys.size
     ).asInstanceOf[Long]
-    samplesScannedCounters.foreach(ctr => ctr.addAndGet(samplesPerCounter))
+
+    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
   }
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument counters; the total is divided evenly across all counters.
-   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
    *
    * @param class The class that produced these samples.
    */
   def trackSamplesScanned(rv: RangeVector,
                           clazz: Class[_],
-                          samplesScannedCounters: List[AtomicLong],
+                          queryStats: QueryStats,
                           schema: ResultSchema,
                           config: SamplesScannedConfig): Unit = {
     val seriesScanned = 1
-    val rowsScanned = estimateNumRows(rv)
+    val rowsScanned = rv.estimateNumRows()
     val partKeyBytes = rv.key.keySize
     trackSamplesScanned(seriesScanned, rowsScanned, partKeyBytes,
-      clazz, samplesScannedCounters, schema, config)
+      clazz, queryStats, schema, config)
   }
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument counters; the total is divided evenly across all counters.
-   * This is typically used to increment {@link QueryStats} samples-scanned counters.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
    *
-   * @param childRv The {@link RangeVector} that was scanned by the parent.
-   * @param parentClass The class that scanned the child {@link RangeVector}.
+   * @param childRv The [[RangeVector]] that was scanned by the parent.
+   * @param parentClass The class that scanned the child [[RangeVector]].
    */
   def trackChildSamplesScanned(childRv: RangeVector,
                                parentClass: Class[_],
-                               samplesScannedCounters: List[AtomicLong],
+                               queryStats: QueryStats,
                                schema: ResultSchema,
                                config: SamplesScannedConfig): Unit = {
-    // Exit early if there are no counters to update.
-    if (samplesScannedCounters.isEmpty) {
+    // Exit early if there are no stats to update.
+    if (queryStats.stat.isEmpty) {
       return
     }
 
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is always added to QueryStats.
+    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
+    val statKeys = if (!hasSingleEmptyKey) {
+      queryStats.stat.keys.filter(_.nonEmpty).toSeq
+    } else Nil
+
     val valueColumnType = ResultSchema.valueColumnType(schema)
-    val rowSamples = estimateNumRows(childRv) *
+    val rowSamples = childRv.estimateNumRows() *
       config.valueColumnToRowMultiplier.getOrElse(valueColumnType, 1.0) *
       config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
 
@@ -221,8 +217,9 @@ object QueryUtils {
     ).asInstanceOf[Long]
 
     val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / samplesScannedCounters.size
+      totalSamples.asInstanceOf[Double] / statKeys.size
     ).asInstanceOf[Long]
-    samplesScannedCounters.foreach(ctr => ctr.addAndGet(samplesPerCounter))
+
+    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
   }
 }
