@@ -669,7 +669,7 @@ object PartKeyQueryBuilder {
    *
    * @param regex the regex string after removeRegexAnchors has been applied.
    * @param originalRegex the original regex string before anchor removal, used for error messages.
-   * @throws IllegalArgumentException if the regex contains unescaped $ characters.
+   * Throws IllegalArgumentException if the regex contains unescaped $ characters.
    */
   def validateNoUnescapedMiddleDollar(regex: String, originalRegex: String): Unit = {
     if (!regex.contains('$')) return
