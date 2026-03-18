@@ -183,7 +183,6 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   private def logLabelStats(df: DataFrame): Unit = {
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
-    logger.info(s"Label stats DataFrame row count: ${df.count()}")
     countsFromSketches(df).foreach { r =>
       logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
     }
