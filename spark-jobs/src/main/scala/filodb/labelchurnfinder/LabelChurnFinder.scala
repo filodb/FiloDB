@@ -172,18 +172,21 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   }
 
   /**
-   * Logs label statistics summary and optionally publishes to Kafka.
+   * Publishes to Kafka if configured, otherwise logs label statistics summary.
    */
-  def actionOnLabelStats(df: DataFrame, producer: Option[LabelStatsKafkaProducer]): Unit = {
+  def actionOnLabelStats(df: DataFrame, producer: Option[LabelStatsKafkaProducer]): Unit =
+    producer match {
+      case Some(p) => p.publishLabelStats(df)
+      case None    => logLabelStats(df)
+    }
+
+  private def logLabelStats(df: DataFrame): Unit = {
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
-    val cached = df.cache()
-    logger.info(s"Label stats DataFrame row count: ${cached.count()}")
-    countsFromSketches(cached).foreach { r =>
+    logger.info(s"Label stats DataFrame row count: ${df.count()}")
+    countsFromSketches(df).foreach { r =>
       logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
     }
-    producer.foreach(_.publishLabelStats(cached))
-    cached.unpersist()
   }
 
   protected[labelchurnfinder] def countsFromSketches(df: DataFrame): DataFrame = {
