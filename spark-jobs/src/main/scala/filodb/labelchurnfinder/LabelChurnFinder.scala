@@ -28,7 +28,8 @@ object LabelChurnFinderMain extends App {
     .config(sparkConf)
     .getOrCreate()
   private val labelStats = labelChurnFinder.computeLabelStats(spark)
-  private val producer = new LabelStatsKafkaProducer(dsSettings.filodbConfig)
+  private val publishToKafka = dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.publish-to-kafka")
+  private val producer = if (publishToKafka) Some(new LabelStatsKafkaProducer(dsSettings.filodbConfig)) else None
   labelChurnFinder.actionOnLabelStats(labelStats, producer)
   spark.stop()
 }
@@ -92,6 +93,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
    */
   private def fetchLabelValues(split: (String, String),
                        shard: Int): Iterator[LabelValRow] = {
+    logger.info(s"fetchLabelValues: shard=$shard, filters=$filters")
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
       .flatMap { pk  =>
@@ -137,6 +139,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         } yield (t._1, t._2, shard)
       }
     }
+    logger.info(s"Splits count: ${splits.size}, partKeysV2TableEnabled=${colStore.partKeysV2TableEnabled}")
     import spark.implicits._
     val labelsAndValuesDf = splits
         .toDF("startToken", "endToken", "shard")
@@ -169,18 +172,18 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   }
 
   /**
-   * Publishes label statistics to Kafka and logs summary information.
+   * Logs label statistics summary and optionally publishes to Kafka.
    */
-  def actionOnLabelStats(df: DataFrame, producer: LabelStatsKafkaProducer): Unit = {
-    // Log summary for monitoring
+  def actionOnLabelStats(df: DataFrame, producer: Option[LabelStatsKafkaProducer]): Unit = {
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
-    countsFromSketches(df).foreach { r =>
+    val cached = df.cache()
+    logger.info(s"Label stats DataFrame row count: ${cached.count()}")
+    countsFromSketches(cached).foreach { r =>
       logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
     }
-
-    // Publish to Kafka
-    producer.publishLabelStats(df)
+    producer.foreach(_.publishLabelStats(cached))
+    cached.unpersist()
   }
 
   protected[labelchurnfinder] def countsFromSketches(df: DataFrame): DataFrame = {
