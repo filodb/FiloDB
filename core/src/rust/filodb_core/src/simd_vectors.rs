@@ -1,3 +1,7 @@
+// IEEE 754 NaN detection idiom: `v == v` is false only for NaN.
+// Clippy flags this as "equal expressions as operands" but it's intentional.
+#![allow(clippy::eq_op)]
+
 //! SIMD aggregation functions for double vectors.
 //!
 //! These JNI entry points operate on raw native memory pointers passed from the JVM.
