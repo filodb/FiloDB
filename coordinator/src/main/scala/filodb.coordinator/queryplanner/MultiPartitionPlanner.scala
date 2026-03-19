@@ -1102,6 +1102,16 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
     val nonMetricCols = dataset.options.nonMetricShardColumns
 
+    val areEqualFilters = shardKeyFilterGroups.forall(columnFilters =>
+      columnFilters.
+        forall(
+          colFilter =>
+            colFilter.filter match {
+              case _: Equals => true
+              case _ => false
+            }
+        ))
+
     def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
       nonMetricCols.flatMap(shardKeyCol =>
         group.collectFirst {
@@ -1109,7 +1119,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         }
       ).toMap
 
-    val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || shardKeyFilterGroups.isEmpty
+    val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
+      shardKeyFilterGroups.isEmpty
 
     lp match {
       case lc: LabelCardinality =>
