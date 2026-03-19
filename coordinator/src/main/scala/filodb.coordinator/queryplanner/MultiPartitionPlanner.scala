@@ -24,16 +24,18 @@ import filodb.query.exec._
 
 //scalastyle:off file.size.limit
 case class PartitionDetails(partitionName: String, httpEndPoint: String,
-                            grpcEndPoint: Option[String], proportion: Float)
+                            grpcEndPoint: Option[String], proportion: Float,
+                            workUnit: String)
 trait PartitionAssignmentTrait {
   val proportionMap: Map[String, PartitionDetails]
   val timeRange: TimeRange
 }
 
 case class PartitionAssignment(partitionName: String, httpEndPoint: String, timeRange: TimeRange,
-                               grpcEndPoint: Option[String] = None) extends PartitionAssignmentTrait {
+                               grpcEndPoint: Option[String] = None,
+                               workUnit: String) extends PartitionAssignmentTrait {
   val proportionMap: Map[String, PartitionDetails] =
-    Map(partitionName -> PartitionDetails(partitionName, httpEndPoint, grpcEndPoint, 1.0f))
+    Map(partitionName -> PartitionDetails(partitionName, httpEndPoint, grpcEndPoint, 1.0f, workUnit))
 }
 
 /**
@@ -198,18 +200,22 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
       if (isSinglePartition(partitions)) {
-        val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
-          case Some(pa: PartitionAssignmentTrait)
-          => (pa.proportionMap.keys.head, params.startSecs * 1000L,
-            params.endSecs * 1000L, pa.proportionMap.values.head.grpcEndPoint)
-          case None => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
-        }
-
         // If the plan is on a single partition, then depending on partition name we either delegate to local or
         // remote planner
+        val partitionName = partitions.headOption match {
+          case Some(pa: PartitionAssignmentTrait) => pa.proportionMap.keys.head
+          case None => localPartitionName
+        }
         val execPlan = if (partitionName.equals(localPartitionName)) {
           localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
+          val (startMs, endMs, grpcEndpoint, workUnit) = partitions.headOption match {
+            case Some(pa: PartitionAssignmentTrait)
+            => (params.startSecs * 1000L, params.endSecs * 1000L,
+              pa.proportionMap.values.head.grpcEndPoint,
+              pa.proportionMap.values.head.workUnit)
+            case _ => ???
+          }
           val remoteContext = logicalPlan match {
             case tls: TopLevelSubquery =>
               val instantTime = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].startSecs
@@ -229,7 +235,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             val endpoint = grpcEndpoint.get
             val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
             PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
-              dataset.ref, plannerSelector)
+              dataset.ref, plannerSelector, s"$partitionName-$workUnit")
           } else {
             val remotePartitionEndpoint = partitions.head.proportionMap.values.head.httpEndPoint
             val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
@@ -479,7 +485,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
       val plans = proportionMap.values.map(details => {
         materializeForPartition(aggregate, details.partitionName,
-          details.grpcEndPoint, details.httpEndPoint, childQueryContext, timeRangeOverride)
+          details.grpcEndPoint, details.httpEndPoint, childQueryContext, timeRangeOverride,
+          details.workUnit)
       }).toSeq
       if (plans.size == 1) plans.head
       else {
@@ -676,12 +683,13 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                        queryContext: QueryContext,
                                        timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     assignment match {
-      case PartitionAssignment(partitionName, httpEndPoint, _, grpcEndPoint) =>
-        materializeForPartition(logicalPlan, partitionName, grpcEndPoint, httpEndPoint, queryContext, timeRangeOverride)
+      case PartitionAssignment(partitionName, httpEndPoint, _, grpcEndPoint, workUnit) =>
+        materializeForPartition(logicalPlan, partitionName, grpcEndPoint, httpEndPoint, queryContext,
+          timeRangeOverride, workUnit)
       case PartitionAssignmentV2(proportionMap, _) if proportionMap.size == 1 =>
         val details = proportionMap.head._2
         materializeForPartition(logicalPlan, details.partitionName, details.grpcEndPoint, details.httpEndPoint,
-          queryContext, timeRangeOverride)
+          queryContext, timeRangeOverride, details.workUnit)
       case PartitionAssignmentV2(_, _) =>
         logicalPlan match {
           case aggregate: Aggregate =>
@@ -786,7 +794,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val plans = proportionMap.map(entry => {
       val partitionDetails = entry._2
       materializeForPartition(logicalPlan, partitionDetails.partitionName,
-        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride)
+        partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride,
+        partitionDetails.workUnit)
     }).toSeq
     val dispatcher = PlannerUtil.pickDispatcher(plans)
     MultiPartitionDistConcatExec(queryContext, dispatcher, plans)
@@ -826,7 +835,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,
           GrpcCommonUtils.buildChannelFromEndpoint(grpcEndpoint.get))
         PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, ctx, inProcessPlanDispatcher,
-          dataset.ref, plannerSelector)
+          dataset.ref, plannerSelector, s"$partitionName-${partition.workUnit}")
       } else {
         val httpEndpoint = partition.httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
         PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
@@ -845,7 +854,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                                       grpcEndpoint: Option[String],
                                       httpEndPoint: String,
                                       queryContext: QueryContext,
-                                      timeRangeOverride: Option[TimeRange]): ExecPlan = {
+                                      timeRangeOverride: Option[TimeRange],
+                                      workUnit: String): ExecPlan = {
     val qContextWithOverride = timeRangeOverride.map{ r =>
       val oldParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val newParams = oldParams.copy(startSecs = r.startMs / 1000, endSecs = r.endMs / 1000)
@@ -868,7 +878,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,
           GrpcCommonUtils.buildChannelFromEndpoint(grpcEndpoint.get))
         PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, ctx, inProcessPlanDispatcher,
-          dataset.ref, plannerSelector)
+          dataset.ref, plannerSelector, s"$partitionName-$workUnit")
       } else {
         val httpEndpoint = httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
         PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
@@ -1349,7 +1359,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
     else {
       val execPlans = partitions.flatMap(ps => ps.proportionMap.values.map(pd =>
-        PartitionAssignment(pd.partitionName, pd.httpEndPoint, ps.timeRange, pd.grpcEndPoint))).map { p =>
+        PartitionAssignment(pd.partitionName, pd.httpEndPoint, ps.timeRange, pd.grpcEndPoint, pd.workUnit))).map { p =>
         logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(
@@ -1395,7 +1405,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       localPartitionPlanner.materialize(lp, qContext)
     } else {
       val execPlans = partitions.flatMap(ps => ps.proportionMap.values.map(pd =>
-        PartitionAssignment(pd.partitionName, pd.httpEndPoint, ps.timeRange, pd.grpcEndPoint))).map { p =>
+        PartitionAssignment(pd.partitionName, pd.httpEndPoint, ps.timeRange, pd.grpcEndPoint, pd.workUnit))).map { p =>
         logger.debug(s"partition=$p; plan=$lp")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp, qContext)

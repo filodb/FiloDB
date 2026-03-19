@@ -151,7 +151,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val queryContext = QueryContext(origQueryParams = params, queryId = "someId")
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector", "testWorkUnit")
 
     val qr = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryResult]
     qr.resultSchema shouldEqual resultSchema
@@ -176,7 +176,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val queryContext = QueryContext(origQueryParams = params)
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector", "testWorkUnit")
     val qr = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryResult]
     qr.resultSchema shouldEqual ResultSchema.empty
     qr.result shouldEqual Nil
@@ -188,7 +188,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val queryContext = QueryContext(origQueryParams = params, queryId = "errorId")
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector")
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref, "plannerSelector", "testWorkUnit")
     val er = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryError]
     er.id shouldEqual "errorId"
     er.queryStats shouldEqual QueryStats()

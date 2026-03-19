@@ -45,13 +45,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     queryConfig, "raw")
 
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-    TimeRange(timeRange.startMs, timeRange.endMs)))
+    TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
   val mppPartitionLocationProvider = new PartitionLocationProvider {
     override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
       if (routingKey.equals(Map("_ns_" -> "App-1", "_ws_" -> "demo")))
-        List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
       else
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
     }
 
     override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -59,7 +59,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
   val simplePartitionLocationProvider = new PartitionLocationProvider {
     override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-      List(PartitionAssignment(s"part-${routingKey("_ns_")}", "http://dummy-url.com", timeRange))
+      List(PartitionAssignment(s"part-${routingKey("_ns_")}", "http://dummy-url.com", timeRange, workUnit = "testWorkUnit"))
     override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
       getPartitions(nonMetricShardKeyFilters.map(f => (f.column, f.filter.valuesStrings.head.toString)).toMap, timeRange)
   }
@@ -90,9 +90,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -107,9 +107,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     println(execPlan.printTree())
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ws_", Equals("demo"))) shouldEqual(true)
@@ -170,10 +170,10 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, simplePartitionLocationProvider, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
-    execPlan.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -189,10 +189,10 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
-    execPlan.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -226,9 +226,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -254,14 +254,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
 
     // Child plans should have only inner periodic query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-2\"}"
-    execPlan.children(1).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -310,17 +310,17 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Plan for each map should not have histogram quantile
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
-    execPlan.children(1).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-    execPlan.children(1).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+    execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -346,15 +346,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
 
     // Child plans should have only sum query in PromQlQueryParams
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
+    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
@@ -366,7 +366,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
     execPlan.children(1).isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec].filters.
+    execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
   }
 
@@ -399,9 +399,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiPartitionExec.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual true
 
     // Child plans should have only inner query in PromQlQueryParams
-    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
+    multiPartitionExec.children(1).children.head.queryContext.origQueryParams
       .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-2"}"""
   }
 
@@ -445,16 +445,16 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
-    lhs.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
-    rhs.children(1).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -475,15 +475,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lhs = execPlan.children(0).asInstanceOf[MultiPartitionDistConcatExec]
     lhs.children.length shouldEqual 2
     lhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     lhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    lhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
@@ -509,9 +509,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       contains(ColumnFilter("_ns_", Equals("App-0"))) shouldEqual (true)
     val rhs = execPlan.children(1).asInstanceOf[MultiPartitionDistConcatExec]
     rhs.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
     rhs.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
+    rhs.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual (true)
   }
 

@@ -11,6 +11,7 @@ import monix.reactive.{MulticastStrategy, Observable}
 import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.core.DatasetRef
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.grpc._
 import filodb.grpc.GrpcMultiPartitionQueryService._
@@ -61,11 +62,13 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            queryContext: QueryContext,
                            dispatcher: PlanDispatcher,
                            dataset: DatasetRef,
-                           plannerSelector: String) extends GrpcRemoteExec {
+                           plannerSelector: String,
+                           destinationWorkUnit: String) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
         // Todo add asset for thread name
     Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
         val subject = ConcurrentSubject[GrpcMultiPartitionQueryService.StreamingResponse](MulticastStrategy.Publish)
+        val startMs = System.currentTimeMillis()
         subject
           .doOnSubscribe(Task.eval {
               val nonBlockingStub = RemoteExecGrpc.newStub(channel)
@@ -78,13 +81,30 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                 .execStreaming(getGrpcRequest(plannerSelector),
                     new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
-                        override def onError(t: java.lang.Throwable): Unit = subject.onError(t)
-                        override def onCompleted(): Unit = subject.onComplete()
+                        override def onError(t: java.lang.Throwable): Unit = {
+                            PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
+                              System.currentTimeMillis() - startMs,
+                              Map("destination" -> destinationWorkUnit))
+                            subject.onError(t)
+                        }
+                        override def onCompleted(): Unit = {
+                            PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
+                              System.currentTimeMillis() - startMs,
+                              Map("destination" -> destinationWorkUnit))
+                            subject.onComplete()
+                        }
                     })
           })
     }
 
     override def queryEndpoint: String = channel.authority() + ".execStreaming"
+}
+
+object PromQLGrpcRemoteExec {
+    val grpcRemoteExecSuccessLatency = FilodbMetrics.timeHistogram(
+      "grpc-remote-exec-success-latency", TimeUnit.MILLISECONDS)
+    val grpcRemoteExecErrorLatency = FilodbMetrics.timeHistogram(
+      "grpc-remote-exec-error-latency", TimeUnit.MILLISECONDS)
 }
 
 
