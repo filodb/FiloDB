@@ -63,7 +63,7 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            dispatcher: PlanDispatcher,
                            dataset: DatasetRef,
                            plannerSelector: String,
-                           destinationWorkUnit: String) extends GrpcRemoteExec {
+                           destinationTsdbWorkUnit: String) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
         // Todo add asset for thread name
     Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
@@ -84,13 +84,13 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                         override def onError(t: java.lang.Throwable): Unit = {
                             PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
                               System.currentTimeMillis() - startMs,
-                              Map("destination" -> destinationWorkUnit))
+                              Map("destination" -> destinationTsdbWorkUnit))
                             subject.onError(t)
                         }
                         override def onCompleted(): Unit = {
                             PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
                               System.currentTimeMillis() - startMs,
-                              Map("destination" -> destinationWorkUnit))
+                              Map("destination" -> destinationTsdbWorkUnit))
                             subject.onComplete()
                         }
                     })
