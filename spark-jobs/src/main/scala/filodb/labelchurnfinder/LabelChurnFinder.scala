@@ -184,7 +184,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
     countsFromSketches(df).foreach { r =>
-      logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
+      logger.info(s"Label stats ${cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" ")}")
     }
   }
 
