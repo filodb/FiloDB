@@ -12,7 +12,6 @@ import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMet
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
-import filodb.core.MachineMetricsData.defaultPartKey
 import filodb.memory._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
@@ -154,7 +153,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
   def timeValueRVPk(tuples: Seq[(Long, Double)],
-                    partKey: NativePointer = defaultPartKey): RawDataRangeVector = {
+                    partKey: NativePointer = MetricsTestData.defaultPartKey): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDatasetWithMetric, partKey, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
@@ -367,7 +366,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val data = (0 until 200).map { i =>
       if ((i+1) % 40 == 0) -2.3d
       else if ((i+1) % 20 == 0) 2.3d
-      else rand.nextDouble()
+      else (i % 9 + 1) * 0.1  // cycles 0.1, 0.2, ..., 0.9; guarantees MAD >= ~0.2
     }
     val rv = timeValueRV(data)
     val rangeParams = RangeParams(100, 20, 500)
@@ -730,7 +729,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
       val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(params), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
-      val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
+      val res = data.sliding(windowSize, step).map(holt_winters).toBuffer
       for (i <- res.indices) {
         if (res(i).isNaN) {
           println("Inside Nan")
