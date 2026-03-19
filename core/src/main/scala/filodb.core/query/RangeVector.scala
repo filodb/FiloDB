@@ -148,7 +148,7 @@ trait RangeVector {
       .orElse(
         this.outputRange
           .filter(range => range.stepMs > 0)
-          .map(range => (range.endMs - range.startMs) / range.stepMs)
+          .map(range => 1 + Math.floor((range.endMs - range.startMs).toDouble / range.stepMs).toLong)
       )
       // Worst-case: at least count the time-series.
       .getOrElse(1)

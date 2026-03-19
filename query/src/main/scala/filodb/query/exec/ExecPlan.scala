@@ -210,29 +210,30 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
+            val inputSchema = resultSchema
+            val outputSchema = transf.schema(resultSchema)
             // Track child samples input to the transformer.
             val inputRvs = if (samplesScannedConfig.rvtChildSamplesEnabled) {
               acc._1.map { rv =>
                 QueryUtils.trackChildSamplesScanned(
-                  rv, transf.getClass, querySession.queryStats, acc._2, samplesScannedConfig)
+                  rv, transf.getClass, querySession.queryStats, inputSchema, samplesScannedConfig)
                 rv
               }
             } else acc._1
             val transformedRvs: Observable[RangeVector] = {
               val transformed = transf.apply(inputRvs, querySession,
-                queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
+                queryContext.plannerParams.enforcedLimits.execPlanSamples, inputSchema, paramRangeVector
               )
               // Track samples output from the transformer.
               if (samplesScannedConfig.rvtSamplesEnabled) {
                 transformed.map { rv =>
                   QueryUtils.trackSamplesScanned(
-                    rv, transf.getClass, querySession.queryStats, resultSchema, samplesScannedConfig)
+                    rv, transf.getClass, querySession.queryStats, outputSchema, samplesScannedConfig)
                   rv
                 }
               } else transformed
             }
-            val schema = transf.schema(resultSchema)
-            (transformedRvs, schema)
+            (transformedRvs, outputSchema)
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
@@ -462,29 +463,30 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
+            val inputSchema = resultSchema
+            val outputSchema = transf.schema(resultSchema)
             // Track child samples input to the transformer.
             val inputRvs = if (samplesScannedConfig.rvtChildSamplesEnabled) {
               acc._1.map { rv =>
                 QueryUtils.trackChildSamplesScanned(
-                  rv, transf.getClass, querySession.queryStats, acc._2, samplesScannedConfig)
+                  rv, transf.getClass, querySession.queryStats, inputSchema, samplesScannedConfig)
                 rv
               }
             } else acc._1
             val transformedRvs : Observable[RangeVector] = {
               val transformed = transf.apply(inputRvs, querySession,
-                  queryContext.plannerParams.enforcedLimits.execPlanSamples, acc._2, paramRangeVector
+                  queryContext.plannerParams.enforcedLimits.execPlanSamples, inputSchema, paramRangeVector
                 )
               // Track samples output from the transformer.
               if (samplesScannedConfig.rvtSamplesEnabled) {
                 transformed.map { rv =>
                   QueryUtils.trackSamplesScanned(
-                    rv, transf.getClass, querySession.queryStats, resultSchema, samplesScannedConfig)
+                    rv, transf.getClass, querySession.queryStats, outputSchema, samplesScannedConfig)
                   rv
                 }
               } else transformed
             }
-            val schema = transf.schema(resultSchema)
-            (transformedRvs, schema)
+            (transformedRvs, outputSchema)
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
@@ -984,7 +986,7 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
                   }
               } else rvObs
               rvObsWithSamples
-                .guarantee(Task.eval(() => querySession.queryStats.add(stats)))
+                .guarantee(Task.eval { querySession.queryStats.add(stats) })
             }
             Task.parZip2(schemaTask, rvTask)
           }

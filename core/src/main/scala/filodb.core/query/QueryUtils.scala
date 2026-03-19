@@ -5,6 +5,8 @@ import scala.collection.mutable.ArrayBuffer
 
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 
+import filodb.core.metadata.Column.ColumnType
+
 /**
  * Storage for utility functions.
  */
@@ -110,6 +112,19 @@ object QueryUtils {
   }
 
   /**
+   * [[ResultSchema#valueColumnType(ResultSchema)]] has a few requirements that might throw.
+   * This method wraps [[ResultSchema#valueColumnType(ResultSchema)]] and returns an empty
+   *   [[Option]] if the method throws.
+   */
+  def safeGetColumnType(schema: ResultSchema): Option[ColumnType] = {
+    try {
+      Some(ResultSchema.valueColumnType(schema))
+    } catch {
+      case ex: IllegalArgumentException => None
+    }
+  }
+
+  /**
    * Given the arguments, determines the total count of samples scanned.
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
@@ -138,9 +153,13 @@ object QueryUtils {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
     } else Seq(Nil)
 
-    val valueColumnType = ResultSchema.valueColumnType(schema)
+    val valueColumnType = safeGetColumnType(schema)
+    if (valueColumnType.isEmpty) {
+      return
+    }
+
     val rowSamples = rowsScanned *
-      config.valueColumnToRowMultiplier.getOrElse(valueColumnType, 1.0) *
+      config.valueColumnToRowMultiplier.getOrElse(valueColumnType.get, 1.0) *
       config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
 
     val seriesSamples = seriesScanned *
@@ -212,9 +231,13 @@ object QueryUtils {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
     } else Seq(Nil)
 
-    val valueColumnType = ResultSchema.valueColumnType(schema)
+    val valueColumnType = safeGetColumnType(schema)
+    if (valueColumnType.isEmpty) {
+      return
+    }
+
     val rowSamples = childRv.estimateNumRows() *
-      config.valueColumnToRowMultiplier.getOrElse(valueColumnType, 1.0) *
+      config.valueColumnToRowMultiplier.getOrElse(valueColumnType.get, 1.0) *
       config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
 
     val seriesSamples = config.classToSamplesPerChildSeries.getOrElse(
