@@ -113,6 +113,9 @@ object QueryUtils {
    * Given the arguments, determines the total count of samples scanned.
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
    *
    * @param clazz The class that produced these samples.
    */
@@ -133,7 +136,7 @@ object QueryUtils {
     val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
     val statKeys = if (!hasSingleEmptyKey) {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Nil
+    } else Seq(Nil)
 
     val valueColumnType = ResultSchema.valueColumnType(schema)
     val rowSamples = rowsScanned *
@@ -162,6 +165,10 @@ object QueryUtils {
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
    *
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   *
    * @param class The class that produced these samples.
    */
   def trackSamplesScanned(rv: RangeVector,
@@ -181,6 +188,10 @@ object QueryUtils {
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
    *
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   *
    * @param childRv The [[RangeVector]] that was scanned by the parent.
    * @param parentClass The class that scanned the child [[RangeVector]].
    */
@@ -199,7 +210,7 @@ object QueryUtils {
     val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
     val statKeys = if (!hasSingleEmptyKey) {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Nil
+    } else Seq(Nil)
 
     val valueColumnType = ResultSchema.valueColumnType(schema)
     val rowSamples = childRv.estimateNumRows() *

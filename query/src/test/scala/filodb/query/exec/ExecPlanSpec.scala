@@ -20,6 +20,9 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import ZeroCopyUTF8String._
 
+
+import scala.collection.immutable.Map
+
 // scalastyle:off number.of.methods
 class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
   implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
@@ -315,15 +318,23 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   describe("samples-scanned accounting tests") {
 
-    def assertSamplesScanned(queryStats: QueryStats, expectedCounts: Map[String, Long]): Unit = {
-      // Subtracting one to account for the Nil key; Nil is always added.
-      assert(queryStats.stat.size - 1 == expectedCounts.size)
+    def assertSamplesScanned(queryStats: QueryStats, expectedCounts: Map[Seq[String], Long]): Unit = {
       for ((key, value) <- expectedCounts) {
-        assert(value == queryStats.stat(Seq(key)).samplesScanned.get())
+        assert(value == queryStats.stat(key).samplesScanned.get())
       }
-      // Better also have the Nil key sine we asserted different sizes above.
-      assert(queryStats.stat.contains(Nil))
-      assert(queryStats.stat(Nil).samplesScanned.get() == 0)
+
+      // Have to awkwardly account for the Nil key; Nil is always added for some plans.
+      val nilInExpected = expectedCounts.exists(_._1.isEmpty)
+      val nilInActual = queryStats.stat.contains(Nil)
+      if (!nilInExpected && nilInActual) {
+        // Make sure we've already asserted the values of all other keys.
+        assert(queryStats.stat.size == 1 + expectedCounts.size)
+        // Make sure no samples-scanned have been counted against Nil.
+        assert(queryStats.stat(Nil).samplesScanned.get() == 0)
+      } else {
+        // Make sure we've already asserted the values of all keys.
+        assert(queryStats.stat.size == expectedCounts.size)
+      }
     }
 
     it("should correctly count single-plan samples") {
@@ -386,7 +397,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         })
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 214))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 214))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -471,7 +482,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 887))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 887))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -567,7 +578,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 2351))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 2351))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -665,8 +676,8 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
           // Values slightly larger than expected here due to integer-snapping
           //   after division during trackSamplesScanned.
           assertSamplesScanned(res.queryStats, Map(
-            "lhsKey" -> 424,
-            "rhsKey" -> 439,
+            Seq("lhsKey") -> 424,
+            Seq("rhsKey") -> 439,
           ))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
@@ -747,7 +758,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key"-> 0))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 0))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -837,7 +848,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 212))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 212))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -921,7 +932,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 217))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 217))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -1005,7 +1016,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 106))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 106))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -1089,7 +1100,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 217))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 217))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }
@@ -1175,7 +1186,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
-          assertSamplesScanned(res.queryStats, Map("key" -> 106))
+          assertSamplesScanned(res.queryStats, Map(Seq("key") -> 106))
         case error: QueryError =>
           assert(false, "expected QueryResult got " + error)
       }

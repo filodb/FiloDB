@@ -210,7 +210,7 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
-            // Track child samples input to the transformer as samples.
+            // Track child samples input to the transformer.
             val inputRvs = if (samplesScannedConfig.rvtChildSamplesEnabled) {
               acc._1.map { rv =>
                 QueryUtils.trackChildSamplesScanned(
@@ -462,7 +462,7 @@ trait ExecPlan extends QueryCommand {
             // transformers that cannot handle empty results
             (acc._1, resultSchema)
           } else {
-            // Track child samples input to the transformer as samples.
+            // Track child samples input to the transformer.
             val inputRvs = if (samplesScannedConfig.rvtChildSamplesEnabled) {
               acc._1.map { rv =>
                 QueryUtils.trackChildSamplesScanned(
@@ -845,10 +845,10 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-      .flatMap { case (plan, i) =>
+      .mapParallelUnordered(parallelism) { case (plan, i) =>
         val task = dispatchRemotePlan(plan, qs, span, source).map((_, i))
         span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
-        Observable.fromTask(task)
+        task
       }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
