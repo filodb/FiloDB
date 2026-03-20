@@ -110,8 +110,8 @@ class SimdNativeMethodsTest extends NativeVectorTest {
       simdResult shouldEqual scalaResult +- 1e-10
     }
 
-    it("should handle NaN at various positions within 4-element chunks") {
-      // NaN at positions 0,3,4,7 to test boundary alignment with 4-way unrolling
+    it("should handle NaN at various positions within 8-element chunks") {
+      // NaN at positions 0,3,4,7 to test boundary alignment with 8-way unrolling
       val values = Seq(Double.NaN, 2.0, 3.0, Double.NaN, Double.NaN, 6.0, 7.0, Double.NaN, 9.0)
       val (reader, addr) = buildVector(values)
       val dataAddr = addr + OffsetData
@@ -154,8 +154,8 @@ class SimdNativeMethodsTest extends NativeVectorTest {
       simdNoNaN shouldEqual scalaNoNaN +- (Math.abs(scalaNoNaN) * 1e-12)
     }
 
-    it("should handle remainder elements (count not divisible by 4)") {
-      // 5 elements: 1 chunk of 4 + 1 remainder
+    it("should handle remainder elements (count not divisible by 8)") {
+      // 5 elements: 0 chunks of 8 + 5 remainder
       val values = Seq(1.0, 2.0, 3.0, 4.0, 5.0)
       val (reader, addr) = buildVector(values)
       val dataAddr = addr + OffsetData
@@ -167,15 +167,41 @@ class SimdNativeMethodsTest extends NativeVectorTest {
       simdResult shouldEqual scalaResult +- 1e-10
     }
 
-    it("should handle exactly 4 elements (one full chunk, no remainder)") {
-      val values = Seq(1.5, 2.5, 3.5, 4.5)
+    it("should handle exactly 8 elements (one full chunk, no remainder)") {
+      val values = Seq(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0)
       val (reader, addr) = buildVector(values)
       val dataAddr = addr + OffsetData
 
       val scalaResult = reader.sum(acc, addr, 0, values.length - 1, ignoreNaN = true)
       val simdResult = SimdNativeMethods.simdSumDouble(dataAddr, 0, values.length - 1, ignoreNaN = true)
 
-      scalaResult shouldEqual 12.0
+      scalaResult shouldEqual 36.0
+      simdResult shouldEqual scalaResult +- 1e-10
+    }
+
+    it("should handle 9 elements (one chunk of 8 + 1 remainder)") {
+      val values = Seq(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
+      val (reader, addr) = buildVector(values)
+      val dataAddr = addr + OffsetData
+
+      val scalaResult = reader.sum(acc, addr, 0, values.length - 1, ignoreNaN = true)
+      val simdResult = SimdNativeMethods.simdSumDouble(dataAddr, 0, values.length - 1, ignoreNaN = true)
+
+      scalaResult shouldEqual 45.0
+      simdResult shouldEqual scalaResult +- 1e-10
+    }
+
+    it("should handle NaN at 8-way chunk boundaries with ignoreNaN=true") {
+      // NaN at positions 0, 7, 8, 15 to test 8-way unroll boundaries
+      val values = (0 until 16).map { i =>
+        if (i == 0 || i == 7 || i == 8 || i == 15) Double.NaN else (i + 1).toDouble
+      }
+      val (reader, addr) = buildVector(values)
+      val dataAddr = addr + OffsetData
+
+      val scalaResult = reader.sum(acc, addr, 0, values.length - 1, ignoreNaN = true)
+      val simdResult = SimdNativeMethods.simdSumDouble(dataAddr, 0, values.length - 1, ignoreNaN = true)
+
       simdResult shouldEqual scalaResult +- 1e-10
     }
 
