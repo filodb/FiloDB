@@ -615,7 +615,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       while (iter.hasNext) {
         diffFromMedians.append(Math.abs(iter.next()-medianVal))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(diffFromMedians.elems.asInstanceOf[Array[Double]], 0, diffFromMedians.length)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
       iter = diffFromMedians.iterator
       diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
