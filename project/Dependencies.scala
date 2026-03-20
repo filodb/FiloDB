@@ -66,7 +66,8 @@ object Dependencies {
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
-    "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
+    "org.scorexfoundation" %% "debox"            % "0.10.0" withJavadoc(),
+    "org.typelevel"        %% "spire"            % "0.14.1",
     scalaLoggingDep
   )
 
