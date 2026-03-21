@@ -14,6 +14,14 @@ import org.apache.commons.lang3.SystemUtils
  */
 object SimdNativeMethods {
 
+  /** Minimum number of elements for SIMD to be worthwhile.
+   *  Below this threshold, JNI call overhead exceeds the SIMD savings.
+   *  Benchmarked: 30 elements (5m@10s) shows regression at long query ranges,
+   *  90 elements (15m@10s) shows clear SIMD wins. 64 is the safe default crossover.
+   *  Configurable via `filodb.simd.threshold` in config or system property. */
+  @volatile var simdThreshold: Int =
+    Integer.getInteger("filodb.simd.threshold", 64)
+
   /** Runtime toggle for SIMD-accelerated sum/count in DoubleVectorDataReader64.
    *  Initialized from system property `filodb.simd.enabled` (default false).
    *  Can be set programmatically or via GlobalConfig. */

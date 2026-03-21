@@ -42,6 +42,12 @@ object GlobalConfig extends StrictLogging {
     filodb.memory.format.vectors.SimdNativeMethods.enabled = true
   }
 
+  // Set SIMD threshold from config if specified
+  if (systemConfig.hasPath("filodb.simd.threshold")) {
+    filodb.memory.format.vectors.SimdNativeMethods.simdThreshold =
+      systemConfig.getInt("filodb.simd.threshold")
+  }
+
   val configToDisableAkkaCluster = ConfigFactory.parseString(
     """
       |akka {

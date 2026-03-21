@@ -2251,4 +2251,103 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       SimdNativeMethods.enabled = false
     }
   }
+
+  // ── SIMD end-to-end tests for sum(rate(...)) on delta counters ─────────
+  // RateOverDeltaChunkedFunctionD calls doubleReader.sum() which delegates to SIMD.
+
+  it("should produce matching sum(rate) on delta counters with SIMD on vs off") {
+    // Delta counter data: each value is a delta (not cumulative)
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val windowSize = 50  // 50 samples in rate window
+    val step = 10
+
+    // Compute with SIMD off
+    SimdNativeMethods.enabled = false
+    val scalaIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaIt.map(_.getDouble(1)).toBuffer
+
+    // Compute with SIMD on
+    SimdNativeMethods.enabled = true
+    try {
+      val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+      val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        if (scala.isNaN) {
+          simd.isNaN shouldBe true
+        } else {
+          simd shouldEqual scala +- (Math.abs(scala) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum(rate) on delta counters with NaN values and SIMD enabled") {
+    // Delta counter data with periodic NaN values
+    val data = (1 to 300).map { i =>
+      if (i % 8 == 0) Double.NaN else i.toDouble
+    }
+    val rv = timeValueRV(data)
+    val windowSize = 40
+    val step = 15
+
+    SimdNativeMethods.enabled = false
+    val scalaIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaIt.map(_.getDouble(1)).toBuffer
+
+    SimdNativeMethods.enabled = true
+    try {
+      val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+      val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        if (scala.isNaN) {
+          simd.isNaN shouldBe true
+        } else {
+          simd shouldEqual scala +- (Math.abs(scala) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum(rate) on delta counters with large data and SIMD enabled") {
+    val data = (1 to 1000).map(_.toDouble)
+    val rv = timeValueRV(data)
+
+    SimdNativeMethods.enabled = true
+    try {
+      (0 until 5).foreach { x =>
+        val windowSize = rand.nextInt(200) + 50
+        val step = rand.nextInt(50) + 10
+        info(s"iteration $x windowSize=$windowSize step=$step")
+
+        // RateOverDelta with SIMD
+        val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+        val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+        // Sliding window rate (row-by-row, no SIMD)
+        val slidingIt = slidingWindowIt(data, rv, new RateOverDeltaFunction(), windowSize, step)
+        val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+        slidingIt.close()
+
+        simdResults.length shouldEqual slidingResults.length
+        simdResults.zip(slidingResults).foreach { case (simd, sliding) =>
+          if (sliding.isNaN) {
+            simd.isNaN shouldBe true
+          } else {
+            simd shouldEqual sliding +- (Math.abs(sliding) * 1e-6)
+          }
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
 }
