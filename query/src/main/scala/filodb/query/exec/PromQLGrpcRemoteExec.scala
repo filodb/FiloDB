@@ -4,6 +4,7 @@ import java.util.concurrent.TimeUnit
 
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}
+import com.typesafe.scalalogging.StrictLogging
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -11,6 +12,7 @@ import monix.reactive.{MulticastStrategy, Observable}
 import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.core.DatasetRef
+import filodb.core.GlobalConfig
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.grpc._
@@ -82,15 +84,20 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                     new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
                         override def onError(t: java.lang.Throwable): Unit = {
-                            PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
-                              System.currentTimeMillis() - startMs,
-                              Map("destination" -> destinationTsdbWorkUnit))
+                            PromQLGrpcRemoteExec.logError(destinationTsdbWorkUnit, queryContext, t)
+                            if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
+                                PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
+                                  System.currentTimeMillis() - startMs,
+                                  Map("destination" -> destinationTsdbWorkUnit))
+                            }
                             subject.onError(t)
                         }
                         override def onCompleted(): Unit = {
-                            PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
-                              System.currentTimeMillis() - startMs,
-                              Map("destination" -> destinationTsdbWorkUnit))
+                            if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
+                                PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
+                                  System.currentTimeMillis() - startMs,
+                                  Map("destination" -> destinationTsdbWorkUnit))
+                            }
                             subject.onComplete()
                         }
                     })
@@ -100,11 +107,19 @@ case class PromQLGrpcRemoteExec(channel: Channel,
     override def queryEndpoint: String = channel.authority() + ".execStreaming"
 }
 
-object PromQLGrpcRemoteExec {
-    val grpcRemoteExecSuccessLatency = FilodbMetrics.timeHistogram(
+object PromQLGrpcRemoteExec extends StrictLogging {
+    val latencyMetricsEnabled: Boolean = {
+        GlobalConfig.systemConfig.hasPath("filodb.query.grpc.promql-remote-exec-latency-metrics-enabled") &&
+          GlobalConfig.systemConfig.getBoolean("filodb.query.grpc.promql-remote-exec-latency-metrics-enabled")
+    }
+    lazy val grpcRemoteExecSuccessLatency = FilodbMetrics.timeHistogram(
       "grpc-remote-exec-success-latency", TimeUnit.MILLISECONDS)
-    val grpcRemoteExecErrorLatency = FilodbMetrics.timeHistogram(
+    lazy val grpcRemoteExecErrorLatency = FilodbMetrics.timeHistogram(
       "grpc-remote-exec-error-latency", TimeUnit.MILLISECONDS)
+
+    def logError(destination: String, queryContext: QueryContext, t: java.lang.Throwable): Unit = {
+        logger.error(s"gRPC remote exec to destination=$destination failed, queryContext=$queryContext", t)
+    }
 }
 
 
