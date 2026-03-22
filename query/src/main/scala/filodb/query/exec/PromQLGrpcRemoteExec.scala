@@ -70,7 +70,7 @@ case class PromQLGrpcRemoteExec(channel: Channel,
         // Todo add asset for thread name
     Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
         val subject = ConcurrentSubject[GrpcMultiPartitionQueryService.StreamingResponse](MulticastStrategy.Publish)
-        val startMs = System.currentTimeMillis()
+        val startNs = System.nanoTime()
         subject
           .doOnSubscribe(Task.eval {
               val nonBlockingStub = RemoteExecGrpc.newStub(channel)
@@ -85,17 +85,19 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
                         override def onError(t: java.lang.Throwable): Unit = {
                             PromQLGrpcRemoteExec.logError(destinationTsdbWorkUnit, queryContext, t)
+                            val elapsedMs = (System.nanoTime() - startNs) / 1000000
                             if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
                                 PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
-                                  System.currentTimeMillis() - startMs,
+                                  elapsedMs,
                                   Map("destination" -> destinationTsdbWorkUnit))
                             }
                             subject.onError(t)
                         }
                         override def onCompleted(): Unit = {
                             if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
+                                val elapsedMs = (System.nanoTime() - startNs) / 1000000
                                 PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
-                                  System.currentTimeMillis() - startMs,
+                                  elapsedMs,
                                   Map("destination" -> destinationTsdbWorkUnit))
                             }
                             subject.onComplete()
