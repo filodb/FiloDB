@@ -2,9 +2,9 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
+import com.typesafe.scalalogging.StrictLogging
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}
-import com.typesafe.scalalogging.StrictLogging
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
