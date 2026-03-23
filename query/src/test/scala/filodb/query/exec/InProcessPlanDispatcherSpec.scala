@@ -210,6 +210,12 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
         r.result.size shouldEqual 0
     }
   }
+  it("should extract partition from hostname at construction") {
+    val dispatcherDeployment = new InProcessPlanDispatcher(queryConfig) {
+      override val clusterName = "query-server-api-tsdb1000-66bdd86ffd-bcdrt"
+    }
+    dispatcherDeployment.partition shouldEqual "tsdb1000"
+  }
 }
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {

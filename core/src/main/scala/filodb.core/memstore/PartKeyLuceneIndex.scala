@@ -415,12 +415,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val start = System.nanoTime()
     withNewSearcher { searcher =>
       val reader = searcher.getIndexReader
+      val query = colFiltersToQuery(colFilters, startTime, endTime)
       try {
         val state = readerStateCache.get((reader, colName))
         val fc = new FacetsCollector() {
           override def scoreMode() = ScoreMode.COMPLETE_NO_SCORES
         }
-        val query = colFiltersToQuery(colFilters, startTime, endTime)
         searcher.search(query, fc)
         val facets = new SortedSetDocValuesFacetCounts(state, fc)
         val result = facets.getTopChildren(limit, colName)

@@ -46,8 +46,9 @@ object Dependencies {
   val circeParser       = "io.circe"                   %% "circe-parser"         % "0.9.3"
 
   lazy val commonDeps = Seq(
-    "io.kamon" %% "kamon-bundle"  % kamonBundleVersion,
-    "io.kamon" %% "kamon-testkit" % kamonBundleVersion % Test,
+    "io.kamon" %% "kamon-bundle"                        % kamonBundleVersion,
+    "io.kamon" %% "kamon-testkit"                       % kamonBundleVersion % Test,
+    "io.kamon" %% "kamon-opentelemetry"                 % kamonBundleVersion excludeAll(excludegrpc),
     "io.opentelemetry"             % "opentelemetry-api"                    % otelVersion,
     "io.opentelemetry"             % "opentelemetry-sdk-metrics"            % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-otlp"          % otelVersion,
@@ -69,7 +70,8 @@ object Dependencies {
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
-    "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
+    "org.scorexfoundation" %% "debox"            % "0.10.0" withJavadoc(),
+    "org.typelevel"        %% "spire"            % "0.14.1",
     scalaLoggingDep
   )
 
@@ -101,7 +103,11 @@ object Dependencies {
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty, excludeXBean),
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
+    "org.apache.kafka"       %       "kafka-clients" % "1.0.0" exclude("org.slf4j", "slf4j-log4j12"),
+    "org.mockito"            %%      "mockito-scala" % "1.17.45" % Test,
+    circeGeneric,
+    circeParser
   )
 
   lazy val cassDeps = commonDeps ++ Seq(

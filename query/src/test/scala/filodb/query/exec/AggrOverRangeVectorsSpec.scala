@@ -9,7 +9,8 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
@@ -846,6 +847,78 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       case (false, false) => Unit
       case _ => fail("Unequal lengths")
     }
+  }
+
+  // Simulates the bug where serializing a quantile reduction result that contains NaNRowReader rows
+  // causes a MatchError in filoUTF8String. This happens during gRPC transport when a shard returns no
+  // data for some time steps: the iterator produces NaNRowReader rows, the reduction schema has a
+  // StringColumn for the T-Digest blob, and the NaN row filtering in SerializedRangeVector.apply
+  // doesn't handle StringColumn — so NaNRowReader reaches RecordBuilder which calls filoUTF8String,
+  // and NaNRowReader.getAny returns Double.NaN which doesn't match any case in the pattern match.
+  it("should not fail when serializing quantile reduction result containing NaN rows") {
+    // Produce a quantile map-reduce result (reduction schema: [TimestampColumn, StringColumn for tdigest])
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, 4.6d), (2L, 4.4d)))
+    )
+
+    val agg = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping,
+      queryContext = qc, QueryWarnings())
+    val reduced = RangeVectorAggregator.mapReduce(agg, true, resultObs, rv => rv.key,
+      queryContext = qc, QueryWarnings())
+    val reducedResult = reduced.toListL.runToFuture.futureValue
+    reducedResult.size shouldEqual 1
+
+    // Now build a RangeVector that interleaves real reduction rows with NaNRowReader rows,
+    // simulating what happens when a shard has gaps in data.
+    // The aggregation pipeline reuses the same QuantileAggTransientRow instance across next() calls,
+    // so we must copy each row into a fresh immutable snapshot before collecting.
+    val realRows = reducedResult(0).rows().map { r =>
+      val copy = new QuantileAggTransientRow()
+      copy.copyFrom(r)
+      copy
+    }.toList
+    val mixedRows: Seq[RowReader] = Seq(
+      new NaNRowReader(0L),  // gap before data
+      realRows(0),           // timestamp 1
+      new NaNRowReader(3L),  // gap in middle
+      realRows(1)            // timestamp 2
+    )
+    val mixedRv = new RangeVector {
+      import NoCloseCursor._
+      override def key: RangeVectorKey = noKey
+      override def rows(): RangeVectorCursor = mixedRows.iterator
+      override def outputRange: Option[RvRange] = None
+    }
+
+    // Use the quantile reduction schema (StringColumn for tdigest blob)
+    val recSchema = SerializedRangeVector.toSchema(Seq(
+      ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("tdig", ColumnType.StringColumn)))
+    val builder = SerializedRangeVector.newBuilder()
+
+    // This is where the bug manifests: serializing a NaNRowReader with a StringColumn schema
+    // causes filoUTF8String to fail because NaNRowReader.getAny returns Double.NaN
+    val srv = SerializedRangeVector(mixedRv, builder, recSchema,
+      "NaN-quantile-serialize-test", queryStats)
+
+    // If we get here without exception, verify we can still present the valid rows
+    val presented = RangeVectorAggregator.present(agg, Observable.now(srv), 1000,
+      RangeParams(0, 1, 0), queryStats)
+    val finalResult = presented.toListL.runToFuture.futureValue
+    finalResult.size shouldEqual 1
+
+    // Verify that NaNRowReader gaps were skipped and only the valid reduction rows survived.
+    // Expect exactly two rows, at timestamps 1L and 2L, with non-NaN quantile values.
+    val resultRows = finalResult.head.rows().map { r =>
+      val ts = r.getLong(0)
+      val q  = r.getDouble(1)
+      (ts, q)
+    }.toList
+    resultRows.size shouldEqual 2
+    resultRows.map(_._1) shouldEqual Seq(1L, 2L)
+    resultRows.foreach { case (_, q) => q.isNaN shouldEqual false }
   }
 
   @tailrec
