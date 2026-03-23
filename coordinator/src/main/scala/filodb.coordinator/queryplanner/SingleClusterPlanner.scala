@@ -6,7 +6,6 @@ import scala.concurrent.duration._
 import akka.actor.ActorRef
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.typesafe.scalalogging.StrictLogging
-import org.apache.arrow.flight.Location
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -218,8 +217,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def getAkkaOrFlightDispatcher(targetActor: ActorRef): PlanDispatcher = {
     if (flightEnabled) {
       qLogger.debug(s"Converting $targetActor to Flight ... ")
-      val location = Location.forGrpcInsecure(targetActor.path.address.host.get,
-        FiloDBFlightProducer.akkaPortToFlightPort(targetActor.path.address.port.get))
+      val location = FiloDBFlightProducer.akkaActorToFlightLocation(targetActor)
       SingleClusterFlightPlanDispatcher(location, clusterName)
     } else {
       ActorPlanDispatcher(targetActor, clusterName)

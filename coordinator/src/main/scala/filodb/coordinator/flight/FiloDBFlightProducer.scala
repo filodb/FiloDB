@@ -5,6 +5,7 @@ import java.util
 import java.util.{Collections, Optional}
 import java.util.concurrent.Executors
 
+import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor,
@@ -79,6 +80,12 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
 object FiloDBFlightProducer extends StrictLogging {
 
   def akkaPortToFlightPort(akkaPort: Int): Int = akkaPort + 5000
+
+  def akkaActorToFlightLocation(actor: ActorRef): Location = {
+    val host = actor.path.address.host.get
+    val port = akkaPortToFlightPort(actor.path.address.port.get)
+    Location.forGrpcInsecure(host, port)
+  }
 
   def start(memStore: TimeSeriesStore, allConfig: Config): Server = {
 

@@ -37,6 +37,7 @@ object FlightKryoSerDeser {
         val ki = new KryoInit()
         ki.preInit(k)
         initScalaSerializer(k)
+        initFilodbClasses(k)
         otherInit(k)
         ki.postInit(k)
         // register serializers here
@@ -92,22 +93,38 @@ object FlightKryoSerDeser {
   }
 
   private def otherInit(k: Kryo): Unit = {
-    k.register(classOf[Some[AnyRef]], 64)
-    k.register(classOf[Tuple2[_, _]], 65)
+    k.register(Some.getClass, 64)
+    k.register(Tuple2.getClass, 65)
     k.register(None.getClass, 66)
     k.register(Nil.getClass, 67)
     k.register(::.getClass, 68)
-    k.register(classOf[ArrayBuffer[_]], 69)
-    k.register(classOf[Vector[_]], 70)
-    // Register Flight-specific classes with stable IDs for deterministic serialization
-    k.register(classOf[RvRange], 71)
-    k.register(classOf[RvMetadata], 72)
+    k.register(ArrayBuffer.getClass, 69)
+    k.register(Vector.getClass, 70)
 
     // Register Guava classes used by Arrow Flight exceptions
     k.register(classOf[com.google.common.collect.LinkedListMultimap[_, _]])
     k.register(classOf[org.apache.arrow.flight.FlightRuntimeException])
     k.register(classOf[org.apache.arrow.flight.CallStatus])
     k.register(classOf[org.apache.arrow.flight.ErrorFlightMetadata])
+  }
+
+  def initFilodbClasses(k: Kryo): Unit = {
+    // Exec plans
+    k.register(classOf[filodb.query.exec.MultiSchemaPartitionsExec])
+    k.register(classOf[filodb.query.exec.LocalPartitionReduceAggregateExec])
+    k.register(classOf[filodb.query.exec.MultiPartitionReduceAggregateExec])
+    k.register(classOf[filodb.query.exec.BinaryJoinExec])
+    k.register(classOf[filodb.query.exec.LocalPartitionDistConcatExec])
+    k.register(classOf[filodb.query.exec.MultiPartitionDistConcatExec])
+    k.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
+    k.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
+    k.register(classOf[filodb.query.exec.ScalarOperationMapper])
+    k.register(classOf[filodb.query.exec.AggregateMapReduce])
+    k.register(classOf[filodb.query.exec.AggregatePresenter])
+    // TODO all query plans
+
+    // Flight Objects
+    k.register(classOf[RvMetadata])
   }
 
   def deserialize(bytes: Array[Byte]): Any = {
