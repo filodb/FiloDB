@@ -427,7 +427,7 @@ class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction[Trans
       i = i + 1
     }
     val counter = values.length
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    java.util.Arrays.sort(values.elems.asInstanceOf[Array[Double]], 0, values.length)
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
     var quantileResult : Double = Double.NaN
     if (counter > 0) {
@@ -459,7 +459,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
       }
     }
     val size = values.length
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    java.util.Arrays.sort(values.elems.asInstanceOf[Array[Double]], 0, values.length)
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
     var median : Double = Double.NaN
     if (size > 0) {
@@ -473,7 +473,7 @@ class MedianAbsoluteDeviationOverTimeFunction(funcParams: Seq[Any]) extends Rang
       val curValue = window.apply(i).getDouble(1)
       diffFromMedians.append(Math.abs(median - curValue))
     }
-    diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+    java.util.Arrays.sort(diffFromMedians.elems.asInstanceOf[Array[Double]], 0, diffFromMedians.length)
     if (size > 0) {
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex)*(1-weight) + diffFromMedians(upperIndex)*weight
     }
@@ -516,7 +516,7 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
           values.append(curValue)
         }
       }
-      values.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(values.elems.asInstanceOf[Array[Double]], 0, values.length)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, size)
       val median = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
 
@@ -528,7 +528,7 @@ class LastOverTimeIsMadOutlierFunction(funcParams: Seq[Any]) extends RangeFuncti
       }
 
       // mad = median of absolute distances from median
-      distFromMedian.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(distFromMedian.elems.asInstanceOf[Array[Double]], 0, distFromMedian.length)
       val mad = distFromMedian(lowerIndex)*(1-weight) + distFromMedian(upperIndex)*weight
 
       // classify last point as anomaly if it's more than `tolerance * mad` away from median
@@ -1190,7 +1190,7 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
       val counter = values.length
-      values.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(values.elems.asInstanceOf[Array[Double]], 0, values.length)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
       if (counter > 0) {
         quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
@@ -1208,7 +1208,7 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val size = values.length
     val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, size)
-    values.sort(spire.algebra.Order.fromOrdering[Double])
+    java.util.Arrays.sort(values.elems.asInstanceOf[Array[Double]], 0, values.length)
     var median: Double = Double.NaN
     if (size > 0) {
       median = values(lowerIndex) * (1 - weight) + values(upperIndex) * weight
@@ -1217,7 +1217,7 @@ abstract class MedianAbsoluteDeviationOverTimeChunkedFunction(var medianAbsolute
       for (value <- values) {
         diffFromMedians.append(Math.abs(median - value))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(diffFromMedians.elems.asInstanceOf[Array[Double]], 0, diffFromMedians.length)
       medianAbsoluteDeviationResult = diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
     sampleToEmit.setValues(endTimestamp, medianAbsoluteDeviationResult)

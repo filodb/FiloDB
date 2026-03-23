@@ -221,5 +221,15 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       promQl shouldEqual("""(test1{job="app"} + test2{job="app"})""")
   }
+
+  it("should extract partition and pod from StatefulSet actor path") {
+    val dispatcher = ActorPlanDispatcher(node, "test-cluster")
+
+    val actorPath = "akka.tcp://test-system@some-tsdb21-62.test.local:2552/user/coordinator"
+    val (partition, pod) = dispatcher.extractPartitionAndPod(actorPath)
+
+    partition shouldEqual "tsdb21"
+    pod shouldEqual "62"
+  }
 }
 

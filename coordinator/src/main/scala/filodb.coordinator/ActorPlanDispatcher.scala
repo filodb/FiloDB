@@ -26,6 +26,10 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
  */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
+  import ActorPlanDispatcher._
+
+  lazy val (partition, pod) = extractPartitionAndPod(target.path.toString)
+
   def getCaseClassOrProtoExecPlan(execPlan: filodb.query.exec.ExecPlan): QueryCommand = {
     val doProto = execPlan.queryContext.plannerParams.useProtoExecPlans
     val ep =
@@ -75,7 +79,9 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
                   "dispatcher" -> "actor-plan",
                   "dataset" -> plan.execPlan.dataset.dataset,
                   "cluster" -> clusterName,
-                  "target" -> target.path.toString))
+                  "target" -> target.path.toString,
+                  "partition" -> partition,
+                  "pod" -> pod))
               if (plan.execPlan.queryContext.plannerParams.allowPartialResults) {
                 qLogger.warn(s"Swallowed AskTimeoutException since partial results are enabled.")
                 Future.successful(emptyPartialResult)
@@ -120,5 +126,27 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     }
   }
 
+  private[coordinator] def extractHostname(actorPath: String): String = {
+    actorPath match {
+      case hostnamePattern(hostname) => hostname
+      case _ => actorPath
+    }
+  }
+
+  private[coordinator] def extractPartitionAndPod(actorPath: String): (String, String) = {
+    val hostname = extractHostname(actorPath)
+    hostname match {
+      case statefulSetPattern(partition, podNum) => (partition, podNum)
+      case _ =>
+        qLogger.warn(s"Unexpected hostname format in actor path, expected StatefulSet: $hostname")
+        (hostname, "unknown")
+    }
+  }
+
   override def isLocalCall: Boolean = false
+}
+
+object ActorPlanDispatcher {
+  private val hostnamePattern = """.*@([^.:]+).*""".r
+  private val statefulSetPattern = """.*?(tsdb\d+)-(\d+).*""".r
 }
