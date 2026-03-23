@@ -116,6 +116,144 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
 }
 
 /**
+ * Timestamp of Max Over Time - returns the timestamp when the maximum value occurred.
+ * Stores both the max value and its timestamp for proper reduction across partitions.
+ */
+class TsOfMaxOverTimeChunkedFunctionD(var max: Double = Double.NaN,
+                                       var maxTimestamp: Long = -1L)
+  extends ChunkedRangeFunction[TransientRow] {
+
+  override final def reset(): Unit = {
+    max = Double.NaN
+    maxTimestamp = -1L
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    // Return the timestamp (in seconds) when max occurred
+    sampleToEmit.setValues(endTimestamp,
+      if (maxTimestamp >= 0) maxTimestamp.toDouble / 1000.0 else Double.NaN)
+  }
+
+  // Need to override addChunks to access both timestamp and value vectors
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr,
+                valueReader: VectorDataReader,
+                startTime: Long, endTime: Long,
+                info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (startRowNum <= endRowNum) {
+      var rowNum = startRowNum
+      val doubleReader = valueReader.asDoubleReader
+      val it = doubleReader.iterate(valueVectorAcc, valueVector, startRowNum)
+
+      while (rowNum <= endRowNum) {
+        val nextVal = it.next
+        if (!nextVal.isNaN) {
+          if (max.isNaN || nextVal > max) {
+            max = nextVal
+            maxTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+          }
+        }
+        rowNum += 1
+      }
+    }
+  }
+  // scalastyle:on parameter.number
+}
+
+/**
+ * Timestamp of Min Over Time - returns the timestamp when the minimum value occurred.
+ * Stores both the min value and its timestamp for proper reduction across partitions.
+ */
+class TsOfMinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
+                                       var minTimestamp: Long = -1L)
+  extends ChunkedRangeFunction[TransientRow] {
+
+  override final def reset(): Unit = {
+    min = Double.NaN
+    minTimestamp = -1L
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    // Return the timestamp (in seconds) when min occurred
+    sampleToEmit.setValues(endTimestamp,
+      if (minTimestamp >= 0) minTimestamp.toDouble / 1000.0 else Double.NaN)
+  }
+
+  // Need to override addChunks to access both timestamp and value vectors
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr,
+                valueReader: VectorDataReader,
+                startTime: Long, endTime: Long,
+                info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (startRowNum <= endRowNum) {
+      var rowNum = startRowNum
+      val doubleReader = valueReader.asDoubleReader
+      val it = doubleReader.iterate(valueVectorAcc, valueVector, startRowNum)
+
+      while (rowNum <= endRowNum) {
+        val nextVal = it.next
+        if (!nextVal.isNaN) {
+          if (min.isNaN || nextVal < min) {
+            min = nextVal
+            minTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+          }
+        }
+        rowNum += 1
+      }
+    }
+  }
+  // scalastyle:on parameter.number
+}
+
+/**
+ * Timestamp of Max/Min Over Time - sliding window version for iterating functions.
+ * Returns the timestamp when the maximum or minimum value occurred.
+ * Uses a monotonic deque to track both values and their timestamps.
+ */
+class TsOfMaxMinOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
+  val tsDeque = new util.ArrayDeque[(Long, Double)]()
+
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
+    if (!row.value.isNaN) {
+      // Remove values that are "worse" than the current value
+      while (!tsDeque.isEmpty && ord.compare(tsDeque.peekLast()._2, row.value) < 0) {
+        tsDeque.removeLast()
+      }
+      tsDeque.addLast((row.timestamp, row.value))
+    }
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
+    // Remove entries with timestamps older than or equal to the removed row's timestamp
+    while (!tsDeque.isEmpty && tsDeque.peekFirst()._1 <= row.timestamp) {
+      tsDeque.removeFirst()
+    }
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
+                     sampleToEmit: TransientRow,
+                     queryConfig: QueryConfig): Unit = {
+    if (tsDeque.isEmpty) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    } else {
+      // Return the timestamp (in seconds) when the extremum occurred
+      val timestamp = tsDeque.peekFirst()._1
+      sampleToEmit.setValues(endTimestamp, timestamp.toDouble / 1000.0)
+    }
+  }
+}
+
+/**
  * Sliding window tracker for finding maximum or minimum values efficiently over time windows.
  * Uses a monotonic deque approach to maintain O(1) amortized insertion/removal operations.
  *

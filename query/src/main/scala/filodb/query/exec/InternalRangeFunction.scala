@@ -33,6 +33,10 @@ object InternalRangeFunction {
 
   case object MinOverTime extends InternalRangeFunction
 
+  case object TsOfMaxOverTime extends InternalRangeFunction
+
+  case object TsOfMinOverTime extends InternalRangeFunction
+
   case object PredictLinear extends InternalRangeFunction
 
   case object QuantileOverTime extends InternalRangeFunction
@@ -83,6 +87,8 @@ object InternalRangeFunction {
     case RangeFunctionId.Irate            => Irate
     case RangeFunctionId.MaxOverTime      => MaxOverTime
     case RangeFunctionId.MinOverTime      => MinOverTime
+    case RangeFunctionId.TsOfMaxOverTime  => TsOfMaxOverTime
+    case RangeFunctionId.TsOfMinOverTime  => TsOfMinOverTime
     case RangeFunctionId.PredictLinear    => PredictLinear
     case RangeFunctionId.QuantileOverTime => QuantileOverTime
     case RangeFunctionId.Rate             => Rate
