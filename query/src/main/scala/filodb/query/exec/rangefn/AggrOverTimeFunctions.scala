@@ -5,7 +5,7 @@ import java.util
 
 import debox.Buffer
 
-import filodb.core.query.{QueryConfig, TransientHistMaxMinRow, TransientHistRow, TransientRow}
+import filodb.core.query.{QueryConfig, QueryUtils, TransientHistMaxMinRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
@@ -49,7 +49,7 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN) extends ChunkedD
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      min = if (min.isNaN) nextVal else Math.min(min, nextVal)
+      min = QueryUtils.minIgnoreNaN(min, nextVal)
       rowNum += 1
     }
   }
@@ -88,7 +88,7 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN) extends ChunkedD
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      max = if (max.isNaN) nextVal else Math.max(max, nextVal) // cannot compare NaN, always < anything else
+      max = QueryUtils.maxIgnoreNaN(max, nextVal) // cannot compare NaN, always < anything else
       rowNum += 1
     }
   }

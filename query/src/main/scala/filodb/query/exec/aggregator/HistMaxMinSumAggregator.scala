@@ -1,7 +1,7 @@
 package filodb.query.exec.aggregator
 
-import filodb.core.query.{MutableRowReader, QueryStats, RangeParams,
-                          RangeVector, RangeVectorKey, ResultSchema, TransientHistMaxMinRow}
+import filodb.core.query.{MutableRowReader, QueryStats, QueryUtils, RangeParams, RangeVector,
+                          RangeVectorKey, ResultSchema, TransientHistMaxMinRow}
 import filodb.memory.format.RowReader
 
 object HistMaxMinSumAggregator extends RowAggregator {
@@ -28,8 +28,8 @@ object HistMaxMinSumAggregator extends RowAggregator {
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }
-    acc.max = if (acc.max.isNaN) aggRes.getDouble(2) else Math.max(acc.max, aggRes.getDouble(2))
-    acc.min = if (acc.min.isNaN) aggRes.getDouble(3) else Math.min(acc.min, aggRes.getDouble(3))
+    acc.max = QueryUtils.maxIgnoreNaN(acc.max, aggRes.getDouble(2))
+    acc.min = QueryUtils.maxIgnoreNaN(acc.min, aggRes.getDouble(3))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int,
