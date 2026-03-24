@@ -29,7 +29,7 @@ object HistMaxMinSumAggregator extends RowAggregator {
       case h                            =>
     }
     acc.max = QueryUtils.maxIgnoreNaN(acc.max, aggRes.getDouble(2))
-    acc.min = QueryUtils.maxIgnoreNaN(acc.min, aggRes.getDouble(3))
+    acc.min = QueryUtils.minIgnoreNaN(acc.min, aggRes.getDouble(3))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int,
