@@ -88,7 +88,7 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN) extends ChunkedD
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      max = QueryUtils.maxIgnoreNaN(max, nextVal) // cannot compare NaN, always < anything else
+      max = QueryUtils.maxIgnoreNaN(max, nextVal)
       rowNum += 1
     }
   }

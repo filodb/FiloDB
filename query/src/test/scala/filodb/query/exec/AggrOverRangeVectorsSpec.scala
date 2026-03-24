@@ -919,8 +919,6 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       toRv(Seq((1000L, 3.0d),       (2000L, Double.NaN), (3000L, 9.0d)),
            CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)))
     )
-    val rangeParams = RangeParams(1, 1, 3)
-
     // Max
     val aggMax = RowAggregator(AggregationOperator.Max, Nil, tvSchema)
     val maxResult = RangeVectorAggregator.mapReduce(
