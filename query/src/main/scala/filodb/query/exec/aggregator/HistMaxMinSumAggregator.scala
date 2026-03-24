@@ -1,7 +1,7 @@
 package filodb.query.exec.aggregator
 
-import filodb.core.query.{MutableRowReader, QueryStats, RangeParams,
-                          RangeVector, RangeVectorKey, ResultSchema, TransientHistMaxMinRow}
+import filodb.core.query.{MutableRowReader, QueryStats, QueryUtils, RangeParams, RangeVector,
+                          RangeVectorKey, ResultSchema, TransientHistMaxMinRow}
 import filodb.memory.format.RowReader
 
 object HistMaxMinSumAggregator extends RowAggregator {
@@ -13,7 +13,7 @@ object HistMaxMinSumAggregator extends RowAggregator {
                             var min: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientHistMaxMinRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row.max = max; row.min = min; row }
-    def resetToZero(): Unit = { h = bv.Histogram.empty; max = 0.0; min = Double.MaxValue }
+    def resetToZero(): Unit = { h = bv.Histogram.empty; max = Double.NaN; min = Double.NaN }
   }
   type AggHolderType = HistSumMaxMinHolder
   def zero: HistSumMaxMinHolder = new HistSumMaxMinHolder
@@ -28,8 +28,8 @@ object HistMaxMinSumAggregator extends RowAggregator {
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }
-    acc.max = if (acc.max.isNaN) aggRes.getDouble(2) else Math.max(acc.max, aggRes.getDouble(2))
-    acc.min = if (acc.min.isNaN) aggRes.getDouble(3) else Math.min(acc.min, aggRes.getDouble(3))
+    acc.max = QueryUtils.maxIgnoreNaN(acc.max, aggRes.getDouble(2))
+    acc.min = QueryUtils.minIgnoreNaN(acc.min, aggRes.getDouble(3))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int,
