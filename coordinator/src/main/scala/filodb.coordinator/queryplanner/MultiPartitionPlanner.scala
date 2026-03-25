@@ -1122,6 +1122,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
       shardKeyFilterGroups.isEmpty
 
+    // this will preserve the legacy routing logic.
+
     lp match {
       case lc: LabelCardinality =>
         getPartitions(lc, queryParams)

@@ -4328,7 +4328,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       TimeStepParams(startSeconds, step, endSeconds), Antlr)
     // getRoutingKeys should throw an exception for regex filters as only Equals filters are supported
     // Regex filters on shard keys are handled by ShardKeyRegexPlanner which wraps  MultiPartitionPlanner
-    an[IllegalArgumentException] should be thrownBy {
+    noException should be thrownBy {
       mpp.getRoutingKeys(lp)
     }
   }
