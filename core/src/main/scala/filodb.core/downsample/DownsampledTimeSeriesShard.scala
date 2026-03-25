@@ -517,8 +517,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  minResolutionMs: Int,
                                  colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
-    val isCompatibleSchemas = Utils.doesSchemaMatchOrBackCompatibleHistograms(
-      schemas.schemaName(schemaId), schemaId, schemas.schemaName(firstSchemaId), firstSchemaId)
+    val isCompatibleSchemas = Utils.areCompatibleMetricTypes(schemaId, firstSchemaId)
     if (!isCompatibleSchemas) {
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId), getClass.getSimpleName)
     }
