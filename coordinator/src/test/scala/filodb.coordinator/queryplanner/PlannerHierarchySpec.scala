@@ -4324,11 +4324,12 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
     val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan(
-      """foo{_ns_=~"ns1|ns2"}""",
+      """foo{_ns_=~"ns.*"}""",
       TimeStepParams(startSeconds, step, endSeconds), Antlr)
     // getRoutingKeys should throw an exception for regex filters as only Equals filters are supported
+    // Pipe-only regexes (e.g. "ns1|ns2") are handled specially, but wildcard regexes should throw.
     // Regex filters on shard keys are handled by ShardKeyRegexPlanner which wraps  MultiPartitionPlanner
-    noException should be thrownBy {
+    an[IllegalArgumentException] should be thrownBy {
       mpp.getRoutingKeys(lp)
     }
   }

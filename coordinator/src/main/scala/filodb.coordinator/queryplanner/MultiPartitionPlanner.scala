@@ -1,13 +1,16 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.concurrent.{Map => ConcurrentMap}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
+
 import akka.util.Helpers.Requiring
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
