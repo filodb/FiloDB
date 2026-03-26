@@ -54,3 +54,9 @@ impl EarlyReturn for i64 {
 impl EarlyReturn for () {
     fn abort_value() -> Self {}
 }
+
+impl EarlyReturn for f64 {
+    fn abort_value() -> Self {
+        0.0
+    }
+}
