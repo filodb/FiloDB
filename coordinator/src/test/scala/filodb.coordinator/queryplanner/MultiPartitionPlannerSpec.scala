@@ -13,14 +13,14 @@ import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RoutingConfig}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.BinaryOperator.{ADD, LAND}
+import filodb.query.BinaryOperator.ADD
 import filodb.query.InstantFunctionId.Ln
 import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(32)
@@ -37,8 +37,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   private val config = ConfigFactory.load("application_test.conf")
     .getConfig("filodb.query").withFallback(routingConfig).resolve()
   private val queryConfig = QueryConfig(config)
-                            .copy(plannerSelector = Some("plannerSelector"),
-                              routingConfig = RoutingConfig(supportRemoteRawExport = true))
+    .copy(plannerSelector = Some("plannerSelector"),
+      routingConfig = RoutingConfig(supportRemoteRawExport = true))
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, 1)))
@@ -50,38 +50,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   val step = 100
 
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
-    TimeRange(timeRange.startMs, timeRange.endMs)))
+    TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
   def partitionsV2SinglePartition(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, 1.0f)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, 1.0f, "testWorkUnit")),
       TimeRange(timeRange.startMs, timeRange.endMs)))
   def partitionsV2MultiPartition(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
-      "remote" -> PartitionDetails("remote", "remote-url", None, .5f)), TimeRange(timeRange.startMs, timeRange.endMs)))
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f, "testWorkUnit"),
+      "remote" -> PartitionDetails("remote", "remote-url", None, .5f, "testWorkUnit")), TimeRange(timeRange.startMs, timeRange.endMs)))
 
   def partitionsV2MultiPartitionAssignments(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
-      "remote1" -> PartitionDetails("remote1", "remote-url", None, .5f)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f, "testWorkUnit"),
+      "remote1" -> PartitionDetails("remote1", "remote-url", None, .5f, "testWorkUnit")),
       TimeRange(timeRange.startMs, timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2)),
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
-      "remote2" -> PartitionDetails("remote2", "remote-url", None, .5f)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f, "testWorkUnit"),
+      "remote2" -> PartitionDetails("remote2", "remote-url", None, .5f, "testWorkUnit")),
       TimeRange(timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2 + 1, timeRange.endMs)))
 
   def partitionsV2MultiPartitionAssignmentsOnlyWeightChange(timeRange: TimeRange): List[PartitionAssignmentV2] = List(
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f),
-      "remote" -> PartitionDetails("remote1", "remote-url", None, .5f)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .5f, "testWorkUnit"),
+      "remote" -> PartitionDetails("remote1", "remote-url", None, .5f, "testWorkUnit")),
       TimeRange(timeRange.startMs, timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2)),
-    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .2f),
-      "remote" -> PartitionDetails("remote2", "remote-url", None, .8f)),
+    PartitionAssignmentV2(Map("local" -> PartitionDetails("local", "local-url", None, .2f, "testWorkUnit"),
+      "remote" -> PartitionDetails("remote2", "remote-url", None, .8f, "testWorkUnit")),
       TimeRange(timeRange.startMs + (timeRange.endMs - timeRange.startMs) / 2 + 1, timeRange.endMs)))
 
   it ("should not generate PromQlExec plan when partitions are local") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -106,13 +106,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
       PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-        localPartitionStart * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
-        TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"), PartitionAssignment("remote2", "remote-url2",
+        TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-       if (routingKey.equals(Map("job" -> "app"))) twoPartitions(timeRange)
-       else Nil
+        if (routingKey.equals(Map("job" -> "app"))) twoPartitions(timeRange)
+        else Nil
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
@@ -141,13 +141,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // This tests the scenario where data is distributed across partitions but not split across time
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
-      
+
       override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = {
         if (routingKey.equals(Map("job" -> "app1"))) {
           List(PartitionAssignmentV2(
             Map(
-              "local" -> PartitionDetails("local", "local-url", None, 0.5f),
-              "remote" -> PartitionDetails("remote", "remote-url", None, 0.5f)
+              "local" -> PartitionDetails("local", "local-url", None, 0.5f, "testWorkUnit"),
+              "remote" -> PartitionDetails("remote", "remote-url", None, 0.5f, "testWorkUnit")
             ),
             TimeRange(1000 * 1000, 10000 * 1000)
           ))
@@ -223,8 +223,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         if (routingKey.equals(Map("job" -> "app1"))) {
           List(PartitionAssignmentV2(
             Map(
-              "local" -> PartitionDetails("local", "local-url", None, 0.5f),
-              "remote" -> PartitionDetails("remote", "remote-url", None, 0.5f)
+              "local" -> PartitionDetails("local", "local-url", None, 0.5f, "testWorkUnit"),
+              "remote" -> PartitionDetails("remote", "remote-url", None, 0.5f, "testWorkUnit")
             ),
             TimeRange(1000 * 1000, 10000 * 1000)
           ))
@@ -264,10 +264,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val subqueryLookbackSecs = 9000
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
     }
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, localPlanner, "local", dataset, queryConfig
@@ -282,10 +282,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
     val expectedPlan =
       """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)
-         |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-         |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)
-         |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-         |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)""".stripMargin
+        |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)
+        |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -302,8 +302,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //    val subqueryLookbackSecs = 9000
   //
   //    def twoPartitions(): List[PartitionAssignment] = List(
-  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
-  //      PartitionAssignment("remote2", "remote-url2", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000), workUnit = "testWorkUnit"),
+  //      PartitionAssignment("remote2", "remote-url2", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000), workUnit = "testWorkUnit")
   //    )
   //
   //    val partitionLocationProvider = new PartitionLocationProvider {
@@ -364,8 +364,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //    val subqueryLookbackSecs = 9000
   //
   //    def twoPartitions(): List[PartitionAssignment] = List(
-  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
-  //      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000), workUnit = "testWorkUnit"),
+  //      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000), workUnit = "testWorkUnit")
   //    )
   //
   //    val partitionLocationProvider = new PartitionLocationProvider {
@@ -419,14 +419,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1")))
-          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
         else
-          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -449,13 +449,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       )
     )
     val expectedPlan =
-    """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-      |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)
-      |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)
-      |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)""".stripMargin
+      """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)
+        |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)
+        |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-763739679],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
 
@@ -467,14 +467,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1")))
-          List(PartitionAssignment("remote1", "remote-url1", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("remote1", "remote-url1", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
         else
-          List(PartitionAssignment("remote2", "remote-url2", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("remote2", "remote-url2", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -513,14 +513,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val subqueryLookbackSecs = 9000
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1")))
-          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
         else
-          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -567,7 +567,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val queryEndSecs = 1800
     def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
       PartitionAssignment(
-        "remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs, endSeconds * 1000)
+        "remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs, endSeconds * 1000),
+        workUnit = "testWorkUnit"
       )
     )
     val partitionLocationProvider = new PartitionLocationProvider {
@@ -600,7 +601,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
       PartitionAssignment(
-        "local", "local-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)
+        "local", "local-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000),
+        workUnit = "testWorkUnit"
       )
     )
     val partitionLocationProvider = new PartitionLocationProvider {
@@ -641,9 +643,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1")))
-          List(PartitionAssignment("remote", "remote-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000), workUnit = "testWorkUnit"))
         else
-          List(PartitionAssignment("local", "local-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+          List(PartitionAssignment("local", "local-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -681,9 +683,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1")))
-          List(PartitionAssignment("remote", "remote-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000), workUnit = "testWorkUnit"))
         else
-          List(PartitionAssignment("local", "local-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+          List(PartitionAssignment("local", "local-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -895,6 +897,562 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     execPlan.children.head.children.count(plan => plan.isInstanceOf[LocalPartitionDistConcatExec]) shouldEqual 1
   }
 
+  it("should generate StitchRvsExec for absent_over_time with V2 assignment partition changes") {
+    // This test uses partitionsV2MultiPartitionAssignments which has partition changes over time
+    // This should generate StitchRvsExec to combine results from different time periods
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(test{job = "app"}[10m])""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""absent_over_time(test{job = "app"}[10m])""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val expectedPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-T~AbsentFunctionMapper(columnFilter=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))) rangeParams=RangeParams(1000,100,1200) metricColumn=__name__)
+                         |--E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1200000, window=Some(600000), functionId=Some(Last), rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,1200000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1200000, window=Some(600000), functionId=Some(Last), rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,1200000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |----E~PromQlRemoteExec(PromQlQueryParams(sum(last(test{job="app"}[600s])),1000,100,1200,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-T~AbsentFunctionMapper(columnFilter=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))) rangeParams=RangeParams(1300,100,2000) metricColumn=__name__)
+                         |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+                         |----T~PeriodicSamplesMapper(start=1300000, step=100000, end=2000000, window=Some(600000), functionId=Some(Last), rawSource=false, offsetMs=None)
+                         |-----E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |-------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[1600s],2000,1,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1527240629],raw)
+                         |-------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[1600s],2000,1,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expectedPlan)
+  }
+
+  it("should generate StitchRvsExec for sum(absent_over_time) + 1 with V2 assignment partition changes") {
+    // This test uses partitionsV2MultiPartitionAssignments which has partition changes over time
+    // This should generate StitchRvsExec to combine results from different time periods
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(absent_over_time(test{job = "app"}[10m])) + 1""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""sum(absent_over_time(test{job = "app"}[10m])) + 1""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val expectedPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+                         |--FA1~StaticFuncArgs(1.0,RangeParams(1000,100,2000))
+                         |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,2000))
+                         |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |-----T~AbsentFunctionMapper(columnFilter=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))) rangeParams=RangeParams(1000,100,1200) metricColumn=__name__)
+                         |------E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-------E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |--------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |---------T~PeriodicSamplesMapper(start=1000000, step=100000, end=1200000, window=Some(600000), functionId=Some(Last), rawSource=true, offsetMs=None)
+                         |----------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,1200000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |--------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |---------T~PeriodicSamplesMapper(start=1000000, step=100000, end=1200000, window=Some(600000), functionId=Some(Last), rawSource=true, offsetMs=None)
+                         |----------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,1200000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |-------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |--------E~PromQlRemoteExec(PromQlQueryParams(sum(last(test{job="app"}[600s])),1000,100,1200,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+                         |--FA1~StaticFuncArgs(1.0,RangeParams(1300,100,2000))
+                         |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1300,100,2000))
+                         |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |-----T~AbsentFunctionMapper(columnFilter=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))) rangeParams=RangeParams(1300,100,2000) metricColumn=__name__)
+                         |------E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+                         |--------T~PeriodicSamplesMapper(start=1300000, step=100000, end=2000000, window=Some(600000), functionId=Some(Last), rawSource=false, offsetMs=None)
+                         |---------E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |----------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-----------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |------------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |------------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |-----------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[1600s],2000,1,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |----------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |-----------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |------------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |------------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(400000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#412742127],raw)
+                         |-----------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[1600s],2000,1,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expectedPlan)
+  }
+
+
+  it("should generate StitchRvsExec for BinaryJoin with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app"} + test2{job = "app"}""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""test1{job = "app"} + test2{job = "app"}""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test1{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test2{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test1{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test1{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test2{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test2{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=8, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=24, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test1{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2036399103],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test2{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for ScalarBinaryOperation with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""scalar(test{job = "app"}) + 5""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""scalar(test{job = "app"}) + 5""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1000,100,2000))
+                       |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+                       |---E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1400,100,1999))
+                       |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+                       |---T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |----E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1000,100,2000))
+                       |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+                       |---E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |-----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#209663367],raw)
+                       |----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for ScalarVectorBinaryOperation with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""5 + test{job = "app"}""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""5 + test{job = "app"}""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1000,100,2000))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1400,100,1999))
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+                       |--FA1~StaticFuncArgs(5.0,RangeParams(1000,100,2000))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-375203203],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for VectorPlan with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(test{job = "app"}) or vector(5)""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""sum(test{job = "app"}) or vector(5)""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~SetOperatorExec(binaryOp=LOR, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,2000))
+                       |---E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |------T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |------T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~VectorFunctionMapper(funcParams=List())
+                       |---E~ScalarFixedDoubleExec(params = RangeParams(1000,100,2000), value = 5.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~SetOperatorExec(binaryOp=LOR, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1400,100,1999))
+                       |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |-----T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |------E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |---------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |---------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |--------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-------E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |---------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |---------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |--------E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~VectorFunctionMapper(funcParams=List())
+                       |---E~ScalarFixedDoubleExec(params = RangeParams(1400,100,1999), value = 5.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-E~SetOperatorExec(binaryOp=LOR, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,2000))
+                       |---E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |------T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |------T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#611828007],raw)
+                       |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~VectorFunctionMapper(funcParams=List())
+                       |---E~ScalarFixedDoubleExec(params = RangeParams(1000,100,2000), value = 5.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for ApplyInstantFunction with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""abs(test{job = "app"})""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""abs(test{job = "app"})""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=Abs)
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=Abs)
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=Abs)
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-943089927],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for ApplyInstantFunctionRaw with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""histogram_quantile(0.9, test{job = "app"})""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""histogram_quantile(0.9, test{job = "app"})""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=HistogramQuantile)
+                       |--FA1~StaticFuncArgs(0.9,RangeParams(1000,100,2000))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=HistogramQuantile)
+                       |--FA1~StaticFuncArgs(0.9,RangeParams(1400,100,1999))
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-T~InstantVectorFunctionMapper(function=HistogramQuantile)
+                       |--FA1~StaticFuncArgs(0.9,RangeParams(1000,100,2000))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1030667299],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
+  it("should generate StitchRvsExec for ApplySortFunction with V2 assignment partition changes") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getMetadataPartitionsTrait(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignmentTrait] =
+        partitionsV2MultiPartitionAssignments(timeRange)
+
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""sort(test{job = "app"})""",
+      TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("""sort(test{job = "app"})""", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    val actualPlan = """T~SortFunctionMapper(function=Sort)
+                       |-E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |----T~PeriodicSamplesMapper(start=1000000, step=100000, end=1350000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1350000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},1000,100,1350,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--T~PeriodicSamplesMapper(start=1400000, step=100000, end=1999000, window=None, functionId=None, rawSource=false, offsetMs=None)
+                       |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |----E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |-----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1050000,1999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |-----E~PromQlRemoteExec(PromQlQueryParams(test{job="app"}[949s],1999,1,1999,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |--E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                       |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |----T~PeriodicSamplesMapper(start=2000000, step=100000, end=2000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(1700000,2000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#360021522],raw)
+                       |---E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},2000,100,2000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, actualPlan)
+  }
+
   it ("should have equal hashcode for identical getColumnFilterGroup") {
 
     val lp1 = Parser.queryRangeToLogicalPlan("test1{inst = \"inst-001\", job = \"app\", host = \"localhost\"}",
@@ -917,7 +1475,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should generate PromQlRemoteExec plan for BinaryJoin when lhs and rhs are in same remote partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -945,7 +1503,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should generate PromQLGrpcRemote plan for BinaryJoin when lhs and rhs are in same remote partition and grpc is enabled") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs), grpcEndPoint = Some("grpcEndpoint")))
+      TimeRange(timeRange.startMs, timeRange.endMs), grpcEndPoint = Some("grpcEndpoint"), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -975,8 +1533,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it ("should generate Exec plan for Metadata query without shardkey") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1018,8 +1576,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it ("should generate Exec plan for Metadata query with partial shardkey") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1061,8 +1619,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it ("should generate Exec plan for Metadata query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-      TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-      PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+      TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+      PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1108,18 +1666,18 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app")))
           List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
-             secondPartitionStart * 1000 - 1)),
+             secondPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
             PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
-              thirdPartitionStart * 1000 - 1)),
-            PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
+              thirdPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+            PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
         else Nil
       }
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
-          secondPartitionStart * 1000 - 1)),
+          secondPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
           PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
-            thirdPartitionStart * 1000 - 1)),
-          PartitionAssignment("local", "local-url", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
+            thirdPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+          PartitionAssignment("local", "local-url", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
@@ -1155,15 +1713,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app")))
           List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
-            localPartitionStartSec * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
-            TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
+            localPartitionStartSec * 1000 - 1), workUnit = "testWorkUnit"), PartitionAssignment("remote2", "remote-url2",
+            TimeRange(localPartitionStartSec * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
         else Nil
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStartSec * 1000 - 1)), PartitionAssignment("local", "local-url",
-          TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
+          localPartitionStartSec * 1000 - 1), workUnit = "testWorkUnit"), PartitionAssignment("local", "local-url",
+          TimeRange(localPartitionStartSec * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
@@ -1188,67 +1746,67 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //     |------------------------------------------|-----------|----------------------------.....|
   //                                        ^             ^
   //                                   Query start    Query end
-//  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
-//    "than or equal to lookback ") {
-//
-//    val startSeconds = 1594309980L
-//    val endSeconds = 1594310280L
-//    val localPartitionStartMs: Long = 1594309980001L
-//    val step = 15L
-//
-//    val partitionLocationProvider = new PartitionLocationProvider {
-//      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-//        if (routingKey.equals(Map("job" -> "app"))) List(
-//          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-//            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-//            TimeRange(localPartitionStartMs, endSeconds * 1000)))
-//        else Nil
-//      }
-//
-//      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
-//        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-//          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-//          TimeRange(localPartitionStartMs, endSeconds * 1000)))
-//
-//    }
-//    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-//    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
-//
-//    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
-//
-//    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
-//      PlannerParams(processMultiPartition = true)))
-//    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-//    stitchRvsExec.children.size shouldEqual (2)
-//    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-//    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-//
-//
-//    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-//    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    queryParams.startSecs shouldEqual startSeconds
-//    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
-//    queryParams.stepSecs shouldEqual step
-//    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
-//    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
-//    remoteExec.queryEndpoint shouldEqual "remote-url"
-//
-//    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-//    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    queryParams2.startSecs shouldEqual endSeconds
-//    queryParams2.endSecs shouldEqual endSeconds
-//    queryParams2.stepSecs shouldEqual step
-//    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-//    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-//    remoteExec2.queryEndpoint shouldEqual "remote-url"
-//
-//  }
+  //  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
+  //    "than or equal to lookback ") {
+  //
+  //    val startSeconds = 1594309980L
+  //    val endSeconds = 1594310280L
+  //    val localPartitionStartMs: Long = 1594309980001L
+  //    val step = 15L
+  //
+  //    val partitionLocationProvider = new PartitionLocationProvider {
+  //      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+  //        if (routingKey.equals(Map("job" -> "app"))) List(
+  //          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+  //            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+  //            TimeRange(localPartitionStartMs, endSeconds * 1000)))
+  //        else Nil
+  //      }
+  //
+  //      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
+  //        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+  //          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+  //          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+  //
+  //    }
+  //    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+  //    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
+  //
+  //    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+  //
+  //    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+  //      PlannerParams(processMultiPartition = true)))
+  //    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+  //    stitchRvsExec.children.size shouldEqual (2)
+  //    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+  //    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+  //
+  //
+  //    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
+  //    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+  //    queryParams.startSecs shouldEqual startSeconds
+  //    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+  //    queryParams.stepSecs shouldEqual step
+  //    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
+  //    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
+  //    remoteExec.queryEndpoint shouldEqual "remote-url"
+  //
+  //    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+  //    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+  //    queryParams2.startSecs shouldEqual endSeconds
+  //    queryParams2.endSecs shouldEqual endSeconds
+  //    queryParams2.stepSecs shouldEqual step
+  //    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+  //    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
+  //    remoteExec2.queryEndpoint shouldEqual "remote-url"
+  //
+  //  }
 
   it ("should generate Exec plan for Metadata Label values query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1273,7 +1831,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val expectedUrlParams = Map("filter" -> """_ws_="demo"""", "labels" -> "__metric__")
     execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams) // Filter values
-                                                                                                  // should have quotes
+    // should have quotes
     execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       endSecs shouldEqual(localPartitionStart - 1)
     execPlan.children(0).asInstanceOf[LabelValuesDistConcatExec].children(0).asInstanceOf[LabelValuesExec].startMs shouldEqual
@@ -1285,8 +1843,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it("should generate correct ExecPlan for TsCardinalities query version 2") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1300,7 +1858,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local",
       dataset, queryConfig)
     val lp = TsCardinalities(Seq("a", "b"), 3, Seq("longtime-prometheus","recordingrules-prometheus_rules_1m")
-    , "raw,recordingrules")
+      , "raw,recordingrules")
     val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds,
       Some("/api/v2/metering/cardinality/timeseries"))
     val expectedUrlParams = Map("match[]" -> """{_ws_="a",_ns_="b"}""", "numGroupByFields" -> "3","verbose" -> "true",
@@ -1317,16 +1875,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should generate multipartition BinaryJoin") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1"))) List(
           PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1432,14 +1990,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app"))) List(
           PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-            endSeconds * 1000)))
+            endSeconds * 1000), workUnit = "testWorkUnit"))
         else Nil
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
         PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
-          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+          localPartitionStartMs - 1), workUnit = "testWorkUnit"), PartitionAssignment("remote", "remote-url",
+          TimeRange(localPartitionStartMs, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -1458,8 +2016,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   private def getPlannerForMetadataQueryTests = {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
-        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
-        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1566,16 +2124,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should generate correct plan for multipartition BinaryJoin with instant function") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1"))) List(
           PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1588,16 +2146,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val promQlQueryParams = PromQlQueryParams("""ln(test1{job = "app1"} + test2{job = "app2"})""", 1000, 100, 10000)
 
-//    Sample plan generated for an instant function applied to a Multi Partition Binary Join
+    //    Sample plan generated for an instant function applied to a Multi Partition Binary Join
 
-//    T~InstantVectorFunctionMapper(function=Ln)
-//    -E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
-//    --E~PromQlRemoteExec(PromQlQueryParams(test1{job="app1"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
-//    --E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
-//      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
-//      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+    //    T~InstantVectorFunctionMapper(function=Ln)
+    //    -E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
+    //    --E~PromQlRemoteExec(PromQlQueryParams(test1{job="app1"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
+    //    --E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+    //      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+    //    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+    //      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+    //    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
@@ -1619,16 +2177,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should generate correct plan for multipartition set operation with absent function") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app1"))) List(
           PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1641,52 +2199,41 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val promQlQueryParams = PromQlQueryParams("""absent(test1{job = "app1"} and test2{job = "app2"})""", 1000, 100, 10000)
 
-    //    Sample plan generated for an instant function applied to a Multi Partition Set Operation with Absent
-
-//    T~AbsentFunctionMapper(columnFilter=List() rangeParams=RangeParams(1000,100,10000) metricColumn=__name__)
-//    -E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
-//    --T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-//    ---E~SetOperatorExec(binaryOp=LAND, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
-//    ----E~PromQlRemoteExec(PromQlQueryParams(test1{job="app1"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,None,None,None,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
-//    ----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
-//      -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
-//      -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
-
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
-    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-    execPlan.rangeVectorTransformers.nonEmpty shouldBe true
-    execPlan.rangeVectorTransformers.head shouldBe AbsentFunctionMapper(Nil, RangeParams(1000, 100, 10000), "__name__")
-    val childPlan = execPlan.children.head
-    childPlan.isInstanceOf[SetOperatorExec] shouldEqual (true)
-    childPlan.asInstanceOf[SetOperatorExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
-    childPlan.asInstanceOf[SetOperatorExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
-    childPlan.asInstanceOf[SetOperatorExec].binaryOp shouldBe LAND
 
-    childPlan.asInstanceOf[SetOperatorExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
-      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}""")
-
-    childPlan.asInstanceOf[SetOperatorExec].rhs.head.asInstanceOf[LocalPartitionDistConcatExec].children.head.
-      asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
+    val expectedPlan = """T~AbsentFunctionMapper(columnFilter=List() rangeParams=RangeParams(1000,100,10000) metricColumn=__name__)
+                         |-E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))
+                         |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                         |----E~SetOperatorExec(binaryOp=LAND, on=None, ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+                         |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1745818007],raw)
+                         |--E~PromQlRemoteExec(PromQlQueryParams(sum((test1{job="app1"} and test2{job="app2"})),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000,Set(),),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expectedPlan)
   }
 
   it("should materialize a multi level multi partition binary join correctly") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app2"))) List(
           PartitionAssignment("remote-1", "remote-url-1", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else if (routingKey.equals(Map("job" -> "app3"))) List(
           PartitionAssignment("remote-2", "remote-url-2", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1713,28 +2260,28 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // binary join for + should be done in process
 
     val expectedPlan =
-    """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-      |-E~BinaryJoinExec(binaryOp=MUL, on=None, ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-      |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-      |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-      |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-      |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
-      |-T~InstantVectorFunctionMapper(function=Ln)
-      |--E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
-      |---E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
+      """E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |-E~BinaryJoinExec(binaryOp=MUL, on=None, ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#847971057],raw)
+        |-T~InstantVectorFunctionMapper(function=Ln)
+        |--E~BinaryJoinExec(binaryOp=ADD, on=None, ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |---E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))
+        |---E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(true,3 days,true,300000)))""".stripMargin
 
     validatePlan(execPlan, expectedPlan)
   }
@@ -1742,16 +2289,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it("should push multi-namespace portion of query when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app2"))) List(
           PartitionAssignment("remote-1", "remote-url-1", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1801,16 +2348,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it("should push entire query to remote partition when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app2"))) List(
           PartitionAssignment("remote-1", "remote-url-1", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1839,16 +2386,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it("should materialize to local or remote based on where the job") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
-      TimeRange(timeRange.startMs, timeRange.endMs)))
+      TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app2"))) List(
           PartitionAssignment("remote-1", "remote-url-1", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
         else List(
           PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
-            timeRange.endMs)))
+            timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -1895,8 +2442,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val subqueryLookbackSecs = 9000
 
     def twoPartitions(): List[PartitionAssignment] = List(
-      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
-      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000), workUnit = "testWorkUnit"),
+      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000), workUnit = "testWorkUnit")
     )
 
     val partitionLocationProvider = new PartitionLocationProvider {
@@ -1993,7 +2540,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val execPlan2 = engine.materialize(lp2, QueryContext(origQueryParams = promQlQueryParams2, plannerParams =
       PlannerParams(processMultiPartition = true)))
 
-   validatePlan(execPlan2, expectedPlanWithRemoteExec1)
+    validatePlan(execPlan2, expectedPlanWithRemoteExec1)
 
 
 

@@ -398,7 +398,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val labelSets = labelValuesEfficient(colFilters, startTime, endTime, LABEL_LIST)
     val labels = mutable.HashSet[String]()
     labelSets.foreach { labelSet =>
-      labelSet.split(",").foreach(l => labels += l)
+      labelSet.split(",").toIndexedSeq.foreach(l => labels += l)
     }
     labels.toSeq
   }
@@ -415,12 +415,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val start = System.nanoTime()
     withNewSearcher { searcher =>
       val reader = searcher.getIndexReader
+      val query = colFiltersToQuery(colFilters, startTime, endTime)
       try {
         val state = readerStateCache.get((reader, colName))
         val fc = new FacetsCollector() {
           override def scoreMode() = ScoreMode.COMPLETE_NO_SCORES
         }
-        val query = colFiltersToQuery(colFilters, startTime, endTime)
         searcher.search(query, fc)
         val facets = new SortedSetDocValuesFacetCounts(state, fc)
         val result = facets.getTopChildren(limit, colName)
@@ -457,7 +457,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
         //scalastyle:off
         if (terms != null) {
-          val termsEnum = terms.iterator()
+          val termsEnum = terms.iterator
           var nextVal: BytesRef = termsEnum.next()
           while (nextVal != null && termsRead < MAX_TERMS_TO_ITERATE) {
             //scalastyle:on
@@ -1001,13 +1001,13 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 
   def topKPartIds(): IntIterator = {
     val result = new EWAHCompressedBitmap()
-    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    topkResults.iterator.asScala.foreach { p => result.set(p._1) }
     result.intIterator()
   }
 
   def topKPartIDsBitmap(): EWAHCompressedBitmap = {
     val result = new EWAHCompressedBitmap()
-    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    topkResults.iterator.asScala.foreach { p => result.set(p._1) }
     result
   }
 }

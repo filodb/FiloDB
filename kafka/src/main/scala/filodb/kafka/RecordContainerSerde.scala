@@ -10,12 +10,12 @@ object RecordContainerSerdeStats {
   val tsCount     = FilodbMetrics.counter("kafka-num-containers")
 }
 
-final class RecordContainerSerializer extends Serializer[RecordContainer] with KafkaSerdes {
+final class RecordContainerSerializer extends Serializer[RecordContainer]  {
   override def serialize(topic: String, data: RecordContainer): Array[Byte] =
     if (data.hasArray) data.array else data.trimmedArray
 }
 
-final class RecordContainerDeserializer extends Deserializer[RecordContainer] with KafkaSerdes {
+final class RecordContainerDeserializer extends Deserializer[RecordContainer] {
   import RecordContainerSerdeStats._
 
   override def deserialize(topic: String, data: Array[Byte]): RecordContainer = {

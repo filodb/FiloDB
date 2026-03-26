@@ -96,7 +96,7 @@ trait BaseAkkaBootstrapperSpec extends MultiNodeSpecCallbacks
     Thread.sleep(4000) // sleep for a bit for ClusterMembershipTracker actor to get the message
     val response = scalaj.http.Http(seedsEndpoint).timeout(500, 500).asString
     response.is2xx shouldEqual true
-    val addresses = decode[ClusterMembershipHttpResponse](response.body).right.get
+    val addresses = decode[ClusterMembershipHttpResponse](response.body).toOption.get
                       .members.map(a => AddressFromURIString.parse(a))
     addresses.size shouldEqual numSeeds
   }

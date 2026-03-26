@@ -46,7 +46,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   val config = ConfigFactory.load("filodb-defaults.conf")
     .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("1GB"))
   val queryConfig = QueryConfig(config.getConfig("filodb.query"))
-  implicit val _ = queryConfig.askTimeout
+  implicit val _: akka.util.Timeout = queryConfig.askTimeout
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", config)

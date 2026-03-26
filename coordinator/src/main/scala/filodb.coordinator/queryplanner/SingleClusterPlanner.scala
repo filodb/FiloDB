@@ -738,7 +738,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val pp = qContext.plannerParams
       eps.map(ep => makeBuddyExecPlanIfNeeded(qContext, ep))
     }
-    PlanResult(plans)
+    PlanResult(plans.toSeq)
   }
   // scalastyle:on method.length
 
@@ -766,7 +766,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], logicalPlanWithoutBucket: PeriodicSeriesWithWindowing) =
       if (queryConfig.translatePromToFilodbHistogram) {
        val result = removeBucket(Right(lp))
-        (result._1, result._2, result._3.right.get)
+        (result._1, result._2, result._3.toOption.get)
     } else (None, None, lp)
 
     val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext, forceInProcess)
@@ -852,9 +852,9 @@ class SingleClusterPlanner(val dataset: Dataset,
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
-                Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
               else
-                Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
           }
         }
@@ -871,7 +871,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
     if (queryConfig.translatePromToFilodbHistogram) {
      val result = removeBucket(Left(lp))
-      (result._1, result._2, result._3.left.get)
+      (result._1, result._2, result._3.swap.toOption.get)
 
     } else (None, None, lp)
 
@@ -926,17 +926,22 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-    * If there is a _type_ filter, return it.
+    * If there is a _type_ filter, validate it against known schemas and return it.
+    * Throws BadQueryException if the value does not match any known schema.
     */
   private def extractSchemaFilter(filters: Seq[ColumnFilter]): Option[String] = {
     var schemaOpt: Option[String] = None
     filters.foreach { case ColumnFilter(label, filt) =>
       val isTypeFilt = label == TypeLabel
       if (isTypeFilt) filt match {
-        case Filter.Equals(schema) => schemaOpt = Some(schema.asInstanceOf[String])
+        case Filter.Equals(schema) =>
+          val schemaName = schema.asInstanceOf[String]
+          if (schemas.schemas.contains(schemaName)) schemaOpt = Some(schemaName)
+          else throw new BadQueryException(
+            s"Invalid value '$schemaName' for _type_ filter. " +
+            s"Valid values are: ${schemas.schemas.keys.toSeq.sorted.mkString(", ")}")
         case x: Any                 => throw new IllegalArgumentException(s"Illegal filter $x on _type_")
       }
-      isTypeFilt
     }
     schemaOpt
   }

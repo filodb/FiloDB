@@ -17,7 +17,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
-  private implicit val system = ActorSystem()
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val localMapper = new ShardMapper(32)
@@ -220,6 +220,16 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       promQl shouldEqual("""(test1{job="app"} + test2{job="app"})""")
+  }
+
+  it("should extract partition and pod from StatefulSet actor path") {
+    val dispatcher = ActorPlanDispatcher(node, "test-cluster")
+
+    val actorPath = "akka.tcp://test-system@some-tsdb21-62.test.local:2552/user/coordinator"
+    val (partition, pod) = dispatcher.extractPartitionAndPod(actorPath)
+
+    partition shouldEqual "tsdb21"
+    pod shouldEqual "62"
   }
 }
 

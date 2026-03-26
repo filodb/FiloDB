@@ -4,6 +4,7 @@ import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
 import filodb.memory.format.{vectors => bv}
+import filodb.query.exec.StaticFuncArgs
 
 object RangeInstantFunctions {
   def derivFunction(window: Window[TransientRow]): Double = {
@@ -12,16 +13,37 @@ object RangeInstantFunctions {
     } else {
       // We pass in an arbitrary timestamp that is near the values in use
       // to avoid floating point accuracy issues
-      linearRegression(window, window(0).timestamp)
+      linearRegression(window, window(0).timestamp)._1
+    }
+  }
+
+  /**
+    * Predicts the value of time series at a future time using linear regression.
+    * @param window the window of samples to use for regression
+    * @param duration the number of seconds into the future to predict
+    * @param interceptTime the reference timestamp for the intercept calculation (typically the window end time)
+    * @return the predicted value, or NaN if less than 2 samples
+    *
+    * NOTE: This implementation uses interceptTime (window end timestamp) to match the behavior of
+    * PredictLinearChunkedFunctionD. This should be verified for compatibility with Prometheus
+    * predict_linear semantics, which may use the last sample's timestamp instead.
+    */
+  def predictLinearFunction(window: Window[TransientRow], duration: Double, interceptTime: Long): Double = {
+    if (window.size < 2) {
+      Double.NaN  // cannot calculate result without 2 samples
+    } else {
+      val (slope, intercept) = linearRegression(window, interceptTime)
+      slope * duration + intercept
     }
   }
 
   /**
     * Logic is kept consistent with Prometheus' linearRegression function in order to get consistent results.
     * We can look at optimizations (if any) later.
+    * @return tuple of (slope, intercept)
     */
   private def linearRegression(window: Window[TransientRow],
-                                                      interceptTime: Long, isPredict: Boolean = false): Double = {
+                                                      interceptTime: Long): (Double, Double) = {
     var n = 0.0
     var sumX = 0.0
     var sumY = 0.0
@@ -39,8 +61,8 @@ object RangeInstantFunctions {
     val covXY = sumXY - sumX*sumY/n
     val varX = sumX2 - sumX*sumX/n
     val slope = covXY / varX
-    val intercept = sumY/n - slope*sumX/n // keeping it, needed for predict_linear function = slope*duration + intercept
-    slope
+    val intercept = sumY/n - slope*sumX/n
+    (slope, intercept)
   }
 
   def instantValue(startTimestamp: Long,
@@ -292,6 +314,33 @@ object DerivFunction extends RangeFunction[TransientRow] {
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.derivFunction(window)
     sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
+  }
+}
+
+/**
+  * Iterator-based implementation of predict_linear function.
+  * Predicts the value of time series t seconds from now based on linear regression of the window.
+  * @param funcParams sequence containing the duration parameter (number of seconds to predict into the future)
+  *
+  * NOTE: This implementation uses endTimestamp (window end time) as the intercept time to match
+  * PredictLinearChunkedFunctionD behavior. This should be verified for compatibility with Prometheus
+  * predict_linear semantics.
+  */
+class PredictLinearFunction(funcParams: Seq[Any]) extends RangeFunction[TransientRow] {
+  require(funcParams.size == 1, "predict_linear function needs a duration argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "duration parameter must be a number")
+
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val duration = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    val result = RangeInstantFunctions.predictLinearFunction(window, duration, endTimestamp)
+    sampleToEmit.setValues(endTimestamp, result)
   }
 }
 

@@ -28,7 +28,9 @@ object LabelChurnFinderMain extends App {
     .config(sparkConf)
     .getOrCreate()
   private val labelStats = labelChurnFinder.computeLabelStats(spark)
-  labelChurnFinder.actionOnLabelStats(labelStats)
+  private val publishToKafka = dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.publish-to-kafka")
+  private val producer = if (publishToKafka) Some(new LabelStatsKafkaProducer(dsSettings.filodbConfig)) else None
+  labelChurnFinder.actionOnLabelStats(labelStats, producer)
   spark.stop()
 }
 
@@ -62,7 +64,7 @@ case class LabelValRow(ws: String, ns: String, label: String, labelVal: String, 
  *     _ws_ = "tag_value_as_regex"
  *  }
  * ]
- * filodb.labelchurnfinder.dataset = "dataset_name"
+ * filodb.labelchurnfinder.raw-dataset-name = "dataset_name"
  * }}}
  */
 class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable with StrictLogging {
@@ -76,10 +78,10 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
   @transient lazy private[labelchurnfinder] val colStore =
     new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
-  @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.dataset")
+  @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.raw-dataset-name")
   @transient lazy val datasetRef = DatasetRef(datasetName)
   @transient lazy private[labelchurnfinder] val filters = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.mapValues(_.r.pattern).toSeq)
+    .as[Seq[Map[String, String]]]("labelchurnfinder.pk-filters").map(_.map { case (k, v) => k -> v.r.pattern }.toSeq)
 
   @transient private[labelchurnfinder] val numShards = dsSettings.filodbSettings.streamConfigs
     .find(_.getString("dataset") == datasetName)
@@ -91,6 +93,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
    */
   private def fetchLabelValues(split: (String, String),
                        shard: Int): Iterator[LabelValRow] = {
+    logger.info(s"fetchLabelValues: shard=$shard, filters=$filters")
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
       .flatMap { pk  =>
@@ -136,6 +139,7 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         } yield (t._1, t._2, shard)
       }
     }
+    logger.info(s"Splits count: ${splits.size}, partKeysV2TableEnabled=${colStore.partKeysV2TableEnabled}")
     import spark.implicits._
     val labelsAndValuesDf = splits
         .toDF("startToken", "endToken", "shard")
@@ -168,13 +172,19 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
   }
 
   /**
-   * Placeholder for future actions on label stats - example, sending it to a churn monitoring system etc.
+   * Publishes to Kafka if configured, otherwise logs label statistics summary.
    */
-  def actionOnLabelStats(df: DataFrame): Unit = {
+  def actionOnLabelStats(df: DataFrame, producer: Option[LabelStatsKafkaProducer]): Unit =
+    producer match {
+      case Some(p) => p.publishLabelStats(df)
+      case None    => logLabelStats(df)
+    }
+
+  private def logLabelStats(df: DataFrame): Unit = {
     val cols = Seq(WsCol, LabelCol, Ats1hWithLabelCol, Ats3dWithLabelCol, Ats7dWithLabelCol,
       LabelCard1h, LabelCard3d, LabelCard7d)
     countsFromSketches(df).foreach { r =>
-      logger.info("Label stats" + cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" "))
+      logger.info(s"Label stats ${cols.map(c => s"$c=${r.getAs[Any](c)}").mkString(" ")}")
     }
   }
 

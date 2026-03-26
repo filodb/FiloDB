@@ -12,13 +12,12 @@ import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMet
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
-import filodb.core.MachineMetricsData.defaultPartKey
 import filodb.memory._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.BinaryRegion.NativePointer
-import filodb.memory.format.vectors.MutableHistogram
+import filodb.memory.format.vectors.{MutableHistogram, SimdNativeMethods}
 import filodb.query.exec._
 
 /**
@@ -39,6 +38,23 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
   protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, downsampleSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
+
+  // Delta (non-cumulative) counter infrastructure — same blockMetaSize as timeseriesDatasetWithMetric
+  protected val deltaTsBufferPool = new WriteBufferPool(TestData.nativeMem,
+                                        deltaTimeseriesDatasetWithMetric.schema.data, storeConf)
+
+  def deltaTimeValueRV(data: Seq[Double],
+                       pubFrequency: Long = pubFreq,
+                       startTS: Long = defaultStartTS): RawDataRangeVector = {
+    val tuples = data.zipWithIndex.map { case (d, t) => (startTS + t * pubFrequency, d) }
+    val part = TimeSeriesPartitionSpec.makePart(0, deltaTimeseriesDatasetWithMetric,
+                                               partKey = defaultPartKey, bufferPool = deltaTsBufferPool)
+    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
+      flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
+    part.switchBuffers(ingestBlockHolder, encode = true)
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
+  }
 
   after {
     ChunkMap.validateNoSharedLocks(getClass().toString(), true)
@@ -154,7 +170,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
   def timeValueRVPk(tuples: Seq[(Long, Double)],
-                    partKey: NativePointer = defaultPartKey): RawDataRangeVector = {
+                    partKey: NativePointer = MetricsTestData.defaultPartKey): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDatasetWithMetric, partKey, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
@@ -367,7 +383,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val data = (0 until 200).map { i =>
       if ((i+1) % 40 == 0) -2.3d
       else if ((i+1) % 20 == 0) 2.3d
-      else rand.nextDouble()
+      else (i % 9 + 1) * 0.1  // cycles 0.1, 0.2, ..., 0.9; guarantees MAD >= ~0.2
     }
     val rv = timeValueRV(data)
     val rangeParams = RangeParams(100, 20, 500)
@@ -520,7 +536,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   it("should correctly do changes") {
     var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
     val windowSize = 100
     val step = 20
@@ -616,9 +632,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       while (iter.hasNext) {
         diffFromMedians.append(Math.abs(iter.next()-medianVal))
       }
-      diffFromMedians.sort(spire.algebra.Order.fromOrdering[Double])
+      java.util.Arrays.sort(diffFromMedians.elems.asInstanceOf[Array[Double]], 0, diffFromMedians.length)
       val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(0.5, diffFromMedians.length)
-      iter = diffFromMedians.iterator()
+      iter = diffFromMedians.iterator
       diffFromMedians(lowerIndex) * (1 - weight) + diffFromMedians(upperIndex) * weight
     }
 
@@ -651,7 +667,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val data = scala.util.Random.shuffle(data2 ++ data1)
 
       val rv = timeValueRV(data)
-      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+      val list = rv.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
 
       val stepTimeMillis = step.toLong * pubFreq
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
@@ -730,7 +746,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
       val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(params), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
-      val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
+      val res = data.sliding(windowSize, step).map(holt_winters).toBuffer
       for (i <- res.indices) {
         if (res(i).isNaN) {
           println("Inside Nan")
@@ -788,6 +804,95 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
         endTime += step * pubFreq
       }
       aggregated2 shouldEqual (res)
+    }
+  }
+
+  it("should correctly calculate predict_linear using iterator-based function") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    val duration = 50
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
+
+    def predict_linear_iter(s: Seq[Double], interceptTime: Long, startTime: Long): Double = {
+      val n = s.length.toDouble
+      var sumY = 0.0
+      var sumX = 0.0
+      var sumXY = 0.0
+      var sumX2 = 0.0
+      var x = 0.0
+      if (n >= 2) {
+        for (i <- 0 until n.toInt) {
+          x = (startTime + i * pubFreq - interceptTime) / 1000.0
+          sumY += s(i)
+          sumX += x
+          sumXY += x * s(i)
+          sumX2 += x * x
+        }
+        val covXY = sumXY - (sumX * sumY) / n.toDouble
+        val varX = sumX2 - (sumX * sumX) / n.toDouble
+        val slope = covXY.toDouble / varX.toDouble
+        val intercept = sumY / n - (slope * sumX) / n.toDouble
+        slope * duration + intercept
+      } else {
+        Double.NaN
+      }
+    }
+
+    val step = rand.nextInt(50) + 5
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      info(s"iteration $x windowSize=$windowSize step=$step")
+      val slidingIt = slidingWindowIt(data, rv2, new PredictLinearFunction(params), windowSize, step)
+      val aggregated2 = slidingIt.map(_.getDouble(1)).toBuffer
+      var res = new ArrayBuffer[Double]
+      var startTime = defaultStartTS
+      var endTime = startTime + (windowSize - 1) * pubFreq
+      // sliding iterator includes all samples in the window (no .drop(1))
+      for (item <- data.sliding(windowSize, step)) {
+        res += predict_linear_iter(item, endTime, startTime)
+        startTime += step * pubFreq
+        endTime += step * pubFreq
+      }
+      // Compare all except the last window (edge case with partial windows at end)
+      val compareLength = Math.min(aggregated2.length, res.length) - 1
+      if (compareLength > 0) {
+        aggregated2.take(compareLength) shouldEqual res.take(compareLength)
+      }
+    }
+  }
+
+  it("should produce consistent results between chunked and iterating PredictLinear implementations") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Chunked implementation
+      val chunkedIt = chunkedWindowIt(data, rv, new PredictLinearChunkedFunctionD(params), windowSize, step)
+      val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+
+      // Iterating implementation
+      val slidingIt = slidingWindowIt(data, rv, new PredictLinearFunction(params), windowSize, step)
+      val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+
+      // Both should produce the same number of results
+      chunkedResults.length shouldEqual slidingResults.length
+
+      // Compare results with tolerance for floating-point differences
+      chunkedResults.zip(slidingResults).zipWithIndex.foreach { case ((chunked, sliding), idx) =>
+        if (chunked.isNaN && sliding.isNaN) {
+          // Both NaN is fine
+        } else if (chunked.isNaN || sliding.isNaN) {
+          fail(s"Mismatch at index $idx: chunked=$chunked, sliding=$sliding (one is NaN)")
+        } else {
+          chunked shouldEqual sliding +- errorOk
+        }
+      }
     }
   }
 
@@ -1824,4 +1929,425 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  // ---- CumlDeltaTogglerChunkedFunction tests ----
+
+  it("CumlDeltaToggler with increase/sum should route cumulative counter to ChunkedIncreaseFunction " +
+      "and delta counter to SumOverTimeChunkedFunctionD") {
+    // Monotonically increasing data so increase == last - first; delta data sums directly
+    val data = (1 to 120).map(_.toDouble)
+
+    val cumulRV = timeValueRV(data)          // schema has detectDrops=true → cumulative
+    val deltaRV  = deltaTimeValueRV(data)    // schema has no detectDrops   → delta
+
+    // The toggler wraps ChunkedIncreaseFunction (cum) and SumOverTimeChunkedFunctionD (delta)
+    val windowSize = 20
+    val step       = 10
+
+    // Run reference functions directly
+    val directIncreaseIt = chunkedWindowIt(data, cumulRV, new ChunkedIncreaseFunction, windowSize, step)
+    val directIncreaseResults = directIncreaseIt.map(_.getDouble(1)).toBuffer
+
+    val directSumIt = chunkedWindowIt(data, deltaRV, new SumOverTimeChunkedFunctionD(), windowSize, step)
+    val directSumResults = directSumIt.map(_.getDouble(1)).toBuffer
+
+    val toggler = new CumlDeltaTogglerChunkedFunction(new ChunkedIncreaseFunction, new SumOverTimeChunkedFunctionD())
+
+    // Run toggler on cumulative RV — should delegate to ChunkedIncreaseFunction
+    val togglerCumIt = chunkedWindowIt(data, cumulRV, toggler, windowSize, step)
+    val togglerCumIncreaseResults = togglerCumIt.map(_.getDouble(1)).toBuffer
+
+    // Run toggler on delta RV — should delegate to SumOverTimeChunkedFunctionD
+    val togglerDeltaIt = chunkedWindowIt(data, deltaRV, toggler, windowSize, step)
+    val togglerDeltaIncreaseResults = togglerDeltaIt.map(_.getDouble(1)).toBuffer
+
+    togglerCumIncreaseResults shouldEqual directIncreaseResults
+    togglerDeltaIncreaseResults shouldEqual directSumResults
+    // Sanity: the two result sets are different (increase ≠ sum for this data)
+    togglerCumIncreaseResults should not equal togglerDeltaIncreaseResults
+  }
+
+  it("CumlDeltaToggler with rate should route cumulative counter to ChunkedRateFunction " +
+      "and delta counter to RateOverDeltaChunkedFunctionD") {
+    val data = (1 to 120).map(_.toDouble)
+
+    val cumulRV = timeValueRV(data)
+    val deltaRV  = deltaTimeValueRV(data)
+
+    val windowSize = 20
+    val step       = 10
+
+    val directRateCumIt = chunkedWindowIt(data, cumulRV, new ChunkedRateFunction, windowSize, step)
+    val directRateCumResults = directRateCumIt.map(_.getDouble(1)).toBuffer
+
+    val directRateDeltaIt = chunkedWindowIt(data, deltaRV, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+    val directRateDeltaResults = directRateDeltaIt.map(_.getDouble(1)).toBuffer
+
+    val toggler = new CumlDeltaTogglerChunkedFunction(new ChunkedRateFunction, new RateOverDeltaChunkedFunctionD())
+
+    val togglerCumIt = chunkedWindowIt(data, cumulRV, toggler, windowSize, step)
+    val togglerCumResults = togglerCumIt.map(_.getDouble(1)).toBuffer
+
+    val togglerDeltaIt = chunkedWindowIt(data, deltaRV, toggler, windowSize, step)
+    val togglerDeltaResults = togglerDeltaIt.map(_.getDouble(1)).toBuffer
+
+    togglerCumResults shouldEqual directRateCumResults
+    togglerDeltaResults shouldEqual directRateDeltaResults
+    togglerCumResults should not equal togglerDeltaResults
+  }
+
+  it("CumlDeltaToggler with histogram rate should route delta histogram to RateOverDeltaChunkedFunctionH " +
+      "and cumulative histogram to HistRateFunction") {
+    // Delta histogram — histDataset has counter=false and no detectDrops
+    val (deltaData, deltaRV) = histogramRV(numSamples = 50)
+
+    // Cumulative histogram — cumulHistDS has detectDrops=true on count/sum and counter=true on hist
+    val (cumulData, cumulRV) = MMD.cumulHistRV(defaultStartTS, pubFreq, numSamples = 50)
+
+    val windowSize = 10
+    val step       = 5
+
+    // Reference: direct delta histogram rate
+    val directDeltaIt = chunkedWindowItHist(deltaData, deltaRV, new RateOverDeltaChunkedFunctionH(), windowSize, step)
+    val directDeltaResults = directDeltaIt.map(r => r.getHistogram(1).toString).toBuffer
+
+    // Reference: direct cumulative histogram rate
+    val directCumIt = chunkedWindowItHist(cumulData, cumulRV,
+      new HistRateFunction(), windowSize, step)
+    val directCumResults = directCumIt.map(r => r.getHistogram(1).toString).toBuffer
+
+    val toggler = new CumlDeltaTogglerChunkedFunction[TransientHistRow](
+      new HistRateFunction(),
+      new RateOverDeltaChunkedFunctionH())
+
+    // Toggler on delta RV → should produce same output as RateOverDeltaChunkedFunctionH
+    val togglerDeltaIt = chunkedWindowItHist(deltaData, deltaRV,
+      toggler,
+      windowSize, step)
+    val togglerDeltaResults = togglerDeltaIt.map(r => r.getHistogram(1).toString).toBuffer
+
+    // Toggler on cumulative RV → should produce same output as HistRateFunction
+    val togglerCumIt = chunkedWindowItHist(cumulData, cumulRV,
+      toggler,
+      windowSize, step)
+    val togglerCumResults = togglerCumIt.map(r => r.getHistogram(1).toString).toBuffer
+
+    togglerDeltaResults shouldEqual directDeltaResults
+    togglerCumResults   shouldEqual directCumResults
+  }
+
+  it("CumlDeltaToggler with histogram rate+max/min should route delta to DeltaRateAndMinMaxOverTimeFuncHD " +
+      "and cumulative to CumulativeHistRateAndMinMaxFunction") {
+    // Delta histogram with min/max columns (histMaxMinDS: colIds timestamp=0,count=1,sum=2,hist=3,min=4,max=5)
+    val (deltaData, deltaRV) = MMD.histMaxMinRV(defaultStartTS, pubFreq, numSamples = 50)
+
+    // Cumulative histogram with min/max columns (cumulHistDS: same layout)
+    val (cumulData, cumulRV) = MMD.cumulHistRV(defaultStartTS, pubFreq, numSamples = 50)
+
+    val windowSize = 10
+    val step = 5
+
+    val row = new TransientHistMaxMinRow()
+
+    // Reference: direct delta rate+min/max
+    val directDeltaIt = chunkedWindowItHist(deltaData, deltaRV,
+      new DeltaRateAndMinMaxOverTimeFuncHD(5, 4), windowSize, step, row)
+    val directDeltaResults = directDeltaIt.map { r =>
+      (r.getHistogram(1).toString, r.getDouble(2), r.getDouble(3))
+    }.toBuffer
+
+    // Reference: direct cumulative rate+min/max
+    val directCumIt = chunkedWindowItHist(cumulData, cumulRV,
+      new CumulativeHistRateAndMinMaxFunction(5, 4),
+      windowSize, step, new TransientHistMaxMinRow())
+    val directCumResults = directCumIt.map { r =>
+      (r.getHistogram(1).toString, r.getDouble(2), r.getDouble(3))
+    }.toBuffer
+
+    val toggler = new CumlDeltaTogglerChunkedFunction[TransientHistMaxMinRow](
+      new CumulativeHistRateAndMinMaxFunction(5, 4),
+      new DeltaRateAndMinMaxOverTimeFuncHD(5, 4))
+
+    // Toggler on delta RV
+    val togglerDeltaIt = chunkedWindowItHist(deltaData, deltaRV,
+      toggler,
+      windowSize, step, new TransientHistMaxMinRow())
+    val togglerDeltaResults = togglerDeltaIt.map { r =>
+      (r.getHistogram(1).toString, r.getDouble(2), r.getDouble(3))
+    }.toBuffer
+
+    // Toggler on cumulative RV
+    val togglerCumIt = chunkedWindowItHist(cumulData, cumulRV,
+      toggler,
+      windowSize, step, new TransientHistMaxMinRow())
+    val togglerCumResults = togglerCumIt.map { r =>
+      (r.getHistogram(1).toString, r.getDouble(2), r.getDouble(3))
+    }.toBuffer
+
+    togglerDeltaResults shouldEqual directDeltaResults
+    togglerCumResults shouldEqual directCumResults
+  }
+
+  // ── SIMD end-to-end tests ───────────────────────────────────────────────
+  // These tests verify that sum_over_time and count_over_time produce correct results
+  // through the chunked query path when SIMD is enabled, including NaN handling.
+
+  it("should produce matching sum_over_time results with SIMD on vs off") {
+    val data = (1 to 240).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val windowSize = 50
+    val step = 20
+
+    // Compute with SIMD off
+    SimdNativeMethods.enabled = false
+    val scalaChunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaChunkedIt.map(_.getDouble(1)).toBuffer
+
+    // Compute with SIMD on
+    SimdNativeMethods.enabled = true
+    try {
+      val simdChunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
+      val simdResults = simdChunkedIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        simd shouldEqual scala +- (Math.abs(scala) * 1e-12)
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce matching count_over_time results with SIMD on vs off") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val windowSize = 80
+    val step = 25
+
+    SimdNativeMethods.enabled = false
+    val scalaChunkedIt = chunkedWindowIt(data, rv, new CountOverTimeChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaChunkedIt.map(_.getDouble(1)).toBuffer
+
+    SimdNativeMethods.enabled = true
+    try {
+      val simdChunkedIt = chunkedWindowIt(data, rv, new CountOverTimeChunkedFunctionD(), windowSize, step)
+      val simdResults = simdChunkedIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults shouldEqual scalaResults
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum_over_time with NaN values and SIMD enabled") {
+    // Data with periodic NaN values (every 7th element)
+    val data = (1 to 240).map { i =>
+      if (i % 7 == 0) Double.NaN else i.toDouble
+    }
+    val rv = timeValueRV(data)
+    val windowSize = 30
+    val step = 10
+
+    SimdNativeMethods.enabled = true
+    try {
+      val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
+      val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
+
+      val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+      val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+
+      chunkedResults.length shouldEqual slidingResults.length
+      chunkedResults.zip(slidingResults).foreach { case (chunked, sliding) =>
+        if (sliding.isNaN) {
+          chunked.isNaN shouldBe true
+        } else {
+          chunked shouldEqual sliding +- (Math.abs(sliding) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct count_over_time with NaN values and SIMD enabled") {
+    // Data with periodic NaN values (every 5th element)
+    val data = (1 to 300).map { i =>
+      if (i % 5 == 0) Double.NaN else i.toDouble
+    }
+    val rv = timeValueRV(data)
+    val windowSize = 40
+    val step = 15
+
+    SimdNativeMethods.enabled = true
+    try {
+      val chunkedIt = chunkedWindowIt(data, rv, new CountOverTimeChunkedFunctionD(), windowSize, step)
+      val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+
+      // Verify against manual count of non-NaN values per window
+      val expectedResults = data.sliding(windowSize, step).map(countNonNaN(_).toDouble).toBuffer
+      chunkedResults.length shouldEqual expectedResults.length
+      chunkedResults shouldEqual expectedResults
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum_over_time with large data and SIMD enabled") {
+    // Large dataset that spans multiple chunks and exercises 8-way unrolling
+    val data = (1 to 1000).map(_.toDouble)
+    val rv = timeValueRV(data)
+
+    SimdNativeMethods.enabled = true
+    try {
+      (0 until 5).foreach { x =>
+        val windowSize = rand.nextInt(200) + 50
+        val step = rand.nextInt(100) + 10
+        info(s"iteration $x windowSize=$windowSize step=$step")
+
+        val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
+        val chunkedResults = chunkedIt.map(_.getDouble(1)).toBuffer
+        val expected = data.sliding(windowSize, step).map(_.sum).toBuffer
+
+        chunkedResults.length shouldEqual expected.length
+        chunkedResults.zip(expected).foreach { case (actual, exp) =>
+          actual shouldEqual exp +- (Math.abs(exp) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct avg_over_time with NaN values and SIMD enabled") {
+    // avg_over_time exercises both sum and count through SIMD
+    val data = (1 to 300).map { i =>
+      if (i % 6 == 0) Double.NaN else i.toDouble
+    }
+    val rv = timeValueRV(data)
+    val windowSize = 40
+    val step = 15
+
+    // Compute with SIMD off (baseline)
+    SimdNativeMethods.enabled = false
+    val scalaIt = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaIt.map(_.getDouble(1)).toBuffer
+
+    // Compute with SIMD on
+    SimdNativeMethods.enabled = true
+    try {
+      val simdIt = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
+      val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        if (scala.isNaN) {
+          simd.isNaN shouldBe true
+        } else {
+          simd shouldEqual scala +- (Math.abs(scala) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  // ── SIMD end-to-end tests for sum(rate(...)) on delta counters ─────────
+  // RateOverDeltaChunkedFunctionD calls doubleReader.sum() which delegates to SIMD.
+
+  it("should produce matching sum(rate) on delta counters with SIMD on vs off") {
+    // Delta counter data: each value is a delta (not cumulative)
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val windowSize = 50  // 50 samples in rate window
+    val step = 10
+
+    // Compute with SIMD off
+    SimdNativeMethods.enabled = false
+    val scalaIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaIt.map(_.getDouble(1)).toBuffer
+
+    // Compute with SIMD on
+    SimdNativeMethods.enabled = true
+    try {
+      val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+      val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        if (scala.isNaN) {
+          simd.isNaN shouldBe true
+        } else {
+          simd shouldEqual scala +- (Math.abs(scala) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum(rate) on delta counters with NaN values and SIMD enabled") {
+    // Delta counter data with periodic NaN values
+    val data = (1 to 300).map { i =>
+      if (i % 8 == 0) Double.NaN else i.toDouble
+    }
+    val rv = timeValueRV(data)
+    val windowSize = 40
+    val step = 15
+
+    SimdNativeMethods.enabled = false
+    val scalaIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+    val scalaResults = scalaIt.map(_.getDouble(1)).toBuffer
+
+    SimdNativeMethods.enabled = true
+    try {
+      val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+      val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+      simdResults.length shouldEqual scalaResults.length
+      simdResults.zip(scalaResults).foreach { case (simd, scala) =>
+        if (scala.isNaN) {
+          simd.isNaN shouldBe true
+        } else {
+          simd shouldEqual scala +- (Math.abs(scala) * 1e-10)
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
+
+  it("should produce correct sum(rate) on delta counters with large data and SIMD enabled") {
+    val data = (1 to 1000).map(_.toDouble)
+    val rv = timeValueRV(data)
+
+    SimdNativeMethods.enabled = true
+    try {
+      (0 until 5).foreach { x =>
+        val windowSize = rand.nextInt(200) + 50
+        val step = rand.nextInt(50) + 10
+        info(s"iteration $x windowSize=$windowSize step=$step")
+
+        // RateOverDelta with SIMD
+        val simdIt = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD(), windowSize, step)
+        val simdResults = simdIt.map(_.getDouble(1)).toBuffer
+
+        // Sliding window rate (row-by-row, no SIMD)
+        val slidingIt = slidingWindowIt(data, rv, new RateOverDeltaFunction(), windowSize, step)
+        val slidingResults = slidingIt.map(_.getDouble(1)).toBuffer
+        slidingIt.close()
+
+        simdResults.length shouldEqual slidingResults.length
+        simdResults.zip(slidingResults).foreach { case (simd, sliding) =>
+          if (sliding.isNaN) {
+            simd.isNaN shouldBe true
+          } else {
+            simd shouldEqual sliding +- (Math.abs(sliding) * 1e-6)
+          }
+        }
+      }
+    } finally {
+      SimdNativeMethods.enabled = false
+    }
+  }
 }

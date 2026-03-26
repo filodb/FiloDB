@@ -53,7 +53,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1) shouldEqual expectedDelta +- errorOk
+    it.next().getDouble(1) shouldEqual expectedDelta +- errorOk
   }
 
   it("should not return NaN for rate over period-counter when window only contains one sample") {
@@ -62,7 +62,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1).isNaN shouldEqual false
+    it.next().getDouble(1).isNaN shouldEqual false
   }
 
   it("should not return rate of 0 when delta-counter samples do not increase") {
@@ -74,7 +74,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionD, querySession)
-    it.next.getDouble(1) should not equal 0.0
+    it.next().getDouble(1) should not equal 0.0
   }
 
   // Also ensures that chunked rate works across chunk boundaries
@@ -131,7 +131,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
                                         new RateOverDeltaChunkedFunctionH, querySession)
     // Scheme should have remained the same
-    val answer = it.next.getHistogram(1)
+    val answer = it.next().getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
 
     // Have to compare each bucket with floating point error tolerance
@@ -187,7 +187,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
       new SumOverTimeChunkedFunctionD, querySession)
-    it.next.getDouble(1) shouldEqual expectedDelta
+    it.next().getDouble(1) shouldEqual expectedDelta
   }
 
   ignore (" disabled since the lookback extension is disabled for now. See PeriodicSamplesMapper::extendLookback") {
@@ -260,7 +260,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -307,7 +307,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -354,7 +354,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
@@ -401,7 +401,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList should not equal expectedResults) // increase functioncumulative
@@ -424,15 +424,9 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
       1300000L -> 100d
     )
 
-    import ZeroCopyUTF8String._
     val resultSchema = ResultSchema(Schemas.deltaCounter.infosFromIDs(0 to 1), 1)
 
-    // step tag with 100s publish interval is important here
-    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
-    val partBuilder = new RecordBuilder(TestData.nativeMem)
-    val partKey = partBuilder.partKeyFromObjects(Schemas.deltaCounter, "counterName".utf8, seriesTags)
-
-    val rv = timeValueRVPk(samples, partKey)
+    val rv = deltaTimeValueRV(samples.map(_._2), 100000, 100000)
 
     val expectedResults = List(
       500000L -> 200d,
@@ -448,7 +442,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
-    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults) // increase functioncumulative

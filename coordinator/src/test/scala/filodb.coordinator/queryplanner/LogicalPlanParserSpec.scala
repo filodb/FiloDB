@@ -80,6 +80,14 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
   }
 
+  it("should generate query from LogicalPlan having limit") {
+    val query = "http_requests_total{job=\"app\"} limit 10"
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual("http_requests_total{job=\"app\"} limit 10")
+  }
+
   it("should generate query from LogicalPlan having @modifier") {
     var query = "http_requests_total{job=\"app\"} offset 5m @start()"
     var lp = Parser.queryToLogicalPlan(query, 1000, 1000)

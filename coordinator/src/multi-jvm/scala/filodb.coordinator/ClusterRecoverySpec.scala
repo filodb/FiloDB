@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.actor.ActorRef
 import akka.pattern.ask
@@ -87,7 +87,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   private lazy val coordinatorActor = cluster.coordinatorActor
   private lazy val metaStore = cluster.metaStore
 
-  implicit val patience =   // make sure futureValue has long enough time
+  implicit val patience: PatienceConfig =   // make sure futureValue has long enough time
     PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
 
   var clusterActor: ActorRef = _
@@ -110,20 +110,20 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     enterBarrier("both-nodes-joined-cluster")
 
-    import scala.concurrent.ExecutionContext.Implicits.global
-
     // wait for dataset to get registered automatically
-    // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
+    // NOTE: the delay seems to be needed in order to query the ClusterActor successfully
     Thread sleep 3000
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout * 2
-    def func: Future[Seq[DatasetRef]] = {
-      val refs = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
-      refs.map { r =>
-        println(s"Queried $clusterActor and got back [$refs]")
-        r
-      }
-    }
-    // awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
+    // Bug fix: the awaitCond was previously commented out, leaving only the 3-second sleep above.
+    // If the dataset isn't registered yet when SubscribeShardUpdates is sent, NodeClusterActor
+    // replies with DatasetUnknown instead of CurrentShardSnapshot, causing expectMsgPF to fail
+    // immediately (it doesn't retry on non-matching messages).  That node then misses
+    // enterBarrier("ingestion-stopped"), the other node times out waiting at that barrier, and
+    // both JVMs exit with Akka's BARRIER_TIMEOUT_EXIT_CODE = 189.
+    awaitCond({
+      Await.result((clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]], timeout.duration)
+           .contains(dataset6.ref)
+    }, max = timeout.duration, interval = 500.millis)
     enterBarrier("cluster-actor-recovery-started")
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)
@@ -132,12 +132,19 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     }
     info(s"Initial shardmapper snapshot = $mapper")
 
-    // wait for all ingestion to be stopped, keep receiving status messages
-    while(!hasAllShardsStopped(mapper)) {
-      println(s"Not all shards stopped, waiting for shard updates...  mapper is now $mapper")
-      expectMsgPF(10.seconds.dilated) {
-        case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
-      }
+    // Bug fix: replaced the while-loop + expectMsgPF(10s) pattern with fishForMessage.
+    // The old loop called expectMsgPF inside a while(!hasAllShardsStopped) condition.
+    // expectMsgPF fails immediately on any non-matching message and also fails on timeout
+    // (e.g. if shards land in Error/Down state instead of Stopped, the condition never
+    // becomes true and the 10-second per-iteration timeout fires, again causing the barrier
+    // miss -> exit code 189).  fishForMessage keeps consuming snapshots until the predicate
+    // returns true, with a single overall timeout covering the whole wait.
+    fishForMessage(90.seconds.dilated, hint = "waiting for all shards to stop") {
+      case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref =>
+        mapper = newMap
+        val stopped = hasAllShardsStopped(mapper)
+        if (!stopped) println(s"Not all shards stopped yet, mapper is now $mapper")
+        stopped
     }
     cluster.memStore.refreshIndexForTesting(dataset6.ref)
     enterBarrier("ingestion-stopped")
@@ -157,9 +164,9 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                                        ColumnInfo("value", ColumnType.DoubleColumn, true))
         // query is counting each partition....
         vectors should have length (59 * 2)
-        // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
+        // vectors(0).rows().map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  actually change logicalPlan above to sum up individual counts for us
-        vectors.map(_.rows.map(_.getDouble(1).toInt).toSeq.head).sum shouldEqual (99 * 2)
+        vectors.map(_.rows().map(_.getDouble(1).toInt).toSeq.head).sum shouldEqual (99 * 2)
     }
   }
 }

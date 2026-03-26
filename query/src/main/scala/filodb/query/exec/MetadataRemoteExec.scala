@@ -44,7 +44,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
         if (response.body.isLeft) {
-          parser.decode[ErrorResponse](response.body.left.get) match {
+          parser.decode[ErrorResponse](response.body.swap.toOption.get) match {
             case Right(errorResponse) =>
               QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
                 RemoteQueryFailureException(response.code, errorResponse.status, errorResponse.errorType,
@@ -166,4 +166,6 @@ case class MetadataRemoteExec(queryEndpoint: String,
     QueryResult(id, schema, srvSeq, QueryStats(), QueryWarnings(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
+
+  override def checkSamplesLimit(numResultSamples: Int, queryWarnings: QueryWarnings): Unit = {}
 }

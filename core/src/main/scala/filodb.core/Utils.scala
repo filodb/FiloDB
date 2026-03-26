@@ -72,32 +72,25 @@ object Utils extends StrictLogging {
 
   }
 
+  lazy val compatibleMetricTypes: Set[Set[Int]] = Set(
+    Set(Schemas.promHistogram.schemaHash, Schemas.otelCumulativeHistogram.schemaHash,
+      Schemas.deltaHistogram.schemaHash, Schemas.otelDeltaHistogram.schemaHash),
+    Set(Schemas.preaggDeltaHistogram.schemaHash, Schemas.preaggOtelDeltaHistogram.schemaHash),
+    Set(Schemas.promCounter.schemaHash, Schemas.deltaCounter.schemaHash)
+  )
+
   /**
-   * @param schemaName Source schema name.
-   * @param schemaHash Source schema hash.
-   * @param schemaNameToCheck the schema name to check against.
-   * @param schemaHashToCheck the schema hash to check against.
-   * @return true if the schema name and hash match or if the schemas are back compatible histograms
+   * Checks if the two schema ids are compatible metric types for spatial aggregation.
+   * Typically used to avoid unintended aggregations over incompatible types like counters and gauges,
+   * or histograms and counters etc.
+   * @param schemaId Source schema id.
+   * @param schemaIdToCheck other schema id
+   * @return true if the schema hash match or if the schemas are compatible histograms or counters
    */
-  def doesSchemaMatchOrBackCompatibleHistograms(schemaName : String, schemaHash : Int,
-                                                      schemaNameToCheck : String, schemaHashToCheck : Int) : Boolean = {
-    if (schemaHash == schemaHashToCheck) { true }
-    else {
-      val sortedSchemas = Seq(schemaName, schemaNameToCheck).sortBy(_.length)
-      val ret = if (
-        (sortedSchemas(0) == Schemas.promHistogram.name) &&
-        (sortedSchemas(1) == Schemas.otelCumulativeHistogram.name)
-      ) true
-      else if (
-        (sortedSchemas(0) == Schemas.deltaHistogram.name) &&
-        (sortedSchemas(1) == Schemas.otelDeltaHistogram.name)
-      ) true
-      else if (
-        (sortedSchemas(0) == Schemas.preaggDeltaHistogram.name) &&
-        (sortedSchemas(1) == Schemas.preaggOtelDeltaHistogram.name)
-      ) true
-      else false
-      ret
-    }
+  def areCompatibleMetricTypes(schemaId : Int,
+                               schemaIdToCheck : Int) : Boolean = {
+
+    if (schemaId == schemaIdToCheck) true
+    else compatibleMetricTypes.exists( s => s.contains(schemaId) && s.contains(schemaIdToCheck))
   }
 }

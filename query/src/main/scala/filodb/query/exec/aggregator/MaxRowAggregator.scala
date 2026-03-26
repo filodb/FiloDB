@@ -21,10 +21,7 @@ object MaxRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: MaxHolder, aggRes: RowReader): MaxHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
-      if (acc.max.isNaN) acc.max = Double.MinValue
-      acc.max = Math.max(acc.max, aggRes.getDouble(1))
-    }
+    acc.max = QueryUtils.maxIgnoreNaN(acc.max, aggRes.getDouble(1))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int,

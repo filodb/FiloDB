@@ -479,11 +479,13 @@ object Schemas extends StrictLogging {
   val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
   val preaggOtelDeltaHistogram = global.schemas("preagg-otel-delta-histogram")
   val preaggOtelExpDeltaHistogram = global.schemas("preagg-otel-exp-delta-histogram")
+  val preaggDeltaHistogramV2 = global.schemas("preagg-delta-histogram-v2")
 
   val preAggSchema: Map[String, String] = Map(
     gauge.name ->                 preaggGaugeV2.name,
     deltaCounter.name ->          preaggDeltaCounter.name,
     deltaHistogram.name ->        preaggDeltaHistogram.name,
+    deltaHistogramV2.name ->      preaggDeltaHistogramV2.name,
     otelDeltaHistogram.name ->    preaggOtelDeltaHistogram.name,
     otelExpDeltaHistogram.name -> preaggOtelExpDeltaHistogram.name
   )
