@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
+import com.typesafe.scalalogging.StrictLogging
 import io.grpc.{Channel, Metadata}
 import io.grpc.stub.{MetadataUtils, StreamObserver}
 import kamon.trace.Span
@@ -11,6 +12,8 @@ import monix.reactive.{MulticastStrategy, Observable}
 import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.core.DatasetRef
+import filodb.core.GlobalConfig
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.grpc._
 import filodb.grpc.GrpcMultiPartitionQueryService._
@@ -61,11 +64,13 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            queryContext: QueryContext,
                            dispatcher: PlanDispatcher,
                            dataset: DatasetRef,
-                           plannerSelector: String) extends GrpcRemoteExec {
+                           plannerSelector: String,
+                           destinationTsdbWorkUnit: String) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
         // Todo add asset for thread name
     Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
         val subject = ConcurrentSubject[GrpcMultiPartitionQueryService.StreamingResponse](MulticastStrategy.Publish)
+        val startNs = System.nanoTime()
         subject
           .doOnSubscribe(Task.eval {
               val nonBlockingStub = RemoteExecGrpc.newStub(channel)
@@ -78,13 +83,45 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                 .execStreaming(getGrpcRequest(plannerSelector),
                     new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
-                        override def onError(t: java.lang.Throwable): Unit = subject.onError(t)
-                        override def onCompleted(): Unit = subject.onComplete()
+                        override def onError(t: java.lang.Throwable): Unit = {
+                            PromQLGrpcRemoteExec.logError(destinationTsdbWorkUnit, queryContext, t)
+                            val elapsedMs = (System.nanoTime() - startNs) / 1000000
+                            if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
+                                PromQLGrpcRemoteExec.grpcRemoteExecErrorLatency.record(
+                                  elapsedMs,
+                                  Map("destination" -> destinationTsdbWorkUnit))
+                            }
+                            subject.onError(t)
+                        }
+                        override def onCompleted(): Unit = {
+                            if (PromQLGrpcRemoteExec.latencyMetricsEnabled) {
+                                val elapsedMs = (System.nanoTime() - startNs) / 1000000
+                                PromQLGrpcRemoteExec.grpcRemoteExecSuccessLatency.record(
+                                  elapsedMs,
+                                  Map("destination" -> destinationTsdbWorkUnit))
+                            }
+                            subject.onComplete()
+                        }
                     })
           })
     }
 
     override def queryEndpoint: String = channel.authority() + ".execStreaming"
+}
+
+object PromQLGrpcRemoteExec extends StrictLogging {
+    val latencyMetricsEnabled: Boolean = {
+        GlobalConfig.systemConfig.hasPath("filodb.query.grpc.promql-remote-exec-latency-metrics-enabled") &&
+          GlobalConfig.systemConfig.getBoolean("filodb.query.grpc.promql-remote-exec-latency-metrics-enabled")
+    }
+    lazy val grpcRemoteExecSuccessLatency = FilodbMetrics.timeHistogram(
+      "grpc-remote-exec-success-latency", TimeUnit.MILLISECONDS)
+    lazy val grpcRemoteExecErrorLatency = FilodbMetrics.timeHistogram(
+      "grpc-remote-exec-error-latency", TimeUnit.MILLISECONDS)
+
+    def logError(destination: String, queryContext: QueryContext, t: java.lang.Throwable): Unit = {
+        logger.error(s"gRPC remote exec to destination=$destination failed, queryContext=$queryContext", t)
+    }
 }
 
 

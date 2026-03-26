@@ -20,7 +20,6 @@ object QueryConfig {
     val routingConfig = queryConfig.getConfig("routing")
     val parser = queryConfig.as[String]("parser")
     val translatePromToFilodbHistogram = queryConfig.getBoolean("translate-prom-to-filodb-histogram")
-    val fasterRateEnabled = queryConfig.as[Option[Boolean]]("faster-rate").getOrElse(false)
     val enforceResultByteLimit = queryConfig.as[Boolean]("enforce-result-byte-limit")
     val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
@@ -54,7 +53,7 @@ object QueryConfig {
     val enableLocalDispatch = queryConfig.getBoolean("enable-local-dispatch")
 
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
-      fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
+      true, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
       routingConfig.as[Option[String]]("remote.http.endpoint"),
       routingConfig.as[Option[String]]("remote.grpc.endpoint"),
@@ -76,7 +75,6 @@ object QueryConfig {
                                            fastReduceMaxWindows = 50,
                                            parser = "antlr",
                                            translatePromToFilodbHistogram = true,
-                                           fasterRateEnabled = true,
                                            partitionName = None,
                                            remoteHttpTimeoutMs = None,
                                            remoteHttpEndpoint = None,
@@ -109,7 +107,7 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        fastReduceMaxWindows: Int,
                        parser: String,
                        translatePromToFilodbHistogram: Boolean,
-                       fasterRateEnabled: Boolean,
+                       fasterRateEnabled: Boolean = true, // deprecated and not used anymore
                        partitionName: Option[String],
                        remoteHttpTimeoutMs: Option[Long],
                        remoteHttpEndpoint: Option[String],

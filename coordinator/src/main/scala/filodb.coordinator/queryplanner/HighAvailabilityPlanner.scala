@@ -160,7 +160,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                 val endpoint = remoteGrpcEndpoint.get
                 val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
                 PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, newQueryContext, inProcessPlanDispatcher,
-                  dsRef, plannerSelector)
+                  dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")
               } else
                 PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
