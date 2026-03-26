@@ -54,7 +54,8 @@ object SimdNativeMethods {
     }
 
     val resourcePath: String = "/native/" + kernel + "/" + arch + "/" + lib
-    val resourceStream = Option(SimdNativeMethods.getClass.getResourceAsStream(resourcePath)).get
+    val resourceStream = Option(SimdNativeMethods.getClass.getResourceAsStream(resourcePath))
+      .getOrElse(throw new IllegalStateException(s"Native library not found at $resourcePath"))
 
     val finalPath = tempDir.resolve(lib)
     Files.copy(resourceStream, finalPath)
