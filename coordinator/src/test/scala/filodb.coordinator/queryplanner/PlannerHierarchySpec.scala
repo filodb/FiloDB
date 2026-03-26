@@ -4334,7 +4334,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-  it ("should handle non-equals filters gracefully in getPartitions  delegation") {
+  it ("should handle non-equals filters gracefully in getPartitions delegation") {
     val partitionProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         // getPartitions can handle any routing key passed to it
