@@ -93,7 +93,9 @@ object ProtoConverters extends StrictLogging {
         qc.getGrpcPartitionsDenyListList().asScala.toSet,
         if (qc.hasPlannerSelector) Option(qc.getPlannerSelector()) else None,
         rcoIntMap,
-        samplesScannedConfig = qc.getSamplesScannedConfig.fromProto
+        samplesScannedConfig =
+          if (qc.hasSamplesScannedConfig) qc.getSamplesScannedConfig.fromProto
+          else SamplesScannedConfig()
       )
       queryConfig
     }
