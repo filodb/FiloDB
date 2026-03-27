@@ -901,7 +901,6 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
     }
   }
 
-  // scalastyle:off cyclomatic.complexity
   private def doExecuteStreamingDispatch(source: ChunkSource, querySession: QuerySession, span: Span, parallelism: Int)
                                         (implicit sched: Scheduler) = {
     // Create tasks for all results.
@@ -930,6 +929,11 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
                 querySession.resultCouldBePartial = true
                 querySession.partialResultsReason = partialResultReason
               }
+              // NOTE: Child samples-scanned are not tracked here like they are in the
+              //   non-streaming method. We need access to a QueryStats as we iterate RangeVectors,
+              //   but that is not available until the stream's footer has been processed.
+              //   Anyways, this streaming flow is currently unused and may never be used.
+              querySession.queryStats.add(qStats)
               querySession.warnings.merge(warnings)
               footer
             case StreamQueryError(_, _, queryStats, t) =>
@@ -939,72 +943,26 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
           (respWithoutErrors, i)
         }
       }
-      .flatMap { case (responseObs, index) =>
-        // Fork each response into a stream according to its class, then build a
-        //   ResultSchema, QueryStats, and List[RangeVector] from the streams.
-        val resultObs = responseObs
-          .groupBy(elt => elt.getClass)
-          .toListL
-          .flatMap { groupedObservables =>
-            var headerObs: Observable[StreamQueryResultHeader] = Observable.empty
-            var qResObs: Observable[StreamQueryResult] = Observable.empty
-            var footerObs: Observable[StreamQueryResultFooter] = Observable.empty
-            for (groupObs <- groupedObservables) {
-              groupObs.key match {
-                case c if c == classOf[StreamQueryResultHeader] =>
-                  headerObs = groupObs.asInstanceOf[Observable[StreamQueryResultHeader]]
-                case c if c == classOf[StreamQueryResult] =>
-                  qResObs = groupObs.asInstanceOf[Observable[StreamQueryResult]]
-                case c if c == classOf[StreamQueryResultFooter] =>
-                  footerObs = groupObs.asInstanceOf[Observable[StreamQueryResultFooter]]
-                case unk => logger.error("Unrecognized class while collecting stream: " + unk)
-              }
-            }
 
-            val schemaTask = headerObs
-              .map(header => header.resultSchema)
-              .firstL
+    val schemas = childResults.flatMap { obs =>
+      obs._1.find(_.isInstanceOf[StreamQueryResultHeader])
+        .map(_.asInstanceOf[StreamQueryResultHeader].resultSchema)
+        .map(rs => (rs, obs._2))
+    }
 
-            val statsTask = footerObs
-              .map(footer => footer.queryStats)
-              .foldLeftL(QueryStats()) { (accStats, nextStats) =>
-                accStats.add(nextStats)
-                accStats
-              }
-
-            val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
-            val rvTask = Task.parZip2(schemaTask, statsTask).map { case (schema, stats) =>
-              val rvObs = qResObs.flatMap(res => Observable.fromIterable(res.result))
-              val rvObsWithSamples = if (samplesScannedConfig.execChildSamplesEnabled) {
-                rvObs.map { rv =>
-                    // Track all child samples scanned by this non-leaf plan.
-                    // Samples are counted into the child stats just before the
-                    //   child stats are added into the parent stats below.
-                   QueryUtils.trackChildSamplesScanned(rv, this.getClass, stats,
-                     schema, querySession.queryConfig.samplesScannedConfig)
-                     rv
-                  }
-              } else rvObs
-              rvObsWithSamples
-                .guarantee(Task.eval { querySession.queryStats.add(stats) })
-            }
-            Task.parZip2(schemaTask, rvTask)
-          }
-        Observable.fromTask(resultObs)
-          .map { case (schema, rvObs) => (index, schema, rvObs) }
+    val rvs = childResults.map { obs =>
+      val rvs = obs._1.flatMap {
+        case s: StreamQueryResult => Observable.fromIterable(s.result)
+        case _ => Observable.empty
       }
-      .cache
-
-    val schemas = childResults.map { case (index, schema, rvObs) => (schema, index) }
-    val rvs = childResults.map { case (index, schema, rvObs) => (rvObs, index) }
-
+      (rvs, obs._2)
+    }
     // find first non-empty result schema. If all of them are empty, then return empty
     val outputSchema = schemas.findL(!_._1.isEmpty).map(_.map(_._1).getOrElse(ResultSchema.empty))
 
     val results = composeStreaming(rvs, schemas, querySession)
     ExecResult(results, outputSchema)
   }
-  // scalastyle:on cyclomatic.complexity
 
   /**
    * Reduces the different ResultSchemas coming from each child to a single one.
