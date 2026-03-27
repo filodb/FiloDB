@@ -26,7 +26,7 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-release", "8",
+      "-target:8",
       "-feature",
       "-Wconf:cat=deprecation:w",
       "-Ywarn-dead-code",

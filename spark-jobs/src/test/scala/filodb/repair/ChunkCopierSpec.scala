@@ -1,5 +1,6 @@
 package filodb.repair
 
+import java.lang.ref.Reference
 import java.nio.ByteBuffer
 import java.util
 import com.datastax.driver.core.Row
@@ -175,7 +176,7 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
     writeChunk(partKey2, 1609855200000L)
 
     // Ensure that GC doesn't reclaim the native memory too soon.
-    val _ = infoBuf // prevent GC from reclaiming native memory too soon
+    Reference.reachabilityFence(infoBuf)
 
     val part1Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey1))
     val part2Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey2))

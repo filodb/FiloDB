@@ -1,5 +1,6 @@
 package filodb.cassandra.columnstore
 
+import java.lang.ref.Reference
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
@@ -157,7 +158,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       }
     } finally {
       // Ensure that GC doesn't reclaim the native memory too soon.
-      val _ = infoBuf // prevent GC from reclaiming native memory too soon
+      Reference.reachabilityFence(infoBuf)
     }
 
     val part1Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey1))
