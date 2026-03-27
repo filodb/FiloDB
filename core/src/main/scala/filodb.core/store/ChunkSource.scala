@@ -211,8 +211,10 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
       def samplesScannedRowCountConsumer(rowsScanned: Long) = {
         if (samplesScannedConfig.leafSamplesEnabled) {
+          // NOTE: passing 0 for series/bytes scanned because the CountingChunkInfoIterator
+          //   that invokes this consumer will call it multiple times for the same series.
           QueryUtils.trackSamplesScanned(
-            seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
+            seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
             querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
         }  // else no-op
       }
