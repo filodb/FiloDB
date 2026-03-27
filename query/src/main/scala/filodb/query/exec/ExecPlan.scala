@@ -285,7 +285,7 @@ trait ExecPlan extends QueryCommand {
               //   1) Serialization is not free.
               //   2) Some RangeVectors may return None from both numRows() and outputRange().
               //      This means their samples are significantly undercounted until this
-              //      SerializedRangeVector is passed to trackSamplesScanend; SRVs implement numRows.
+              //      SerializedRangeVector is passed to trackSamplesScanned; SRVs implement numRows.
               if (samplesScannedConfig.srvSamplesEnabled) {
                 QueryUtils.trackSamplesScanned(
                   srv, this.getClass, querySession.queryStats, resultSchema,
