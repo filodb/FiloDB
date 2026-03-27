@@ -7,6 +7,20 @@ import filodb.query.exec.ExecPlan
 
 import scala.collection.mutable
 
+/**
+ * Helpers for comparing ExecPlan tree strings independent of non-deterministic ordering.
+ *
+ * In Scala 2.12, HashMap iteration order was different but stable across runs, and all
+ * expected plan strings in tests were written to match that order. Scala 2.13 reimplemented
+ * HashMap (CHAMP trie), changing iteration order. Rather than rewriting all ~132 expected
+ * plan strings (which would be fragile and break again if iteration order changes), we
+ * normalize both actual and expected strings before comparing:
+ *
+ *  - normalizeFilterOrder: sorts ColumnFilter entries and PromQL label matchers within
+ *    each plan node's text, since these come from HashMap iteration and may differ.
+ *  - sortTree: sorts child plan subtrees at each level, since child ordering can be
+ *    non-deterministic (e.g., partition/namespace ordering from Map iteration).
+ */
 trait PlanValidationSpec extends Matchers with StrictLogging {
 
   private def getIndent(line: String): Int = {

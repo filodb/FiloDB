@@ -1,6 +1,7 @@
 package filodb.prometheus.ast
 
 import filodb.core.query.{ColumnFilter, RangeParams}
+// Exclude filodb.query.PeriodicSeries to avoid ambiguity with the local AST trait of the same name
 import filodb.query.{PeriodicSeries => _, _}
 import filodb.query.RangeFunctionId.Timestamp
 

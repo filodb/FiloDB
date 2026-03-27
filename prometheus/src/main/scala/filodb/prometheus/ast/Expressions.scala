@@ -1,6 +1,7 @@
 package filodb.prometheus.ast
 
 import filodb.core.query.RangeParams
+// Exclude filodb.query.PeriodicSeries to avoid ambiguity with the local AST trait of the same name
 import filodb.query.{PeriodicSeries => _, _}
 
 case class UnaryExpression(operator: Operator, operand: Expression) extends Expression with PeriodicSeries {

@@ -28,7 +28,7 @@ object FiloSettings {
       "-unchecked",
       "-target:8",
       "-feature",
-      "-Wconf:cat=deprecation:w",
+      "-Wconf:cat=deprecation:w", // Scala 2.13 replacement for -deprecation; report deprecations as warnings
       "-Ywarn-dead-code",
       "-language:existentials",
       "-language:experimental.macros",
