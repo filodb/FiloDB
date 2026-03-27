@@ -644,11 +644,30 @@ object PlannerUtil extends StrictLogging {
   /**
     * Reorders exec plans so that local (non-remote) plans come before
     * PromQlRemoteExec plans, preserving relative order within each group.
-    * This replaces the broken sortWith comparator that violated the
-    * comparator contract in Scala 2.13.
+    *
+    * This replaces the original sortWith comparator:
+    *   plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+    * which violated the strict weak ordering contract required by sortWith
+    * (antisymmetry: if f(a,b) then !f(b,a)). When both elements are non-remote,
+    * the comparator returned true for both f(a,b) and f(b,a). Scala 2.13's sort
+    * (backed by java.util.TimSort) validates this contract and may throw
+    * IllegalArgumentException or produce incorrect results for non-conforming
+    * comparators (see https://bugs.openjdk.org/browse/JDK-8011944).
     */
   def localPlansFirst(plans: Seq[ExecPlan]): Seq[ExecPlan] = {
     val (local, remote) = plans.partition(!_.isInstanceOf[PromQlRemoteExec])
+    local ++ remote
+  }
+
+  /**
+    * Reorders exec plans so that local (non-metadata-remote) plans come before
+    * MetadataRemoteExec plans, preserving relative order within each group.
+    *
+    * Same rationale as localPlansFirst: avoids a sortWith comparator that would
+    * violate the strict weak ordering contract in Scala 2.13.
+    */
+  def localMetadataFirst(plans: Seq[ExecPlan]): Seq[ExecPlan] = {
+    val (local, remote) = plans.partition(!_.isInstanceOf[MetadataRemoteExec])
     local ++ remote
   }
 

@@ -216,7 +216,7 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
    */
   def validatePlan(plan: ExecPlan,
                    expected: String,
-                   sort: Boolean = false): Unit = {
+                   sort: Boolean = true): Unit = {
     val originalPlanString = plan.printTree()
     val (planString, expectedString) = {
       val denoisedPlan = normalizeFilterOrder(removeNoise(originalPlanString))

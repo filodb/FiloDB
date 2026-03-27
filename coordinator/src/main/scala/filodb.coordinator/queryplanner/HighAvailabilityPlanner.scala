@@ -91,9 +91,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   private def stitchPlans(rootLogicalPlan: LogicalPlan,
                           execPlans: Seq[ExecPlan],
                           queryContext: QueryContext)= {
-    val localMetaFirst = {
-      val (l, r) = execPlans.partition(!_.isInstanceOf[MetadataRemoteExec]); l ++ r
-    }
+    val localMetaFirst = PlannerUtil.localMetadataFirst(execPlans)
     rootLogicalPlan match {
         case lp: LabelValues         =>
           LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
