@@ -137,19 +137,19 @@ case class CachingConfig(
  * @param classToSamplesPerSeries maps classes to the count of samples added per time-series;
  *                                overrides defaultSamplesPerSeries.
  * @param classToSamplesPerPartKeyByte maps classes to the count of samples added per partition-key byte;
- *                                     overrides defaultSamplesPerRow.
+ *                                     overrides defaultSamplesPerPartKeyByte.
  * @param defaultSamplesPerChildRow the default count of samples added per child row;
- *                                  overridden by classToChildSamplesPerRow.
+ *                                  overridden by classToSamplesPerChildRow.
  * @param defaultSamplesPerChildSeries the default count of samples added per child time-series;
- *                                     overridden by classToChildSamplesPerSeries.
+ *                                     overridden by classToSamplesPerChildSeries.
  * @param defaultSamplesPerChildPartKeyByte the default count of samples added per child partition key byte;
- *                                          overridden by classToChildSamplesPerPartyKeyByte.
+ *                                          overridden by classToSamplesPerChildPartKeyByte.
  * @param classToSamplesPerChildRow maps classes to the count of samples added per child row;
- *                                  overrides defaultChildSamplesPerRow.
+ *                                  overrides defaultSamplesPerChildRow.
  * @param classToSamplesPerChildSeries maps classes to the count of samples added per child time-series;
- *                                     overrides defaultChildSamplesPerSeries.
+ *                                     overrides defaultSamplesPerChildSeries.
  * @param classToSamplesPerChildPartKeyByte maps classes to the count of samples added per child partition-key byte;
- *                                          overrides defaultChildSamplesPerPartKeyByte.
+ *                                          overrides defaultSamplesPerChildPartKeyByte.
  */
 case class SamplesScannedConfig(
                                  leafSamplesEnabled: Boolean = true,
