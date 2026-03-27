@@ -2700,11 +2700,11 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String],
                                    timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("direct-partition", directUrl, TimeRange(timeRange.startMs, timeRange.endMs)))
+          List(PartitionAssignment("direct-partition", directUrl, TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                            timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("legacy-partition", metadataUrl, TimeRange(timeRange.startMs, timeRange.endMs)))
+          List(PartitionAssignment("legacy-partition", metadataUrl, TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
       }
 
     val multiShardDataset = MetricsTestData.timeseriesDatasetMultipleShardKeys

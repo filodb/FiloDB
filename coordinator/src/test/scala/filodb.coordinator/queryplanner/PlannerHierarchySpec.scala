@@ -4119,14 +4119,14 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   describe("Metadata Query Routing - MultiPartitionPlanner") {
     val metadataPartitionProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange))
+        List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"))
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                          timeRange: TimeRange): List[PartitionAssignment] =
         List(
-          PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
-          PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange),
-          PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange)
+          PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+          PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit"),
+          PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange, workUnit = "testWorkUnit")
         )
     }
 
@@ -4147,13 +4147,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     it("should use getPartitions when all shard-key Equals filters are present and route to single partition") {
       val singlePartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange))
+          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"))
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                            timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
-            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit")
           )
       }
 
@@ -4180,15 +4180,15 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       val duplicatePartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("partition-1", "http://partition-1-url", timeRange),
-            PartitionAssignment("partition-1", "http://partition-1-url", timeRange)
+            PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit")
           )
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                            timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
-            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit")
           )
       }
 
@@ -4215,15 +4215,15 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       val multiPartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("partition-1", "http://partition-1-url", timeRange),
-            PartitionAssignment("partition-2", "http://partition-2-url", timeRange)
+            PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("partition-2", "http://partition-2-url", timeRange, workUnit = "testWorkUnit")
           )
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                            timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
-            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange)
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit")
           )
       }
 
@@ -4271,14 +4271,14 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
       val regexPartitionProvider = new PartitionLocationProvider {
         override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange))
+          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"))
 
         override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                            timeRange: TimeRange): List[PartitionAssignment] =
           List(
-            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange),
-            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange),
-            PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange)
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange, workUnit = "testWorkUnit")
           )
       }
 
@@ -4338,12 +4338,12 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val partitionProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         // getPartitions can handle any routing key passed to it
-        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
       }
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
                                          timeRange: TimeRange): List[PartitionAssignment] = {
         // This method can handle non-equals filters
-        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
       }
     }
     val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)

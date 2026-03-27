@@ -1184,13 +1184,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   describe("Metadata Routing - MultiPartitionPlanner") {
     val metadataPartitionProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("remote", "remote-url", timeRange))
+        List(PartitionAssignment("remote", "remote-url", timeRange, workUnit = "testWorkUnit"))
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange)
       : List[PartitionAssignment] =
         List(
-          PartitionAssignment("p1", "p1-url", timeRange),
-          PartitionAssignment("p2", "p2-url", timeRange)
+          PartitionAssignment("p1", "p1-url", timeRange, workUnit = "testWorkUnit"),
+          PartitionAssignment("p2", "p2-url", timeRange, workUnit = "testWorkUnit")
         )
     }
 
