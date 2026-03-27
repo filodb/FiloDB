@@ -209,7 +209,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         val stats = QueryStats()
         val rv = makeRV(Some(10), None, 50)
         QueryUtils.trackChildSamplesScanned(
-          rv, classOf[String], QueryStats(), doubleSchema, SamplesScannedConfig())
+          rv, classOf[String], stats, doubleSchema, SamplesScannedConfig())
         assert(stats.stat.isEmpty)
       }
 
