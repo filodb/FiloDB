@@ -1,7 +1,7 @@
 package filodb.prometheus.ast
 
 import filodb.core.query.{ColumnFilter, RangeParams}
-import filodb.query._
+import filodb.query.{PeriodicSeries => _, _}
 import filodb.query.RangeFunctionId.Timestamp
 
 case class Function(name: String, allParams: Seq[Expression]) extends Expression with PeriodicSeries {

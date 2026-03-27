@@ -45,7 +45,7 @@ object QueryUtils {
    *         at index i is chosen from the ith argument sequence.
    */
   def combinations[T](choices: Seq[Seq[T]]): Seq[Seq[T]] = {
-    val running = new mutable.ArraySeq[T](choices.size)
+    val running = mutable.ArraySeq.make(new Array[Any](choices.size)).asInstanceOf[mutable.ArraySeq[T]]
     val result = new mutable.ArrayBuffer[Seq[T]]
     def helper(iChoice: Int): Unit = {
       if (iChoice == choices.size) {
@@ -58,7 +58,7 @@ object QueryUtils {
       }
     }
     helper(0)
-    result
+    result.toSeq
   }
 
   /**
@@ -84,7 +84,7 @@ object QueryUtils {
       offset = offset + left.length + 1
     }
     splits.append(remaining)
-    splits
+    splits.toSeq
   }
 
   /**
@@ -99,7 +99,7 @@ object QueryUtils {
     // Store the entries with some order, then find all possible value combos s.t. each combo's
     //   ith value is a value of the ith key.
     comboCache.get(keyToValues, _ => {
-      val entries = keyToValues.toSeq
+      val entries = keyToValues.toSeq.sortBy(_._1)
       val keys = entries.map(_._1)
       val vals = entries.map(_._2.toSeq)
       val combos = QueryUtils.combinations(vals)

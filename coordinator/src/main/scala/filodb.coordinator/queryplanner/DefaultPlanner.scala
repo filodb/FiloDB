@@ -641,6 +641,17 @@ trait  DefaultPlanner {
 
 object PlannerUtil extends StrictLogging {
 
+  /**
+    * Reorders exec plans so that local (non-remote) plans come before
+    * PromQlRemoteExec plans, preserving relative order within each group.
+    * This replaces the broken sortWith comparator that violated the
+    * comparator contract in Scala 2.13.
+    */
+  def localPlansFirst(plans: Seq[ExecPlan]): Seq[ExecPlan] = {
+    val (local, remote) = plans.partition(!_.isInstanceOf[PromQlRemoteExec])
+    local ++ remote
+  }
+
    /**
    * Returns URL params for label values which is used to create Metadata remote exec plan
    */

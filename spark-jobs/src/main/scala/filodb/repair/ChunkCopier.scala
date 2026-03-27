@@ -29,7 +29,7 @@ class ChunkCopier(conf: SparkConf) {
   // Get filo config from spark conf or file.
   private def getFiloConfig(valueConf: String, filePathConf: String) = {
     val configString = conf.get(valueConf, "")
-    val config = if (!configString.isBlank) {
+    val config = if (!configString.trim.isEmpty) {
       ConfigFactory.parseString(configString).resolve()
     } else {
       ConfigFactory.parseFile(new File(conf.get(filePathConf)))
@@ -46,7 +46,7 @@ class ChunkCopier(conf: SparkConf) {
         override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })
       .findFirst()
-      .orElseThrow()
+      .get()
   }
 
   val rawSourceConfig = getFiloConfig(
@@ -154,7 +154,16 @@ class ChunkCopier(conf: SparkConf) {
 
 object ChunkCopier {
   class ByteComparator extends java.util.Comparator[Array[Byte]] {
-    def compare(a: Array[Byte], b: Array[Byte]): Int = java.util.Arrays.compareUnsigned(a, b)
+    def compare(a: Array[Byte], b: Array[Byte]): Int = {
+      val len = Math.min(a.length, b.length)
+      var i = 0
+      while (i < len) {
+        val cmp = (a(i) & 0xff) - (b(i) & 0xff)
+        if (cmp != 0) return cmp
+        i += 1
+      }
+      a.length - b.length
+    }
   }
 
   val cache = new java.util.TreeMap[Array[Byte], ChunkCopier](new ByteComparator)

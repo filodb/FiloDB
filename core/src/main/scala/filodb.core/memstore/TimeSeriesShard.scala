@@ -1385,7 +1385,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.ingestionClockDelay.update(Math.max(0, currentTime - ingestionTime))
     }
 
-    tasks
+    tasks.toSeq
   }
 
   private def createFlushTask(flushGroup: FlushGroup): Task[Response] = {

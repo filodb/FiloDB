@@ -30,7 +30,7 @@ class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
 
   // Collect all kafka config properties to broadcast to executors
   private[labelchurnfinder] val kafkaProps: Map[String, String] = {
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     kafkaConfig.entrySet().asScala
       .map(e => e.getKey -> e.getValue.unwrapped().toString)
       .toMap

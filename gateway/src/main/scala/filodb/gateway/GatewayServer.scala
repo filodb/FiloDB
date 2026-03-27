@@ -4,9 +4,9 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}

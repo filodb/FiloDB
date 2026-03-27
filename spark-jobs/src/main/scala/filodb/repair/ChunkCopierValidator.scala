@@ -14,7 +14,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.concurrent.duration.Duration
-import scala.jdk.CollectionConverters.asScalaIteratorConverter
+import scala.jdk.CollectionConverters._
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit, TimeSeriesChunksTable}
@@ -51,7 +51,7 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
         override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })
       .findFirst()
-      .orElseThrow()
+      .get()
   }
 
   val rawSourceConfig = getFiloConfig(
@@ -106,7 +106,7 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
 
     val partSchema = Schemas.fromConfig(sourceConfig).get.part
 
-    chunksTable.readChunksNoAsync(partition, chunkInfos)
+    chunksTable.readChunksNoAsync(partition, chunkInfos.toSeq)
       .iterator
       .asScala
       .map(
@@ -186,7 +186,16 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
 
 object ChunkCopierValidator {
   class ByteComparator extends java.util.Comparator[Array[Byte]] {
-    def compare(a: Array[Byte], b: Array[Byte]): Int = java.util.Arrays.compareUnsigned(a, b)
+    def compare(a: Array[Byte], b: Array[Byte]): Int = {
+      val len = Math.min(a.length, b.length)
+      var i = 0
+      while (i < len) {
+        val cmp = (a(i) & 0xff) - (b(i) & 0xff)
+        if (cmp != 0) return cmp
+        i += 1
+      }
+      a.length - b.length
+    }
   }
 
   val cache = new java.util.TreeMap[Array[Byte], ChunkCopierValidator](new ByteComparator)

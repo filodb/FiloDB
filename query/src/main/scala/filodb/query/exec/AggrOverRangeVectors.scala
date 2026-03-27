@@ -279,7 +279,7 @@ object RangeVectorAggregator extends StrictLogging {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
-    rvs.groupBy(grouping).mapValues { rvs =>
+    rvs.groupBy(grouping).view.mapValues { rvs =>
       new CloseableIterator[rowAgg.AggHolderType] {
         // create tuple from rv since rows() will create new iter each time
         val itsAndKeys = rvs.map { rv => (rv.rows(), rv.key) }
@@ -303,7 +303,7 @@ object RangeVectorAggregator extends StrictLogging {
         }
         def close() = rvs.foreach(_.rows().close())
       }
-    }
+    }.toMap
   }
 
   /**
