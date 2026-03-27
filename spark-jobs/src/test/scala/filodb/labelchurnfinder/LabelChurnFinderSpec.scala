@@ -33,7 +33,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     s"""
        |filodb.labelchurnfinder.pk-filters.0._ws_ = bulk_ws
        |filodb.labelchurnfinder.since-time = "${Instant.ofEpochMilli(now).toString}"
-       |filodb.labelchurnfinder.dataset = prometheus
+       |filodb.labelchurnfinder.raw-dataset-name = prometheus
        |""".stripMargin)
 
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
@@ -227,7 +227,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       LabelSketch1hCol, LabelSketch3dCol, LabelSketch7dCol)
 
     // Call actionOnLabelStats
-    lcf.actionOnLabelStats(testDf, mockProducer)
+    lcf.actionOnLabelStats(testDf, Some(mockProducer))
 
     // Verify publishLabelStats was called once
     verify(mockProducer, times(1)).publishLabelStats(any[DataFrame])

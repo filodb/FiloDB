@@ -9,7 +9,8 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
@@ -834,6 +835,115 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     }
   }
 
+  it("should ignore NaN in max aggregation") {
+    // Mirrors the "should ignore NaN while aggregating" test but for Max, which was absent before the fix.
+    // Before the fix, MaxRowAggregator used Double.MinValue as sentinel making it fragile;
+    // now it delegates to QueryUtils.maxIgnoreNaN.
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, 4.6d),       (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, 2.1d),       (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
+    )
+    val agg = RowAggregator(AggregationOperator.Max, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(
+      agg, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    // t=1000: NaN, 4.6, 2.1  → max ignoring NaN = 4.6
+    // t=2000: 5.6, 4.4, 5.4  → max = 5.6
+    compareIter(result(0).rows().map(_.getDouble(1)), Seq(4.6d, 5.6d).iterator)
+  }
+
+  it("should return NaN for max when all values for a timestamp are NaN") {
+    // Mirrors the "should return NaN when all values are NaN for a timestamp" test but for Max.
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
+    )
+    val agg = RowAggregator(AggregationOperator.Max, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(
+      agg, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    // t=1000: all NaN → NaN
+    // t=2000: 5.6, 4.4, 5.4 → max = 5.6
+    compareIter(result(0).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.6d).iterator)
+  }
+
+  it("should compute max correctly with negative values when some inputs are NaN") {
+    // Regression: the old MaxRowAggregator used Double.MinValue as a sentinel when acc was NaN.
+    // With QueryUtils.maxIgnoreNaN the sentinel is gone, ensuring negative-only series return
+    // the true max and not Double.MinValue.
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, Double.NaN), (2000L, -1.5d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, -5.0d),      (2000L, -3.0d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)))
+    )
+    val agg = RowAggregator(AggregationOperator.Max, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(
+      agg, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    // t=1000: NaN, -5.0  → max = -5.0  (not Double.MinValue)
+    // t=2000: -1.5, -3.0 → max = -1.5
+    compareIter(result(0).rows().map(_.getDouble(1)), Seq(-5.0d, -1.5d).iterator)
+  }
+
+  it("should compute min correctly with negative values when some inputs are NaN") {
+    // Regression: the old MinRowAggregator used Double.MaxValue as a sentinel when acc was NaN.
+    // With QueryUtils.minIgnoreNaN the sentinel is gone.
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, Double.NaN), (2000L, -1.5d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, -5.0d),      (2000L, -3.0d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)))
+    )
+    val agg = RowAggregator(AggregationOperator.Min, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(
+      agg, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    // t=1000: NaN, -5.0  → min = -5.0  (not Double.MaxValue)
+    // t=2000: -1.5, -3.0 → min = -3.0
+    compareIter(result(0).rows().map(_.getDouble(1)), Seq(-5.0d, -3.0d).iterator)
+  }
+
+  it("should ignore NaN in max and min aggregation when NaN appears after real values") {
+    // Covers the pattern [real, NaN]: at t=2000 series-1 has a real value and at t=3000 goes NaN,
+    // while series-2 is the inverse. The aggregated max/min must not be poisoned by NaN.
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, Double.NaN), (2000L, 7.0d), (3000L, Double.NaN)),
+           CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, 3.0d),       (2000L, Double.NaN), (3000L, 9.0d)),
+           CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)))
+    )
+    // Max
+    val aggMax = RowAggregator(AggregationOperator.Max, Nil, tvSchema)
+    val maxResult = RangeVectorAggregator.mapReduce(
+      aggMax, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+      .toListL.runToFuture.futureValue
+    maxResult.size shouldEqual 1
+    maxResult(0).key shouldEqual noKey
+    // t=1000: NaN, 3.0  → 3.0
+    // t=2000: 7.0, NaN  → 7.0  (NaN must not poison the real value)
+    // t=3000: NaN, 9.0  → 9.0
+    compareIter(maxResult(0).rows().map(_.getDouble(1)), Seq(3.0d, 7.0d, 9.0d).iterator)
+
+    // Min
+    val aggMin = RowAggregator(AggregationOperator.Min, Nil, tvSchema)
+    val minResult = RangeVectorAggregator.mapReduce(
+      aggMin, false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings())
+      .toListL.runToFuture.futureValue
+    minResult.size shouldEqual 1
+    minResult(0).key shouldEqual noKey
+    // t=1000: NaN, 3.0  → 3.0
+    // t=2000: 7.0, NaN  → 7.0
+    // t=3000: NaN, 9.0  → 9.0
+    compareIter(minResult(0).rows().map(_.getDouble(1)), Seq(3.0d, 7.0d, 9.0d).iterator)
+  }
+
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{
@@ -846,6 +956,78 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       case (false, false) => Unit
       case _ => fail("Unequal lengths")
     }
+  }
+
+  // Simulates the bug where serializing a quantile reduction result that contains NaNRowReader rows
+  // causes a MatchError in filoUTF8String. This happens during gRPC transport when a shard returns no
+  // data for some time steps: the iterator produces NaNRowReader rows, the reduction schema has a
+  // StringColumn for the T-Digest blob, and the NaN row filtering in SerializedRangeVector.apply
+  // doesn't handle StringColumn — so NaNRowReader reaches RecordBuilder which calls filoUTF8String,
+  // and NaNRowReader.getAny returns Double.NaN which doesn't match any case in the pattern match.
+  it("should not fail when serializing quantile reduction result containing NaN rows") {
+    // Produce a quantile map-reduce result (reduction schema: [TimestampColumn, StringColumn for tdigest])
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, 4.6d), (2L, 4.4d)))
+    )
+
+    val agg = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping,
+      queryContext = qc, QueryWarnings())
+    val reduced = RangeVectorAggregator.mapReduce(agg, true, resultObs, rv => rv.key,
+      queryContext = qc, QueryWarnings())
+    val reducedResult = reduced.toListL.runToFuture.futureValue
+    reducedResult.size shouldEqual 1
+
+    // Now build a RangeVector that interleaves real reduction rows with NaNRowReader rows,
+    // simulating what happens when a shard has gaps in data.
+    // The aggregation pipeline reuses the same QuantileAggTransientRow instance across next() calls,
+    // so we must copy each row into a fresh immutable snapshot before collecting.
+    val realRows = reducedResult(0).rows().map { r =>
+      val copy = new QuantileAggTransientRow()
+      copy.copyFrom(r)
+      copy
+    }.toList
+    val mixedRows: Seq[RowReader] = Seq(
+      new NaNRowReader(0L),  // gap before data
+      realRows(0),           // timestamp 1
+      new NaNRowReader(3L),  // gap in middle
+      realRows(1)            // timestamp 2
+    )
+    val mixedRv = new RangeVector {
+      import NoCloseCursor._
+      override def key: RangeVectorKey = noKey
+      override def rows(): RangeVectorCursor = mixedRows.iterator
+      override def outputRange: Option[RvRange] = None
+    }
+
+    // Use the quantile reduction schema (StringColumn for tdigest blob)
+    val recSchema = SerializedRangeVector.toSchema(Seq(
+      ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("tdig", ColumnType.StringColumn)))
+    val builder = SerializedRangeVector.newBuilder()
+
+    // This is where the bug manifests: serializing a NaNRowReader with a StringColumn schema
+    // causes filoUTF8String to fail because NaNRowReader.getAny returns Double.NaN
+    val srv = SerializedRangeVector(mixedRv, builder, recSchema,
+      "NaN-quantile-serialize-test", queryStats)
+
+    // If we get here without exception, verify we can still present the valid rows
+    val presented = RangeVectorAggregator.present(agg, Observable.now(srv), 1000,
+      RangeParams(0, 1, 0), queryStats)
+    val finalResult = presented.toListL.runToFuture.futureValue
+    finalResult.size shouldEqual 1
+
+    // Verify that NaNRowReader gaps were skipped and only the valid reduction rows survived.
+    // Expect exactly two rows, at timestamps 1L and 2L, with non-NaN quantile values.
+    val resultRows = finalResult.head.rows().map { r =>
+      val ts = r.getLong(0)
+      val q  = r.getDouble(1)
+      (ts, q)
+    }.toList
+    resultRows.size shouldEqual 2
+    resultRows.map(_._1) shouldEqual Seq(1L, 2L)
+    resultRows.foreach { case (_, q) => q.isNaN shouldEqual false }
   }
 
   @tailrec

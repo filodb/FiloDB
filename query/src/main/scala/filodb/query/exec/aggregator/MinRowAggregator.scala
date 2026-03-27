@@ -21,11 +21,7 @@ object MinRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: MinHolder, aggRes: RowReader): MinHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
-      if (acc.min.isNaN)
-        acc.min = Double.MaxValue
-      acc.min = Math.min(acc.min, aggRes.getDouble(1))
-    }
+    acc.min = QueryUtils.minIgnoreNaN(acc.min, aggRes.getDouble(1))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int,

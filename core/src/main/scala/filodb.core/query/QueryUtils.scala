@@ -256,4 +256,18 @@ object QueryUtils {
 
     statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
   }
+
+  def maxIgnoreNaN(a: Double, b: Double): Double = {
+    if (a != a) b // a is NaN
+    else if (b != b) a // b is NaN
+    else if (a > b) a
+    else b
+  }
+
+  def minIgnoreNaN(a: Double, b: Double): Double = {
+    if (a != a) b // a is NaN
+    else if (b != b) a // b is NaN
+    else if (a < b) a
+    else b
+  }
 }

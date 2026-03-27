@@ -176,10 +176,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
           scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
-            if (!Utils.doesSchemaMatchOrBackCompatibleHistograms(
-                  p.schema.name, p.schema.schemaHash, // current partition
-                  Schemas.global.schemaName(reqSchemaId), reqSchemaId) // requested schema
-            ) {
+            if (!Utils.areCompatibleMetricTypes(p.schema.schemaHash, reqSchemaId)) {
               throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
             }
             // short term fix to prevent segv which occurs when we access non-existent columns

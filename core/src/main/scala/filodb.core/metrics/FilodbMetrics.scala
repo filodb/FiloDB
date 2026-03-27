@@ -171,11 +171,11 @@ case class MetricsCounter(otelCounter: Option[DoubleCounter],
       case None => value
     }
     if (additionalAttributes.nonEmpty) {
-      otelCounter.foreach(_.add(value2, withAttributes(additionalAttributes)))
-      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
+      if (otelCounter.isDefined) otelCounter.get.add(value2, withAttributes(additionalAttributes))
+      if (kamonCounter.isDefined) kamonCounter.get.withTags(TagSet.from(additionalAttributes)).increment(value)
     } else {
-      otelCounter.foreach(_.add(value2, baseAttributes))
-      kamonCounter.foreach(_.increment(value))
+      if (otelCounter.isDefined) otelCounter.get.add(value2, baseAttributes)
+      if (kamonCounter.isDefined) kamonCounter.get.increment(value)
     }
   }
 }
@@ -185,11 +185,13 @@ case class MetricsUpDownCounter(otelCounter: Option[LongUpDownCounter],
                                 baseAttributes: Attributes) extends MetricsInstrument {
   def increment(value: Long = 1, additionalAttributes: Map[String, String] = Map.empty): Unit = {
     if (additionalAttributes.nonEmpty) {
-      kamonCounter.foreach(_.withTags(TagSet.from(additionalAttributes)).increment(value))
-      otelCounter.foreach(_.add(value, withAttributes(additionalAttributes)))
+      // don't use foreach here since it results in lambda allocation on hot path
+      if (kamonCounter.isDefined) kamonCounter.get.withTags(TagSet.from(additionalAttributes)).increment(value)
+      if (otelCounter.isDefined) otelCounter.get.add(value, withAttributes(additionalAttributes))
     } else {
-      kamonCounter.foreach(_.increment(value))
-      otelCounter.foreach(_.add(value, baseAttributes))
+      // don't use foreach here since it results in lambda allocation on hot path
+      if (kamonCounter.isDefined) kamonCounter.get.increment(value)
+      if (otelCounter.isDefined) otelCounter.get.add(value, baseAttributes)
     }
   }
 }
@@ -207,11 +209,11 @@ case class MetricsGauge(otelGauge: Option[mutable.HashMap[Map[String, String], D
       case None => value
     }
     if (additionalAttributes.nonEmpty) {
-      otelGauge.foreach( m => m.put(additionalAttributes ++ baseAttributesMap, value2))
-      kamonGauge.foreach(_.withTags(TagSet.from(additionalAttributes)).update(value))
+      if (otelGauge.isDefined) otelGauge.get.put(additionalAttributes ++ baseAttributesMap, value2)
+      if (kamonGauge.isDefined) kamonGauge.get.withTags(TagSet.from(additionalAttributes)).update(value)
     } else {
-      otelGauge.foreach( m => m.put(baseAttributesMap, value2))
-      kamonGauge.foreach(_.update(value))
+      if (otelGauge.isDefined) otelGauge.get.put(baseAttributesMap, value2)
+      if (kamonGauge.isDefined) kamonGauge.get.update(value)
     }
   }
 }
@@ -228,11 +230,11 @@ case class MetricsHistogram(otelHistogram: Option[DoubleHistogram],
 
     // report original value because instrument is already configured with time unit
     if (additionalAttributes.nonEmpty) {
-      otelHistogram.foreach(_.record(valueInSeconds, withAttributes(additionalAttributes)))
-      kamonHistogram.foreach(_.withTags(TagSet.from(additionalAttributes)).record(value))
+      if (otelHistogram.isDefined) otelHistogram.get.record(valueInSeconds, withAttributes(additionalAttributes))
+      if (kamonHistogram.isDefined) kamonHistogram.get.withTags(TagSet.from(additionalAttributes)).record(value)
     } else {
-      otelHistogram.foreach(_.record(valueInSeconds, baseAttributes))
-      kamonHistogram.foreach(_.record(value))
+      if (otelHistogram.isDefined) otelHistogram.get.record(valueInSeconds, baseAttributes)
+      if (kamonHistogram.isDefined) kamonHistogram.get.record(value)
     }
   }
 }

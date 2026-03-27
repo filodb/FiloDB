@@ -9,6 +9,7 @@ import akka.stream.ActorMaterializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
+import io.circe.Printer
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
@@ -175,6 +176,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams,
         spreadProvider, partialResults))
     }
+
+    implicit val printer: Printer = Printer.noSpaces.copy(dropNullValues = true)
 
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult if logicalPlan.isInstanceOf[MetadataQueryPlan] =>
