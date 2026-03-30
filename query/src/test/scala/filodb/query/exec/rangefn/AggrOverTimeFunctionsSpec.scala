@@ -2431,11 +2431,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val fn = new ResetsFunction
 
     val samples = Seq(1000L -> 7.0, 2000L -> 5.0, 3000L -> Double.NaN)
-    val rows = samples.map { case (t, v) =>
+    samples.foreach { case (t, v) =>
       val row = new TransientRow(t, v)
       q.add(row)
       fn.addedToWindow(row, window)
-      row
     }
 
     // Evict the first element (7.0) to simulate window sliding
@@ -2466,6 +2465,140 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val toEmit = new TransientRow
     fn.apply(1000L, 3000L, window, toEmit, queryConfig)
     toEmit.value shouldEqual 0.0  // no real samples, no resets
+  }
+
+  // ---- LastSampleFunction stale-marker tests (sliding window) ----
+  // These cover the behaviour introduced by the fix where NaN is no longer skipped
+  // and stale markers are propagated as-is, matching Prometheus semantics.
+
+  it("LastSampleFunction should return NaN when the last sample in the window is a stale marker") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Window: [3.0, NaN]  → last is NaN (stale marker), should propagate NaN.
+    // Old code searched backwards and would have returned 3.0 instead.
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+
+    val samples = Seq(1000L -> 3.0, 2000L -> Double.NaN)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+    }
+
+    val toEmit = new TransientRow
+    LastSampleFunction.apply(1000L, 2000L, window, toEmit, queryConfig)
+    toEmit.value.isNaN shouldBe true
+  }
+
+  it("LastSampleFunction should return the last real value when no stale marker is present") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+
+    val samples = Seq(1000L -> 2.0, 2000L -> 5.0, 3000L -> 8.0)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+    }
+
+    val toEmit = new TransientRow
+    LastSampleFunction.apply(1000L, 3000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 8.0
+  }
+
+  it("LastSampleFunction should return NaN for an empty window") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+
+    val toEmit = new TransientRow
+    LastSampleFunction.apply(1000L, 2000L, window, toEmit, queryConfig)
+    toEmit.value.isNaN shouldBe true
+  }
+
+  it("LastSampleFunction should return NaN when the only sample in the window is a stale marker") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+
+    val row = new TransientRow(1000L, Double.NaN)
+    q.add(row)
+
+    val toEmit = new TransientRow
+    LastSampleFunction.apply(1000L, 1000L, window, toEmit, queryConfig)
+    toEmit.value.isNaN shouldBe true
+  }
+
+  // ---- LastSampleChunkedFunctionD stale-marker tests (chunked path) ----
+  // These cover the behaviour introduced by the fix where NaN is no longer skipped
+  // and stale markers are propagated as-is.
+
+  it("LastSampleChunkedFunctionD should propagate NaN stale marker as the last value in a chunk") {
+    // Ingest [1.0, 2.0, NaN] and query a window that covers all three samples.
+    // Old code: NaN → look at endRowNum-1 → would return 2.0.
+    // New code: NaN propagates directly.
+    val data = Seq(1.0, 2.0, Double.NaN)
+    val rv = timeValueRVPk(data.zipWithIndex.map { case (v, i) => (defaultStartTS + i * pubFreq, v) })
+
+    // Window covers all three samples; endTime is the timestamp of the NaN sample.
+    val endTime   = defaultStartTS + 2 * pubFreq
+    val startTime = defaultStartTS
+    val it = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, endTime - startTime,
+      new LastSampleChunkedFunctionD(), querySession)
+
+    val result = it.map(_.getDouble(1)).toList
+    result should have size 1
+    result.head.isNaN shouldBe true
+  }
+
+  it("LastSampleChunkedFunctionD should return the last real value when no stale marker is present") {
+    val data = Seq(1.0, 3.0, 7.0)
+    val rv = timeValueRVPk(data.zipWithIndex.map { case (v, i) => (defaultStartTS + i * pubFreq, v) })
+
+    val endTime   = defaultStartTS + 2 * pubFreq
+    val startTime = defaultStartTS
+    val it = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, endTime - startTime,
+      new LastSampleChunkedFunctionD(), querySession)
+
+    val result = it.map(_.getDouble(1)).toList
+    result should have size 1
+    result.head shouldEqual 7.0
+  }
+
+  it("LastSampleChunkedFunctionD should propagate NaN stale marker that appears at end of first chunk in multi-chunk scenario") {
+    // First chunk ends with a NaN stale marker; a second chunk adds more real data.
+    // The query window covers only the first chunk so the stale NaN should be returned.
+    val firstChunk = Seq((defaultStartTS, 4.0), (defaultStartTS + pubFreq, Double.NaN))
+    val rv = timeValueRVPk(firstChunk)
+    // Add a second chunk with a real value well outside the query window.
+    addChunkToRV(rv, Seq((defaultStartTS + 10 * pubFreq, 99.0)))
+
+    val endTime   = defaultStartTS + pubFreq        // covers only first chunk
+    val startTime = defaultStartTS
+    val it = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, endTime - startTime,
+      new LastSampleChunkedFunctionD(), querySession)
+
+    val result = it.map(_.getDouble(1)).toList
+    result should have size 1
+    result.head.isNaN shouldBe true
+  }
+
+  it("LastSampleChunkedFunctionD should return NaN for an empty window") {
+    val rv = timeValueRVPk(Seq.empty)
+    val endTime = defaultStartTS + pubFreq
+    val it = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, pubFreq,
+      new LastSampleChunkedFunctionD(), querySession)
+
+    val result = it.map(_.getDouble(1)).toList
+    result should have size 1
+    result.head.isNaN shouldBe true
   }
 
 }

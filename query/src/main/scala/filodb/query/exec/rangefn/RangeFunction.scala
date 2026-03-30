@@ -544,15 +544,12 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
             window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    for (i <- (window.size - 1) to 0 by -1) {
-      val row = window.apply(i)
-      val rowValue = row.getDouble(1)
-      if (!rowValue.isNaN ) {
-        sampleToEmit.setValues(endTimestamp, rowValue)
-        return
-      }
+    if (window.size > 0) {
+      val last = window.last.getDouble(1)
+      sampleToEmit.setValues(endTimestamp, last)
+    } else {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
     }
-    sampleToEmit.setValues(endTimestamp, Double.NaN)
   }
 }
 
