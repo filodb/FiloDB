@@ -678,19 +678,10 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
     val doubleVal = dblReader(valAcc, valVector, endRowNum)
-    // If the last value is NaN, that may be Prometheus end of time series marker.
-    // In that case try to get the sample before last.
-    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
-    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
-    if (java.lang.Double.isNaN(doubleVal)) {
-      if (endRowNum > 0) {
-        timestamp = ts
-        value = dblReader(valAcc, valVector, endRowNum - 1)
-      }
-    } else {
-      timestamp = ts
-      value = doubleVal
-    }
+    // Respect Prometheus staleness: if the last value is NaN (stale marker),
+    // propagate it so the series is correctly reported as stale.
+    timestamp = ts
+    value = doubleVal
   }
 }
 

@@ -2350,4 +2350,122 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       SimdNativeMethods.enabled = false
     }
   }
+  // ---- ResetsFunction NaN-handling tests ----
+  // These cover the bugs that existed before the fix where NaN was coerced to 0,
+  // causing false-positive resets and incorrect undo-on-remove behavior.
+
+  it("ResetsFunction should not count a reset when a NaN sample follows a larger real value") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Before the fix: NaN was treated as 0, so the comparison 0 < 5.0 triggered a spurious reset.
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+    val fn = new ResetsFunction
+
+    val samples = Seq(1000L -> 5.0, 2000L -> Double.NaN)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+      fn.addedToWindow(row, window)
+    }
+
+    val toEmit = new TransientRow
+    fn.apply(1000L, 2000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 0.0  // no real reset occurred
+  }
+
+  it("ResetsFunction should not count a reset when a NaN sample sits between two increasing real values") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Before the fix: NaN→0 < 5.0 counted as reset; 7.0 < 0 was false, so net resets = 1 (wrong).
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+    val fn = new ResetsFunction
+
+    val samples = Seq(1000L -> 5.0, 2000L -> Double.NaN, 3000L -> 7.0)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+      fn.addedToWindow(row, window)
+    }
+
+    val toEmit = new TransientRow
+    fn.apply(1000L, 3000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 0.0  // counter only went up; NaN must be ignored
+  }
+
+  it("ResetsFunction should count only real-value resets when NaN trails a genuine reset") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Sequence [7.0, 5.0, NaN]: one real reset (7→5) plus a NaN at the end.
+    // Before the fix: NaN→0 < 5.0 added a second spurious reset, giving 2.
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+    val fn = new ResetsFunction
+
+    val samples = Seq(1000L -> 7.0, 2000L -> 5.0, 3000L -> Double.NaN)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+      fn.addedToWindow(row, window)
+    }
+
+    val toEmit = new TransientRow
+    fn.apply(1000L, 3000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 1.0  // exactly the one real reset (7→5)
+  }
+
+  it("ResetsFunction should correctly maintain resets count when sliding window removes a real value before a NaN") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Window [7.0, 5.0, NaN]: one real reset.
+    // Slide off 7.0 → window becomes [5.0, NaN]: zero real resets.
+    // Before the fix: removedFromWindow treated NaN as 0, so 7.0 > 0 decremented incorrectly,
+    // leaving a stale count of 1 after the slide.
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+    val fn = new ResetsFunction
+
+    val samples = Seq(1000L -> 7.0, 2000L -> 5.0, 3000L -> Double.NaN)
+    val rows = samples.map { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+      fn.addedToWindow(row, window)
+      row
+    }
+
+    // Evict the first element (7.0) to simulate window sliding
+    val evicted = q.remove()
+    fn.removedFromWindow(evicted, window)
+
+    val toEmit = new TransientRow
+    fn.apply(2000L, 3000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 0.0  // [5.0, NaN] has no real reset
+  }
+
+  it("ResetsFunction should handle a window that is entirely NaN values") {
+    import filodb.query.util.IndexedArrayQueue
+    import filodb.query.exec.QueueBasedWindow
+
+    // Before the fix: NaN→0 comparisons could produce spurious resets even with all-NaN data.
+    val q = new IndexedArrayQueue[TransientRow]()
+    val window = new QueueBasedWindow(q)
+    val fn = new ResetsFunction
+
+    val samples = Seq(1000L -> Double.NaN, 2000L -> Double.NaN, 3000L -> Double.NaN)
+    samples.foreach { case (t, v) =>
+      val row = new TransientRow(t, v)
+      q.add(row)
+      fn.addedToWindow(row, window)
+    }
+
+    val toEmit = new TransientRow
+    fn.apply(1000L, 3000L, window, toEmit, queryConfig)
+    toEmit.value shouldEqual 0.0  // no real samples, no resets
+  }
+
 }
