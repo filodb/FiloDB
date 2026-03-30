@@ -46,7 +46,7 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
         }
       })
       .findFirst()
-      .get()
+      .orElseThrow()
   }
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
@@ -143,16 +143,7 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
 object PartitionKeysCopierValidator {
 
   class ByteComparator extends java.util.Comparator[Array[Byte]] {
-    def compare(a: Array[Byte], b: Array[Byte]): Int = {
-      val len = Math.min(a.length, b.length)
-      var i = 0
-      while (i < len) {
-        val cmp = (a(i) & 0xff) - (b(i) & 0xff)
-        if (cmp != 0) return cmp
-        i += 1
-      }
-      a.length - b.length
-    }
+    def compare(a: Array[Byte], b: Array[Byte]): Int = java.util.Arrays.compareUnsigned(a, b)
   }
 
   val cache = new java.util.TreeMap[Array[Byte], PartitionKeysCopierValidator](new ByteComparator)

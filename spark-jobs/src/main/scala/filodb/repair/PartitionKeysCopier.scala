@@ -26,7 +26,7 @@ class PartitionKeysCopier(conf: SparkConf) {
   // Get filo config from spark conf or file.
   private def getFiloConfig(valueConf: String, filePathConf: String) = {
     val configString = conf.get(valueConf, "")
-    val config = if (!configString.trim.isEmpty) {
+    val config = if (!configString.isBlank) {
       ConfigFactory.parseString(configString).resolve()
     } else {
       ConfigFactory.parseFile(new File(conf.get(filePathConf)))
@@ -43,7 +43,7 @@ class PartitionKeysCopier(conf: SparkConf) {
         override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })
       .findFirst()
-      .get()
+      .orElseThrow()
   }
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
@@ -139,16 +139,7 @@ class PartitionKeysCopier(conf: SparkConf) {
 object PartitionKeysCopier {
 
   class ByteComparator extends java.util.Comparator[Array[Byte]] {
-    def compare(a: Array[Byte], b: Array[Byte]): Int = {
-      val len = Math.min(a.length, b.length)
-      var i = 0
-      while (i < len) {
-        val cmp = (a(i) & 0xff) - (b(i) & 0xff)
-        if (cmp != 0) return cmp
-        i += 1
-      }
-      a.length - b.length
-    }
+    def compare(a: Array[Byte], b: Array[Byte]): Int = java.util.Arrays.compareUnsigned(a, b)
   }
 
   val cache = new java.util.TreeMap[Array[Byte], PartitionKeysCopier](new ByteComparator)
