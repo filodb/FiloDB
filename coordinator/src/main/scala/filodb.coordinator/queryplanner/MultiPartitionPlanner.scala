@@ -1387,8 +1387,14 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
 
   private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
     val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
-    val shardKeyFilterGroups =
-      LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
+    // SeriesKeysByFilters stores its filters directly; getNonMetricShardKeyFilters doesn't extract them
+    // via getRawSeriesFilters (which only handles RawSeries/LabelValues/LabelNames leaves).
+    val shardKeyFilterGroups = lp match {
+      case skbf: SeriesKeysByFilters =>
+        Seq(skbf.filters.filter(f => dataset.options.shardKeyColumns.contains(f.column)))
+      case _ =>
+        LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
+    }
     val nonMetricCols = dataset.options.nonMetricShardColumns
 
     val areEqualFilters = shardKeyFilterGroups.forall(columnFilters =>

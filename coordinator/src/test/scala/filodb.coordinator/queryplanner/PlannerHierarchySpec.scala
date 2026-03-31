@@ -4302,18 +4302,30 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-  it ("should give correct routing keys for Equals filters in multi-partition queries") {
+  it ("should fall back to legacy metadata routing when non-equals filter is present") {
+    var legacyPathUsed = false
+    var directPathUsed = false
     val partitionProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        directPathUsed = true
+        List(PartitionAssignment("remotePartition", "direct-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+      }
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+                                         timeRange: TimeRange): List[PartitionAssignment] = {
+        legacyPathUsed = true
+        List(PartitionAssignment("remotePartition", "legacy-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+      }
     }
-    val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan(
-      """foo{_ws_="demo",_ns_="ns1"} + foo{_ws_="demo",_ns_="ns2"}""",
-      TimeStepParams(startSeconds, step, endSeconds), Antlr)
-    val expected = Set(Map("_ns_" ->  "ns1"), Map("_ns_" -> "ns2"))
-    mpp.getRoutingKeys(lp) shouldEqual expected
+    val mpp = new MultiPartitionPlanner(partitionProvider, singlePartitionPlanner, "localPartition", dataset, queryConfig)
+    // Non-equals filter (regex) → resolveMetadataPartitions should fall back to getMetadataPartitions
+    val lp = Parser.metadataQueryToLogicalPlan(
+      """foo{_ns_=~"ns.*"}""",
+      TimeStepParams(startSeconds, step, endSeconds))
+    val metadataQueryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
+    mpp.materialize(lp, QueryContext(origQueryParams = metadataQueryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+    legacyPathUsed shouldEqual true
+    directPathUsed shouldEqual false
   }
 
   it ("should throw IllegalArgumentException for regex filters on _ns_ in getRoutingKeys") {

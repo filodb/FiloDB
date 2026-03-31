@@ -96,7 +96,6 @@ case class RoutingConfig(
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis,
                           tenantsWithDisabledRemoteStitch: Set[String]   = Set.empty,
                           stitchDisabledTenantColumn: String             = "",
-                          forceMetadataRegexFallback: Boolean            = false,
                           useLegacyMetadataRouting: Boolean              = false
                         )
 
