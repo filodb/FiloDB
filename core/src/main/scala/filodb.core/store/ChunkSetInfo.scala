@@ -330,7 +330,6 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 
 object CountingChunkInfoIterator {
   val dataBytesScannedCtr = FilodbMetrics.bytesCounter("data-scanned-by-queries")
-  val numSamplesScannedCtr = FilodbMetrics.counter("num-samples-scanned-by-queries")
 }
 
 /**
@@ -373,7 +372,7 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
 
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
-    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows * bucketsFactor)
+    // NOTE: samples-scanned are counted from within QueryUtils.
     reader
   }
   override def nextInfo: ChunkSetInfo = {
