@@ -37,7 +37,8 @@ object FiloSettings {
     ),
 
     javacOptions ++= Seq(
-      "-encoding", "UTF-8"
+      "-encoding", "UTF-8",
+      "--release", "11"
     ))
 
   // Create a default Scala style task to run with tests
@@ -83,7 +84,8 @@ object FiloSettings {
     javacOptions ++= Seq(
       "-Xlint",
       "-Xlint:deprecation",
-      "-Xlint:unchecked"
+      "-Xlint:unchecked",
+      "--release", "11"
     ))
 
   lazy val disciplineSettings =
