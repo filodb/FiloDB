@@ -303,7 +303,7 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
     try {
       val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
       while (hasNext) { buf += nextInfo }
-      buf
+      buf.toSeq
     } catch {
       case e: Throwable => close(); throw e;
     }

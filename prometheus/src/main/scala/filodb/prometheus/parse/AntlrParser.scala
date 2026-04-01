@@ -1,7 +1,7 @@
 // scalastyle:off
 package filodb.prometheus.parse
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import com.typesafe.scalalogging.StrictLogging
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.ParseCancellationException

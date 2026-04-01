@@ -309,7 +309,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     } finally {
       it.close();
     }
-    buf
+    buf.toSeq
   }
   // scalastyle:on method.length
 

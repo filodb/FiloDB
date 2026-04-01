@@ -784,7 +784,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         StructField("month", IntegerType, false),
         StructField("day", IntegerType, false),
         StructField("hour", IntegerType, false))
-      StructType(fields)
+      StructType(fields.toArray)
     }
     dsSettings.exportKeyToConfig.head._2.tableSchema shouldEqual exportSchema
   }

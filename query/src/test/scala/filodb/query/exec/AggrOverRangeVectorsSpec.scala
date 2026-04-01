@@ -261,11 +261,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(2.1d, 4.6d), Set(4.4, 5.4d)).iterator)
     val result5b = resultObs5b.toListL.runToFuture.futureValue
     result5b.size shouldEqual 2
-    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
+    result5b.map(_.key).toSet shouldEqual Set(CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)),
+      CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
 
-    compareIter(result5b(0).rows().map(_.getDouble(1)), Seq(4.6d, 4.4d).iterator)
-    compareIter(result5b(1).rows().map(_.getDouble(1)), Seq(2.1d, 5.4d).iterator)
+    val result5b_a2 = result5b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))).get
+    val result5b_a3 = result5b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).get
+    compareIter(result5b_a2.rows().map(_.getDouble(1)), Seq(4.6d, 4.4d).iterator)
+    compareIter(result5b_a3.rows().map(_.getDouble(1)), Seq(2.1d, 5.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -279,13 +281,17 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(4.6d, 2.1d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runToFuture.futureValue
     result6b.size shouldEqual 3
-    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-    result6b(2).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
+    result6b.map(_.key).toSet shouldEqual Set(
+      CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)),
+      CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)),
+      CustomRangeVectorKey(Map("a".utf8 -> "1".utf8)))
 
-    compareIter(result6b(0).rows().map(_.getDouble(1)), Seq(4.6d,Double.NaN).iterator)
-    compareIter(result6b(1).rows().map(_.getDouble(1)), Seq(2.1d,5.4d).iterator)
-    compareIter(result6b(2).rows().map(_.getDouble(1)), Seq(Double.NaN,5.6d).iterator)
+    val result6b_a2 = result6b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))).get
+    val result6b_a3 = result6b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).get
+    val result6b_a1 = result6b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))).get
+    compareIter(result6b_a2.rows().map(_.getDouble(1)), Seq(4.6d,Double.NaN).iterator)
+    compareIter(result6b_a3.rows().map(_.getDouble(1)), Seq(2.1d,5.4d).iterator)
+    compareIter(result6b_a1.rows().map(_.getDouble(1)), Seq(Double.NaN,5.6d).iterator)
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
@@ -468,11 +474,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2), queryStats)
     val result5b = resultObs5b.toListL.runToFuture.futureValue
     result5b.size shouldEqual 2
-    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
-    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
+    result5b.map(_.key).toSet shouldEqual Set(CustomRangeVectorKey(Map("a".utf8 -> "2".utf8)),
+      CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
 
-    compareIter(result5b(0).rows().map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
-    compareIter(result5b(1).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
+    val result5b_nan_a2 = result5b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))).get
+    val result5b_nan_a3 = result5b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).get
+    compareIter(result5b_nan_a2.rows().map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
+    compareIter(result5b_nan_a3.rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -486,11 +494,13 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Seq(Set(-1.7976931348623157E308d, -1.7976931348623157E308d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runToFuture.futureValue
     result6b.size shouldEqual 2
-    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
-    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
+    result6b.map(_.key).toSet shouldEqual Set(CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)),
+      CustomRangeVectorKey(Map("a".utf8 -> "1".utf8)))
 
-    compareIter(result6b(0).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
-    compareIter(result6b(1).rows().map(_.getDouble(1)), Seq(Double.NaN, 5.6d).iterator)
+    val result6b_nan_a3 = result6b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))).get
+    val result6b_nan_a1 = result6b.find(_.key == CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))).get
+    compareIter(result6b_nan_a3.rows().map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
+    compareIter(result6b_nan_a1.rows().map(_.getDouble(1)), Seq(Double.NaN, 5.6d).iterator)
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
@@ -607,16 +617,18 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result = resultObsc.toListL.runToFuture.futureValue
 
     result.size shouldEqual 2
-    result(0).key shouldEqual ignoreKey2
-    result(1).key shouldEqual ignoreKey
+    result.exists(_.key == ignoreKey2) shouldEqual true
+    result.exists(_.key == ignoreKey) shouldEqual true
 
-    result(0).rows().map(_.getLong(0)).
+    val resultIgnoreKey2 = result.find(_.key == ignoreKey2).get
+    val resultIgnoreKey = result.find(_.key == ignoreKey).get
+    resultIgnoreKey2.rows().map(_.getLong(0)).
       sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
-    result(1).rows().map(_.getLong(0)).
+    resultIgnoreKey.rows().map(_.getLong(0)).
       sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
-    compareIter(result(0).rows().map(_.getDouble(1)).toIterator,
+    compareIter(resultIgnoreKey2.rows().map(_.getDouble(1)).toIterator,
       Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).toIterator)
-    compareIter(result(1).rows().map(_.getDouble(1)).toIterator,
+    compareIter(resultIgnoreKey.rows().map(_.getDouble(1)).toIterator,
       Seq(Double.NaN, 5.1, Double.NaN, Double.NaN, Double.NaN, Double.NaN).toIterator)
   }
 
@@ -665,8 +677,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000, RangeParams(0,1,0), queryStats )
     val result = resultObs2.toListL.runToFuture.futureValue
     result.size.shouldEqual(4)
-    result.map(_.key.labelValues).sameElements(expectedLabels) shouldEqual true
-    result.flatMap(_.rows().map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    result.flatMap(_.rows().map(x => (x.getLong(0), x.getDouble(1))).toList).sortBy(x => (x._1, x._2)) shouldEqual
+      expectedRows.sortBy(x => (x._1, x._2))
 
   }
 
@@ -953,7 +966,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
         if (v1.isNaN) v2.isNaN shouldEqual true
         else Math.abs(v1-v2) should be < error
         compareIter(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
@@ -1038,7 +1051,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
         val v2 = it2.next()
         v1 shouldEqual v2
         compareIter2(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }

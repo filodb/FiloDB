@@ -3,8 +3,8 @@ package filodb.core.store
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
+import scala.jdk.CollectionConverters._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging

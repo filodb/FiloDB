@@ -6,7 +6,7 @@ import filodb.core.{query, GlobalConfig}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryUtils, RangeParams}
 import filodb.prometheus.parse.Parser
-import filodb.query._
+import filodb.query.{PeriodicSeries => PeriodicSeriesLP, _}
 
 object Vectors {
   val PromMetricLabel = GlobalConfig.PromMetricLabel
@@ -237,7 +237,7 @@ sealed trait Vector extends Expression {
     val parts = metricName.split(regexColumnName)
     if (parts.size > 1) {
       require(parts(1).nonEmpty, "cannot use empty column name")
-      require(!parts(1).isBlank, "cannot use blank/whitespace column name")
+      require(parts(1).trim.nonEmpty, "cannot use blank/whitespace column name")
       (parts(0), Some(parts(1)))
     } else (metricName, None)
   }
@@ -338,7 +338,7 @@ case class InstantExpression(metricName: Option[String],
 
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-    val ps = PeriodicSeries(
+    val ps = PeriodicSeriesLP(
       RawSeries(Base.timeParamToSelector(realTimeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
         offset.map(_.millis(timeParams.step * 1000))),
       timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,

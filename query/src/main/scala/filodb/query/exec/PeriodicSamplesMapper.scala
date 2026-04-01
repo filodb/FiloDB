@@ -299,7 +299,7 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
 
     wit.nextWindow()
     while (wit.hasNext) {
-      val nextInfo = wit.next
+      val nextInfo = wit.next()
       try {
         rangeFunction.addChunks(rv.partition.schema, nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr,
           nextInfo.getTsReader, nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,

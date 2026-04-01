@@ -37,7 +37,7 @@ else
   exit
 fi
 
-if [ ! -f standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar ]; then
+if [ ! -f standalone/target/scala-2.13/standalone-assembly-*-SNAPSHOT.jar ]; then
     echo "Standalone assembly not found. Building..."
     sbt standalone/assembly
 fi
@@ -46,4 +46,4 @@ FIXED_JAVA_OPTS="-Xmx2G -Dconfig.file=$CONFIG -Dlogback.configurationFile=conf/l
 
 echo "Starting FiloDB standalone server ..."
 echo "Java Opts Used: $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS"
-java $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS -cp standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer
+java $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS -cp standalone/target/scala-2.13/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer
