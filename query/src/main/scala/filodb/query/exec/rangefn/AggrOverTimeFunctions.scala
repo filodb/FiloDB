@@ -218,37 +218,28 @@ class TsOfMinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
 /**
  * Timestamp of Max/Min Over Time - sliding window version for iterating functions.
  * Returns the timestamp when the maximum or minimum value occurred.
- * Uses a monotonic deque to track both values and their timestamps.
+ * Reuses MaxMinTracker to avoid duplicating monotonic deque logic.
  */
 class TsOfMaxMinOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
-  val tsDeque = new util.ArrayDeque[(Long, Double)]()
+  private val tracker = MaxMinTracker(ord)
 
   override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    if (!row.value.isNaN) {
-      // Remove values that are "worse" than the current value
-      while (!tsDeque.isEmpty && ord.compare(tsDeque.peekLast()._2, row.value) < 0) {
-        tsDeque.removeLast()
-      }
-      tsDeque.addLast((row.timestamp, row.value))
-    }
+    tracker.offer(row.timestamp, row.value)
   }
 
   override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    // Remove entries with timestamps older than or equal to the removed row's timestamp
-    while (!tsDeque.isEmpty && tsDeque.peekFirst()._1 <= row.timestamp) {
-      tsDeque.removeFirst()
-    }
+    tracker.removeValuesOlderThan(row.timestamp)
   }
 
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    if (tsDeque.isEmpty) {
-      sampleToEmit.setValues(endTimestamp, Double.NaN)
-    } else {
-      // Return the timestamp (in seconds) when the extremum occurred
-      val timestamp = tsDeque.peekFirst()._1
-      sampleToEmit.setValues(endTimestamp, timestamp.toDouble / 1000.0)
+    tracker.headValue() match {
+      case Some((timestamp, _)) =>
+        // Return the timestamp (in seconds) when the extremum occurred
+        sampleToEmit.setValues(endTimestamp, timestamp.toDouble / 1000.0)
+      case None =>
+        sampleToEmit.setValues(endTimestamp, Double.NaN)
     }
   }
 }
