@@ -536,6 +536,14 @@ class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeF
   }
 }
 
+/**
+ * IMPORTANT GOTCHA:
+ * LastSampleFunction does not behave like LastSampleChunkedFunctionD in NaN handling.  LastSampleFunction will return
+ * the last non-NaN sample in the window, while LastSampleChunkedFunctionD will return NaN if the last sample in the
+ * chunk is NaN, even if there are non-NaN samples before it.  This is because LastSampleFunction is designed to
+ * answer sub-queries which require the last non-NaN sample in the window, while LastSampleChunkedFunctionD is designed
+ * raw data queries which can have the staleness sample marker.
+ */
 object LastSampleFunction extends RangeFunction[TransientRow] {
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
@@ -544,14 +552,17 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
             window: Window[TransientRow],
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    if (window.size > 0) {
-      val last = window.last.getDouble(1)
-      sampleToEmit.setValues(endTimestamp, last)
-    } else {
+    for (i <- (window.size - 1) to 0 by -1) {
+      val row = window.apply(i)
+      val rowValue = row.getDouble(1)
+      if (!rowValue.isNaN ) {
+        sampleToEmit.setValues(endTimestamp, rowValue)
+        return
+      }
+    }
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     }
   }
-}
 
 /**
  * Timestamp function for iterating (sliding window) mode.
