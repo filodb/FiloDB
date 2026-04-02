@@ -603,15 +603,87 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
     returnHist
   }
 
+  /**
+   * Sum histograms over a row range for sum_over_time / rate on delta histograms.
+   *
+   * Called by: rate(delta_hist[5m]) → RateOverDeltaChunkedFunctionH → SumOverTimeChunkedFunctionH
+   * Query:     histogram_quantile(0.99, sum(rate(delta_hist[5m])))
+   *
+   * For SUBTYPE_H_SIMPLE vectors (delta histograms), each blob is independently
+   * NibblePack delta-encoded into Long[] bucket values. The previous implementation
+   * called apply(i) → addNoCorrection() for each histogram, which incurred overhead
+   * that this method eliminates:
+   *
+   * What this saves (for 30 histograms × 20 buckets):
+   *
+   *   1. Long→Double conversion: 600 → 20 (97% reduction)
+   *      Old: every bucket of every histogram converted via bucketValue() virtual call
+   *      New: accumulate in Long[], single conversion pass at the end
+   *
+   *   2. Virtual dispatch eliminated: 630 → 0
+   *      Old: 30× similarForMath() + 600× bucketValue() — interface dispatch per call
+   *      New: direct array access, no interface/virtual calls in the loop
+   *
+   *   3. Branch elimination:
+   *      Old: NaN check + Arrays.fill(0.0) on first call, NaN branch on every call
+   *      New: Long[] is zero-initialized by JVM spec, no NaN possible
+   *
+   *   4. Allocation reduction:
+   *      Old: MutableHistogram.empty() allocates Double[N] filled with NaN
+   *      New: Long[N] (zero-init, no fill)
+   *
+   * Safety: similarForMath check is safe to skip because all histograms in a single
+   * HistogramVector are guaranteed to share the same bucket scheme — enforced by
+   * matchBucketDef() check in AppendableHistogramVector.addData().
+   *
+   * Note: SectDeltaHistogramReader (cumulative histograms) overrides this method
+   * because its blobs are deltas from section base, not independent histograms.
+   *
+   *   BEFORE:
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  result = MutableHistogram(Double[N], filled with NaN)   │
+   *   │  for i in [start..end]:                                  │
+   *   │    locate(i)                                             │
+   *   │    unpack(blob[i]) → shared Long[N]                      │
+   *   │    addNoCorrection:                                      │
+   *   │      similarForMath check       ← virtual call            │
+   *   │      if NaN: Arrays.fill(0.0)   ← first-call branch      │
+   *   │      result[b] += Long.toDouble ← conversion per bucket  │
+   *   └──────────────────────────────────────────────────────────┘
+   *
+   *   AFTER:
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  acc = new Long[N]              ← zero-init, no NaN      │
+   *   │  for i in [start..end]:                                  │
+   *   │    locate(i)                    ← O(1) for sequential    │
+   *   │    unpack(blob[i]) → Long[N]    ← dedicated sink         │
+   *   │    acc[b] += values[b]          ← Long add, no toDouble  │
+   *   │  result = acc.map(_.toDouble)   ← convert once at end    │
+   *   └──────────────────────────────────────────────────────────┘
+   */
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
-  // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(buckets)
+    val longAcc = new Array[Long](numBuckets)
+    val sink = NibblePack.DeltaSink(new Array[Long](numBuckets))
+    // locate() handles section boundary crossings correctly;
+    // for sequential access (i = prev+1) it is O(1) — just one blob skip
     cforRange { start to end } { i =>
-      summedHist.addNoCorrection(apply(i))
+      val histPtr = locate(i)
+      val histLen = histPtr.asU16.getU16(acc)
+      val buf = BinaryHistogram.valuesBuf
+      acc.wrapInto(buf, histPtr.add(2).addr, histLen)
+      sink.reset()
+      NibblePack.unpackToSink(buf, sink, numBuckets)
+      cforRange { 0 until numBuckets } { b =>
+        longAcc(b) += sink.outArray(b)
+      }
     }
-    summedHist
+    val result = new Array[Double](numBuckets)
+    cforRange { 0 until numBuckets } { b =>
+      result(b) = longAcc(b).toDouble
+    }
+    MutableHistogram(buckets, result)
   }
 }
 
@@ -662,6 +734,17 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
       summedHist.add(returnHist)
       summedHist
     }
+  }
+
+  // SectDelta blobs are deltas from section base — cannot use parent's optimized sum() which
+  // unpacks blobs independently. Must go through apply() to reconstruct base + delta per histogram.
+  override def sum(start: Int, end: Int): MutableHistogram = {
+    require(length > 0 && start >= 0 && end < length)
+    val summedHist = MutableHistogram.empty(buckets)
+    cforRange { start to end } { i =>
+      summedHist.addNoCorrection(apply(i))
+    }
+    summedHist
   }
 
   // TODO: optimized summing.  It's wasteful to apply the base + delta math so many times ...

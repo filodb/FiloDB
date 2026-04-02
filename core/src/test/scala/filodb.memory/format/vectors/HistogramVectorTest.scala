@@ -431,6 +431,94 @@ class HistogramVectorTest extends NativeVectorTest {
     }
   }
 
+  // ── RowHistogramReader.sum() tests (delta histogram query path) ────
+  // These test the optimized sum() used by: rate(delta_hist[5m]) → SumOverTimeChunkedFunctionH
+
+  it("sum should match expected bucket-wise totals for geometric histograms") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    val sum = reader.sum(0, rawHistBuckets.length - 1)
+    val expected = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+    sum.values shouldEqual expected
+  }
+
+  it("sum of single histogram should equal that histogram's values") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    // sum(2,2) should equal apply(2)
+    val sum = reader.sum(2, 2)
+    val single = reader(2)
+    (0 until bucketScheme.numBuckets).foreach { b =>
+      sum.bucketValue(b) shouldEqual single.bucketValue(b)
+    }
+  }
+
+  it("sum of sub-range should match expected values") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    // sum(1,2) = rawHistBuckets(1) + rawHistBuckets(2)
+    val sum = reader.sum(1, 2)
+    val expected = (0 until 8).map { b => rawHistBuckets(1)(b) + rawHistBuckets(2)(b) }.toArray
+    sum.values shouldEqual expected
+  }
+
+  it("sum should work across section boundaries (>64 histograms)") {
+    val numElements = 100
+    val appender = HistogramVector.appending(memFactory, numElements * 30)
+    (0 until numElements).foreach { i =>
+      BinaryHistogram.writeDelta(bucketScheme, rawLongBuckets(i % rawLongBuckets.length), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    // Sum across section boundary (sections are 64 elements for SIMPLE)
+    val sum = reader.sum(50, 80)
+    // Verify against manual computation
+    val expected = new Array[Double](8)
+    (50 to 80).foreach { i =>
+      val h = rawHistBuckets(i % rawHistBuckets.length)
+      (0 until 8).foreach { b => expected(b) += h(b) }
+    }
+    sum.values shouldEqual expected
+  }
+
+  it("sum should work with custom bucket schemes") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    customHistograms.foreach { custHist =>
+      custHist.serialize(Some(buffer))
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    val sum = reader.sum(0, customHistograms.length - 1)
+    val expected = (0 until customScheme.numBuckets).map { b =>
+      customHistograms.map(_.bucketValue(b)).sum
+    }.toArray
+    sum.values shouldEqual expected
+  }
+
+  it("sum should handle histograms with zero values") {
+    val zeroBuckets = Array.fill(8)(0L)
+    val appender = HistogramVector.appending(memFactory, 1024)
+    (0 until 10).foreach { _ =>
+      BinaryHistogram.writeDelta(bucketScheme, zeroBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    val sum = reader.sum(0, 9)
+    (0 until 8).foreach { b => sum.bucketValue(b) shouldEqual 0.0 }
+  }
+
   val incrAppender = HistogramVector.appendingSect(memFactory, 1024)
   incrHistBuckets.foreach { rawBuckets =>
     BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
