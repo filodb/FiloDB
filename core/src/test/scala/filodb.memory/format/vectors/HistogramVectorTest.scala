@@ -486,4 +486,97 @@ class HistogramVectorTest extends NativeVectorTest {
     incr5.add(correction2)
     reader.correctedValue(5, meta1) shouldEqual incr5
   }
+
+  // ── SectDelta optimized sum tests ──────────────────────────────────
+
+  it("SectDelta optimized sum should match element-wise sum") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+
+    // Compute expected sum by applying each histogram individually
+    val expected = new Array[Double](bucketScheme.numBuckets)
+    (0 until incrHistBuckets.length).foreach { i =>
+      val h = reader(i)
+      (0 until bucketScheme.numBuckets).foreach { b =>
+        expected(b) += h.bucketValue(b)
+      }
+    }
+
+    val sum = reader.sum(0, incrHistBuckets.length - 1)
+    sum.values shouldEqual expected
+  }
+
+  it("SectDelta optimized sum should work with sub-ranges") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+
+    // Sum just middle elements [1, 2]
+    val expected = new Array[Double](bucketScheme.numBuckets)
+    (1 to 2).foreach { i =>
+      val h = reader(i)
+      (0 until bucketScheme.numBuckets).foreach { b =>
+        expected(b) += h.bucketValue(b)
+      }
+    }
+
+    val sum = reader.sum(1, 2)
+    sum.values shouldEqual expected
+  }
+
+  it("SectDelta optimized sum should handle vectors with counter drops") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    // First round: increasing histograms
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    // Second round: same values = counter drop detected
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    reader.length shouldEqual incrHistBuckets.length * 2
+
+    // Compute expected sum across the drop boundary
+    val expected = new Array[Double](bucketScheme.numBuckets)
+    (0 until reader.length).foreach { i =>
+      val h = reader(i)
+      (0 until bucketScheme.numBuckets).foreach { b =>
+        expected(b) += h.bucketValue(b)
+      }
+    }
+
+    val sum = reader.sum(0, reader.length - 1)
+    sum.values shouldEqual expected
+  }
+
+  it("SectDelta optimized sum of single element should match apply") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+
+    // sum(2, 2) should equal apply(2)
+    val sum = reader.sum(2, 2)
+    val single = reader(2)
+    (0 until bucketScheme.numBuckets).foreach { b =>
+      sum.bucketValue(b) shouldEqual single.bucketValue(b)
+    }
+  }
 }
+

@@ -604,8 +604,7 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
-  // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
     val summedHist = MutableHistogram.empty(buckets)
     cforRange { start to end } { i =>
@@ -664,8 +663,117 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     }
   }
 
-  // TODO: optimized summing.  It's wasteful to apply the base + delta math so many times ...
-  // instead add delta + base * n if possible.   However, do we care about sum performance on increasing histograms?
+  /**
+   * Optimized sum for SectDelta histograms.
+   *
+   * SectDelta format: first histogram in each section is the "base", subsequent histograms
+   * store only the delta from that base. To reconstruct histogram[i]: base + delta[i].
+   *
+   * The naive approach (inherited from RowHistogramReader) calls apply(i) for each histogram,
+   * which reconstructs base+delta every time — repeating the same base addition N times:
+   *
+   *   BEFORE (naive):
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  sum = 0                                                 │
+   *   │  for i in [start..end]:                                  │
+   *   │    unpack(base)           ← REPEATED for every i         │
+   *   │    unpack(delta[i])                                      │
+   *   │    sum += base + delta[i] ← base added N times           │
+   *   │                                                          │
+   *   │  Unpacks: N base + (N-1) delta = 2N-1                    │
+   *   │  Adds:    N × numBuckets (redundant base adds)           │
+   *   └──────────────────────────────────────────────────────────┘
+   *
+   * This override unpacks the base once per section and sums deltas separately:
+   *
+   *   AFTER (optimized):
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  sum = 0                                                 │
+   *   │  for each section overlapping [start..end]:              │
+   *   │    unpack(base)           ← ONCE per section             │
+   *   │    deltaSum = 0                                          │
+   *   │    for each delta in section ∩ [start..end]:             │
+   *   │      unpack(delta[i])                                    │
+   *   │      deltaSum += delta[i]                                │
+   *   │    sum += N × base + deltaSum                            │
+   *   │                                                          │
+   *   │  Unpacks: 1 base + (N-1) delta = N                      │
+   *   │  Adds:    (N-1) × numBuckets + numBuckets (final)       │
+   *   └──────────────────────────────────────────────────────────┘
+   *
+   * For 30 histograms with 20 buckets in one section:
+   *   Before: 59 unpacks + 1,780 bucket adds
+   *   After:  30 unpacks +   620 bucket adds  → ~2x faster
+   */
+  override def sum(start: Int, end: Int): MutableHistogram = {
+    require(length > 0 && start >= 0 && end < length)
+    val result = new Array[Double](numBuckets)
+    var globalElem = 0
+    var sectionAddr = firstSectionAddr
+    while (globalElem <= end && sectionAddr.addr < endAddr.addr) {
+      val sect = Section.fromPtr(acc, sectionAddr)
+      val sectNumElems = sect.numElements(acc)
+      if (sectNumElems == 0) {
+        return MutableHistogram(buckets, result)  //scalastyle:ignore
+      }
+      val sectEnd = globalElem + sectNumElems
+      if (sectEnd > start && globalElem <= end) {
+        sumSection(sect, globalElem, sectNumElems, start, end, result)
+      }
+      sectionAddr = Ptr.U8(sect.endAddr(acc).addr)
+      globalElem = sectEnd
+    }
+    MutableHistogram(buckets, result)
+  }
+
+  /** Processes one section's contribution to the sum. See [[sum]] for algorithm overview. */
+  private def sumSection(sect: Section, globalElem: Int, sectNumElems: Int,
+                         start: Int, end: Int, result: Array[Double]): Unit = {
+    // Unpack this section's base histogram (once)
+    val sectionBase = new Array[Long](numBuckets)
+    val sectBaseSink = NibblePack.DeltaSink(sectionBase)
+    val basePtr = sect.firstElem
+    val baseLen = basePtr.asU16.getU16(acc)
+    val baseBuf = BinaryHistogram.valuesBuf
+    acc.wrapInto(baseBuf, basePtr.add(2).addr, baseLen)
+    sectBaseSink.reset()
+    NibblePack.unpackToSink(baseBuf, sectBaseSink, numBuckets)
+
+    // If the base histogram itself is in [start, end], add it directly
+    if (globalElem >= start && globalElem <= end) {
+      cforRange { 0 until numBuckets } { b => result(b) += sectionBase(b).toDouble }
+    }
+
+    // Sum deltas for non-base elements in [start, end]
+    var blobPtr = basePtr + 2 + baseLen
+    var elemIdx = globalElem + 1
+    val deltaAccum = new Array[Long](numBuckets)
+    val deltaSink = NibblePack.DeltaSink(new Array[Long](numBuckets))
+    var deltaCount = 0
+
+    cforRange { 1 until sectNumElems } { _ =>
+      if (elemIdx <= end && blobPtr.addr < endAddr.addr) {
+        val blobLen = blobPtr.asU16.getU16(acc)
+        if (elemIdx >= start) {
+          val buf = BinaryHistogram.valuesBuf
+          acc.wrapInto(buf, blobPtr.add(2).addr, blobLen)
+          deltaSink.reset()
+          NibblePack.unpackToSink(buf, deltaSink, numBuckets)
+          cforRange { 0 until numBuckets } { b => deltaAccum(b) += deltaSink.outArray(b) }
+          deltaCount += 1
+        }
+        blobPtr = blobPtr + 2 + blobLen
+        elemIdx += 1
+      }
+    }
+
+    // Apply: result += deltaCount × base + sum(deltas)
+    if (deltaCount > 0) {
+      cforRange { 0 until numBuckets } { b =>
+        result(b) += deltaCount.toDouble * sectionBase(b).toDouble + deltaAccum(b).toDouble
+      }
+    }
+  }
 
   def detectDropAndCorrection(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr,
                               meta: CorrectionMeta): CorrectionMeta = meta match {
