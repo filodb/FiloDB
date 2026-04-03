@@ -78,7 +78,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = windowToUse.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = windowToUse.getOrElse(querySession.queryConfig.staleSampleAfterMs + 1)
 
     val rvs = sampleRangeFunc match {
       case _: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
