@@ -2778,6 +2778,68 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
       execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "legacy-remote-url"
     }
+
+    it("should fall back to getMetadataPartitions for SeriesKeysByFilters with regex shard key filter") {
+      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
+      val engine = makeMultiShardPlanner(provider)
+      // Non-equals (regex) filter on _ns_ via SeriesKeysByFilters →
+      // resolveMetadataPartitions should fall back to getMetadataPartitions
+      val lp = Parser.metadataQueryToLogicalPlan(
+        """foo{_ns_=~"ns.*"}""",
+        TimeStepParams(startSeconds, step, endSeconds))
+      val metadataQueryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = metadataQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "legacy-remote-url"
+    }
+
+    it("should use getPartitions directly when a shard-key filter is missing (LabelValues)") {
+      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
+      val engine = makeMultiShardPlanner(provider)
+      // Only _ws_ filter present, _ns_ is missing — shardKeyFilterGroups is non-empty and all-Equals
+      // so direct path (getPartitions) is taken with the partial routing key
+      val lp = Parser.labelValuesQueryToLogicalPlan(
+        Seq("instance"), Some("""_ws_="demo""""),
+        TimeStepParams(startSeconds, step, endSeconds))
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = labelValuesQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
+    }
+
+    it("should use getPartitions directly when a shard-key filter is missing (SeriesKeysByFilters)") {
+      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
+      val engine = makeMultiShardPlanner(provider)
+      // Only _ws_ filter present, _ns_ is missing — shardKeyFilterGroups is non-empty and all-Equals
+      // so direct path (getPartitions) is taken with the partial routing key
+      val lp = Parser.metadataQueryToLogicalPlan(
+        """foo{_ws_="demo"}""",
+        TimeStepParams(startSeconds, step, endSeconds))
+      val metadataQueryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = metadataQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
+    }
+
+    it("should handle non-equals filters gracefully in getPartitions delegation") {
+      val provider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+      }
+      val engine = makeMultiShardPlanner(provider)
+      // getPartitionsTrait should work with any filter type since it delegates to the provider
+      val timeRange = TimeRange(startSeconds * 1000L, endSeconds * 1000L)
+      val result = engine.partitionLocationProvider.getPartitionsTrait(Map("_ns_" -> "ns1"), timeRange)
+      result.size should be > 0
+    }
   }
 
 }
