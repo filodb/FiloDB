@@ -42,6 +42,12 @@ object GlobalConfig extends StrictLogging {
     filodb.memory.format.vectors.SimdNativeMethods.enabled = true
   }
 
+  // Enable native-accelerated delta histogram sum (Rust NibblePack) if configured
+  if (systemConfig.hasPath("filodb.simd.delta-histogram-sum-optimized-enabled") &&
+      systemConfig.getBoolean("filodb.simd.delta-histogram-sum-optimized-enabled")) {
+    filodb.memory.format.vectors.SimdNativeMethods.deltaHistogramSumEnabled = true
+  }
+
   // Set SIMD threshold from config if specified
   if (systemConfig.hasPath("filodb.simd.threshold")) {
     filodb.memory.format.vectors.SimdNativeMethods.simdThreshold =
