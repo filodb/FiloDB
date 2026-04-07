@@ -1,12 +1,16 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicLong
+
 import scala.concurrent.duration._
 import scala.io.Source
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
+
+import filodb.core.MachineMetricsData.partKeyBuilder
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.DownsampleConfig
@@ -557,6 +561,8 @@ object MetricsTestData {
     Seq.empty,
     None,
     DatasetOptions(Seq("_metric_", "_ns_"), "_metric_")).get
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(timeseriesDatasetWithMetric.schema, "metric1",
+    Map("__name__".utf8 -> "metric1".utf8, "_ws_".utf8     -> "testws".utf8, "_ns_".utf8     -> "testns".utf8))
 
   val timeseriesDatasetMultipleShardKeys = Dataset.make("timeseries",
     Seq("tags:map"),
