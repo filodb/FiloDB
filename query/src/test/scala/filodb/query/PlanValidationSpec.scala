@@ -7,6 +7,20 @@ import filodb.query.exec.ExecPlan
 
 import scala.collection.mutable
 
+/**
+ * Helpers for comparing ExecPlan tree strings independent of non-deterministic ordering.
+ *
+ * In Scala 2.12, HashMap iteration order was different but stable across runs, and all
+ * expected plan strings in tests were written to match that order. Scala 2.13 reimplemented
+ * HashMap (CHAMP trie), changing iteration order. Rather than rewriting all ~132 expected
+ * plan strings (which would be fragile and break again if iteration order changes), we
+ * normalize both actual and expected strings before comparing:
+ *
+ *  - normalizeFilterOrder: sorts ColumnFilter entries and PromQL label matchers within
+ *    each plan node's text, since these come from HashMap iteration and may differ.
+ *  - sortTree: sorts child plan subtrees at each level, since child ordering can be
+ *    non-deterministic (e.g., partition/namespace ordering from Map iteration).
+ */
 trait PlanValidationSpec extends Matchers with StrictLogging {
 
   private def getIndent(line: String): Int = {
@@ -17,6 +31,169 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
     planString
       .replaceAll("testProbe-.*]", "testActor]")
       .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
+  }
+
+  /**
+   * Normalizes filter ordering in plan strings to make comparisons
+   * insensitive to HashMap iteration order differences across Scala versions.
+   *
+   * Handles two patterns:
+   * 1. ColumnFilter lists: filters=List(ColumnFilter(b,...), ColumnFilter(a,...))
+   *    -> filters=List(ColumnFilter(a,...), ColumnFilter(b,...))
+   * 2. PromQL label matchers: metric{_ws_="demo",_ns_="App"}
+   *    -> metric{_ns_="App",_ws_="demo"}
+   */
+  protected def normalizeFilterOrder(s: String): String = {
+    val step1 = normalizeColumnFilterLists(s)
+    normalizePromQLBraces(step1)
+  }
+
+  /**
+   * Finds all `filters=List(...)` sections (handling nested parens) and sorts
+   * the ColumnFilter entries alphabetically within each.
+   */
+  private def normalizeColumnFilterLists(s: String): String = {
+    val marker = "filters=List("
+    val result = new StringBuilder
+    var pos = 0
+    while (pos < s.length) {
+      val idx = s.indexOf(marker, pos)
+      if (idx < 0) {
+        result.append(s.substring(pos))
+        pos = s.length
+      } else {
+        result.append(s.substring(pos, idx))
+        result.append(marker)
+        val contentStart = idx + marker.length
+        // Find matching closing paren using depth counting
+        var depth = 1
+        var i = contentStart
+        while (i < s.length && depth > 0) {
+          if (s.charAt(i) == '(') depth += 1
+          else if (s.charAt(i) == ')') depth -= 1
+          if (depth > 0) i += 1
+        }
+        // i now points to the matching ')'
+        val inner = s.substring(contentStart, i)
+        val sorted = splitTopLevel(inner, ',').map(_.trim).sorted.mkString(", ")
+        result.append(sorted)
+        result.append(')')
+        pos = i + 1
+      }
+    }
+    result.toString
+  }
+
+  /**
+   * Sorts label matchers within PromQL curly braces: metric{b="2",a="1"} -> metric{a="1",b="2"}
+   */
+  private def normalizePromQLBraces(s: String): String = {
+    val result = new StringBuilder
+    var pos = 0
+    while (pos < s.length) {
+      val idx = s.indexOf('{', pos)
+      if (idx < 0) {
+        result.append(s.substring(pos))
+        pos = s.length
+      } else {
+        result.append(s.substring(pos, idx + 1))
+        val contentStart = idx + 1
+        val closeIdx = findMatchingBrace(s, contentStart)
+        if (closeIdx < 0) {
+          result.append(s.substring(contentStart))
+          pos = s.length
+        } else {
+          val inner = s.substring(contentStart, closeIdx)
+          // Only sort if it looks like label matchers (contains = sign)
+          if (inner.contains("=") && !inner.contains("ColumnFilter")) {
+            val matchers = splitPromQLMatchers(inner)
+            result.append(matchers.sorted.mkString(","))
+          } else {
+            result.append(inner)
+          }
+          result.append('}')
+          pos = closeIdx + 1
+        }
+      }
+    }
+    result.toString
+  }
+
+  private def findMatchingBrace(s: String, startAfterOpen: Int): Int = {
+    var depth = 1
+    var i = startAfterOpen
+    var inQuote = false
+    var escaped = false
+    while (i < s.length && depth > 0) {
+      val c = s.charAt(i)
+      if (escaped) {
+        escaped = false
+      } else if (c == '\\') {
+        escaped = true
+      } else if (c == '"') {
+        inQuote = !inQuote
+      } else if (!inQuote) {
+        if (c == '{') depth += 1
+        else if (c == '}') depth -= 1
+      }
+      if (depth > 0) i += 1
+    }
+    if (depth == 0) i else -1
+  }
+
+  /**
+   * Splits a string at top-level occurrences of the delimiter,
+   * respecting nested parentheses.
+   */
+  private def splitTopLevel(s: String, delim: Char): Seq[String] = {
+    val result = new mutable.ArrayBuffer[String]()
+    var depth = 0
+    var start = 0
+    var i = 0
+    while (i < s.length) {
+      s.charAt(i) match {
+        case '(' => depth += 1; i += 1
+        case ')' => depth -= 1; i += 1
+        case c if c == delim && depth == 0 =>
+          val token = s.substring(start, i).trim
+          if (token.nonEmpty) result.append(token)
+          i += 1
+          start = i
+        case _ => i += 1
+      }
+    }
+    val last = s.substring(start).trim
+    if (last.nonEmpty) result.append(last)
+    result.toSeq
+  }
+
+  /**
+   * Splits PromQL label matchers like '_ws_="demo",_ns_="App"'
+   * into Seq('_ws_="demo"', '_ns_="App"')
+   * handling quoted strings that may contain commas.
+   */
+  private def splitPromQLMatchers(s: String): Seq[String] = {
+    val result = new mutable.ArrayBuffer[String]()
+    var inQuote = false
+    var escaped = false
+    var start = 0
+    var i = 0
+    while (i < s.length) {
+      val c = s.charAt(i)
+      if (escaped) {
+        escaped = false
+      } else if (c == '\\') {
+        escaped = true
+      } else if (c == '"') {
+        inQuote = !inQuote
+      } else if (c == ',' && !inQuote) {
+        result.append(s.substring(start, i))
+        start = i + 1
+      }
+      i += 1
+    }
+    result.append(s.substring(start))
+    result.toSeq
   }
 
   /**
@@ -53,11 +230,11 @@ trait PlanValidationSpec extends Matchers with StrictLogging {
    */
   def validatePlan(plan: ExecPlan,
                    expected: String,
-                   sort: Boolean = false): Unit = {
+                   sort: Boolean = true): Unit = {
     val originalPlanString = plan.printTree()
     val (planString, expectedString) = {
-      val denoisedPlan = removeNoise(originalPlanString)
-      val denoisedExpected = removeNoise(expected)
+      val denoisedPlan = normalizeFilterOrder(removeNoise(originalPlanString))
+      val denoisedExpected = normalizeFilterOrder(removeNoise(expected))
       if (sort) {
         (sortTree(denoisedPlan), sortTree(denoisedExpected))
       } else {

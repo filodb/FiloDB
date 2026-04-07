@@ -62,7 +62,7 @@ trait GrpcRemoteExec extends RemoteExec {
 case class PromQLGrpcRemoteExec(channel: Channel,
                            requestTimeoutMs: Long,
                            queryContext: QueryContext,
-                           dispatcher: PlanDispatcher,
+                           dispatcher: filodb.query.exec.PlanDispatcher,
                            dataset: DatasetRef,
                            plannerSelector: String,
                            destinationTsdbWorkUnit: String) extends GrpcRemoteExec {

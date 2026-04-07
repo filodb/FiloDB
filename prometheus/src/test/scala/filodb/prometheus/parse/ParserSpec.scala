@@ -1005,20 +1005,20 @@ class ParserSpec extends AnyFunSpec with Matchers {
     // true -> should not throw an exception; else false
     val succeedQueryPairs = Seq(
       // Begin successful...
-      (true, s"""job=~"${"a".repeat(lim)}""""),
-      (true, s"""job=~"${".".repeat(lim)}""""),
+      (true, s"""job=~"${"a" * (lim)}""""),
+      (true, s"""job=~"${"." * (lim)}""""),
       // May want to enforce this (no regex chars, but length limit exceeded).
-      (true, s"""job=~"${"a".repeat(lim + 1)}""""),
-      (true, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}""""),
-      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim)}""""),
+      (true, s"""job=~"${"a" * (lim + 1)}""""),
+      (true, s"""job=~"${("a" * (lim + 1)).split("").mkString("|")}""""),
+      (true, s"""job=~"${"a|" * (10) + "a" * (lim)}""""),
       // May want to enforce this (single "|"-joined value exceeds limit).
-      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim + 1)}""""),
+      (true, s"""job=~"${"a|" * (10) + "a" * (lim + 1)}""""),
 
       // Begin unsuccessful...
-      (false, s"""job=~"${".".repeat(lim + 1)}""""),
-      (false, s"""job=~"${".".repeat(lim + 1).split("").mkString("|")}""""),
-      (false, s"""job=~"${"a".repeat(lim + 1)}.*"}"""),
-      (false, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}.*""""),
+      (false, s"""job=~"${"." * (lim + 1)}""""),
+      (false, s"""job=~"${("." * (lim + 1)).split("").mkString("|")}""""),
+      (false, s"""job=~"${"a" * (lim + 1)}.*"}"""),
+      (false, s"""job=~"${("a" * (lim + 1)).split("").mkString("|")}.*""""),
     )
     val timeParams = TimeStepParams(1000, 1, 1000)
     val testFunc = (shouldSucceed: Boolean, lambda: () => Unit) => {

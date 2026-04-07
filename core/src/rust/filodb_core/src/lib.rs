@@ -27,4 +27,5 @@ mod parser;
 mod profile;
 mod query_parser;
 mod reader;
+mod simd_vectors;
 mod state;

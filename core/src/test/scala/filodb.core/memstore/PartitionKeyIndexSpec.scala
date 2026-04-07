@@ -31,7 +31,7 @@ class PartitionKeyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter
     def toSeq: Seq[Int] = {
       val newSeq = new collection.mutable.ArrayBuffer[Int]()
       while (ii.hasNext) { newSeq += ii.next() }
-      newSeq
+      newSeq.toSeq
     }
   }
 

@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
 

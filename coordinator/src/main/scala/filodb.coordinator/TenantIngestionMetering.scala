@@ -33,7 +33,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
                                    coordActorProducer: () => ActorRef) extends StrictLogging{
 
   private val ASK_TIMEOUT = FiniteDuration(
-    settings.config.getDuration("metering-query-interval").toSeconds,
+    settings.config.getDuration("metering-query-interval").getSeconds,
     TimeUnit.SECONDS)
   private val SCHED_INIT_DELAY = ASK_TIMEOUT  // time until first job is scheduled
   private val SCHED_DELAY = ASK_TIMEOUT  // time between all jobs after the first

@@ -666,7 +666,7 @@ trait PartKeyIndexRawSpec {
               pathname.toString.contains("segment") || pathname.toString.contains(".term")
             }
           }).foreach( file => {
-            Files.writeString(file.toPath, "Hello", StandardOpenOption.APPEND)
+            Files.write(file.toPath, "Hello".getBytes, StandardOpenOption.APPEND)
           })
 
           createNewIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
@@ -807,7 +807,7 @@ trait PartKeyIndexRawSpec {
           val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
           shardDirectory.mkdirs()
           new File(shardDirectory, "empty").createNewFile()
-          Files.writeString(new File(shardDirectory, "meta.json").toPath, "Hello", StandardOpenOption.CREATE)
+          Files.write(new File(shardDirectory, "meta.json").toPath, "Hello".getBytes, StandardOpenOption.CREATE)
           // Make directory readonly to for an IOException when attempting to write
           shardDirectory.setWritable(false)
           // Validate the file named empty exists

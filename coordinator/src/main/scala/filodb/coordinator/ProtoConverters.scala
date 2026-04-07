@@ -2,8 +2,8 @@ package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters._
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 
 import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
@@ -1279,7 +1279,7 @@ object ProtoConverters {
       builder.setQueryId(qc.queryId)
       builder.setSubmitTime(qc.submitTime)
       builder.setPlannerParams(qc.plannerParams.toProto)
-      val javaTraceInfoMap = mapAsJavaMap(qc.traceInfo)
+      val javaTraceInfoMap = qc.traceInfo.asJava
       builder.putAllTraceInfo(javaTraceInfoMap)
       builder.build()
     }
@@ -2926,7 +2926,7 @@ object ProtoConverters {
       val ep = srpe.getLeafExecPlan.getExecPlan
       val dataSchema = if (srpe.hasDataSchema) Option(srpe.getDataSchema.fromProto) else None
       val lookupRes = if (srpe.hasLookupRes) Option(srpe.getLookupRes.fromProto) else None
-      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue())
+      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue()).toSeq
       val leafExecPlan = srpe.getLeafExecPlan
       val execPlan = leafExecPlan.getExecPlan
       val dispatcher = execPlan.getDispatcher.fromProto

@@ -3865,7 +3865,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         origQueryParams = PromQlQueryParams(test.query, timeParams.start, timeParams.step, timeParams.end),
         plannerParams = PlannerParams(processMultiPartition = true, targetSchemaProviderOverride = Some(tschema)))
       val ep = shardKeyRegexPlanner.materialize(lp, context)
-      validatePlan(ep, test.expected, sort = true)
+      validatePlan(ep, test.expected)
     }
   }
 

@@ -180,7 +180,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += TermInfo(ZeroCopyUTF8String.apply(strBytes), count.toInt)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   private def decodeStringArray(arr: Array[Byte]): Seq[String] = {
@@ -197,7 +197,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += new String(strBytes, StandardCharsets.UTF_8)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   override def labelNamesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long): Seq[String] = {
@@ -356,7 +356,7 @@ class PartKeyTantivyIndex(ref: DatasetRef,
       parsedResults += PartKeyLuceneIndexRecord(pk, start, end)
     }
 
-    parsedResults
+    parsedResults.toSeq
   }
 
   override def partIdFromPartKeySlow(partKeyBase: Any, partKeyOffset: Long): Option[Int] = {
@@ -598,7 +598,8 @@ class TantivyQueryBuilder extends PartKeyQueryBuilder with StrictLogging {
 // * Index handle creation / cleanup is not thread safe.
 // * Other operations are thread safe and may involve an internal mutex
 protected object TantivyNativeMethods {
-  // Load native library from jar
+  // Load native library from jar. SimdNativeMethods may have already loaded it,
+  // so we catch UnsatisfiedLinkError to avoid duplicate loading.
   private def loadLibrary(): Unit = {
     val tempDir = Files.createTempDirectory("filodb-native-")
 
@@ -624,7 +625,8 @@ protected object TantivyNativeMethods {
     System.load(finalPath.toAbsolutePath.toString)
   }
 
-  loadLibrary()
+  try { loadLibrary() }
+  catch { case _: UnsatisfiedLinkError => () }
 
   @native
   def newIndexHandle(diskLocation: String, schemaFields: Array[String],

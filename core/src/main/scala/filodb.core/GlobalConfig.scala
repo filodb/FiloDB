@@ -36,6 +36,18 @@ object GlobalConfig extends StrictLogging {
     unresolvedSystemConfig.resolve()
   }
 
+  // Enable SIMD-accelerated sum/count for 64-bit double vectors if configured
+  if (systemConfig.hasPath("filodb.simd.enabled") &&
+      systemConfig.getBoolean("filodb.simd.enabled")) {
+    filodb.memory.format.vectors.SimdNativeMethods.enabled = true
+  }
+
+  // Set SIMD threshold from config if specified
+  if (systemConfig.hasPath("filodb.simd.threshold")) {
+    filodb.memory.format.vectors.SimdNativeMethods.simdThreshold =
+      systemConfig.getInt("filodb.simd.threshold")
+  }
+
   val configToDisableAkkaCluster = ConfigFactory.parseString(
     """
       |akka {

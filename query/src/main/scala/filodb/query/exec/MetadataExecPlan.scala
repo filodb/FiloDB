@@ -208,8 +208,9 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
       val x = rv.rows().next()
       // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
       val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-          val sketchMapIterator = (sketchMap.mapValues {
-            sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
+          // .view.mapValues: Scala 2.13 deprecated Map.mapValues (returns lazy view); use explicit .view first
+          val sketchMapIterator = (sketchMap.view.mapValues {
+            sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}.toMap
             :: Nil).toIterator
       IteratorBackedRangeVector(rv.key, UTF8MapIteratorRowReader(sketchMapIterator), None)
       })

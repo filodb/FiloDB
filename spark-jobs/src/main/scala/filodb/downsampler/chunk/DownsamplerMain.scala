@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.{ForkJoinPool, TimeUnit}
 
 import scala.collection.mutable.ListBuffer
+import scala.collection.parallel.CollectionConverters._
 import scala.collection.parallel.ForkJoinTaskSupport
 
 import kamon.Kamon

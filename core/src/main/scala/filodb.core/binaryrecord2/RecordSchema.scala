@@ -286,7 +286,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
-    result
+    result.toSeq
   }
 
   def colNames(base: Any, offset: Long): Seq[String] = {
@@ -304,7 +304,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (BinaryRecordColumn, i) => ???
       case (HistogramColumn, i) => result += colNames(i)
     }
-    result
+    result.toSeq
   }
 
   def singleColValues(base: Any, offset: Long, col: String,
@@ -344,7 +344,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     }
     if (cols.contains(Schemas.TypeLabel)) res(cols.indexOf(Schemas.TypeLabel)) =
       Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
-    res
+    res.toSeq
   }
 
   /**

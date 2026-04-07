@@ -344,24 +344,33 @@ class PredictLinearFunction(funcParams: Seq[Any]) extends RangeFunction[Transien
   }
 }
 
+/**
+ * Resets function based on
+ * prometheus impl at
+ * https://github.com/prometheus/prometheus/blob/54e010926b0a270cadb22be1113ad45fe9bcb90a/promql/functions.go#L1791
+ */
 class ResetsFunction extends RangeFunction[TransientRow] {
   var resets = Double.NaN // NaN for windows that do not have data
 
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
     val size = window.size
-    val currentValue = if (row.value.isNaN) 0 else row.value
     if (resets.isNaN && size > 0) resets = 0
-    if (size > 1 ) {
-      val prevValue = if (window(size - 2).value.isNaN) 0 else window(size - 2).value
-      if (currentValue < prevValue) resets += 1
+    if (size > 1) {
+      val prevValue = window(size - 2).value
+      val currValue = row.value
+      // Only compare when both samples are real — skip NaN entirely
+      if (!currValue.isNaN && !prevValue.isNaN && currValue < prevValue)
+        resets += 1
     }
   }
 
   def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    val currentValue = if (row.value.isNaN) 0 else row.value
     if (window.size > 0) {
-      val prevValue = if (window.head.value.isNaN) 0 else window.head.value
-      if (currentValue > prevValue) resets -= 1
+      val removedValue = row.value
+      val nextValue    = window.head.value
+      // Only undo a reset that was actually counted (both must have been real)
+      if (!removedValue.isNaN && !nextValue.isNaN && removedValue > nextValue)
+        resets -= 1
     } else resets = Double.NaN
   }
 

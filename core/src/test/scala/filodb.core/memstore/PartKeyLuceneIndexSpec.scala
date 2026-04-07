@@ -41,7 +41,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     def toSeq: Seq[Int] = {
       val newSeq = new collection.mutable.ArrayBuffer[Int]()
       while (ii.hasNext) { newSeq += ii.next() }
-      newSeq
+      newSeq.toSeq
     }
   }
 

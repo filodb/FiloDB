@@ -123,7 +123,7 @@ trait ExecPlan extends QueryCommand {
     rangeVectorTransformers += mapper
   }
 
-  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
+  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers.toSeq
 
   /**
    * Facade for the execution orchestration of the plan sub-tree
@@ -556,7 +556,7 @@ trait ExecPlan extends QueryCommand {
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
-    (transf :+ curNode) ++ childr
+    ((transf :+ curNode) ++ childr).toSeq
   }
 
   protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
