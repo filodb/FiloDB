@@ -2593,7 +2593,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     mpp.getRoutingKeys(lp) shouldEqual expected
   }
 
-  it ("should throw IllegalArgumentException for regex filters on shard keys") {
+  it ("should not throw for regex filters on shard keys in metadata queries") {
     val dummyPartitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
@@ -2795,28 +2795,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "legacy-remote-url"
     }
 
-    it("should use getPartitions directly when a shard-key filter is missing (LabelValues)") {
+    it("should use getPartitions directly when all shard key filters are Equals (SeriesKeysByFilters)") {
       val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
       val engine = makeMultiShardPlanner(provider)
-      // Only _ws_ filter present, _ns_ is missing — shardKeyFilterGroups is non-empty and all-Equals
-      // so direct path (getPartitions) is taken with the partial routing key
-      val lp = Parser.labelValuesQueryToLogicalPlan(
-        Seq("instance"), Some("""_ws_="demo""""),
-        TimeStepParams(startSeconds, step, endSeconds))
-      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = labelValuesQueryParams,
-        plannerParams = PlannerParams(processMultiPartition = true)))
-
-      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
-      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
-    }
-
-    it("should use getPartitions directly when a shard-key filter is missing (SeriesKeysByFilters)") {
-      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
-      val engine = makeMultiShardPlanner(provider)
-      // Only _ws_ filter present, _ns_ is missing — shardKeyFilterGroups is non-empty and all-Equals
-      // so direct path (getPartitions) is taken with the partial routing key
+      // Both _ws_ and _ns_ are Equals filters and present → direct path via getPartitions
       val lp = Parser.metadataQueryToLogicalPlan(
-        """foo{_ws_="demo"}""",
+        """foo{_ws_="demo",_ns_="ns1"}""",
         TimeStepParams(startSeconds, step, endSeconds))
       val metadataQueryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = metadataQueryParams,
@@ -2826,20 +2810,35 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
     }
 
-    it("should handle non-equals filters gracefully in getPartitions delegation") {
-      val provider = new PartitionLocationProvider {
-        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
-        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                           timeRange: TimeRange): List[PartitionAssignment] =
-          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
-      }
+    it("should fall back to getMetadataPartitions when a shard-key filter is missing (LabelValues)") {
+      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
       val engine = makeMultiShardPlanner(provider)
-      // getPartitionsTrait should work with any filter type since it delegates to the provider
-      val timeRange = TimeRange(startSeconds * 1000L, endSeconds * 1000L)
-      val result = engine.partitionLocationProvider.getPartitionsTrait(Map("_ns_" -> "ns1"), timeRange)
-      result.size should be > 0
+      // Only _ws_ filter present, _ns_ is missing — not all shard-key columns are present
+      // so should fall back to getMetadataPartitions, not getPartitions
+      val lp = Parser.labelValuesQueryToLogicalPlan(
+        Seq("instance"), Some("""_ws_="demo""""),
+        TimeStepParams(startSeconds, step, endSeconds))
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = labelValuesQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "legacy-remote-url"
+    }
+
+    it("should fall back to getMetadataPartitions when a shard-key filter is missing (SeriesKeysByFilters)") {
+      val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
+      val engine = makeMultiShardPlanner(provider)
+      // Only _ws_ filter present, _ns_ is missing — not all shard-key columns are present
+      // so should fall back to getMetadataPartitions, not getPartitions
+      val lp = Parser.metadataQueryToLogicalPlan(
+        """foo{_ws_="demo"}""",
+        TimeStepParams(startSeconds, step, endSeconds))
+      val metadataQueryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = metadataQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "legacy-remote-url"
     }
   }
-
 }

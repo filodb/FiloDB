@@ -1415,7 +1415,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       ).toMap
 
     val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
-      shardKeyFilterGroups.isEmpty
+      shardKeyFilterGroups.isEmpty ||
+      !shardKeyFilterGroups.forall(group => nonMetricCols.forall(col => group.exists(_.column == col)))
 
     // this will preserve the legacy routing logic.
 
