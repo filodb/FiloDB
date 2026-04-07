@@ -36,20 +36,26 @@ object LogicalPlanParser {
 
   private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String],
                              lookback: Option[Long], offset: Option[Long], addWindow: Boolean): String = {
-    val columnString = if (columns.isEmpty) "" else s"::${columns.head}"
-    // Get metric name from filters and remove quotes from start and end
-    val name = s"${filters.find(x => x._1.equals(PromMetricLabel)).head._3.
-      replaceAll("^\"|\"$", "")}$columnString"
     val window = if (lookback.isDefined) {
       // Window should not be added for queries like sum(foo) even though they have lookback
       if (lookback.get.equals(WindowConstants.staleDataLookbackMillis) && !addWindow) ""
       else s"$OpeningSquareBracket${lookback.get / 1000}s$ClosingSquareBracket"
     } else ""
     val offsetString = offset.map(o => s"$Space$Offset$Space${(o / 1000).toString}s").getOrElse("")
-    // When only metric name is present
-    if (filters.size == 1) name + window + offsetString
-    else s"$name$OpeningCurlyBraces${filters.filterNot(x => x._1.equals(PromMetricLabel)).
-      map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces" + window + offsetString
+    val filterString = filters
+      .map { filter =>
+        // If appropriate, add a column suffix to the metric name.
+        val (name, op, value) = filter
+        if (name == PromMetricLabel) {
+          val valueWithoutQuotes = value.substring(1, value.length - 1)
+          val colSuffix = columns.headOption.map("::" + _).getOrElse("")
+          val doubleQuote = "\""  // Scalastyle does not like escaped quotes in f-strings.
+          (name, op, f"$doubleQuote$valueWithoutQuotes$colSuffix$doubleQuote")
+        } else filter
+      }
+      .map { case (name, op, value) => s"$name$op$value" }
+      .mkString(Comma)
+    s"$OpeningCurlyBraces$filterString$ClosingCurlyBraces$window$offsetString"
   }
 
   private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean): String = {

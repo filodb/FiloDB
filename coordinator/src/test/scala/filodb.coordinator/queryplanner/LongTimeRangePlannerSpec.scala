@@ -453,8 +453,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     val execPlan = longTimeRangePlanner.materialize(lp, QueryContext(origQueryParams = promQlParams))
     execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "(sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])) / " +
-        "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])))"
+      "(sum(rate({_ws_=\"test\",_ns_=\"test2\",__name__=\"Counter3\"}[120s])) / " +
+        "sum(rate({_ws_=\"test\",_ns_=\"test2\",__name__=\"Counter3\"}[120s])))"
     execPlan.rangeVectorTransformers.size shouldEqual 1
     execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarOperationMapper] shouldEqual true
     execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].operator shouldEqual BinaryOperator.SUB

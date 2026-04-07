@@ -143,7 +143,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-6#893240335],raw)
       |---T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
       |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-6#893240335],raw)
-      |--E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
+      |--E~PromQlRemoteExec(PromQlQueryParams({instance="Inst-1",_ws_="demo",_ns_="App-1",__name__="test"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
     val lp = Parser.queryToLogicalPlan(
       """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m])""",
       1000, 1000
@@ -204,7 +204,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=6, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-6#893240335],raw)
           |--T~PeriodicSamplesMapper(start=720000, step=60000, end=960000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(420000,960000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(test)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-6#893240335],raw)
-          |-E~PromQlRemoteExec(PromQlQueryParams(test{instance="Inst-1",_ws_="demo",_ns_="App-1"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
+          |-E~PromQlRemoteExec(PromQlQueryParams({instance="Inst-1",_ws_="demo",_ns_="App-1",__name__="test"},720,60,960,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=remote-url, requestTimeoutMs=60000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
     val lp = Parser.queryToLogicalPlan(
       """test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m]""",
       1000, 1000
@@ -255,9 +255,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only inner periodic query in PromQlQueryParams
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}"
+      "{instance=\"Inst-1\",__name__=\"test\",_ws_=\"demo\",_ns_=\"App-1\"}"
     execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-2\"}"
+      "{instance=\"Inst-1\",__name__=\"test\",_ws_=\"demo\",_ns_=\"App-2\"}"
     execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
     execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
@@ -319,9 +319,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only sum query in PromQlQueryParams
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
+      """sum({__name__="test",_ws_="demo",_ns_="App-1"})"""
     execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-2"})"""
+      """sum({__name__="test",_ws_="demo",_ns_="App-2"})"""
   }
 
   it("should generate Exec plan for exp for Aggregate query") {
@@ -353,9 +353,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only sum query in PromQlQueryParams
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-1"})"""
+      """sum({__name__="test",_ws_="demo",_ns_="App-1"})"""
     execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(test{_ws_="demo",_ns_="App-2"})"""
+      """sum({__name__="test",_ws_="demo",_ns_="App-2"})"""
   }
 
   it("should generate local Exec plan for query without regex") {
@@ -400,9 +400,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only inner query in PromQlQueryParams
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """{__name__="test",_ws_="demo",_ns_="App-1"}"""
     multiPartitionExec.children(1).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-2"}"""
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """{__name__="test",_ws_="demo",_ns_="App-2"}"""
   }
 
   it ("should generate Exec plan for Metadata Label values query") {
@@ -562,7 +562,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec]
 
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """histogram_quantile(0.2,sum(test{_ws_="demo",_ns_="App-1"}))"""
+      """histogram_quantile(0.2,sum({__name__="test",_ws_="demo",_ns_="App-1"}))"""
 
     execPlan.queryContext.plannerParams.skipAggregatePresent shouldEqual (false)
   }
@@ -579,7 +579,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("""(test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"})""")
+      ("""({__name__="test1",_ws_="demo",_ns_="App"} + {__name__="test2",_ws_="demo",_ns_="App"})""")
   }
 
   it("should preserve brackets in Binary join with regex query") {
@@ -594,7 +594,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("""(sum(test1{_ws_="demo",_ns_="App"}) / (sum(test2{_ws_="demo",_ns_="App"}) + sum(test3{_ws_="demo",_ns_="App"})))""")
+      ("""(sum({__name__="test1",_ws_="demo",_ns_="App"}) / (sum({__name__="test2",_ws_="demo",_ns_="App"}) + sum({__name__="test3",_ws_="demo",_ns_="App"})))""")
   }
 
   it("should handle push down aggregation to right level case 1") {
@@ -626,8 +626,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""count(test1{_ws_="demo",_ns_="App2"}) by (foo)""",
-            """count(test1{_ws_="demo",_ns_="App1"}) by (foo)""")
+          Set("""count({__name__="test1",_ws_="demo",_ns_="App2"}) by (foo)""",
+            """count({__name__="test1",_ws_="demo",_ns_="App1"}) by (foo)""")
         plan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -649,7 +649,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      """sum(count(test1{_ws_="demo",_ns_="App1"}) by (foo))"""
+      """sum(count({__name__="test1",_ws_="demo",_ns_="App1"}) by (foo))"""
   }
 
   it("should handle multiple binary joins appropriately, case 1") {
@@ -725,8 +725,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""test1{_ws_="demo",_ns_="App1"}""",
-            """test1{_ws_="demo",_ns_="App2"}""")
+          Set("""{__name__="test1",_ws_="demo",_ns_="App1"}""",
+            """{__name__="test1",_ws_="demo",_ns_="App2"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -764,8 +764,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""test1{_ws_="demo",_ns_="App-1"}""",
-            """test1{_ws_="demo",_ns_="App-2"}""")
+          Set("""{__name__="test1",_ws_="demo",_ns_="App-1"}""",
+            """{__name__="test1",_ws_="demo",_ns_="App-2"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -845,8 +845,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""foo{_ws_="demo",_ns_="App-2"}""",
-            """foo{_ws_="demo",_ns_="App-1"}""")
+          Set("""{__name__="foo",_ws_="demo",_ns_="App-2"}""",
+            """{__name__="foo",_ws_="demo",_ns_="App-1"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -882,8 +882,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""foo{_ws_="demo",_ns_="App-2"}""",
-            """foo{_ws_="demo",_ns_="App-1"}""")
+          Set("""{__name__="foo",_ws_="demo",_ns_="App-2"}""",
+            """{__name__="foo",_ws_="demo",_ns_="App-1"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -927,8 +927,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""sum(absent(foo{_ws_="demo",_ns_="App-2"}))""",
-            """sum(absent(foo{_ws_="demo",_ns_="App-1"}))""")
+          Set("""sum(absent({__name__="foo",_ws_="demo",_ns_="App-2"}))""",
+            """sum(absent({__name__="foo",_ws_="demo",_ns_="App-1"}))""")
       case _ => fail("Expected two children")
     }
   }
@@ -969,8 +969,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case Seq(plan1, plan2) =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""foo{_ws_="demo",_ns_="App-2"}""",
-            """foo{_ws_="demo",_ns_="App-1"}""")
+          Set("""{__name__="foo",_ws_="demo",_ns_="App-2"}""",
+            """{__name__="foo",_ws_="demo",_ns_="App-1"}""")
       case _ => fail("Expected two children")
     }
   }
@@ -1054,8 +1054,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("""sum(foo{_ws_="demo",_ns_="App-1"})""",
-            """sum(foo{_ws_="demo",_ns_="App-2"})""")
+          Set("""sum({__name__="foo",_ws_="demo",_ns_="App-1"})""",
+            """sum({__name__="foo",_ws_="demo",_ns_="App-2"})""")
       case _ => fail("Expected two children")
     }
   }
