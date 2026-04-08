@@ -239,9 +239,17 @@ case class RawSeries(rangeSelector: RangeSelector,
   override def isRaw: Boolean = true
 
   override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = {
-    val filterColumns = newFilters.map(_.column)
-    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
-    this.copy(filters = updatedFilters)
+    val newFilterMap = newFilters.map(f => f.column -> f).toMap
+    val newFilterColumns = newFilterMap.keySet
+    // Keep non-replaced filters in their original order, then append
+    // replaced filters in the order they appeared in the original plan
+    // (not in Map iteration order which is non-deterministic in 2.13).
+    val kept = this.filters.filterNot(f => newFilterColumns.contains(f.column))
+    val replacedInOrigOrder = this.filters.collect {
+      case f if newFilterMap.contains(f.column) => newFilterMap(f.column)
+    }
+    val added = newFilters.filterNot(f => this.filters.exists(_.column == f.column))
+    this.copy(filters = kept ++ replacedInOrigOrder ++ added)
   }
 
   def updateRawSeriesForAggOptimize(newFilters: Seq[ColumnFilter], columns: Seq[String]): RawSeriesLikePlan = {
@@ -383,9 +391,14 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   override def endMs: Long = ???
 
   override def replacePeriodicSeriesFilters(newFilters: Seq[ColumnFilter]): PeriodicSeriesPlan  = {
-    val filterColumns = newFilters.map(_.column)
-    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
-    this.copy(filters = updatedFilters)
+    val newFilterMap = newFilters.map(f => f.column -> f).toMap
+    val newFilterColumns = newFilterMap.keySet
+    val kept = this.filters.filterNot(f => newFilterColumns.contains(f.column))
+    val replacedInOrigOrder = this.filters.collect {
+      case f if newFilterMap.contains(f.column) => newFilterMap(f.column)
+    }
+    val added = newFilters.filterNot(f => this.filters.exists(_.column == f.column))
+    this.copy(filters = kept ++ replacedInOrigOrder ++ added)
   }
 
   override def useAggregatedMetricIfApplicable(aggRuleProvider: AggRuleProvider): PeriodicSeriesPlan = {

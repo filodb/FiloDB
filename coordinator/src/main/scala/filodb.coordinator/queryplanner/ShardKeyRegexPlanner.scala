@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.mutable
 
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -72,8 +72,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
     val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
     if (pushdownKeys.isDefined) {
-      val plans = generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true)
-        .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+      val plans = PlannerUtil.localPlansFirst(
+        generateExec(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext, pushdownPlan = true))
       Some(PlanResult(plans.toSeq))
     } else None
   }
@@ -456,7 +456,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
+            PlannerUtil.localPlansFirst(execPlans).toSeq, aggregate.operator, aggregate.params)
           val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
             RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
@@ -489,7 +489,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // would have suboptimal performance. See subquery tests in PlannerHierarchySpec
       MultiPartitionDistConcatExec(
         queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+        PlannerUtil.localPlansFirst(execPlans)
       )
     } else {
       EmptyResultExec(queryContext, dataset.ref, inProcessPlanDispatcher)

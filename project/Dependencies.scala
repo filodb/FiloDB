@@ -18,16 +18,16 @@ object Dependencies {
   val excludeOkHttp3 = ExclusionRule(organization = "com.squareup.okhttp3", name = "okhttp")
 
   /* Versions in various modules versus one area of build */
-  val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
-  val akkaHttpVersion   = "10.1.8"
+  val akkaVersion       = "2.5.32" // Patch bump for Scala 2.13 support (added in 2.5.23)
+  val akkaHttpVersion   = "10.1.15" // Patch bump for Scala 2.13 support (added in 10.1.9)
   val cassDriverVersion = "3.7.1"
-  val ficusVersion      = "1.3.4"
+  val ficusVersion      = "1.5.2" // Updated for Scala 2.13
   val kamonBundleVersion = "2.7.3"
   val otelVersion       = "1.54.1"
   val otelInstVersion   = "2.20.1-alpha"
   val monixKafkaVersion = "1.0.0-RC7"
   val sparkVersion      = "3.4.0"
-  val sttpVersion       = "1.3.3"
+  val sttpVersion       = "1.7.2" // Updated for Scala 2.13
   val grpcVersion       = "1.50.0"
   val arrowVersion      = "11.0.0" // latest version is 15, but unfortunately it breaks Spark compatibility; we cannot
                                    // move to spark 4.0 yet; when we do move to Spark 4.0, do upgrade Arrow as well
@@ -35,15 +35,15 @@ object Dependencies {
   /* Dependencies shared */
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
-  val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
+  val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.9.5" // Updated for Scala 2.13
   val scalaTest         = "org.scalatest"              %% "scalatest"            % "3.1.2"
   val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.14.3"
   val scalaTestPlus     = "org.scalatestplus"          %% "scalacheck-1-14"      % "3.1.2.0"
   val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
   val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
-  val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
-  val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.9.3"
-  val circeParser       = "io.circe"                   %% "circe-parser"         % "0.9.3"
+  val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.31.0" // Updated for circe 0.12 compatibility
+  val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.12.3" // Updated for Scala 2.13
+  val circeParser       = "io.circe"                   %% "circe-parser"         % "0.12.3" // Updated for Scala 2.13
 
   lazy val commonDeps = Seq(
     "io.kamon" %% "kamon-bundle"                        % kamonBundleVersion,
@@ -55,9 +55,10 @@ object Dependencies {
     "io.opentelemetry"             % "opentelemetry-exporter-logging-otlp"  % otelVersion,
     "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry-java8" % otelInstVersion,
     "io.opentelemetry.instrumentation" % "opentelemetry-oshi"                    % otelInstVersion,
+    "org.scala-lang.modules" %% "scala-collection-compat" % "2.11.0",
     logbackDep % Test,
     scalaTest  % Test,
-    "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
+    "com.softwaremill.quicklens" %% "quicklens" % "1.9.7" % Test,
     "org.apache.xbean" % "xbean-asm6-shaded" % "4.10" % Test,
     scalaCheck % Test,
     scalaTestPlus % Test
@@ -71,35 +72,36 @@ object Dependencies {
     "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
     "org.scorexfoundation" %% "debox"            % "0.10.0" withJavadoc(),
-    "org.typelevel"        %% "spire"            % "0.14.1",
+    "org.typelevel"        %% "spire"            % "0.17.0",
     scalaLoggingDep
   )
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
-    "com.beachape"                 %% "enumeratum"        % "1.5.10",
+    "com.beachape"                 %% "enumeratum"        % "1.5.13", // Updated for Scala 2.13
     "io.monix"                     %% "monix"             % "3.4.0",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
     "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
-    "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
+    "org.scalactic"                %% "scalactic"         % "3.1.2" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "9.7.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-facet"       % "9.7.0" withJavadoc(),
-    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
+    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.13.1", // Updated for Scala 2.13
     "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
-    "com.twitter"                  %% "chill"             % "0.9.3",
+    "com.twitter"                  %% "chill"             % "0.10.0", // Updated for Scala 2.13
     "org.apache.commons"           % "commons-lang3"      % "3.14.0",
     "org.apache.arrow"             % "arrow-vector"       % arrowVersion,
     "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion,
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
+    "org.scala-lang.modules"  %%     "scala-parallel-collections" % "1.0.4",
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty, excludeXBean),
@@ -130,7 +132,7 @@ object Dependencies {
   lazy val coordDeps = commonDeps ++ Seq(
     "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
-    "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4,excludeAkka),
+    "io.altoo"               %% "akka-kryo-serialization"     % "1.1.0" excludeAll(excludeMinlog, excludeOldLz4,excludeAkka),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog,excludeAkka),
     "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion  excludeAll(excludeOkHttp3),
     // Redirect minlog logs to SLF4J
@@ -161,7 +163,7 @@ object Dependencies {
   lazy val cliDeps = Seq(
     logbackDep,
     "io.kamon"          %% "kamon-bundle"        % kamonBundleVersion,
-    "org.rogach"        %% "scallop"             % "3.1.1"
+    "org.rogach"        %% "scallop"             % "3.3.0" // Updated for Scala 2.13
   )
 
   lazy val kafkaDeps = Seq(
@@ -173,15 +175,15 @@ object Dependencies {
 
   lazy val promDeps = Seq(
     "com.google.protobuf"    % "protobuf-java"             % "2.5.0",
-    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1",
-    "com.softwaremill.quicklens" %% "quicklens"            % "1.4.12",
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2", // Updated for Scala 2.13
+    "com.softwaremill.quicklens" %% "quicklens"            % "1.9.7", // Updated for Scala 2.13
     "org.antlr" % "antlr4-runtime" % "4.9.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
     logbackDep,
     "io.monix"   %% "monix-kafka-1x" % monixKafkaVersion,
-    "org.rogach" %% "scallop"        % "3.1.1",
+    "org.rogach" %% "scallop"        % "3.3.0", // Updated for Scala 2.13
     "com.google.protobuf" % "protobuf-java" % "2.5.0",
     "org.xerial.snappy" % "snappy-java" % "1.1.8.4",
     akkaHttp
@@ -204,7 +206,7 @@ object Dependencies {
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,
     "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion       % Test,
     "com.softwaremill.sttp" %% "core"                    % sttpVersion       % Test,
-    "com.typesafe.akka"     %% "akka-stream"             % "2.5.11"          % Test
+    "com.typesafe.akka"     %% "akka-stream"             % akkaVersion       % Test
   )
 
   lazy val bootstrapperDeps = Seq(
@@ -218,7 +220,7 @@ object Dependencies {
     circeParser       % "test; provided",
     "com.typesafe.akka"            %% "akka-slf4j"              % akkaVersion,
     "dnsjava"                      %  "dnsjava"                 % "2.1.8",
-    "org.scalaj"                   %% "scalaj-http"             % "2.3.0",
+    "org.scalaj"                   %% "scalaj-http"             % "2.4.2", // Updated for Scala 2.13
     "com.typesafe.akka"            %% "akka-testkit"            % akkaVersion   % Test,
     "com.typesafe.akka"            %% "akka-multi-node-testkit" % akkaVersion   % Test,
     scalaTest   % Test
@@ -238,8 +240,8 @@ object Dependencies {
   )
 
   lazy val gatlingDeps = Seq(
-      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.2.0" % "test,it",
-      "io.gatling"            % "gatling-test-framework"    % "3.2.0" % "test,it"
+      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.5.0" % "test,it", // 3.5.0 is first version compiled against Scala 2.13
+      "io.gatling"            % "gatling-test-framework"    % "3.5.0" % "test,it"  // 3.5.0 is first version compiled against Scala 2.13
   )
 
   //  lazy val stressDeps = Seq(

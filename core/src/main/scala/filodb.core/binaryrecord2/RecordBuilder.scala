@@ -470,7 +470,7 @@ class RecordBuilder(memFactory: MemFactory,
   /**
    * Returns the list of all current containers
    */
-  def allContainers: Seq[RecordContainer] = containers
+  def allContainers: Seq[RecordContainer] = containers.toSeq
 
   def lastContainer: RecordContainer = containers.last
 

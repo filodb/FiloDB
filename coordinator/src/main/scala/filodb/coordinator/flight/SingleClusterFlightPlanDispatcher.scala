@@ -115,8 +115,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         } else if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
           QueryError(plan.queryContext.queryId, respFooter.get.queryStats, respFooter.get.throwable.get)
         } else {
-          val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(vsrs,
-            respHeader.get.resultSchema)
+          val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(vsrs.toSeq, respHeader.get.resultSchema)
           QueryResult(plan.queryContext.queryId, respHeader.get.resultSchema, srvs,
             respFooter.map(_.queryStats).getOrElse(QueryStats()))
         }

@@ -191,7 +191,9 @@ private case class MaxMinTracker(ordering: Ordering[Double]) {
 class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
   extends RangeFunction[TransientHistRow] {
     private val sumOverTimeFunction: SumOverTimeFunctionH = new SumOverTimeFunctionH(sum, 0)
-    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
+    // Scala 2.13 split Ordering.Double into TotalOrdering and IeeeOrdering; TotalOrdering
+    // gives NaN a defined position (greater than all values), matching the 2.12 behavior.
+    private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.TotalOrdering)
   /**
    * Called when a sample is added to the sliding window
    */
@@ -224,8 +226,8 @@ class SumAndMaxOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.em
 class RateAndMaxMinOverTimeFunctionHD(var sum: bv.MutableHistogram = bv.Histogram.empty)
   extends RangeFunction[TransientHistRow] {
   private val rateOverDeltaFunction: RateOverDeltaFunctionH = new RateOverDeltaFunctionH
-  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double)
-  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.reverse)
+  private val maxTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.TotalOrdering)
+  private val minTracker: MaxMinTracker = MaxMinTracker(Ordering.Double.TotalOrdering.reverse)
   /**
    * Called when a sample is added to the sliding window
    */

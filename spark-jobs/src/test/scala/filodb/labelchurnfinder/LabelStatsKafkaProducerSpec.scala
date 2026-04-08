@@ -161,17 +161,17 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
 
       // Workspace1 should have 3 labels
       val ws1 = result.find(_.getAs[String]("ws") == "workspace1").get
-      val ws1Labels = ws1.getAs[Seq[Row]]("labels")
+      val ws1Labels = ws1.getAs[scala.collection.Seq[Row]]("labels")
       ws1Labels should have length 3
 
       // Workspace2 should have 1 label
       val ws2 = result.find(_.getAs[String]("ws") == "workspace2").get
-      val ws2Labels = ws2.getAs[Seq[Row]]("labels")
+      val ws2Labels = ws2.getAs[scala.collection.Seq[Row]]("labels")
       ws2Labels should have length 1
 
       // Workspace3 should have 1 label
       val ws3 = result.find(_.getAs[String]("ws") == "workspace3").get
-      val ws3Labels = ws3.getAs[Seq[Row]]("labels")
+      val ws3Labels = ws3.getAs[scala.collection.Seq[Row]]("labels")
       ws3Labels should have length 1
     }
   }

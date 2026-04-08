@@ -314,9 +314,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(300)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(700)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val apiResult1 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult1 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult1.rows().map(_.getDouble(1)).toList shouldEqual List(300)
+    appResult1.rows().map(_.getDouble(1)).toList shouldEqual List(700)
   }
 
   it("should join many-to-many with and between vector having scalar operation ") {
@@ -352,10 +354,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    val apiResult2 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult2 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult2.rows().map(_.getDouble(1)).toList shouldEqual List(301)
+    appResult2.rows().map(_.getDouble(1)).toList shouldEqual List(701)
   }
 
   it("should do LAND with on having multiple labels") {
@@ -391,9 +395,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val apiResult3 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult3 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult3.rows().map(_.getDouble(1)).toList shouldEqual List(301)
+    appResult3.rows().map(_.getDouble(1)).toList shouldEqual List(701)
 
   }
 
@@ -430,9 +436,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val apiResult4 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult4 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult4.rows().map(_.getDouble(1)).toList shouldEqual List(301)
+    appResult4.rows().map(_.getDouble(1)).toList shouldEqual List(701)
   }
 
   it("should do LAND with ignoring having one label") {
@@ -468,9 +476,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val apiResult5 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult5 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult5.rows().map(_.getDouble(1)).toList shouldEqual List(301)
+    appResult5.rows().map(_.getDouble(1)).toList shouldEqual List(701)
   }
 
   it("should do LAND with ignoring having multiple labels") {
@@ -505,9 +515,11 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(701)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val apiResult6 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResult6 = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResult6.rows().map(_.getDouble(1)).toList shouldEqual List(301)
+    appResult6.rows().map(_.getDouble(1)).toList shouldEqual List(701)
   }
 
   it("should return Lhs when LAND is done with vector having no labels with on dummy") {
@@ -865,8 +877,10 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     result.size shouldEqual 2
     result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(800)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    val apiResultUnless = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "api-server")).get
+    val appResultUnless = result.find(_.key.labelValues.get("job".utf8).exists(_.toString == "app-server")).get
+    apiResultUnless.rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    appResultUnless.rows().map(_.getDouble(1)).toList shouldEqual List(800)
   }
 
   it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
@@ -935,8 +949,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
   }
 
   it("should not return any results when rhs has same vector on joining without ignoring labels with LUnless") {
@@ -1006,8 +1020,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(800)
   }
 
   it("AND should not return rv's when RHS has only NaN") {
@@ -1811,7 +1825,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), resSchemaTask, querySession)
       .toListL.runToFuture.futureValue
     result1.tail shouldEqual Nil
-    val res = result1.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList
+    val res = result1.head.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
     res shouldEqual expected.rows.map(r => (r.getLong(0), r.getDouble(1).toString)).toList
   }
 

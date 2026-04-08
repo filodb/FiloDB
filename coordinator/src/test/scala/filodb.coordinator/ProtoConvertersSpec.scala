@@ -119,7 +119,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
       // Convert to ArrowSerializedRangeVector2 instances
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
-      val asrvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs, resSchema)
+      val asrvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
       asrvs.foreach { a =>
         val roundTrip = a.toProto.fromProto
         roundTrip.rows().map(r => (r.getLong(0) , r.getDouble(1))).toList shouldEqual a.rows().map(r => (r.getLong(0) , r.getDouble(1))).toList
@@ -163,7 +163,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
   class DummyActor extends akka.actor.Actor {
     override def receive: Receive = {
-      case "" => Unit
+      case "" => ()
     }
   }
 

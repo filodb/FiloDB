@@ -252,7 +252,7 @@ object ArrowSerializedRangeVectorOps {
         currentStartRowIndex, currentNumDataRows, currentAsrvMetdata.outputRange)
     }
 
-    result
+    result.toSeq
   }
 
 }

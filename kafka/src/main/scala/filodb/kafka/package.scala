@@ -2,7 +2,7 @@ package filodb
 
 import java.util.{Map => JMap, Properties => JProperties}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 import com.typesafe.config.{Config, ConfigFactory}

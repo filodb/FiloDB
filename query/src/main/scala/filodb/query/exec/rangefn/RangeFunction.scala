@@ -536,6 +536,14 @@ class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeF
   }
 }
 
+/**
+ * IMPORTANT GOTCHA:
+ * LastSampleFunction does not behave like LastSampleChunkedFunctionD in NaN handling.  LastSampleFunction will return
+ * the last non-NaN sample in the window, while LastSampleChunkedFunctionD will return NaN if the last sample in the
+ * chunk is NaN, even if there are non-NaN samples before it.  This is because LastSampleFunction is designed to
+ * answer sub-queries which require the last non-NaN sample in the window, while LastSampleChunkedFunctionD is designed
+ * raw data queries which can have the staleness sample marker.
+ */
 object LastSampleFunction extends RangeFunction[TransientRow] {
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
@@ -552,9 +560,9 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
         return
       }
     }
-    sampleToEmit.setValues(endTimestamp, Double.NaN)
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
   }
-}
 
 /**
  * Timestamp function for iterating (sliding window) mode.
@@ -678,19 +686,10 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
     val doubleVal = dblReader(valAcc, valVector, endRowNum)
-    // If the last value is NaN, that may be Prometheus end of time series marker.
-    // In that case try to get the sample before last.
-    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
-    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
-    if (java.lang.Double.isNaN(doubleVal)) {
-      if (endRowNum > 0) {
-        timestamp = ts
-        value = dblReader(valAcc, valVector, endRowNum - 1)
-      }
-    } else {
-      timestamp = ts
-      value = doubleVal
-    }
+    // Respect Prometheus staleness: if the last value is NaN (stale marker),
+    // propagate it so the series is correctly reported as stale.
+    timestamp = ts
+    value = doubleVal
   }
 }
 

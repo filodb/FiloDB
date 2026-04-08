@@ -180,7 +180,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       exportData.day,
       exportData.hour
     )
-    Row.fromSeq(dataSeq)
+    Row.fromSeq(dataSeq.toSeq)
   }
 
   def writeDataToIcebergTable(spark: SparkSession,
