@@ -68,7 +68,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         val vsrs = mutable.ListBuffer[VectorSchemaRoot]()
         var canceled = false
         // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
-        while (canceled || stream.next()) { // next is a blocking call - this is why we run on ioScheduler
+        while (!canceled && stream.next()) { // next is a blocking call - this is why we run on ioScheduler
           if (stream.getLatestMetadata == null) {
             flightAllocator.withRequestAllocator { requestAllocator =>
               checkAllocatorLimits(requestAllocator, plan.queryContext)

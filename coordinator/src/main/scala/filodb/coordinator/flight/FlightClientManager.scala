@@ -99,8 +99,14 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
     })
 
     if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) { // not healthy
-      logger.info(s"Reconnecting unhealthy FlightClient for $location")
-      reconnectClientUnsafe(entry, location)
+      entry.synchronized {
+        if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) {
+          logger.info(s"Reconnecting unhealthy FlightClient for $location")
+          reconnectClientUnsafe(entry, location)
+        } else {
+          entry.client
+        }
+      }
     } else {
       entry.client
     }

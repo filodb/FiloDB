@@ -39,6 +39,7 @@ import filodb.query.exec.ExecPlan
  */
 trait FlightQueryExecutor extends StrictLogging {
 
+  // enable it for now until we stabilize and productionize. Then remove
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
 
   def memStore: TimeSeriesStore

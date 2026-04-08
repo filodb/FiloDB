@@ -342,7 +342,7 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
- * QuerySession should never be serialized and sent/recieved over the wire to a peer Filodb or client node.
+ * QuerySession should never be serialized and sent/received over the wire to a peer Filodb or client node.
   *
   * IMPORTANT: The param catchMultipleLockSetErrors should be false
   * only in unit test code for ease of use.

@@ -181,7 +181,7 @@ object ArrowSerializedRangeVectorOps {
                 recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
                 addFromReader(nextRow)
               } else {
-                if (state.rowNum > maxNumRows) addNewVsr()
+                if (state.rowNum >= maxNumRows) addNewVsr()
                 state.currentRvkBrVec.setNull(state.rowNum)
                 state.currentIsRvkVec.set(state.rowNum, 0)
                 state.rowNum += 1

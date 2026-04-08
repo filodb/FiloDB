@@ -89,14 +89,12 @@ class FlightAllocator(private val allocator: BufferAllocator) extends AutoClosea
    * @return the result of the lambda
    */
   def withRequestAllocator[T](f: BufferAllocator => T)(ifClosed: => T): T = {
-    if (closed.get()) ifClosed
-    else {
-      rwLock.readLock().lock()
-      try {
-        f(allocator)
-      } finally {
-        rwLock.readLock().unlock()
-      }
+    rwLock.readLock().lock()
+    try {
+      if (closed.get()) ifClosed
+      else f(allocator)
+    } finally {
+      rwLock.readLock().unlock()
     }
   }
 

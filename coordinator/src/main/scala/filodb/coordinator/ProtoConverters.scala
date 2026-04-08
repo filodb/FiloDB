@@ -1400,14 +1400,18 @@ object ProtoConverters {
   implicit class SingleClusterFlightPlanDispatcherToProtoConverter(fpd: filodb.coordinator.flight.SingleClusterFlightPlanDispatcher) {
     def toProto(): GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher = {
       val builder = GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher.newBuilder()
-      builder.setPlanDispatcher(fpd.asInstanceOf[filodb.query.exec.PlanDispatcher].toProto)
+      val planDispatcherBuilder = GrpcMultiPartitionQueryService.PlanDispatcher.newBuilder()
+      planDispatcherBuilder.setClusterName(fpd.clusterName)
+      planDispatcherBuilder.setIsLocalCall(fpd.isLocalCall)
+      builder.setPlanDispatcher(planDispatcherBuilder.build())
+      builder.setLocation(fpd.location.getUri.toString)
       builder.build()
     }
   }
 
   implicit class SingleClusterFlightPlanDispatcherFromProtoConverter(fpd: GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher) {
     def fromProto: SingleClusterFlightPlanDispatcher = {
-      val dispatcher = SingleClusterFlightPlanDispatcher(new Location( fpd.getLocation), fpd.getPlanDispatcher.getClusterName)
+      val dispatcher = SingleClusterFlightPlanDispatcher(new Location(fpd.getLocation), fpd.getPlanDispatcher.getClusterName)
       dispatcher
     }
   }
