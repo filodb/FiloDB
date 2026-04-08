@@ -39,7 +39,8 @@ import filodb.query.exec.ExecPlan
  */
 trait FlightQueryExecutor extends StrictLogging {
 
-  // enable it for now until we stabilize and productionize. Then remove
+  // FIXME enable debugging for now until we stabilize and productionize. Then remove.
+  //  It has performance overhead.
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
 
   def memStore: TimeSeriesStore
@@ -206,7 +207,7 @@ trait FlightQueryExecutor extends StrictLogging {
             val respHeader = RespHeader(res.resultSchema)
             // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
             // and hence not closed here
-            checkAllocatorLimits(flightAllocator, execPlan.queryContext)
+            flightAllocator.checkAllocatorLimits(execPlan.queryContext)
             logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
             listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, flightAllocator))
           }.flatMap { _ =>
@@ -251,9 +252,6 @@ trait FlightQueryExecutor extends StrictLogging {
               } else {
                 val recSchema = res.resultSchema.toRecordSchema
                 val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
-                // Track sent VSRs to avoid duplicates when ASRVs are mixed with non-ASRV types
-                // (e.g., or-join combining Arrow Flight-dispatched and Kryo-dispatched sub-query results)
-                val sentVsrs = scala.collection.mutable.Set.empty[AnyRef]
                 Observable.fromIterable(res.result).mapEval { rv =>
                   if (rv.isInstanceOf[ArrowSerializedRangeVector]) {
                     // Mixed is unexpected but we should still be able to handle it - just log at
@@ -266,7 +264,7 @@ trait FlightQueryExecutor extends StrictLogging {
                   Task.eval {
                     // This lambda triggers intensive iterators and calculations and should be done on query sched
                     FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
-                    checkAllocatorLimits(flightAllocator, execPlan.queryContext)
+                    flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
                     flightAllocator.withRequestAllocator { allocator =>
                       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
@@ -351,17 +349,6 @@ trait FlightQueryExecutor extends StrictLogging {
       listener.completed()
     }
 
-    def checkAllocatorLimits(flightAllocator: FlightAllocator, queryContext: QueryContext): Unit = {
-      val used = flightAllocator.allocatedBytes
-      val limit = flightAllocator.allocationLimit * 0.9 // 90% of limit
-      if (used > limit) {
-        val msg = s"Reached $used bytes of result size (final or intermediate) for data serialized out of a host " +
-          s"or shard breaching maximum result size limit ($limit bytes)."
-        throw QueryLimitException(
-          s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
-          queryContext.queryId
-        )
-      }
-    }
+
   }
 }

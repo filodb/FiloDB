@@ -108,20 +108,38 @@ class FlightAllocator(private val allocator: BufferAllocator) extends AutoClosea
   }
 
   def close(): Unit = {
-    if (closed.get()) return
     rwLock.writeLock().lock()
     try {
-      closeables.forEach(_.close())
-      closeables.clear()
-      if (allocator.getAllocatedMemory > 0) {
-        logger.error(s"FlightAllocator close attempt with ${allocator.getAllocatedMemory} bytes still allocated")
-        logger.error(s"Allocator Verbose Trace: ${allocator.toVerboseString}")
-        Shutdown.haltAndCatchFire(new IllegalStateException("Arrow BufferAllocator memory leak detected"))
+      if (!closed.get()) {
+        closeables.forEach(_.close())
+        closeables.clear()
+        if (allocator.getAllocatedMemory > 0) {
+          logger.error(s"FlightAllocator close attempt with ${allocator.getAllocatedMemory} bytes still allocated")
+          logger.error(s"Allocator Verbose Trace: ${allocator.toVerboseString}")
+          Shutdown.haltAndCatchFire(new IllegalStateException("Arrow BufferAllocator memory leak detected"))
+        }
+        allocator.close()
+        closed.set(true)
       }
-      allocator.close()
-      closed.set(true)
     } finally {
       rwLock.writeLock().unlock()
+    }
+  }
+
+  /**
+   * Check if the allocated memory is approaching the limit, and throw a QueryLimitException if it is.
+   * @param queryContext
+   */
+  def checkAllocatorLimits(queryContext: QueryContext): Unit = {
+    val used = allocatedBytes
+    val limit = allocationLimit * 0.9 // 90% of limit - configure later if needed
+    if (used > limit) {
+      val msg = s"Reached $used bytes of result size (final or intermediate) for data serialized out of a host " +
+        s"or shard breaching maximum result size limit ($limit bytes)."
+      throw QueryLimitException(
+        s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
+        queryContext.queryId
+      )
     }
   }
 }

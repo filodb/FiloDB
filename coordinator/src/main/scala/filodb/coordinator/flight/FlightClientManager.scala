@@ -1,7 +1,7 @@
 package filodb.coordinator.flight
 
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -74,7 +74,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
       throw new IllegalStateException("FlightClientManager has been shut down")
     }
     val locationKey = locationToKey(location)
-    Option(clientMap.get(locationKey)).map(_.isHealthy)
+    Option(clientMap.get(locationKey)).map(e => if (e.lastHealthCheck.get == 0) None else Some(e.isHealthy.get))
   }
 
   /**
@@ -98,15 +98,9 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
       createNewClientEntry(location)
     })
 
-    if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) { // not healthy
-      entry.synchronized {
-        if (forceRebuild || (entry.isHealthy.isDefined && !entry.isHealthy.get)) {
-          logger.info(s"Reconnecting unhealthy FlightClient for $location")
-          reconnectClientUnsafe(entry, location)
-        } else {
-          entry.client
-        }
-      }
+    if (forceRebuild || (entry.lastHealthCheck.get > 0 && !entry.isHealthy.get)) {
+      logger.info(s"Reconnecting unhealthy FlightClient for $location")
+      reconnectClient(entry, location)
     } else {
       entry.client
     }
@@ -170,9 +164,9 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
       val entry = FlightClientEntry(
         client = client,
         location = location,
-        isHealthy = None,
+        isHealthy = new AtomicBoolean(true),
         createdAt = System.currentTimeMillis(),
-        lastHealthCheck = System.currentTimeMillis()
+        lastHealthCheck = new AtomicLong(0)
       )
       logger.info(s"Successfully created FlightClient for $location with compression = $compressionEnabled")
       entry
@@ -185,29 +179,28 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
   /**
    * Reconnects a client by closing the old one and creating a new one.
-   * IMPORTANT: This method is not thread-safe and should only be called when synchronized on the entry.
    *
    * @param entry The FlightClientEntry to reconnect
    * @param location The location to connect to
    * @return The new FlightClient
    */
-  private def reconnectClientUnsafe(entry: FlightClientEntry, location: Location): FlightClient = {
-    // Close the old client
-    closeClient(entry.client)
+  private def reconnectClient(entry: FlightClientEntry, location: Location): FlightClient = {
 
-    // Create new client with existing allocator
-    try {
-      val locationKey = locationToKey(location)
-      val newEntry = createNewClientEntry(location)  // Create new client entry
-      clientMap.put(locationKey, newEntry)           // Update the map with the new entry
-      logger.info(s"Successfully recreated for FlightClient for $location")
-      newEntry.client
-
-    } catch {
-      case ex: Exception =>
-        entry.isHealthy = Some(false)
-        logger.error(s"Failed to reconnect FlightClient for $location", ex)
-        throw ex
+    entry.synchronized { // so that only one thread can reconnect for this location at a time
+      try {
+        // Create new client with existing allocator
+        val locationKey = locationToKey(location)
+        val newEntry = createNewClientEntry(location) // Create new client entry
+        val oldClient = clientMap.put(locationKey, newEntry) // Update the map with the new entry
+        closeClient(oldClient.client)
+        logger.info(s"Successfully recreated for FlightClient for $location")
+        newEntry.client
+      } catch {
+        case ex: Exception =>
+          entry.isHealthy.set(false)
+          logger.error(s"Failed to reconnect FlightClient for $location", ex)
+          throw ex
+      }
     }
   }
 
@@ -247,22 +240,14 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
       entry.client.listActions(CallOptions.timeout(healthCheckTimeoutMs, TimeUnit.MILLISECONDS))
                                 .iterator().hasNext
 
-      // Synchronize when updating entry fields
-      entry.synchronized {
-        entry.lastHealthCheck = System.currentTimeMillis()
-        if (!entry.isHealthy.getOrElse(false)) {
-          logger.info(s"FlightClient for ${entry.location} is now healthy")
-        }
-        entry.isHealthy = Some(true)
+      entry.lastHealthCheck.set(System.currentTimeMillis())
+      if (!entry.isHealthy.get) {
+        logger.info(s"FlightClient for ${entry.location} is now healthy")
       }
-    } catch {
-      case ex: Exception =>
-        logger.warn(s"FlightClient for ${entry.location} failed health check", ex)
-        // Synchronize when updating entry fields
-        entry.synchronized {
-          entry.lastHealthCheck = System.currentTimeMillis()
-          entry.isHealthy = Some(false)
-        }
+      entry.isHealthy.set(true)
+    } catch { case ex: Exception =>
+      logger.warn(s"FlightClient for ${entry.location} failed health check", ex)
+      entry.isHealthy.set(false)
     }
   }
 }
@@ -272,13 +257,12 @@ object FlightClientManager extends StrictLogging {
   /**
    * Represents a FlightClient entry in the connection pool.
    */
-  private[coordinator] case class FlightClientEntry(
-    client: FlightClient,
-    location: Location,
-    var isHealthy: Option[Boolean],
-    createdAt: Long,
-    var lastHealthCheck: Long
-  )
+  private[coordinator] case class FlightClientEntry(client: FlightClient,
+                                                    location: Location,
+                                                    isHealthy: AtomicBoolean,
+                                                    createdAt: Long,
+                                                    // 0 at the beginning, updated on each health check
+                                                    lastHealthCheck: AtomicLong)
 
   // Global FlightClientManager instance that follows the same pattern as GrpcPlanDispatcher
   private val globalManagerInstance = new FlightClientManager(FlightAllocator.clientAllocator)

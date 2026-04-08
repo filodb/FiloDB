@@ -71,7 +71,7 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
         while (!canceled && stream.next()) { // next is a blocking call - this is why we run on ioScheduler
           if (stream.getLatestMetadata == null) {
             flightAllocator.withRequestAllocator { requestAllocator =>
-              checkAllocatorLimits(requestAllocator, plan.queryContext)
+              flightAllocator.checkAllocatorLimits(plan.queryContext)
               val reqVsr = VectorSchemaRoot.create(ArrowSerializedRangeVectorOps.arrowSrvSchema, requestAllocator)
               flightAllocator.registerCloseable(reqVsr)
               // stream.getRoot is owned by the stream and should not be closed by us
@@ -148,18 +148,5 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
 
   def isLocalCall: Boolean = false
 
-  def checkAllocatorLimits(reqAllocator: BufferAllocator, queryContext: QueryContext): Unit = {
-    val used = reqAllocator.getAllocatedMemory
-    val limit = reqAllocator.getLimit * 0.9 // 90% of limit
-    if (used > limit) {
-      val msg = s"Reached $used bytes of result size (final or intermediate) " +
-        s"for data serialized out of a host or shard breaching maximum result size limit" +
-        s"($limit bytes)."
-      throw QueryLimitException(
-        s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
-        queryContext.queryId
-      )
-    }
-  }
 }
 
