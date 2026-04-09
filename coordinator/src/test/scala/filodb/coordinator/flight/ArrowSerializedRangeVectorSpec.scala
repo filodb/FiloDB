@@ -274,10 +274,12 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      // we choose 52408 because next RVK is written at row 52409, and new VSR is created for 52410
+      // we choose 52411 because next RVK is written at row 52412, and new VSR is created for 52413
       // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
-      // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR
-      val largeDataset = (1 to 52415).map { i =>
+      // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR.
+      // Do by adding temporary print statements in ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs to
+      // find the row number when RVK is written and when new VSR is created.
+      val largeDataset = (1 to 52411).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -302,9 +304,13 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       allVsrs.length shouldEqual 2
 
       val isRvkVec1 = allVsrs.head.getVector(0).asInstanceOf[org.apache.arrow.vector.BitVector]
+      // last row of first VSR should have RVK bit set to 1
       isRvkVec1.get(isRvkVec1.getValueCount - 1) shouldEqual 1
       val rvkBrVec2 = allVsrs.last.getVector(1).asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
+      val isRvkVec2 = allVsrs.last.getVector(0).asInstanceOf[org.apache.arrow.vector.BitVector]
+      // first row of second VSR should have RVK bit set to 0, and should have RVK content
       rvkBrVec2.get(0) should not be null
+      isRvkVec2.get(0) shouldEqual 0
 
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
       srvs.length shouldEqual 2
