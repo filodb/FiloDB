@@ -150,6 +150,23 @@ object QueryUtils {
   }
 
   /**
+   * Returns the sample multiplier that should be applied
+   *   to a row with the argument column type.
+   */
+  private def getSamplesScannedRowMultiplier(colInfo: ColumnInfo,
+                                             config: SamplesScannedConfig): Double = {
+    colInfo.colType match {
+      case ColumnType.HistogramColumn =>
+        if (colInfo.isExponential) {
+          config.exponentialHistogramRowMultiplier
+        } else {
+          config.histogramRowMultiplier
+        }
+      case _ => config.defaultRowMultiplier
+    }
+  }
+
+  /**
    * Given the arguments, determines the total count of samples scanned.
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
@@ -178,9 +195,9 @@ object QueryUtils {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
     } else Seq(Nil)
 
-    val rowMultiplier = schema.columns.map { col =>
-      config.valueColumnToRowMultiplier.getOrElse(col.colType, 1.0)
-    }.sum
+    val rowMultiplier = schema.columns
+      .map(getSamplesScannedRowMultiplier(_, config))
+      .sum
     val rowSamples = rowsScanned * rowMultiplier *
       config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
     rowSamplesScanned.increment(rowSamples.toLong)
@@ -256,9 +273,9 @@ object QueryUtils {
       queryStats.stat.keys.filter(_.nonEmpty).toSeq
     } else Seq(Nil)
 
-    val rowMultiplier = schema.columns.map { col =>
-      config.valueColumnToRowMultiplier.getOrElse(col.colType, 1.0)
-    }.sum
+    val rowMultiplier = schema.columns
+      .map(getSamplesScannedRowMultiplier(_, config))
+      .sum
     val rowSamples = childRv.estimateNumRows() * rowMultiplier *
       config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
     childRowSamplesScanned.increment(rowSamples.toLong)

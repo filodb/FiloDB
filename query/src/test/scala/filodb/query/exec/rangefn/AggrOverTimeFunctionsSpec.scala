@@ -53,7 +53,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
       flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
     part.switchBuffers(ingestBlockHolder, encode = true)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), new AtomicLong(), Long.MaxValue, "query-id")
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), _ => {}, Long.MaxValue, "query-id")
   }
 
   after {

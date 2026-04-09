@@ -8,8 +8,6 @@ import scala.jdk.CollectionConverters._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.metadata.Column.ColumnType
-
 object QueryConfig {
   val DefaultVectorsLimit = 150
   // scalastyle:off method.length
@@ -113,8 +111,6 @@ case class CachingConfig(
  * Scanned samples are counted for various dimensions of a query: rows, series, partition-key bytes, etc.
  *   These parameters should be tuned so partition samples-scanned rates correlate well with partition saturation.
  *
- * All default values maintain legacy behavior.
- *
  * *** NOTE!!! *******************************************************************************
  * All Class values are serialized as their .getName() strings.
  * Deserialization will fail if class names and packages are not consistent across partitions.
@@ -126,7 +122,11 @@ case class CachingConfig(
  * @param rvtSamplesEnabled toggle whether-or-not RangeVectorTransformer samples are counted.
  * @param rvtChildSamplesEnabled toggle whether-or-not RangeVectorTransformer child samples are counted.
  * @param srvSamplesEnabled toggle whether-or-not SerializedRangeVector samples are counted.
- * @param valueColumnToRowMultiplier maps value column types to multipliers applied to samples added per row.
+ * @param defaultRowMultiplier multiplier applied to row count for all non-histogram columns value types.
+ * @param histogramRowMultiplier multiplier applied to row count for all non-
+ *                               exponential histogram columns value types.
+ * @param exponentialHistogramRowMultiplier multiplier applied to row count for all
+ *                                          exponential histogram columns value types.
  * @param defaultSamplesPerRow the default count of samples added per row; overridden by classToSamplesPerRow.
  * @param defaultSamplesPerSeries the count of samples added per time-series; overridden by classToSamplesPerSeries.
  * @param defaultSamplesPerPartKeyByte the count of samples added per partition key byte;
@@ -157,9 +157,9 @@ case class SamplesScannedConfig(
                                  rvtChildSamplesEnabled: Boolean = false,
                                  srvSamplesEnabled: Boolean = false,
 
-                                 valueColumnToRowMultiplier: Map[ColumnType, Double] = Map(
-                                   ColumnType.HistogramColumn -> 20
-                                 ),
+                                 defaultRowMultiplier: Double = 1.0,
+                                 histogramRowMultiplier: Double = 25.0,
+                                 exponentialHistogramRowMultiplier: Double = 50.0,
 
                                  defaultSamplesPerRow: Double = 1.0,
                                  defaultSamplesPerSeries: Double = 0.0,

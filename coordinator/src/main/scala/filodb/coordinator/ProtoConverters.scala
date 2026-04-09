@@ -110,9 +110,9 @@ object ProtoConverters extends StrictLogging {
       builder.setRvtSamplesEnabled(config.rvtSamplesEnabled)
       builder.setRvtChildSamplesEnabled(config.rvtChildSamplesEnabled)
       builder.setSrvSamplesEnabled(config.srvSamplesEnabled)
-      config.valueColumnToRowMultiplier.foreach { case (colType, mult) =>
-        builder.putValueColumnToRowMultiplier(colType.toString, mult)
-      }
+      builder.setDefaultRowMultiplier(config.defaultRowMultiplier)
+      builder.setHistogramRowMultiplier(config.histogramRowMultiplier)
+      builder.setExponentialHistogramRowMultiplier(config.exponentialHistogramRowMultiplier)
       builder.setDefaultSamplesPerRow(config.defaultSamplesPerRow)
       builder.setDefaultSamplesPerSeries(config.defaultSamplesPerSeries)
       builder.setDefaultSamplesPerPartKeyByte(config.defaultSamplesPerPartKeyByte)
@@ -151,17 +151,9 @@ object ProtoConverters extends StrictLogging {
         config.getRvtSamplesEnabled,
         config.getRvtChildSamplesEnabled,
         config.getSrvSamplesEnabled,
-        config.getValueColumnToRowMultiplierMap.asScala
-          .filter { case (colTypeName, _) =>
-            val parseTry = Try(ColumnType.withName(colTypeName))
-            if (!parseTry.isSuccess) {
-              logger.error("Could not find ColumnType while deserializing SamplesScannedConfig: " +
-                colTypeName, parseTry.failed.get)
-            }
-            parseTry.isSuccess
-          }
-          .map { case (colTypeName, mult) => ColumnType.withName(colTypeName) -> mult.asInstanceOf[Double] }
-          .toMap,
+        config.getDefaultRowMultiplier,
+        config.getHistogramRowMultiplier,
+        config.getExponentialHistogramRowMultiplier,
         config.getDefaultSamplesPerRow,
         config.getDefaultSamplesPerSeries,
         config.getDefaultSamplesPerPartKeyByte,

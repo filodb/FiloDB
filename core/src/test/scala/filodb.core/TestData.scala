@@ -544,7 +544,7 @@ object MachineMetricsData {
     part.switchBuffers(cumulHistBH, encode = true)
     // Select timestamp=0, hist=3, max=5, min=4
     (rawData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+      new AtomicLong, _ => {}, Long.MaxValue, "query-id"))
   }
 }
 
