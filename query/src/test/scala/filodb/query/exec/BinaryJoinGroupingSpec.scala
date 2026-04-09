@@ -164,9 +164,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val idleResult1 = result.find(_.key.labelValues.get("mode".utf8).exists(_.toString == "idle")).get
+    val userResult1 = result.find(_.key.labelValues.get("mode".utf8).exists(_.toString == "user")).get
+    idleResult1.rows().map(_.getDouble(1)).toList shouldEqual List(3)
+    userResult1.rows().map(_.getDouble(1)).toList shouldEqual List(1)
   }
 
   it("should join many-to-one with ignoring ") {
@@ -201,9 +203,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(3)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(1)
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    val idleResult2 = result.find(_.key.labelValues.get("mode".utf8).exists(_.toString == "idle")).get
+    val userResult2 = result.find(_.key.labelValues.get("mode".utf8).exists(_.toString == "user")).get
+    idleResult2.rows().map(_.getDouble(1)).toList shouldEqual List(3)
+    userResult2.rows().map(_.getDouble(1)).toList shouldEqual List(1)
   }
 
   it("should join many-to-one with by and grouping without arguments") {
@@ -252,10 +256,14 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    def findResult(instance: String, mode: String) = result.find { rv =>
+      rv.key.labelValues.get("instance".utf8).exists(_.toString == instance) &&
+        rv.key.labelValues.get("mode".utf8).exists(_.toString == mode)
+    }.get
+    findResult("abc", "idle").rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
+    findResult("abc", "user").rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
+    findResult("def", "idle").rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    findResult("def", "user").rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
   }
 
   it("copy sample role to node using group right ") {
@@ -285,7 +293,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     ))
 
     result.size shouldEqual 1
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
     result.foreach(_.rows().size shouldEqual(1))
     result(0).rows().map(_.getDouble(1)).foreach(_ shouldEqual(2))
   }
@@ -336,10 +344,14 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.size shouldEqual 4
     result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
-    result(3).rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    def findResult2(instance: String, mode: String) = result.find { rv =>
+      rv.key.labelValues.get("instance".utf8).exists(_.toString == instance) &&
+        rv.key.labelValues.get("mode".utf8).exists(_.toString == mode)
+    }.get
+    findResult2("abc", "idle").rows().map(_.getDouble(1)).toList shouldEqual List(0.75)
+    findResult2("abc", "user").rows().map(_.getDouble(1)).toList shouldEqual List(0.25)
+    findResult2("def", "idle").rows().map(_.getDouble(1)).toList shouldEqual List(0.8)
+    findResult2("def", "user").rows().map(_.getDouble(1)).toList shouldEqual List(0.2)
   }
 
   it("should have metric name when operator is not MathOperator") {

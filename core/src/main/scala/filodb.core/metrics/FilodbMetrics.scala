@@ -304,7 +304,7 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdk = OpenTelemetrySdk.builder()
       .setMeterProvider(sdkMeterProviderBuilder.build())
       .build()
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     closeables ++= Classes.registerObservers(sdk).asScala
     closeables ++= Cpu.registerObservers(sdk).asScala
     closeables ++= MemoryPools.registerObservers(sdk).asScala

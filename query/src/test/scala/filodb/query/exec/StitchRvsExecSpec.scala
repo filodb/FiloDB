@@ -548,7 +548,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         if (v1._2.isNaN) v2._2.isNaN shouldEqual true
         else Math.abs(v1._2-v2._2) should be < error
         compareIter(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
@@ -564,7 +564,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         if (v1._3.isNaN) v2._3.isNaN shouldEqual true
         else Math.abs(v1._3 - v2._3) should be < error
         compareIterAvg(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }
@@ -588,7 +588,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         v1._2.buckets.equals(v2._2.buckets) shouldEqual true
         arraysEqual(v1._2.valueArray, v2._2.valueArray) shouldEqual true
         compareIterHist(it1, it2)
-      case (false, false) => Unit
+      case (false, false) => ()
       case _ => fail("Unequal lengths")
     }
   }

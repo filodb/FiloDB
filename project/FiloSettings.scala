@@ -12,14 +12,12 @@ import sbtassembly.AssemblyPlugin.autoImport._
 /* Settings */
 object FiloSettings {
 
-  /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
+  /* The REPL can’t cope with -Xfatal-warnings
      so we disable for console */
   lazy val consoleSettings = Seq(
-   scalacOptions in (Compile, console) ~= (_.filterNot(Set(
-     "-Ywarn-unused-import",
+   Compile / console / scalacOptions ~= (_.filterNot(Set(
      "-Xfatal-warnings"))),
-   scalacOptions in (Test, console) ~= (_.filterNot(Set(
-     "-Ywarn-unused-import",
+   Test / console / scalacOptions ~= (_.filterNot(Set(
      "-Xfatal-warnings"))))
 
   lazy val compilerSettings = Seq(
@@ -28,27 +26,19 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-target:jvm-1.8",
+      "-release:11",
       "-feature",
-      "-Xfuture",
-      "-Xfatal-warnings",
-      "-Ywarn-inaccessible",
+      "-Wconf:cat=deprecation:w", // Scala 2.13 replacement for -deprecation; report deprecations as warnings
       "-Ywarn-dead-code",
-      "-Ywarn-unused-import",
-      "-Yno-adapted-args",
       "-language:existentials",
       "-language:experimental.macros",
       "-language:higherKinds",
       "-language:implicitConversions"
-      // TODO relocate here: -Ywarn-unused-import, add -Ywarn-numeric-widen
-      // TODO in 2.12: remove: -Yinline-warnings, add the new applicable ones
-
-      // Don't enable this option. It makes all fields lazy, hurting performance.
-      //"-Xcheckinit"
     ),
 
     javacOptions ++= Seq(
-      "-encoding", "UTF-8"
+      "-encoding", "UTF-8",
+      "--release", "11"
     ))
 
   // Create a default Scala style task to run with tests
@@ -72,13 +62,12 @@ object FiloSettings {
       .withWarnDirectEvictions(false)
       .withWarnScalaVersionEviction(false))
 
-  // TODO disabled for now: "-Xlint:infer-any", "-Xlint",
   lazy val lintSettings = Seq(
     scalacOptions ++= Seq(
       "-Xlint:adapted-args",
       "-Xlint:nullary-unit",
       "-Xlint:inaccessible",
-      "-Xlint:nullary-override",
+      "-Xlint:infer-any",
       "-Xlint:missing-interpolator",
       "-Xlint:doc-detached",
       "-Xlint:private-shadow",
@@ -86,16 +75,17 @@ object FiloSettings {
       "-Xlint:poly-implicit-overload",
       "-Xlint:option-implicit",
       "-Xlint:delayedinit-select",
-      "-Xlint:by-name-right-associative",
       "-Xlint:package-object-classes",
-      "-Xlint:unsound-match",
-      "-Xlint:stars-align"
+      "-Xlint:stars-align",
+      "-Xlint:constant",
+      "-Xlint:deprecation"
     ),
 
     javacOptions ++= Seq(
       "-Xlint",
       "-Xlint:deprecation",
-      "-Xlint:unchecked"
+      "-Xlint:unchecked",
+      "--release", "11"
     ))
 
   lazy val disciplineSettings =

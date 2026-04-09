@@ -70,7 +70,9 @@ object SelectRawPartitionsExec extends {
       qLogger.debug(s"Replacing range function $origFunc with $newFunc...")
       replaceRangeFunction(transformers, origFunc, newFunc)
     } else {
-      transformers.toBuffer // Produce an immutable copy, so the original one is not mutated by accident
+      // toList produces a truly immutable copy; toBuffer.toSeq would still be mutable in Scala 2.13
+      // since mutable.Buffer already satisfies Seq and .toSeq is a no-op on it.
+      transformers.toList
     }
   }
 

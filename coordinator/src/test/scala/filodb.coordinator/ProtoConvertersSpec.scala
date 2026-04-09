@@ -96,7 +96,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
   class DummyActor extends akka.actor.Actor {
     override def receive: Receive = {
-      case "" => Unit
+      case "" => ()
     }
   }
 

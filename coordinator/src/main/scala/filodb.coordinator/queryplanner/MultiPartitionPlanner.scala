@@ -188,7 +188,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               val newPromQlParams = params.copy(promQl = LogicalPlanParser.convertToQuery(lp))
                 StitchRvsExec(qContext.copy(origQueryParams = newPromQlParams)
                   , inProcessPlanDispatcher, None,
-                  execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+                  PlannerUtil.localPlansFirst(execPlans),
                   enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
             }
             )
@@ -427,7 +427,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
         StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
-          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]),
+          PlannerUtil.localPlansFirst(execPlans),
           enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
       }
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
@@ -495,7 +495,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         )
         val dispatcher = PlannerUtil.pickDispatcher(plans)
         val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
-          plans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+          PlannerUtil.localPlansFirst(plans), aggregate.operator, aggregate.params)
         if (!queryContext.plannerParams.skipAggregatePresent) {
           val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
@@ -1011,7 +1011,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]).toSeq, aggregate.operator, aggregate.params)
+            PlannerUtil.localPlansFirst(execPlans).toSeq, aggregate.operator, aggregate.params)
           if (!queryContext.plannerParams.skipAggregatePresent) {
             reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
               RangeParams(queryParams.startSecs, queryParams.stepSecs, queryParams.endSecs)))
@@ -1246,7 +1246,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       val rvRange = RvRange(1000 * qParams.startSecs,
                             1000 * qParams.stepSecs,
                             1000 * qParams.endSecs)
-      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans,
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), execPlans.toSeq,
         enableApproximatelyEqualCheck = queryConfig.routingConfig.enableApproximatelyEqualCheckInStitch)
     }
     PlanResult(Seq(resPlan))

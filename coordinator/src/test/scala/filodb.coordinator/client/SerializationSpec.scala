@@ -154,8 +154,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         override def outputRange: Option[RvRange] = None
       }
       val srv = SerializedRangeVector(rv, cols.toIndexedSeq, QueryStats())
-      val observedTs = srv.rows().toSeq.map(_.getLong(0))
-      val observedVal = srv.rows().toSeq.map(_.getDouble(1))
+      val observedTs = srv.rows().map(_.getLong(0)).toSeq
+      val observedVal = srv.rows().map(_.getDouble(1)).toSeq
       observedTs shouldEqual tuples.map(_._1)
       observedVal shouldEqual tuples.map(_._2)
       srv

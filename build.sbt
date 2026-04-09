@@ -7,12 +7,26 @@ publishTo := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 // Global setting across all subprojects
 ThisBuild / organization := "org.filodb"
 ThisBuild / organizationName := "FiloDB"
-ThisBuild / scalaVersion := "2.12.12"
+ThisBuild / scalaVersion := "2.13.14"
 ThisBuild / publishMavenStyle := true
 ThisBuild / Test / publishArtifact := false
 ThisBuild / IntegrationTest / publishArtifact := false
 ThisBuild / licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/"))
 ThisBuild / pomIncludeRepository := { x => false }
+
+// Force consistent dependency versions to prevent cross-version conflicts
+ThisBuild / dependencyOverrides ++= Seq(
+  "org.typelevel" %% "cats-kernel" % "2.10.0",
+  "org.typelevel" %% "cats-core" % "2.10.0",
+  "io.circe" %% "circe-core" % "0.12.3",
+  "io.circe" %% "circe-generic" % "0.12.3",
+  "io.circe" %% "circe-parser" % "0.12.3",
+  "io.circe" %% "circe-jawn" % "0.12.3",
+  "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2",
+  "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
+  "com.typesafe.akka" %% "akka-actor" % "2.5.32",
+  "com.typesafe.akka" %% "akka-stream" % "2.5.32"
+)
 
 enablePlugins(ProtobufPlugin)
 

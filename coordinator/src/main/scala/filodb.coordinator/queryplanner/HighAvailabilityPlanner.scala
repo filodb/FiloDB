@@ -91,16 +91,17 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   private def stitchPlans(rootLogicalPlan: LogicalPlan,
                           execPlans: Seq[ExecPlan],
                           queryContext: QueryContext)= {
+    val localMetaFirst = PlannerUtil.localMetadataFirst(execPlans)
     rootLogicalPlan match {
-        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: LabelNames          => LabelNamesDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: LabelValues         =>
+          LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
+        case lp: LabelNames          =>
+          LabelNamesDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
+        case lp: SeriesKeysByFilters =>
+          PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
         case _                       => StitchRvsExec(queryContext, inProcessPlanDispatcher,
                                          rvRangeFromPlan(rootLogicalPlan),
-                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+                                         PlannerUtil.localPlansFirst(execPlans))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }

@@ -279,7 +279,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case s: CurrentClusterState =>
       logger.info(s"Initial Cluster State was: $s")
       shardManager.logAllMappers("After receiving initial cluster state")
-      val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).map(memberUp(_))
+      // .unsorted converts SortedSet[Member] to Set[Member] so that .map can return
+      // a Set[Future[Unit]] without requiring an Ordering[Future[Unit]] (Scala 2.13).
+      val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).unsorted.map(memberUp(_))
       Future.sequence(memberUpFutures.toSeq).onComplete { _ =>
         self ! RemoveStaleCoordinators
       }
