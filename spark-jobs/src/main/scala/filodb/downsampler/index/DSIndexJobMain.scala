@@ -2,15 +2,14 @@ package filodb.downsampler.index
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.metrics.FilodbMetrics
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
+import filodb.query.Query.qLogger
 
 /**
   *
@@ -124,8 +123,13 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
         Map("downsamplePeriod" -> downsamplePeriodStr))
       downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
     }
-    if (dsSettings.shouldSleepForMetricsFlush)
-      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
+    if (dsSettings.shouldSleepForMetricsFlush) {
+      val sleepTime = dsSettings.sleepTimeForMetricsFlush
+      qLogger.info(s"The job is about to finish. Will sleep extra time=${sleepTime}" +
+        s" to make sure the metrics publish finishes")
+      Thread.sleep(sleepTime.toMillis) // quick & dirty hack to ensure that the completed metric gets published
+      qLogger.info(s"The job finished. You may increase sleepTime=${sleepTime} if you see metrics publish failure.")
+    }
     spark
   }
 
