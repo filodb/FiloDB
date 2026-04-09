@@ -110,6 +110,8 @@ message RecordSchema {
 message ColumnInfo {
   string  name                       = 1;
   ColumnType columnType              = 2;
+  bool isCumulative                  = 3;
+  bool isExponential                 = 4;
 }
 
 enum ColumnType {
