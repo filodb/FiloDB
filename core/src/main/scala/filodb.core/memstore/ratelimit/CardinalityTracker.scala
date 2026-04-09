@@ -263,24 +263,30 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKey elements in the shard key of time series.
    *                 For example: (ws, ns, name). Full shard key is needed.
+   * @param count the count by which cardinality should be reduced; must be > 0.
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def decrementCount(shardKey: Seq[String]): Seq[CardinalityRecord] = synchronized {
+  def decrementCount(shardKey: Seq[String],
+                     count: Int): Seq[CardinalityRecord] = synchronized {
     // note this method is synchronized since the read-modify-write pattern that happens here is not thread-safe
     // modifyCount and decrementCount methods are protected this way
-
     try {
       require(shardKey.length == shardKeyLen, "full shard key is needed")
+      require(count > 0)
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
         val old = store.getOrZero(prefix,
           CardinalityRecord(shard, Nil, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
-        if (old.value.tsCount == 0)
-          throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
-            s"further. A double delete likely happened.")
-        val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount - 1,
-                          childrenCount = if (i == shardKeyLen) old.value.childrenCount-1 else old.value.childrenCount))
+        if (old.value.tsCount - count < 0)
+          throw new IllegalArgumentException(
+            s"$prefix count is already less than $count - " +
+            s"cannot reduce. A double delete likely happened.")
+        val neu = old.copy(
+          value = old.value.copy(tsCount = old.value.tsCount - count,
+          childrenCount = if (i == shardKeyLen) old.value.childrenCount - count
+                          else old.value.childrenCount)
+        )
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
