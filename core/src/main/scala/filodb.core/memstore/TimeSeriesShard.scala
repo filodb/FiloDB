@@ -312,12 +312,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
   /**
-    * Cardinality counts are updated according to the multipliers defined here.
+    * Active cardinality counts are updated according to the multipliers defined here.
     * For example: if one prom-histogram series maps to 25 "virtual" series, then cardinality
     *   counters will increment/decrement by 25 for each series accounted/unaccounted for.
     */
-  private val schemaNameToVirtualCardinalityPerSeries =
-    filodbConfig.getConfig("cardinality.schema-name-to-virtual-cardinality-per-series")
+  private val schemaNameToVirtualActiveCardinalityPerSeries =
+    filodbConfig.getConfig("cardinality.schema-name-to-virtual-active-cardinality-per-series")
       .entrySet().asScala.map { entry =>
         entry.getKey -> entry.getValue.unwrapped.asInstanceOf[Int]
       }.toMap
@@ -844,7 +844,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (storeConfig.meteringEnabled) {
         val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
           schema.options.shardKeyColumns)
-        modifyVirtualCardinalityCountNoThrow(shardKey, schema, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
+        modifyCardinalityCountNoThrow(shardKey, schema, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
@@ -1012,7 +1012,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (storeConfig.meteringEnabled) {
           val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
                                                           p.schema.options.shardKeyColumns)
-          modifyVirtualCardinalityCount(shardKey, p.schema, 0, -1)
+          modifyCardinalityCount(shardKey, p.schema, 0, -1)
         }
       }
     }
@@ -1092,13 +1092,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         updatedPartIdsForPublishing.foreach(publisher => publisher.store(partId))
         shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
-          modifyVirtualCardinalityCountNoThrow(shardKey, schema, 1, 1)
+          modifyCardinalityCountNoThrow(shardKey, schema, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
         if (storeConfig.meteringEnabled) {
-          modifyVirtualCardinalityCountNoThrow(shardKey, schema, 0, 1)
+          modifyCardinalityCountNoThrow(shardKey, schema, 0, 1)
           // TODO remove temporary debugging since we were seeing some negative counts when this increment was absent
           if (partId % 100 < 5) { // log for 5% of the cases
             logger.info(s"Increment activeDelta for ${newPart.stringPartition}")
@@ -1161,7 +1161,7 @@ class TimeSeriesShard(val ref: DatasetRef,
               val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                 tsp.schema.options.shardKeyColumns)
               if (storeConfig.meteringEnabled) {
-                modifyVirtualCardinalityCountNoThrow(shardKey, schema, 0, 1)
+                modifyCardinalityCountNoThrow(shardKey, schema, 0, 1)
               }
             }
           }
@@ -1222,51 +1222,46 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Cardinality counts are updated according to the multipliers returned here.
+   * Active cardinality counts are updated according to the multipliers returned here.
    * For example: if one prom-histogram series maps to 25 "virtual" series, then cardinality
    *   counters will increment/decrement by 25 for each series accounted/unaccounted for.
    */
-  private def getVirtualCardinalityPerSeries(schema: Schema): Int = {
-    schemaNameToVirtualCardinalityPerSeries.getOrElse(schema.name, 1)
+  private def getVirtualActiveCardinalityPerSeries(schema: Schema): Int = {
+    schemaNameToVirtualActiveCardinalityPerSeries.getOrElse(schema.name, 1)
   }
 
   /**
-   * Modifies a "virtual" cardinality count.
+   * Modifies the cardinality count.
+   * @param totalDelta the "physical" delta; will *not* be multiplied by any factor.
+   * @param activeDelta the "physical" delta; will be multiplied according to
+   *                    [[getVirtualActiveCardinalityPerSeries()]].
    */
-  private def modifyVirtualCardinalityCount(shardKey: Seq[String],
+  private def modifyCardinalityCount(shardKey: Seq[String],
+                                     schema: Schema,
+                                     totalDelta: Int,
+                                     activeDelta: Int): Unit = {
+    val virtualCardinalityPerSeries = getVirtualActiveCardinalityPerSeries(schema)
+    val virtualActiveDelta = activeDelta * virtualCardinalityPerSeries
+    cardTracker.modifyCount(shardKey, totalDelta, virtualActiveDelta)
+  }
+
+  /**
+   * Modifies the cardinality count and catches/logs any exceptions.
+   * Should only be used where an exception would otherwise cause ingestion/boostrap to fail.
+   * @param totalDelta the "physical" delta; will *not* be multiplied by any factor.
+   * @param activeDelta the "physical" delta; will be multiplied according to
+   *                    [[getVirtualActiveCardinalityPerSeries()]].
+   */
+  private def modifyCardinalityCountNoThrow(shardKey: Seq[String],
                                             schema: Schema,
                                             totalDelta: Int,
                                             activeDelta: Int): Unit = {
-    val virtualCardinalityPerSeries = getVirtualCardinalityPerSeries(schema)
-    val virtualTotalDelta = totalDelta * virtualCardinalityPerSeries
-    val virtualActiveDelta = activeDelta * virtualCardinalityPerSeries
-    cardTracker.modifyCount(shardKey, virtualTotalDelta, virtualActiveDelta)
-  }
-
-  /**
-   * Modifies a "virtual" cardinality count and catches/logs any exceptions.
-   * Should only be used where an exception would otherwise cause ingestion/boostrap to fail.
-   */
-  private def modifyVirtualCardinalityCountNoThrow(shardKey: Seq[String],
-                                                   schema: Schema,
-                                                   totalDelta: Int,
-                                                   activeDelta: Int): Unit = {
     try {
-      modifyVirtualCardinalityCount(shardKey, schema, totalDelta, activeDelta)
+      modifyCardinalityCount(shardKey, schema, totalDelta, activeDelta)
     } catch {
       case t: Throwable =>
           logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)
     }
-  }
-
-  /**
-   * Decrements a "virtual" cardinality count.
-   */
-  private def decrementVirtualCardinalityCount(shardKey: Seq[String],
-                                               schema: Schema): Unit = {
-
-    val virtualCardinalityPerSeries = getVirtualCardinalityPerSeries(schema)
-    cardTracker.decrementCount(shardKey, virtualCardinalityPerSeries)
   }
 
   /////// END SHARD INGESTION METHODS ///////////////////
@@ -1317,7 +1312,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
           try {
-            decrementVirtualCardinalityCount(shardKey, schema)
+            cardTracker.decrementCount(shardKey)
           } catch { case e: Exception =>
             logger.error("Got exception when reducing cardinality in tracker", e)
           }
@@ -1334,7 +1329,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           schemas.part.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
           try {
-            decrementVirtualCardinalityCount(shardKey, schema)
+            cardTracker.decrementCount(shardKey)
           } catch { case e: Exception =>
             logger.error("Got exception when reducing cardinality in tracker", e)
           }
