@@ -164,7 +164,7 @@ object ProtoConverters {
       val grpcColType = ci.colType.toProto
       builder.setColumnType(grpcColType)
       builder.setName(ci.name)
-      builder.setIsCumulative(ci.isCumulative)
+      builder.setIsNotCumulative(!ci.isCumulative)
       builder.setIsExponential(ci.isExponential)
       builder.build()
     }
@@ -173,7 +173,7 @@ object ProtoConverters {
   implicit class ColumnInfoFromProtoConversion(ci: ProtoRangeVector.ColumnInfo) {
     def fromProto: ColumnInfo = {
       val colType = ci.getColumnType.fromProto
-      ColumnInfo(ci.getName, colType, ci.getIsCumulative, ci.getIsExponential)
+      ColumnInfo(ci.getName, colType, !ci.getIsNotCumulative, ci.getIsExponential)
     }
   }
 

@@ -110,7 +110,7 @@ message RecordSchema {
 message ColumnInfo {
   string  name                       = 1;
   ColumnType columnType              = 2;
-  bool isCumulative                  = 3;
+  bool isNotCumulative               = 3;  // Proto default is false, but constructor default is true.
   bool isExponential                 = 4;
 }
 
