@@ -219,7 +219,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      promQl shouldEqual("""({job="app",__name__="test1"} + {job="app",__name__="test2"})""")
+      promQl shouldEqual("""(test1{job="app"} + test2{job="app"})""")
   }
 
   it("should extract partition and pod from StatefulSet actor path") {
