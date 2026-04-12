@@ -312,12 +312,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
   /**
-    * Active cardinality counts are updated according to the multipliers defined here.
-    * For example: if one prom-histogram series maps to 25 "virtual" series, then cardinality
-    *   counters will increment/decrement by 25 for each series accounted/unaccounted for.
+   * Billable cardinality counts are updated according to the multipliers returned here.
+   * For example: if one prom-histogram series maps to 25 "billable" series per "physical"
+   *   active series, then cardinality counters will increment/decrement by 25 for
+   *   each series accounted/unaccounted for.
     */
-  private val schemaNameToVirtualActiveCardinalityPerSeries =
-    filodbConfig.getConfig("cardinality.schema-name-to-virtual-active-cardinality-per-series")
+  val schemaNameToBillableCardinalityPerActiveSeries =
+    filodbConfig.getConfig("cardinality.schema-name-to-billable-cardinality-per-active-series")
       .entrySet().asScala.map { entry =>
         entry.getKey -> entry.getValue.unwrapped.asInstanceOf[Int]
       }.toMap
@@ -1222,35 +1223,30 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Active cardinality counts are updated according to the multipliers returned here.
-   * For example: if one prom-histogram series maps to 25 "virtual" series, then cardinality
-   *   counters will increment/decrement by 25 for each series accounted/unaccounted for.
+   * Billable cardinality counts are updated according to the multipliers returned here.
+   * For example: if one prom-histogram series maps to 25 "billable" series per "physical"
+   *   active series, then cardinality counters will increment/decrement by 25 for
+   *   each series accounted/unaccounted for.
    */
-  private def getVirtualActiveCardinalityPerSeries(schema: Schema): Int = {
-    schemaNameToVirtualActiveCardinalityPerSeries.getOrElse(schema.name, 1)
+  private def getBillableCardinalityPerActiveSeries(schema: Schema): Int = {
+    schemaNameToBillableCardinalityPerActiveSeries.getOrElse(schema.name, 1)
   }
 
   /**
    * Modifies the cardinality count.
-   * @param totalDelta the "physical" delta; will *not* be multiplied by any factor.
-   * @param activeDelta the "physical" delta; will be multiplied according to
-   *                    [[getVirtualActiveCardinalityPerSeries()]].
    */
   private def modifyCardinalityCount(shardKey: Seq[String],
                                      schema: Schema,
                                      totalDelta: Int,
                                      activeDelta: Int): Unit = {
-    val virtualCardinalityPerSeries = getVirtualActiveCardinalityPerSeries(schema)
-    val virtualActiveDelta = activeDelta * virtualCardinalityPerSeries
-    cardTracker.modifyCount(shardKey, totalDelta, virtualActiveDelta)
+    val billableCardinalityPerSeries = getBillableCardinalityPerActiveSeries(schema)
+    val billableDelta = activeDelta * billableCardinalityPerSeries
+    cardTracker.modifyCount(shardKey, totalDelta, activeDelta, billableDelta)
   }
 
   /**
    * Modifies the cardinality count and catches/logs any exceptions.
    * Should only be used where an exception would otherwise cause ingestion/boostrap to fail.
-   * @param totalDelta the "physical" delta; will *not* be multiplied by any factor.
-   * @param activeDelta the "physical" delta; will be multiplied according to
-   *                    [[getVirtualActiveCardinalityPerSeries()]].
    */
   private def modifyCardinalityCountNoThrow(shardKey: Seq[String],
                                             schema: Schema,
