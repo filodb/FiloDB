@@ -397,6 +397,24 @@ class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
+   * Adds a pre-encoded map field directly from a byte array already in RecordBuilder wire format.
+   * Use PreEncodedMap.encode() to produce correctly encoded bytes.
+   */
+  final def addPreEncodedMap(mapBytes: Array[Byte]): Unit = {
+    val numBytes = mapBytes.length
+    require(numBytes < 65536, s"Map bytes too large: $numBytes")
+    startMap()
+    requireBytes(numBytes)
+    UnsafeUtils.unsafe.copyMemory(mapBytes, UnsafeUtils.arayOffset,
+                                  curBase, curRecEndOffset, numBytes)
+    curRecEndOffset += numBytes
+    // update map length and record length
+    setShort(curBase, mapOffset, numBytes.toShort)
+    setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
+    endMap()
+  }
+
+  /**
    * Ends the building of the current BinaryRecord.  Makes sures RecordContainer state is updated.
    * Aligns the next record on a 4-byte/short word boundary.
    * Returns the Long offset of the just finished BinaryRecord.  If the container is offheap, then this is the
