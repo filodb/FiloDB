@@ -367,7 +367,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     case x => sys.error(s"Unsupported part key index type: '$x'")
   }
 
-  private val cardTracker: CardinalityTracker = initCardTracker()
+  private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -1235,10 +1235,10 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
    * Modifies the cardinality count.
    */
-  private def modifyCardinalityCount(shardKey: Seq[String],
-                                     schema: Schema,
-                                     totalDelta: Int,
-                                     activeDelta: Int): Unit = {
+  private[memstore] def modifyCardinalityCount(shardKey: Seq[String],
+                                               schema: Schema,
+                                               totalDelta: Int,
+                                               activeDelta: Int): Unit = {
     val billableCardinalityPerSeries = getBillableCardinalityPerActiveSeries(schema)
     val billableDelta = activeDelta * billableCardinalityPerSeries
     cardTracker.modifyCount(shardKey, totalDelta, activeDelta, billableDelta)
