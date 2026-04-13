@@ -7,6 +7,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 
+import akka.util.Helpers.Requiring
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
@@ -1347,12 +1348,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
     // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
     // is a metadata operation and shares common components with other metadata endpoints.
-    val partitions = lp match {
-      case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-      case _                          => getMetadataPartitions(lp.filters,
-        TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
-    }
-
+    val partitions = resolveMetadataPartitions(lp, queryParams)
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
       localPartitionPlanner.materialize(lp, qContext)
@@ -1389,6 +1385,57 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     PlanResult(execPlan::Nil)
   }
 
+  private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
+    val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
+    // SeriesKeysByFilters stores its filters directly; getNonMetricShardKeyFilters doesn't extract them
+    // via getRawSeriesFilters (which only handles RawSeries/LabelValues/LabelNames leaves).
+    val shardKeyFilterGroups = lp match {
+      case skbf: SeriesKeysByFilters =>
+        Seq(skbf.filters.filter(f => dataset.options.shardKeyColumns.contains(f.column)))
+      case _ =>
+        LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
+    }
+    val nonMetricCols = dataset.options.nonMetricShardColumns
+
+    val areEqualFilters = shardKeyFilterGroups.forall(columnFilters =>
+      columnFilters.
+        forall(
+          colFilter =>
+            colFilter.filter match {
+              case _: Equals => true
+              case _ => false
+            }
+        ))
+
+    def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
+      nonMetricCols.flatMap(shardKeyCol =>
+        group.collectFirst {
+          case ColumnFilter(c, filter) if c == shardKeyCol => c -> filter.value.toString
+        }
+      ).toMap
+
+    val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
+      shardKeyFilterGroups.isEmpty ||
+      !shardKeyFilterGroups.forall(group => nonMetricCols.forall(col => group.exists(_.column == col)))
+
+    // this will preserve the legacy routing logic.
+
+    lp match {
+      case lc: LabelCardinality =>
+        getPartitions(lc, queryParams)
+
+      case _ =>
+        if (shouldFallback) {
+          getMetadataPartitions(lp.filters, timeRange)
+        } else {
+          shardKeyFilterGroups
+            .map(buildRoutingMap)
+            .flatMap(routingMap => partitionLocationProvider.getPartitions(routingMap, timeRange))
+            .distinct
+        }
+    }
+  }
+
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
@@ -1397,7 +1444,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       getPartitions(lp, queryParams, infiniteTimeRange = true)
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
-                  s"dispatching to all authorized partitions")
+        s"dispatching to all authorized partitions")
       getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
     }
     val execPlan = if (partitions.isEmpty) {

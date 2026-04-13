@@ -4118,4 +4118,72 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       validatePlan(execPlan, expected)
     }
   }
+
+  describe("Metadata Query Routing - MultiPartitionPlanner") {
+    val metadataPartitionProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"))
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] =
+        List(
+          PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+          PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit"),
+          PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange, workUnit = "testWorkUnit")
+        )
+    }
+
+    val labelValuesParams = PromQlQueryParams("", 1000, 20, 5000, Some("/api/v2/label/values"))
+    val labelValuesTime = TimeStepParams(1000, 20, 5000)
+
+    def extractMetadataEndpoints(plan: ExecPlan): Seq[String] = plan match {
+      case m: MetadataRemoteExec => Seq(m.queryEndpoint)
+      case c: LabelValuesDistConcatExec =>
+        c.children.collect { case m: MetadataRemoteExec => m.queryEndpoint }
+      case _ => Seq.empty
+    }
+
+    it("should fallback to getMetadataPartitions when one shard-key filter is regex") {
+      // Use ShardKeyRegexPlanner to test regex filter handling
+      val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+        Seq(
+          Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+          Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2")))
+        )
+      }
+
+      val regexPartitionProvider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("partition-1", "http://partition-1-url", timeRange, workUnit = "testWorkUnit"))
+
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] =
+          List(
+            PartitionAssignment("metadata-p1", "http://metadata-p1-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p2", "http://metadata-p2-url", timeRange, workUnit = "testWorkUnit"),
+            PartitionAssignment("metadata-p3", "http://metadata-p3-url", timeRange, workUnit = "testWorkUnit")
+          )
+      }
+
+      val mppRegex = new MultiPartitionPlanner(
+        regexPartitionProvider, singlePartitionPlanner, "localPartition", dataset, queryConfig
+      )
+
+      val skrpRegex = new ShardKeyRegexPlanner(dataset, mppRegex, shardKeyMatcherFn,
+        regexPartitionProvider, queryConfig)
+
+      val lp = Parser.labelValuesQueryToLogicalPlan(
+        Seq("instance"), Some("""_ws_=~"demo.*", _ns_="App-1""""), labelValuesTime
+      )
+
+      val execPlan = skrpRegex.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
+
+      // When regex filter used, should fallback to metadata partitions
+      execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
+      val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
+      concatExec.children.size should be > 1
+    }
+  }
+
 }
+
