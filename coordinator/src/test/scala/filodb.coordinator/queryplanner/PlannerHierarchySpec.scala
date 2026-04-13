@@ -4181,7 +4181,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       // When regex filter used, should fallback to metadata partitions
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
       val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
-      concatExec.children.size should be >= 1
+      concatExec.children.size should be > 1
     }
   }
 
