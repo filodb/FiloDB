@@ -420,41 +420,41 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     //   and converted to ZeroCopyUTF8Strings.
     Seq(
       TestSpec(Seq(), 1, Seq(
-        Seq("demo") -> CardCounts(4,4,4),
-        Seq("testws") -> CardCounts(1,1,1),
-        Seq("demo-A") -> CardCounts(1,1,1)
+        Seq("demo") -> CardCounts(4,4,4,4),
+        Seq("testws") -> CardCounts(1,1,1,1),
+        Seq("demo-A") -> CardCounts(1,1,1,1)
         )),
       TestSpec(Seq(), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4,4),
-        Seq("testws", "testns") -> CardCounts(1,1,1),
-        Seq("demo-A", "App-A") -> CardCounts(1,1,1)
+        Seq("demo", "App-0") -> CardCounts(4,4,4,4),
+        Seq("testws", "testns") -> CardCounts(1,1,1,1),
+        Seq("demo-A", "App-A") -> CardCounts(1,1,1,1)
       )),
       TestSpec(Seq(), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1),
-        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1,1),
-        Seq("testws", "testns", "long_labels_metric") -> CardCounts(1,1,1)
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1,1),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1,1),
+        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1,1,1),
+        Seq("testws", "testns", "long_labels_metric") -> CardCounts(1,1,1,1)
       )),
       TestSpec(Seq("demo"), 1, Seq(
-        Seq("demo") -> CardCounts(4,4,4))),
+        Seq("demo") -> CardCounts(4,4,4,4))),
       TestSpec(Seq("demo"), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4,4))),
+        Seq("demo", "App-0") -> CardCounts(4,4,4,4))),
       TestSpec(Seq("demo"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1)
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1,1),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1,1)
       )),
       TestSpec(Seq("demo", "App-0"), 2, Seq(
-        Seq("demo", "App-0") -> CardCounts(4,4,4)
+        Seq("demo", "App-0") -> CardCounts(4,4,4,4)
       )),
       TestSpec(Seq("demo", "App-0"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1),
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1)
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1,1,1),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1,1,1)
       )),
       TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Seq(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2)))
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2,2,2)))
     ).foreach{ testSpec =>
 
       val leavesRaw = (0 until shardPartKeyLabelValues.size).map{ ishard =>
@@ -495,11 +495,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Seq[(Seq[String], CardCounts)])
 
    val testSpec = TestSpec(Seq(), 3, Seq(
-     Seq("demo", "App-0", "http_req_total") -> CardCounts(2, 2, 2),
-     Seq("demo", "App-0", "http_bar_total") -> CardCounts(1, 1, 1),
-     Seq("demo", "App-0", "http_foo_total") -> CardCounts(1, 1, 1),
-     Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1, 1, 1),
-     Seq("testws", "testns", "long_labels_metric") -> CardCounts(1, 1, 1)
+     Seq("demo", "App-0", "http_req_total") -> CardCounts(2, 2, 2, 2),
+     Seq("demo", "App-0", "http_bar_total") -> CardCounts(1, 1, 1, 1),
+     Seq("demo", "App-0", "http_foo_total") -> CardCounts(1, 1, 1, 1),
+     Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1, 1, 1, 1),
+     Seq("testws", "testns", "long_labels_metric") -> CardCounts(1, 1, 1, 1)
    ))
 
     val leavesRaw = (0 until shardPartKeyLabelValues.size).map { ishard =>
@@ -539,7 +539,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
         testMap.contains(nonOverflowRow.group) shouldEqual true
         testMap.get(nonOverflowRow.group).get shouldEqual nonOverflowRow.counts
 
-        var totalCardCountWithoutOverflow = CardCounts(0, 0, 0)
+        var totalCardCountWithoutOverflow = CardCounts(0, 0, 0, 0)
         val cardCountsWithoutNonOverflow = testMap.filter(x => (x._1 != nonOverflowRow.group)).toList
 
         cardCountsWithoutNonOverflow.map(x => totalCardCountWithoutOverflow = totalCardCountWithoutOverflow.add(x._2))

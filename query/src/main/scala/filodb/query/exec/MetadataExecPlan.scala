@@ -602,7 +602,7 @@ final case class TsCardExec(queryContext: QueryContext,
             if (clusterNameLowercase.contains("downsample")) {
               CardRowReader(
                 groupKey,
-                CardCounts(0, 0, card.value.tsCount))
+                CardCounts(0, 0, 0, card.value.tsCount))
             }
             else {
               CardRowReader(
