@@ -29,28 +29,55 @@ class PreEncodedMapSpec extends AnyFunSpec with Matchers {
   // Non-preagg schema (raw Prometheus counter)
   private val promCounterSchema = schemas.schemas("prom-counter")
 
-  private val testTags: java.util.TreeMap[String, String] = {
-    val map = new TreeMap[String, String]()
-    map.put("_ns_", "filodb-local")
-    map.put("_ws_", "aci-telemetry")
-    map.put("dc", "us-west-2")
-    map.put("instance", "i-12345")
-    map.put("label1", "value1")
-    map.put("region", "us-east-1")
-    map
-  }
+  // Multiple tag maps with varying key/value sizes for exhaustive testing
+  private val testTagMaps: Seq[(String, java.util.TreeMap[String, String])] = Seq(
+    "small keys and small values" -> sortedMap(
+      "_ns_" -> "ns",
+      "_ws_" -> "ws",
+      "a" -> "1"
+    ),
+    "small keys and large values" -> sortedMap(
+      "_ns_" -> "a" * 100,
+      "_ws_" -> "b" * 200,
+      "dc" -> "c" * 500
+    ),
+    "large keys and small values" -> sortedMap(
+      "_ns_" -> "x",
+      "_ws_" -> "y",
+      "k" * 100 -> "v",
+      "long_label_name_that_is_verbose" -> "1"
+    ),
+    "large keys and large values" -> sortedMap(
+      "_ns_" -> "a" * 300,
+      "_ws_" -> "b" * 300,
+      "k" * 80 -> "v" * 500,
+      "another_long_key_name" -> "another_long_value_" * 20
+    ),
+    "mixed predefined and non-predefined keys" -> sortedMap(
+      "_ns_" -> "filodb-local",
+      "_ws_" -> "aci-telemetry",
+      "dc" -> "us-west-2",
+      "instance" -> "i-12345",
+      "label1" -> "value1",
+      "region" -> "us-east-1"
+    ),
+    "predefined keys only" -> sortedMap(
+      "_ns_" -> "filodb-local",
+      "_ws_" -> "aci-telemetry"
+    )
+  )
+
+  // Default tag map used for single-test helpers
+  private val testTags: java.util.TreeMap[String, String] = testTagMaps.find(
+    _._1 == "mixed predefined and non-predefined keys").get._2
 
   describe("PreEncodedMap.encode and toJavaMap round-trip") {
-    it("should round-trip with predefined keys only") {
-      val t = sortedMap("_ns_" -> "filodb-local", "_ws_" -> "aci-telemetry")
-      val pem = PreEncodedMap.encode(t, partSchema)
-      pem.isEmpty shouldBe false
-      pem.toJavaMap() shouldEqual t
-    }
-
-    it("should round-trip with mixed predefined and non-predefined keys") {
-      val pem = PreEncodedMap.encode(testTags, partSchema)
-      pem.toJavaMap() shouldEqual testTags
+    testTagMaps.foreach { case (desc, tags) =>
+      it(s"should round-trip: $desc") {
+        val pem = PreEncodedMap.encode(tags, partSchema)
+        pem.isEmpty shouldBe false
+        pem.toJavaMap() shouldEqual tags
+      }
     }
 
     it("should handle empty map") {
@@ -67,11 +94,13 @@ class PreEncodedMapSpec extends AnyFunSpec with Matchers {
   }
 
   describe("PreEncodedMap.fromBytes") {
-    it("should wrap bytes zero-copy") {
-      val pem = PreEncodedMap.encode(testTags, partSchema)
-      val restored = PreEncodedMap.fromBytes(pem.bytes(), partSchema)
-      restored.bytes() should be theSameInstanceAs pem.bytes()
-      restored.toJavaMap() shouldEqual testTags
+    testTagMaps.foreach { case (desc, tags) =>
+      it(s"should wrap bytes zero-copy: $desc") {
+        val pem = PreEncodedMap.encode(tags, partSchema)
+        val restored = PreEncodedMap.fromBytes(pem.bytes(), partSchema)
+        restored.bytes() should be theSameInstanceAs pem.bytes()
+        restored.toJavaMap() shouldEqual tags
+      }
     }
 
     it("should handle null bytes") {
@@ -92,71 +121,129 @@ class PreEncodedMapSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("predefined key compression") {
+    it("should produce smaller bytes when keys are predefined") {
+      val tags = sortedMap("_ns_" -> "filodb-local", "_ws_" -> "aci-telemetry", "instance" -> "i-001")
+      val withPredef = PreEncodedMap.encode(tags, partSchema)
+      // Encode with a schema that has no predefined keys (use ingestion schema from prom-counter
+      // won't work — need partition schema). Instead, compare against raw key byte sizes.
+      // Each predefined key saves (keyLen) bytes vs the 1-byte code.
+      // _ns_ = 4 bytes key → saves 4 bytes, _ws_ = 4 bytes → saves 4, instance = 8 bytes → saves 8
+      // Total savings = 16 bytes (minus 3 bytes for the 3 predefined codes) = net 13 bytes saved
+      withPredef.size() should be < (4 + 4 + 12 + 8 + 8 + 5 + 6 + 6) // raw size without compression
+    }
+  }
+
+  describe("different tags produce different hashes") {
+    it("should produce different partition hashes for records with different tags") {
+      val tags1 = sortedMap("_ns_" -> "ns1", "_ws_" -> "ws1")
+      val tags2 = sortedMap("_ns_" -> "ns2", "_ws_" -> "ws2")
+
+      val builder1 = new RecordBuilder(MemFactory.onHeapFactory, 4096)
+      builder1.startNewRecord(gaugeSchema)
+      builder1.addLong(12345L); builder1.addDouble(1.0); builder1.addDouble(0.0)
+      builder1.addDouble(1.0); builder1.addDouble(1.0)
+      builder1.addString("metric1")
+      builder1.addPreEncodedMap(PreEncodedMap.encode(tags1, gaugeSchema.ingestionSchema).bytes())
+      val off1 = builder1.endRecord()
+      val hash1 = gaugeSchema.ingestionSchema.partitionHash(builder1.currentContainer.get.base, off1)
+
+      val builder2 = new RecordBuilder(MemFactory.onHeapFactory, 4096)
+      builder2.startNewRecord(gaugeSchema)
+      builder2.addLong(12345L); builder2.addDouble(1.0); builder2.addDouble(0.0)
+      builder2.addDouble(1.0); builder2.addDouble(1.0)
+      builder2.addString("metric1")
+      builder2.addPreEncodedMap(PreEncodedMap.encode(tags2, gaugeSchema.ingestionSchema).bytes())
+      val off2 = builder2.endRecord()
+      val hash2 = gaugeSchema.ingestionSchema.partitionHash(builder2.currentContainer.get.base, off2)
+
+      hash1 should not equal hash2
+    }
+  }
+
+  describe("consumeMapItems reads back PreEncodedMap bytes correctly") {
+    it("should read back all key-value pairs from a record built with addPreEncodedMap") {
+      val tags = sortedMap(
+        "_ns_" -> "filodb-local",
+        "_ws_" -> "aci-telemetry",
+        "dc" -> "us-west-2",
+        "region" -> "us-east-1"
+      )
+      val ingestion = gaugeSchema.ingestionSchema
+      val pem = PreEncodedMap.encode(tags, ingestion)
+
+      val builder = new RecordBuilder(MemFactory.onHeapFactory, 4096)
+      builder.startNewRecord(gaugeSchema)
+      builder.addLong(12345L); builder.addDouble(1.0); builder.addDouble(0.0)
+      builder.addDouble(1.0); builder.addDouble(1.0)
+      builder.addString("test_metric")
+      builder.addPreEncodedMap(pem.bytes())
+      val recOff = builder.endRecord()
+
+      val base = builder.currentContainer.get.base
+      val mapFieldIdx = ingestion.numFields - 1
+      val readBack = new StringifyMapItemConsumer()
+      ingestion.consumeMapItems(base, recOff, mapFieldIdx, readBack)
+
+      val result = new TreeMap[String, String]()
+      val pairs = readBack.stringPairs
+      for (i <- 0 until pairs.size) {
+        val t = pairs.apply(i)
+        result.put(t._1, t._2)
+      }
+      result shouldEqual tags
+    }
+  }
+
   describe("wire format compatibility with RecordBuilder") {
-    it("prom-counter (non-preagg schema)") {
-      // columns: timestamp, count, metric, tags
-      verifySchemaCompatibility(promCounterSchema, { b =>
+    val schemaTests: Seq[(String, Schema, RecordBuilder => Unit)] = Seq(
+      ("prom-counter", promCounterSchema, { b: RecordBuilder =>
         b.addLong(12345L)
         b.addDouble(42.0)
         b.addString("http_requests_total")
-      })
-    }
-
-    it("preagg-gauge") {
-      // columns: timestamp, count, min, sum, max, metric, tags
-      verifySchemaCompatibility(gaugeSchema, { b =>
+      }),
+      ("preagg-gauge", gaugeSchema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(5.0); b.addDouble(1.0)
         b.addDouble(15.0); b.addDouble(5.0)
         b.addString("test_gauge:::suffix")
-      })
-    }
-
-    it("preagg-delta-counter") {
-      // columns: timestamp, count, min, sum, max, metric, tags
-      verifySchemaCompatibility(deltaCounterSchema, { b =>
+      }),
+      ("preagg-delta-counter", deltaCounterSchema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(10.0); b.addDouble(2.0)
         b.addDouble(20.0); b.addDouble(8.0)
         b.addString("test_counter:::suffix")
-      })
-    }
-
-    it("preagg-delta-histogram") {
-      // columns: timestamp, sum, count, tscount, h(hist), metric, tags
-      verifySchemaCompatibility(deltaHistogramSchema, { b =>
+      }),
+      ("preagg-delta-histogram", deltaHistogramSchema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(100.0); b.addDouble(50.0)
         b.addDouble(10.0); b.addBlob(testHistogramBlob())
         b.addString("test_histogram:::suffix")
-      })
-    }
-
-    it("preagg-otel-delta-histogram") {
-      // columns: timestamp, sum, count, tscount, h(hist), min, max, metric, tags
-      verifySchemaCompatibility(otelDeltaHistogramSchema, { b =>
+      }),
+      ("preagg-otel-delta-histogram", otelDeltaHistogramSchema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(100.0); b.addDouble(50.0)
         b.addDouble(10.0); b.addBlob(testHistogramBlob())
         b.addDouble(1.0); b.addDouble(99.0)
         b.addString("test_otel_hist:::suffix")
-      })
-    }
-
-    it("preagg-otel-exp-delta-histogram") {
-      // columns: timestamp, sum, count, tscount, h(hist:exp), min, max, metric, tags
-      verifySchemaCompatibility(otelExpDeltaHistogramSchema, { b =>
+      }),
+      ("preagg-otel-exp-delta-histogram", otelExpDeltaHistogramSchema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(100.0); b.addDouble(50.0)
         b.addDouble(10.0); b.addBlob(testHistogramBlob())
         b.addDouble(1.0); b.addDouble(99.0)
         b.addString("test_otel_exp_hist:::suffix")
-      })
-    }
-
-    it("preagg-delta-histogram-v2") {
-      // columns: timestamp, sum, count, tscount, h(hist), min, max, sumLast, metric, tags
-      verifySchemaCompatibility(deltaHistogramV2Schema, { b =>
+      }),
+      ("preagg-delta-histogram-v2", deltaHistogramV2Schema, { b: RecordBuilder =>
         b.addLong(12345L); b.addDouble(100.0); b.addDouble(50.0)
         b.addDouble(10.0); b.addBlob(testHistogramBlob())
         b.addDouble(1.0); b.addDouble(99.0); b.addDouble(42.0)
         b.addString("test_hist_v2:::suffix")
       })
+    )
+
+    for {
+      (schemaName, schema, addCols) <- schemaTests
+      (tagDesc, tags) <- testTagMaps
+    } {
+      it(s"$schemaName with $tagDesc") {
+        verifySchemaCompatibility(schema, addCols, tags)
+      }
     }
   }
 
@@ -183,13 +270,14 @@ class PreEncodedMapSpec extends AnyFunSpec with Matchers {
    * 3. Partition hashes are identical
    */
   private def verifySchemaCompatibility(schema: Schema,
-                                        addDataColumns: RecordBuilder => Unit): Unit = {
+                                        addDataColumns: RecordBuilder => Unit,
+                                        tags: java.util.TreeMap[String, String]): Unit = {
     // Traditional path
-    val builder1 = new RecordBuilder(MemFactory.onHeapFactory, 4096)
+    val builder1 = new RecordBuilder(MemFactory.onHeapFactory, 16384)
     builder1.startNewRecord(schema)
     addDataColumns(builder1)
     builder1.startMap()
-    testTags.entrySet().forEach { entry =>
+    tags.entrySet().forEach { entry =>
       builder1.addMapKeyValue(
         entry.getKey.getBytes(StandardCharsets.UTF_8),
         entry.getValue.getBytes(StandardCharsets.UTF_8))
@@ -199,9 +287,9 @@ class PreEncodedMapSpec extends AnyFunSpec with Matchers {
 
     // addPreEncodedMap path
     val ingestion = schema.ingestionSchema
-    val pem = PreEncodedMap.encode(testTags, ingestion)
+    val pem = PreEncodedMap.encode(tags, ingestion)
 
-    val builder2 = new RecordBuilder(MemFactory.onHeapFactory, 4096)
+    val builder2 = new RecordBuilder(MemFactory.onHeapFactory, 16384)
     builder2.startNewRecord(schema)
     addDataColumns(builder2)
     builder2.addPreEncodedMap(pem.bytes())

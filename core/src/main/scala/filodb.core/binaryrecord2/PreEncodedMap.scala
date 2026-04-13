@@ -18,6 +18,10 @@ import filodb.memory.format.UnsafeUtils.{arayOffset, setByte}
  *
  * The byte[] stores entries only — no 2-byte map length header (RecordBuilder adds that).
  * Immutable after construction. Thread-safe for reads.
+ *
+ * IMPORTANT: The encoding in PreEncodedMap.encode() must exactly match
+ * RecordBuilder.addMapKeyValue(). If the wire format changes in either place,
+ * both must be updated together.
  */
 final class PreEncodedMap private(private val data: Array[Byte], val schema: RecordSchema) {
 

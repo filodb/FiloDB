@@ -331,6 +331,10 @@ class RecordBuilder(memFactory: MemFactory,
    * Takes care of matching and translating predefined keys into short codes.
    * Keys must be < 60KB and values must be < 64KB
    * Hash is not computed or added for you - it must be separately added by you!
+   *
+   * IMPORTANT: PreEncodedMap.encode() replicates this encoding logic. If the wire format
+   * changes here (predefined key codes, UTF8StringShort/Medium encoding, byte order),
+   * PreEncodedMap must be updated to match.
    */
   final def addMapKeyValue(keyBytes: Array[Byte], keyOffset: Int, keyLen: Int,
                            valueBytes: Array[Byte], valueOffset: Int, valueLen: Int,
