@@ -4178,7 +4178,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
       val execPlan = skrpRegex.materialize(lp, QueryContext(origQueryParams = labelValuesParams))
 
-      // When regex filter used, should  fallback to metadata partitions
+      // When regex filter used, should fallback to metadata partitions
       execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual true
       val concatExec = execPlan.asInstanceOf[LabelValuesDistConcatExec]
       concatExec.children.size should be > 1
