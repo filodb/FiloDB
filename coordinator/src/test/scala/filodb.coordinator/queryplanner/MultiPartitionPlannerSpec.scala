@@ -2680,5 +2680,63 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
   }
 
+  it("should generate correct remote plans for PromQL queries with metric names " +
+     "that cannot prepend selector curly braces") {
+    val queries = Seq(
+      """{__name__="foo bar baz"}""",
+      """{__name__="!@#$%^&*()"}""",
+      """{job="app1",__name__="foo bar baz"}""",
+      """sum({job="app1",__name__="foo bar baz"})""",
+      """histogram_quantile({job="app1",__name__="foo bar baz"})""",
+      """({job="app1",__name__="foo bar baz"} + {job="app1",__name__="foo bar baz"})"""
+    )
 
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = {
+        List(PartitionAssignmentV2(
+          Map("remote" -> PartitionDetails("remote", "remote-url", None, 1.0f, "testWorkUnit")),
+          TimeRange(1000 * 1000, 10000 * 1000)
+        ))
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: scala.Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    for (query <- queries) {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
+      val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+      val remoteExecQuery = execPlan.asInstanceOf[PromQlRemoteExec].promQlQueryParams.promQl
+      remoteExecQuery shouldEqual query
+    }
+  }
+
+  it("should generate correct remote plans for metadata queries with metric names " +
+     "that cannot prepend selector curly braces") {
+    val queries = Seq(
+      """{__name__="foo bar baz"}""",
+      """{__name__="!@#$%^&*()"}""",
+      """{job="app1",__name__="!@#$%^&*()"}"""
+    )
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = Nil
+      override def getMetadataPartitions(nonMetricShardKeyFilters: scala.Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
+        List(PartitionAssignment("remote", "remote-url", TimeRange(1000 * 1000, 10000 * 1000), None, "testWorkUnit"))
+      }
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    for (query <- queries) {
+      val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
+      val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+      val remoteExecQuery = execPlan.asInstanceOf[MetadataRemoteExec].promQlQueryParams.promQl
+      remoteExecQuery shouldEqual query
+    }
+  }
 }
