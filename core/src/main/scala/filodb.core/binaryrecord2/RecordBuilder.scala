@@ -331,6 +331,10 @@ class RecordBuilder(memFactory: MemFactory,
    * Takes care of matching and translating predefined keys into short codes.
    * Keys must be < 60KB and values must be < 64KB
    * Hash is not computed or added for you - it must be separately added by you!
+   *
+   * IMPORTANT: MapEncoder.encode() replicates this encoding logic. If the wire format
+   * changes here (predefined key codes, UTF8StringShort/Medium encoding, byte order),
+   * MapEncoder must be updated to match.
    */
   final def addMapKeyValue(keyBytes: Array[Byte], keyOffset: Int, keyLen: Int,
                            valueBytes: Array[Byte], valueOffset: Int, valueLen: Int,
@@ -394,6 +398,24 @@ class RecordBuilder(memFactory: MemFactory,
     }
     mapOffset = -1L
     fieldNo += 1
+  }
+
+  /**
+   * Adds an encoded map field directly from a byte array already in RecordBuilder wire format.
+   * Use MapEncoder.encode() to produce correctly encoded bytes.
+   */
+  final def addEncodedMap(mapBytes: Array[Byte]): Unit = {
+    val numBytes = mapBytes.length
+    require(numBytes < 65536, s"Map bytes too large: $numBytes")
+    startMap()
+    requireBytes(numBytes)
+    UnsafeUtils.unsafe.copyMemory(mapBytes, UnsafeUtils.arayOffset,
+                                  curBase, curRecEndOffset, numBytes)
+    curRecEndOffset += numBytes
+    // update map length and record length
+    setShort(curBase, mapOffset, numBytes.toShort)
+    setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
+    endMap()
   }
 
   /**

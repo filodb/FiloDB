@@ -1,0 +1,126 @@
+package filodb.core.binaryrecord2
+
+import java.nio.charset.StandardCharsets
+import java.util
+
+import filodb.memory.UTF8StringMedium
+import filodb.memory.UTF8StringShort
+import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.UnsafeUtils.{arayOffset, setByte}
+
+// scalastyle:off null
+/**
+ * Stateless utility for encoding/decoding tag maps in RecordBuilder's exact wire format.
+ *
+ * Wire format per entry:
+ *   Predefined key: [0xC0 | predefKeyNum (1B)][valLen (2B native-endian)][valBytes]
+ *   Full key:       [keyLen (1B)][keyBytes UTF-8][valLen (2B native-endian)][valBytes UTF-8]
+ *
+ * The byte[] contains entries only — no 2-byte map length header (RecordBuilder adds that
+ * via addPreEncodedMap).
+ *
+ * IMPORTANT: The encoding in MapEncoder.encode() must exactly match
+ * RecordBuilder.addMapKeyValue(). If the wire format changes in either place,
+ * both must be updated together.
+ */
+object MapEncoder {
+
+  val EMPTY: Array[Byte] = new Array[Byte](0)
+
+  /**
+   * Encode a tag map into RecordBuilder's wire format with predefined key handling.
+   * TreeMap guarantees keys are sorted, matching RecordBuilder's convention.
+   *
+   * @param tags TreeMap of tag key-value pairs (sorted by key)
+   * @param schema the RecordSchema with predefined key definitions for encoding
+   * @return encoded byte[] in RecordBuilder wire format
+   */
+  def encode(tags: java.util.TreeMap[String, String], schema: RecordSchema): Array[Byte] = {
+    if (tags == null || tags.isEmpty) return EMPTY
+
+    // Upper bound: each entry at most 1 + keyLen*3 + 2 + valLen*3 (UTF-8 worst case)
+    var upperBound = 0
+    val iter = tags.entrySet().iterator()
+    while (iter.hasNext) {
+      val entry = iter.next()
+      upperBound += 1 + entry.getKey.length * 3 + 2 + entry.getValue.length * 3
+    }
+    val buf = new Array[Byte](upperBound)
+    var pos = 0
+
+    val iter2 = tags.entrySet().iterator()
+    while (iter2.hasNext) {
+      val entry = iter2.next()
+      val keyBytes = entry.getKey.getBytes(StandardCharsets.UTF_8)
+      val valBytes = entry.getValue.getBytes(StandardCharsets.UTF_8)
+
+      require(keyBytes.length < 192, s"Key too long: ${entry.getKey} (${keyBytes.length} bytes, max 191)")
+      require(valBytes.length < 65536, s"Value too long: ${entry.getValue} (${valBytes.length} bytes)")
+
+      // Predefined key lookup — matches RecordBuilder.addMapKeyValue exactly
+      val keyKey = RecordSchema.makeKeyKey(keyBytes, 0, keyBytes.length, 7)
+      val predefNum = schema.predefKeyNumMap.getOrElse(keyKey, -1)
+
+      if (predefNum >= 0) {
+        // Predefined key: 1-byte code
+        setByte(buf, arayOffset + pos, (0xC0 | predefNum).toByte)
+        pos += 1
+      } else {
+        // Full key: UTF8StringShort (1B length + bytes)
+        UTF8StringShort.copyByteArrayTo(keyBytes, buf, arayOffset + pos)
+        pos += 1 + keyBytes.length
+      }
+
+      // Value: UTF8StringMedium (2B length + bytes, native endian)
+      UTF8StringMedium.copyByteArrayTo(valBytes, buf, arayOffset + pos)
+      pos += 2 + valBytes.length
+    }
+
+    util.Arrays.copyOf(buf, pos)
+  }
+
+  /**
+   * Decode encoded map bytes into a sorted Java Map.
+   *
+   * @param data encoded byte[] in RecordBuilder wire format
+   * @param schema the RecordSchema with predefined key definitions for decoding key codes
+   * @return sorted TreeMap of decoded key-value pairs
+   */
+  def toJavaMap(data: Array[Byte], schema: RecordSchema): java.util.Map[String, String] = {
+    val map = new util.TreeMap[String, String]()
+    if (data == null || data.length == 0) return map
+
+    var pos = 0
+    while (pos < data.length) {
+      val firstByte = data(pos) & 0xFF
+      val predefIndex = firstByte ^ 0xC0
+
+      if (predefIndex < 64) {
+        // Predefined key — decode from schema
+        val keyOff = schema.predefKeyOffsets(predefIndex)
+        val keyLen = UTF8StringShort.numBytes(schema.predefKeyBytes, keyOff)
+        val keyStr = new String(schema.predefKeyBytes,
+          (keyOff + 1 - UnsafeUtils.arayOffset).toInt, keyLen, StandardCharsets.UTF_8)
+
+        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
+        val valStr = new String(data, pos + 3, valLen, StandardCharsets.UTF_8)
+        map.put(keyStr, valStr)
+        pos += 3 + valLen
+      } else {
+        // Full key
+        val keyLen = firstByte
+        val keyStr = new String(data, pos + 1, keyLen, StandardCharsets.UTF_8)
+
+        val valLenPos = pos + 1 + keyLen
+        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
+        val valStr = new String(data, valLenPos + 2, valLen, StandardCharsets.UTF_8)
+        map.put(keyStr, valStr)
+        pos += 1 + keyLen + 2 + valLen
+      }
+    }
+    map
+  }
+
+  /** Check if encoded map bytes are empty. */
+  def isEmpty(data: Array[Byte]): Boolean = data == null || data.length == 0
+}
