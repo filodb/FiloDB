@@ -150,7 +150,10 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
           |}
           |""".stripMargin)
 
-      val producer = new LabelStatsKafkaProducer(config)
+      val producer = new LabelStatsKafkaProducer(config,
+        spark.sparkContext.longAccumulator("failures"),
+        spark.sparkContext.longAccumulator("labels"),
+        spark.sparkContext.longAccumulator("workspaces"))
 
       val grouped = producer.groupLabelsByWorkspace(df)
 
@@ -216,7 +219,10 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
           |}
           |""".stripMargin)
 
-      val producer = new LabelStatsKafkaProducer(config)
+      val producer = new LabelStatsKafkaProducer(config,
+        spark.sparkContext.longAccumulator("failures"),
+        spark.sparkContext.longAccumulator("labels"),
+        spark.sparkContext.longAccumulator("workspaces"))
 
       producer.topic shouldBe "test-topic"
       producer.kafkaProps("pie.queue.kaffe.connect") shouldBe "test-server:9092"
