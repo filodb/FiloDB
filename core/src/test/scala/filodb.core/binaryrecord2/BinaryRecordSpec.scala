@@ -447,6 +447,50 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       recSchema2.partitionHash(basebase, offset4) shouldEqual lastHash
     }
 
+    it("should produce identical record with addEncodedMap as with addMapKeyValue") {
+      val tags = new java.util.TreeMap[String, String]()
+      tags.put("__name__", "host_cpu_load")
+      tags.put("dc", "AWS-USE")
+      tags.put("instance", "0123892E342342A90")
+      tags.put("job", "prometheus")
+
+      // Traditional path
+      val builder1 = new RecordBuilder(MemFactory.onHeapFactory)
+      builder1.startNewRecord(schema2)
+      builder1.addLong(System.currentTimeMillis)
+      builder1.addDouble(1.0)
+      builder1.addDouble(2.5)
+      builder1.addDouble(10.1)
+      builder1.addLong(123456L)
+      builder1.addString("Series 1")
+      builder1.startMap()
+      tags.entrySet().forEach { entry =>
+        builder1.addMapKeyValue(
+          entry.getKey.getBytes(StandardCharsets.UTF_8),
+          entry.getValue.getBytes(StandardCharsets.UTF_8))
+      }
+      builder1.endMap()
+      val off1 = builder1.endRecord()
+
+      // addEncodedMap path
+      val encoded = MapEncoder.encode(tags, recSchema2)
+      val builder2 = new RecordBuilder(MemFactory.onHeapFactory)
+      builder2.startNewRecord(schema2)
+      builder2.addLong(System.currentTimeMillis)
+      builder2.addDouble(1.0)
+      builder2.addDouble(2.5)
+      builder2.addDouble(10.1)
+      builder2.addLong(123456L)
+      builder2.addString("Series 1")
+      builder2.addEncodedMap(encoded)
+      val off2 = builder2.endRecord()
+
+      // Partition hashes must match
+      val hash1 = recSchema2.partitionHash(builder1.allContainers.head.base, off1)
+      val hash2 = recSchema2.partitionHash(builder2.allContainers.head.base, off2)
+      hash1 shouldEqual hash2
+    }
+
     it("should copy records to new byte arrays and compare equally") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
