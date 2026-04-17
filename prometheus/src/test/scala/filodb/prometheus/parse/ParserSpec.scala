@@ -347,6 +347,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("log2(some_metric, 5)")
     parseSuccessfully("sgn(some_metric)")
 
+    // time() on LHS with aggregate on RHS (rdar://174518144)
+    parseSuccessfully("time() + sum(rate(foo{_ws_=\"demo\", _ns_=\"App-0\"}[1i]))")
+    parseSuccessfully("time() + sum(foo)")
+    parseSuccessfully("time() - max(foo)")
+
 
     //        parseError(  "floor()")
     //        parseError(  "floor(some_metric, other_metric)")
@@ -841,6 +846,14 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "1-1" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(1.0),RangeParams(1524855988,1000,1524855988))",
       "rate(___http_requests_total{job=\"api-server\"}[10m])" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))),List(),Some(600000),None,false),1524855988000,1000000,1524855988000,600000,Rate,false,List(),None,None)",
       "(http_requests_total{job=\"api-server\"}==1)+4 " -> "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(4.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(EQL,ScalarFixedDoublePlan(1.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),false),false)",
+
+      // time() on LHS with aggregate on RHS (rdar://174518144)
+      "time() + sum(rate(foo{_ws_=\"demo\", _ns_=\"App-0\"}[1i]))" ->
+        "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(1000000),None,false),1524855988000,1000000,1524855988000,1000000,Rate,true,List(),None,None),List(),None),true)",
+      "time() + sum(foo)" ->
+        "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),List(),None),true)",
+      "time() - max(foo)" ->
+        "ScalarVectorBinaryOperation(SUB,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),Aggregate(Max,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None,false),1524855988000,1000000,1524855988000,None,None),List(),None),true)",
     )
 
     val qts: Long = 1524855988L
