@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import filodb.core.MetricsTestData
 import filodb.core.binaryrecord2.RecordSchema
@@ -37,6 +38,10 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   implicit val scheduler: monix.execution.Scheduler = monix.execution.Scheduler.Implicits.global
   implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout = Span(60000, Millis))
+  val queryConfig = {
+    val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+    QueryConfig(config.getConfig("query"))
+  }
 
   private def toRv(samples: Seq[(Long, Double)],
                    rangeVectorKey: RangeVectorKey,
@@ -198,7 +203,6 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should correctly apply RangeVectorTransformers") {
     val range = RvRange(1000, 1000, 2000)
     val queryParams = PromQlQueryParams("foo{}", range.startMs, range.stepMs, range.endMs)
-    val queryConfig: QueryConfig = null  // scalastyle:ignore
     val resultSchema1 = ResultSchema(
       Seq(
         ColumnInfo("timestamp", ColumnType.TimestampColumn),
@@ -249,7 +253,6 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should correctly update QueryStats") {
     val range = RvRange(1000, 1000, 2000)
     val queryParams = PromQlQueryParams("foo{}", range.startMs, range.stepMs, range.endMs)
-    val queryConfig: QueryConfig = null // scalastyle:ignore
     val testResultSchema = ResultSchema(
       Seq(
         ColumnInfo("timestamp", ColumnType.TimestampColumn),

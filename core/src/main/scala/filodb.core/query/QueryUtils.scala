@@ -1,15 +1,33 @@
 package filodb.core.query
 
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
+
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.metrics.{FilodbMetrics, MetricsCounter}
+import filodb.core.query.QueryUtils.SamplesScannedScope.SamplesScannedScope
+import filodb.core.query.QueryUtils.SamplesScannedType.SamplesScannedType
 
 /**
  * Storage for utility functions.
  */
 object QueryUtils {
+  object SamplesScannedScope extends Enumeration {
+    type SamplesScannedScope = Value
+    val Parent, Child = Value
+  }
+  object SamplesScannedType extends Enumeration {
+    type SamplesScannedType = Value
+    val Row, Series, PartKeyByte = Value
+  }
+
   val REGEX_CHARS: Array[Char] = Array('.', '?', '+', '*', '|', '{', '}', '[', ']', '(', ')', '"', '\\')
   private val COMBO_CACHE_SIZE = 2048
+  private val SAMPLES_SCANNED_METRIC_NAME = "num-samples-scanned-by-queries"
+  private val SAMPLES_SCANNED_SCOPE_LABEL = "scope"
+  private val SAMPLES_SCANNED_TYPE_LABEL = "type"
 
   private val regexCharsMinusPipe = (REGEX_CHARS.toSet - '|').toArray
 
@@ -19,6 +37,29 @@ object QueryUtils {
       .recordStats()
       .build()
 
+  private def makeSamplesScannedCounter(sampleScope: SamplesScannedScope,
+                                        sampleType: SamplesScannedType): MetricsCounter = {
+    FilodbMetrics.counter(SAMPLES_SCANNED_METRIC_NAME, Map(
+      SAMPLES_SCANNED_SCOPE_LABEL -> sampleScope.toString.toLowerCase,
+      SAMPLES_SCANNED_TYPE_LABEL -> sampleType.toString.toLowerCase
+    ))
+  }
+
+  // These metrics will be useful to help tune the samples-scanned config (e.g.
+  //   they can be fed into a linear regression to determine how well samples-scanned
+  //   values correlate with partition saturation).
+  private val rowSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Parent, SamplesScannedType.Row)
+  private val seriesSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Parent, SamplesScannedType.Series)
+  private val partKeyBytesSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Parent, SamplesScannedType.PartKeyByte)
+  private val childRowSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Child, SamplesScannedType.Row)
+  private val childSeriesSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Child, SamplesScannedType.Series)
+  private val childPartKeyBytesSamplesScanned = makeSamplesScannedCounter(
+    SamplesScannedScope.Child, SamplesScannedType.PartKeyByte)
 
   /**
    * Returns true iff the argument string contains any special regex chars.
@@ -108,6 +149,156 @@ object QueryUtils {
     })
   }
 
+  /**
+   * Returns the sample multiplier that should be applied
+   *   to a row with the argument column type.
+   */
+  private def getSamplesScannedRowMultiplier(colInfo: ColumnInfo,
+                                             config: SamplesScannedConfig): Double = {
+    colInfo.colType match {
+      case ColumnType.HistogramColumn =>
+        if (colInfo.isExponential) {
+          config.exponentialHistogramRowMultiplier
+        } else {
+          config.histogramRowMultiplier
+        }
+      case _ => config.defaultRowMultiplier
+    }
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   *
+   * @param clazz The class that produced these samples.
+   */
+  def trackSamplesScanned(seriesScanned: Long,
+                          rowsScanned: Long,
+                          partKeyBytes: Long,
+                          clazz: Class[_],
+                          queryStats: QueryStats,
+                          schema: ResultSchema,
+                          config: SamplesScannedConfig): Unit = {
+    // Exit early if there are no stats to update.
+    if (queryStats.stat.isEmpty) {
+      return
+    }
+
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is always added to QueryStats.
+    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
+    val statKeys = if (!hasSingleEmptyKey) {
+      queryStats.stat.keys.filter(_.nonEmpty).toSeq
+    } else Seq(Nil)
+
+    val rowMultiplier = schema.columns
+      .map(getSamplesScannedRowMultiplier(_, config))
+      .sum
+    val rowSamples = rowsScanned * rowMultiplier *
+      config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
+    rowSamplesScanned.increment(rowSamples.toLong)
+
+    val seriesSamples = seriesScanned *
+      config.classToSamplesPerSeries.getOrElse(clazz, config.defaultSamplesPerSeries)
+    seriesSamplesScanned.increment(seriesSamples.toLong)
+
+    val partKeySamples = partKeyBytes *
+      config.classToSamplesPerPartKeyByte.getOrElse(clazz, config.defaultSamplesPerPartKeyByte)
+    partKeyBytesSamplesScanned.increment(partKeySamples.toLong)
+
+    val totalSamples = Math.ceil(
+      rowSamples + seriesSamples + partKeySamples
+    ).asInstanceOf[Long]
+
+    val samplesPerCounter = Math.ceil(
+      totalSamples.asInstanceOf[Double] / statKeys.size
+    ).asInstanceOf[Long]
+
+    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
+   *
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   *
+   * @param class The class that produced these samples.
+   */
+  def trackSamplesScanned(rv: RangeVector,
+                          clazz: Class[_],
+                          queryStats: QueryStats,
+                          schema: ResultSchema,
+                          config: SamplesScannedConfig): Unit = {
+    val seriesScanned = 1
+    val rowsScanned = rv.estimateNumRows()
+    val partKeyBytes = rv.key.keySize
+    trackSamplesScanned(seriesScanned, rowsScanned, partKeyBytes,
+      clazz, queryStats, schema, config)
+  }
+
+  /**
+   * Given the arguments, determines the total count of samples scanned.
+   * Adds the total to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
+   *
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   *
+   * @param childRv The [[RangeVector]] that was scanned by the parent.
+   * @param parentClass The class that scanned the child [[RangeVector]].
+   */
+  def trackChildSamplesScanned(childRv: RangeVector,
+                               parentClass: Class[_],
+                               queryStats: QueryStats,
+                               schema: ResultSchema,
+                               config: SamplesScannedConfig): Unit = {
+    // Exit early if there are no stats to update.
+    if (queryStats.stat.isEmpty) {
+      return
+    }
+
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is always added to QueryStats.
+    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
+    val statKeys = if (!hasSingleEmptyKey) {
+      queryStats.stat.keys.filter(_.nonEmpty).toSeq
+    } else Seq(Nil)
+
+    val rowMultiplier = schema.columns
+      .map(getSamplesScannedRowMultiplier(_, config))
+      .sum
+    val rowSamples = childRv.estimateNumRows() * rowMultiplier *
+      config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
+    childRowSamplesScanned.increment(rowSamples.toLong)
+
+    val seriesSamples = config.classToSamplesPerChildSeries.getOrElse(
+      parentClass, config.defaultSamplesPerChildSeries)
+    childSeriesSamplesScanned.increment(seriesSamples.toLong)
+
+    val partKeySamples = childRv.key.keySize *
+      config.classToSamplesPerChildPartKeyByte.getOrElse(parentClass, config.defaultSamplesPerChildPartKeyByte)
+    childPartKeyBytesSamplesScanned.increment(partKeySamples.toLong)
+
+    val totalSamples = Math.ceil(
+      rowSamples + seriesSamples + partKeySamples
+    ).asInstanceOf[Long]
+
+    val samplesPerCounter = Math.ceil(
+      totalSamples.asInstanceOf[Double] / statKeys.size
+    ).asInstanceOf[Long]
+
+    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+  }
+
   def maxIgnoreNaN(a: Double, b: Double): Double = {
     if (a != a) b // a is NaN
     else if (b != b) a // b is NaN
@@ -121,5 +312,4 @@ object QueryUtils {
     else if (a < b) a
     else b
   }
-
 }

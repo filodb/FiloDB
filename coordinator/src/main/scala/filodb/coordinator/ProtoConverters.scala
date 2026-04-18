@@ -1,8 +1,15 @@
 package filodb.coordinator
 
+import java.util.concurrent.TimeUnit
+
+import scala.collection.JavaConverters._
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
+
 import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.StrictLogging
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
@@ -10,6 +17,7 @@ import scala.jdk.CollectionConverters._
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{ComputedColumn, DataColumn}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.grpc.GrpcMultiPartitionQueryService.{RangeVectorTransformerContainer, RemoteExecPlan}
@@ -24,7 +32,7 @@ import filodb.query.exec._
 // scalastyle:off file.size.limit
 // scalastyle:off method.length
 // scalastyle:off line.size.limit
-object ProtoConverters {
+object ProtoConverters extends StrictLogging {
 
   import filodb.query.ProtoConverters._
 
@@ -60,6 +68,7 @@ object ProtoConverters {
       builder.addAllGrpcPartitionsDenyList(qc.grpcPartitionsDenyList.asJava)
       qc.plannerSelector.foreach(plannerSelector => builder.setPlannerSelector(plannerSelector))
       qc.recordContainerOverrides.foreach(overrides => builder.putRecordContainerOverrides(overrides._1, overrides._2))
+      builder.setSamplesScannedConfig(qc.samplesScannedConfig.toProto)
       builder.build()
     }
   }
@@ -86,11 +95,144 @@ object ProtoConverters {
         qc.getAllowPartialResultsMetadataQuery(),
         qc.getGrpcPartitionsDenyListList().asScala.toSet,
         if (qc.hasPlannerSelector) Option(qc.getPlannerSelector()) else None,
-        rcoIntMap
+        rcoIntMap,
+        samplesScannedConfig =
+          if (qc.hasSamplesScannedConfig) qc.getSamplesScannedConfig.fromProto
+          else SamplesScannedConfig()
       )
       queryConfig
     }
   }
+
+  implicit class SamplesScannedConfigToProtoConverter(config: SamplesScannedConfig) {
+    def toProto: GrpcMultiPartitionQueryService.SamplesScannedConfig = {
+      val builder = GrpcMultiPartitionQueryService.SamplesScannedConfig.newBuilder()
+      builder.setLeafSamplesEnabled(config.leafSamplesEnabled)
+      builder.setExecResultSamplesEnabled(config.execResultSamplesEnabled)
+      builder.setExecChildSamplesEnabled(config.execChildSamplesEnabled)
+      builder.setRvtSamplesEnabled(config.rvtSamplesEnabled)
+      builder.setRvtChildSamplesEnabled(config.rvtChildSamplesEnabled)
+      builder.setSrvSamplesEnabled(config.srvSamplesEnabled)
+      builder.setDefaultRowMultiplier(config.defaultRowMultiplier)
+      builder.setHistogramRowMultiplier(config.histogramRowMultiplier)
+      builder.setExponentialHistogramRowMultiplier(config.exponentialHistogramRowMultiplier)
+      builder.setDefaultSamplesPerRow(config.defaultSamplesPerRow)
+      builder.setDefaultSamplesPerSeries(config.defaultSamplesPerSeries)
+      builder.setDefaultSamplesPerPartKeyByte(config.defaultSamplesPerPartKeyByte)
+      config.classToSamplesPerRow.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerRow(clazz.getName, mult)
+      }
+      config.classToSamplesPerSeries.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerSeries(clazz.getName, mult)
+      }
+      config.classToSamplesPerPartKeyByte.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerPartKeyByte(clazz.getName, mult)
+      }
+      builder.setDefaultSamplesPerChildRow(config.defaultSamplesPerChildRow)
+      builder.setDefaultSamplesPerChildSeries(config.defaultSamplesPerChildSeries)
+      builder.setDefaultSamplesPerChildPartKeyByte(config.defaultSamplesPerChildPartKeyByte)
+      config.classToSamplesPerChildRow.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerChildRow(clazz.getName, mult)
+      }
+      config.classToSamplesPerChildSeries.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerChildSeries(clazz.getName, mult)
+      }
+      config.classToSamplesPerChildPartKeyByte.foreach { case (clazz, mult) =>
+        builder.putClassToSamplesPerChildPartKeyByte(clazz.getName, mult)
+      }
+      builder.build()
+    }
+  }
+
+  // scalastyle:off cyclomatic.complexity
+  implicit class SamplesScannedConfigFromProtoConverter(config: GrpcMultiPartitionQueryService.SamplesScannedConfig) {
+    def fromProto: SamplesScannedConfig = {
+      SamplesScannedConfig(
+        config.getLeafSamplesEnabled,
+        config.getExecResultSamplesEnabled,
+        config.getExecChildSamplesEnabled,
+        config.getRvtSamplesEnabled,
+        config.getRvtChildSamplesEnabled,
+        config.getSrvSamplesEnabled,
+        config.getDefaultRowMultiplier,
+        config.getHistogramRowMultiplier,
+        config.getExponentialHistogramRowMultiplier,
+        config.getDefaultSamplesPerRow,
+        config.getDefaultSamplesPerSeries,
+        config.getDefaultSamplesPerPartKeyByte,
+        config.getClassToSamplesPerRowMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap,
+        config.getClassToSamplesPerSeriesMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap,
+        config.getClassToSamplesPerPartKeyByteMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap,
+        config.getDefaultSamplesPerChildRow,
+        config.getDefaultSamplesPerChildSeries,
+        config.getDefaultSamplesPerChildPartKeyByte,
+        config.getClassToSamplesPerChildRowMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap,
+        config.getClassToSamplesPerChildSeriesMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap,
+        config.getClassToSamplesPerChildPartKeyByteMap.asScala
+          .filter { case (className, _) =>
+            val parseTry = Try(Class.forName(className))
+            if (!parseTry.isSuccess) {
+              logger.error("Could not find class while deserializing SamplesScannedConfig: " +
+                className, parseTry.failed.get)
+            }
+            parseTry.isSuccess
+          }
+          .map { case (className, mult) => Class.forName(className) -> mult.asInstanceOf[Double] }
+          .toMap
+      )
+    }
+  }
+  // scalastyle:on cyclomatic.complexity
 
   // ChunkScanMethod
   implicit class ChunkScanMethodToProtoConverter(csm: filodb.core.store.ChunkScanMethod) {

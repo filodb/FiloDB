@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
+import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 
 import filodb.core._
@@ -12,7 +13,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
-
+import filodb.core.query.QueryUtils
 
 /**
  * RawChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
@@ -148,6 +149,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult
 
+  // scalastyle:off method.length
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
@@ -197,12 +199,39 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val key = PartitionRangeVectorKey(Left(partition),
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
+
+      val resultSchema = {
+        val numRowKeyCols = 1
+        ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
+      }
+
+      // Add leaf-level samples-scanned into the QueryStats.
+      val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+      val isSeriesCounted = AtomicBoolean(false)
+      def samplesScannedRowCountConsumer(rowsScanned: Long): Unit = {
+        if (!samplesScannedConfig.leafSamplesEnabled) {
+          return
+        }
+        // Only count the series/pk-bytes once; all other calls will exclusively count rows.
+        if (!isSeriesCounted.get()) {
+          QueryUtils.trackSamplesScanned(
+            seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
+            querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+          isSeriesCounted.set(true)
+        } else {
+          QueryUtils.trackSamplesScanned(
+            seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
+            querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+        }
+      }
+
       RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, lookupRes.samplesScannedCtr,
+        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, samplesScannedRowCountConsumer,
         querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
       )
     }
   }
+  // scalastyle:on method.length
 
   val FILODB_PARTITION_KEY = "filodb.partition"
 
