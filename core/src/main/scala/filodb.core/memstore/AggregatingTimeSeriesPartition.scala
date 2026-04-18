@@ -53,6 +53,9 @@ class AggregatingTimeSeriesPartition(
   // Check if any column has aggregation configured
   private val hasAnyAggregation: Boolean = aggConfigs.exists(_.isDefined)
 
+  // Guard to prevent re-entrant switchBuffers calls (flushAllBuckets -> super.ingest -> switchBuffers)
+  private var isSwitchingBuffers: Boolean = false
+
   // Determine which columns are histogram columns
   private val isHistogramColumn: Array[Boolean] = {
     schema.data.columns.map { col =>
@@ -261,12 +264,17 @@ class AggregatingTimeSeriesPartition(
    * This ensures no data is lost when chunks are sealed.
    */
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    if (hasAnyAggregation) {
-      // Use the latest sample timestamp from bucket state instead of wall clock
-      val latestTs = bucketState.stats.latestSampleTimestamp
-      val flushTime = if (latestTs == Long.MinValue) 0L else latestTs
-      flushAllBuckets(flushTime, blockHolder, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = None, acceptDuplicateSamples = true)
+    if (hasAnyAggregation && !isSwitchingBuffers) {
+      isSwitchingBuffers = true
+      try {
+        // Use the latest sample timestamp from bucket state instead of wall clock
+        val latestTs = bucketState.stats.latestSampleTimestamp
+        val flushTime = if (latestTs == Long.MinValue) 0L else latestTs
+        flushAllBuckets(flushTime, blockHolder, createChunkAtFlushBoundary = false,
+          flushIntervalMillis = None, acceptDuplicateSamples = true)
+      } finally {
+        isSwitchingBuffers = false
+      }
     }
 
     super.switchBuffers(blockHolder, encode)
