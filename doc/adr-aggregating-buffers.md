@@ -1,7 +1,7 @@
 # ADR: Aggregating Buffers for Out-of-Order Tolerance
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
@@ -826,6 +826,31 @@ Add metrics to track:
 3. **Cross-partition aggregation**: Aggregate across multiple partitions
 4. **Watermarking**: Explicit watermarks for bucket emission
 5. **Exactly-once semantics**: Guarantee no duplicate aggregation on replay
+
+## Implementation Notes
+
+Key differences from the original proposal:
+
+1. **Schema-level aggregation config**: Aggregation is configured at the schema level
+   (via `AggregationConfig` on the `Schema` object), not per-column as originally proposed.
+   All aggregating columns in a schema share the same interval and tolerance.
+
+2. **No maxBuckets cap**: The implementation does not enforce a fixed maximum number of
+   active buckets. Buckets are managed by `BucketAggregationState` and flushed based on
+   time progression rather than a hard count limit.
+
+3. **Histogram aggregation support**: The implementation includes `HistogramSum` and
+   `HistogramLast` aggregator types (via `HistogramAggregator`) that were not in the
+   original proposal. These handle `BinaryHistogram` / `HistogramWithBuckets` values.
+
+4. **RowReader-based approach**: Instead of directly manipulating `BinaryRecord` values,
+   the implementation uses `RowReader` abstractions (`BucketDataRowReader`,
+   `BucketRowData`) to emit aggregated data through the query path via
+   `MergingRangeVectorCursor`.
+
+5. **BucketAggregationState**: Replaced the proposed `BucketManager` class. Manages
+   bucket lifecycle, sample aggregation, and emission of finalized bucket rows sorted
+   by timestamp.
 
 ## References
 

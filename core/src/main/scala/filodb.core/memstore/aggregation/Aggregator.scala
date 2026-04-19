@@ -309,23 +309,8 @@ class HistogramAggregator extends Aggregator {
             initialized = true
         }
 
-      case h: Histogram =>
-        // Generic histogram - convert to HistogramWithBuckets if possible
-        h match {
-          case hwb: HistogramWithBuckets =>
-            accumulator match {
-              case Some(acc) =>
-                acc.add(hwb)
-              case None =>
-                accumulator = Some(MutableHistogram(hwb))
-                initialized = true
-            }
-          case _ =>
-            // Cannot handle non-HistogramWithBuckets types
-        }
-
       case _ =>
-        // Ignore non-histogram values
+        // Ignore non-histogram values (including Histogram without buckets)
     }
   }
 

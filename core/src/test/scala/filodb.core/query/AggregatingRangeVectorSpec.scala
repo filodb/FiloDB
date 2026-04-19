@@ -250,6 +250,67 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
         base.closed shouldBe true
       }
     }
+
+    describe("hasNext idempotency") {
+      it("should be idempotent - calling hasNext twice should not lose data") {
+        val base = cursorWithRows((1000L, 10.0))
+        val buckets = Seq(bucketRow(2000L, 20.0), bucketRow(3000L, 30.0))
+        val cursor = new MergingRangeVectorCursor(base, buckets.iterator, tsValueColumnIDs)
+
+        // Consume base row
+        cursor.hasNext shouldBe true
+        cursor.next().getLong(0) shouldEqual 1000L
+
+        // Call hasNext twice in a row without next() — should be idempotent
+        cursor.hasNext shouldBe true
+        cursor.hasNext shouldBe true  // must still be true, not advance the iterator
+
+        // The next row should be the FIRST bucket row (2000), not the second (3000)
+        val row1 = cursor.next()
+        row1.getLong(0) shouldEqual 2000L
+        row1.getDouble(1) shouldEqual 20.0
+
+        // Continue to the next bucket row
+        cursor.hasNext shouldBe true
+        val row2 = cursor.next()
+        row2.getLong(0) shouldEqual 3000L
+        row2.getDouble(1) shouldEqual 30.0
+
+        cursor.hasNext shouldBe false
+      }
+
+      it("should be idempotent with empty base cursor") {
+        val base = emptyCursor()
+        val buckets = Seq(bucketRow(1000L, 10.0), bucketRow(2000L, 20.0))
+        val cursor = new MergingRangeVectorCursor(base, buckets.iterator, tsValueColumnIDs)
+
+        // Call hasNext multiple times before first next()
+        cursor.hasNext shouldBe true
+        cursor.hasNext shouldBe true
+        cursor.hasNext shouldBe true
+
+        // Should still get the first bucket row
+        cursor.next().getLong(0) shouldEqual 1000L
+
+        cursor.hasNext shouldBe true
+        cursor.next().getLong(0) shouldEqual 2000L
+
+        cursor.hasNext shouldBe false
+      }
+
+      it("should be idempotent when no more rows after exhaustion") {
+        val base = cursorWithRows((1000L, 10.0))
+        val cursor = new MergingRangeVectorCursor(base, Iterator.empty, tsValueColumnIDs)
+
+        cursor.hasNext shouldBe true
+        cursor.next()
+
+        // Multiple hasNext calls at end — all should return false
+        cursor.hasNext shouldBe false
+        cursor.hasNext shouldBe false
+        cursor.hasNext shouldBe false
+      }
+    }
   }
 
   // ======================== BucketDataRowReader ========================

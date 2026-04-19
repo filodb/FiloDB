@@ -4,6 +4,10 @@ package filodb.core.memstore.aggregation
  * Represents a time bucket that aggregates samples within a specific time interval.
  * Each bucket has a timestamp representing the bucket boundary (ceiling of the interval).
  *
+ * Note: This case class is test infrastructure — it is not used in the production ingestion path.
+ * Production code uses only TimeBucket.ceilToBucket() from the companion object below.
+ * The case class and its methods (aggregate, emit, canAccept, etc.) are exercised only in TimeBucketSpec.
+ *
  * @param bucketTimestamp the timestamp representing the bucket boundary (end of interval)
  * @param aggregators array of aggregators, one per column being aggregated
  * @param sampleCount number of samples added to this bucket
@@ -97,6 +101,7 @@ case class TimeBucket(
 }
 
 object TimeBucket {
+  // --- Production method (used by BucketAggregationState, AggregatingTimeSeriesPartition) ---
   /**
    * Ceils a timestamp to the next bucket boundary.
    * This is the core time bucketing logic that determines which bucket a sample belongs to.
@@ -114,6 +119,7 @@ object TimeBucket {
     ((ts + intervalMs - 1) / intervalMs) * intervalMs
   }
 
+  // --- Test-only utilities below ---
   /**
    * Floors a timestamp to the previous bucket boundary.
    * Useful for calculating bucket start times.

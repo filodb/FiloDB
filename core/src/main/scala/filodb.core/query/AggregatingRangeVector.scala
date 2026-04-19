@@ -152,9 +152,13 @@ private[query] class MergingRangeVectorCursor(
       true
     } else {
       exhaustedBase = true
-      // Find bucket rows that are after the last finalized timestamp
-      currentBucketRow = findNextBucketRow()
-      currentBucketRow.isDefined
+      // Only find next bucket row if we don't already have one staged
+      if (currentBucketRow.isDefined) {
+        true
+      } else {
+        currentBucketRow = findNextBucketRow()
+        currentBucketRow.isDefined
+      }
     }
   }
 
