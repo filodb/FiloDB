@@ -2,6 +2,8 @@ package filodb.core.memstore.aggregation
 
 import scala.collection.mutable
 
+import filodb.core.metadata.Column
+import filodb.memory.format.RowReader
 import filodb.memory.format.vectors.MutableHistogram
 
 /**
@@ -19,7 +21,8 @@ import filodb.memory.format.vectors.MutableHistogram
  */
 class BucketAggregationState(
   columnConfigs: Array[Option[AggregationConfig]],
-  numColumns: Int
+  numColumns: Int,
+  columnTypes: Array[Column.ColumnType] = Array.empty
 ) {
   // Map from bucket timestamp -> column index -> aggregated value
   // Using nested maps for efficient per-bucket access
@@ -30,6 +33,17 @@ class BucketAggregationState(
 
   // Track the latest sample timestamp seen for OOO detection
   private var latestSampleTimestamp: Long = Long.MinValue
+
+  // Cached primary config values (computed once at construction to avoid per-sample collection ops)
+  private val primaryIntervalMs: Long = columnConfigs.flatten.headOption.map(_.intervalMs).getOrElse(0L)
+  private val primaryOooToleranceMs: Long = columnConfigs.flatten.headOption.map(_.oooToleranceMs).getOrElse(0L)
+  private val hasPrimaryConfig: Boolean = columnConfigs.flatten.nonEmpty
+
+  // Pre-computed arrays for fast inner-loop access (avoids Option matching per column per sample)
+  private val isAggregating: Array[Boolean] = columnConfigs.map(_.isDefined)
+  // scalastyle:off null
+  private val aggConfigsFlat: Array[AggregationConfig] = columnConfigs.map(_.orNull)
+  // scalastyle:on null
 
   /**
    * Aggregates a sample into the appropriate bucket for each aggregating column.
@@ -45,16 +59,9 @@ class BucketAggregationState(
     ingestionTime: Long,
     columnValues: Array[Any]
   ): Boolean = {
-    // Calculate bucket timestamps for each column (they might differ if configs differ)
-    // For simplicity, we use the first aggregating column's interval
-    val bucketTs = getBucketTimestamp(sampleTimestamp)
+    if (!hasPrimaryConfig) return false
 
-    if (bucketTs.isEmpty) {
-      // No aggregation configured
-      return false
-    }
-
-    val ts = bucketTs.get
+    val ts = getBucketTimestamp(sampleTimestamp)
 
     // Check if bucket is already finalized
     if (finalizedBuckets.contains(ts)) {
@@ -73,19 +80,17 @@ class BucketAggregationState(
     var aggregated = false
     var i = 0
     while (i < numColumns) {
-      columnConfigs(i) match {
-        case Some(config) =>
-          val value = columnValues(i)
-          if (value != null) {
-            bucketState.aggregate(i, config, value, sampleTimestamp)
-            aggregated = true
-          }
-        case None =>
-          // Non-aggregating column - keep the latest value (or first, depending on needs)
-          // For now, we'll store the value from the first sample
-          if (!bucketState.hasValue(i) && columnValues(i) != null) {
-            bucketState.setValue(i, columnValues(i))
-          }
+      if (isAggregating(i)) {
+        val value = columnValues(i)
+        if (value != null) {
+          bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+          aggregated = true
+        }
+      } else {
+        // Non-aggregating column - keep first value
+        if (!bucketState.hasValue(i) && columnValues(i) != null) {
+          bucketState.setValue(i, columnValues(i))
+        }
       }
       i += 1
     }
@@ -99,12 +104,101 @@ class BucketAggregationState(
   // scalastyle:on method.length
 
   /**
+   * Aggregates a sample from a RowReader directly, using type-specialized paths
+   * to avoid boxing for Double and Long columns.
+   * Requires columnTypes to be provided at construction.
+   */
+  // scalastyle:off method.length cyclomatic.complexity
+  def aggregate(
+    sampleTimestamp: Long,
+    ingestionTime: Long,
+    row: RowReader
+  ): Boolean = {
+    if (!hasPrimaryConfig) return false
+
+    val ts = getBucketTimestamp(sampleTimestamp)
+
+    if (finalizedBuckets.contains(ts)) return false
+    if (!isWithinTolerance(sampleTimestamp, ingestionTime)) return false
+
+    val bucketState = activeBuckets.getOrElseUpdate(ts, new BucketState(numColumns))
+
+    var aggregated = false
+    var i = 0
+    while (i < numColumns) {
+      if (isAggregating(i)) {
+        if (columnTypes.length > i) {
+          columnTypes(i) match {
+            case Column.ColumnType.DoubleColumn =>
+              val value = row.getDouble(i)
+              if (!value.isNaN) {
+                bucketState.aggregateDoubleWithTimestamp(i, aggConfigsFlat(i), value, sampleTimestamp)
+                aggregated = true
+              }
+            case Column.ColumnType.LongColumn | Column.ColumnType.TimestampColumn =>
+              bucketState.aggregateLongWithTimestamp(i, aggConfigsFlat(i), row.getLong(i), sampleTimestamp)
+              aggregated = true
+            case Column.ColumnType.HistogramColumn =>
+              val value = row.getAny(i)
+              // scalastyle:off null
+              if (value != null) {
+                bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+                aggregated = true
+              }
+              // scalastyle:on null
+            case _ =>
+              val value = row.getAny(i)
+              // scalastyle:off null
+              if (value != null) {
+                bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+                aggregated = true
+              }
+              // scalastyle:on null
+          }
+        } else {
+          // Fallback if columnTypes not provided
+          val value = row.getAny(i)
+          // scalastyle:off null
+          if (value != null) {
+            bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+            aggregated = true
+          }
+          // scalastyle:on null
+        }
+      } else {
+        // scalastyle:off null
+        if (!bucketState.hasValue(i)) {
+          val value = row.getAny(i)
+          if (value != null) bucketState.setValue(i, value)
+        }
+        // scalastyle:on null
+      }
+      i += 1
+    }
+
+    if (sampleTimestamp > latestSampleTimestamp) {
+      latestSampleTimestamp = sampleTimestamp
+    }
+
+    aggregated
+  }
+  // scalastyle:on method.length cyclomatic.complexity
+
+  /**
    * Gets buckets that should be finalized (older than threshold).
-   * Returns bucket timestamps in sorted order.
+   * Uses TreeMap's sorted nature for efficient range iteration.
    */
   def getBucketsToFinalize(thresholdTs: Long): Seq[Long] = {
-    activeBuckets.keys.filter(_ < thresholdTs).toSeq
+    if (activeBuckets.isEmpty) return Seq.empty
+    activeBuckets.until(thresholdTs).keys.toSeq
   }
+
+  /**
+   * Returns the earliest active bucket timestamp, or Long.MaxValue if no active buckets.
+   * Used for fast guard checks before attempting finalization.
+   */
+  def earliestBucketTimestamp: Long =
+    if (activeBuckets.isEmpty) Long.MaxValue else activeBuckets.firstKey
 
   /**
    * Gets the complete aggregated row for a bucket.
@@ -118,11 +212,10 @@ class BucketAggregationState(
       val values = new Array[Any](numColumns)
       var i = 0
       while (i < numColumns) {
-        columnConfigs(i) match {
-          case Some(config) =>
-            values(i) = state.getAggregatedValue(i, config)
-          case None =>
-            values(i) = state.getValue(i)
+        if (isAggregating(i)) {
+          values(i) = state.getAggregatedValue(i, aggConfigsFlat(i))
+        } else {
+          values(i) = state.getValue(i)
         }
         i += 1
       }
@@ -187,9 +280,8 @@ class BucketAggregationState(
    * Cleans up old finalized tracking to prevent unbounded growth.
    */
   def cleanupOldFinalizedTracking(thresholdTs: Long): Unit = {
-    val minConfig = columnConfigs.flatten.headOption
-    minConfig.foreach { config =>
-      val cleanupThreshold = thresholdTs - (2 * config.oooToleranceMs)
+    if (hasPrimaryConfig) {
+      val cleanupThreshold = thresholdTs - (2 * primaryOooToleranceMs)
       finalizedBuckets.retain(_ >= cleanupThreshold)
     }
   }
@@ -212,19 +304,13 @@ class BucketAggregationState(
     latestSampleTimestamp = Long.MinValue
   }
 
-  // Helper to calculate bucket timestamp based on first aggregation config
-  private def getBucketTimestamp(sampleTs: Long): Option[Long] = {
-    columnConfigs.flatten.headOption.map { config =>
-      TimeBucket.ceilToBucket(sampleTs, config.intervalMs)
-    }
-  }
+  // Helper to calculate bucket timestamp using cached primary interval
+  private def getBucketTimestamp(sampleTs: Long): Long =
+    TimeBucket.ceilToBucket(sampleTs, primaryIntervalMs)
 
-  // Helper to check if sample is within tolerance
-  private def isWithinTolerance(sampleTs: Long, ingestionTime: Long): Boolean = {
-    columnConfigs.flatten.headOption.exists { config =>
-      ingestionTime - sampleTs <= config.oooToleranceMs
-    }
-  }
+  // Helper to check if sample is within tolerance using cached tolerance
+  private def isWithinTolerance(sampleTs: Long, ingestionTime: Long): Boolean =
+    ingestionTime - sampleTs <= primaryOooToleranceMs
 
   /**
    * Gets the aggregated histogram for a specific column and bucket.
@@ -253,9 +339,26 @@ private class BucketState(numColumns: Int) {
     aggregators(colIdx).addWithTimestamp(value, sampleTimestamp)
   }
 
+  def aggregateDoubleWithTimestamp(colIdx: Int, config: AggregationConfig,
+                                   value: Double, sampleTimestamp: Long): Unit = {
+    if (aggregators(colIdx) == null) {
+      aggregators(colIdx) = Aggregator.create(config.aggType)
+    }
+    aggregators(colIdx).addDoubleWithTimestamp(value, sampleTimestamp)
+  }
+
+  def aggregateLongWithTimestamp(colIdx: Int, config: AggregationConfig,
+                                 value: Long, sampleTimestamp: Long): Unit = {
+    if (aggregators(colIdx) == null) {
+      aggregators(colIdx) = Aggregator.create(config.aggType)
+    }
+    aggregators(colIdx).addLongWithTimestamp(value, sampleTimestamp)
+  }
+
   def getAggregatedValue(colIdx: Int, config: AggregationConfig): Any = {
     // scalastyle:off null
-    Option(aggregators(colIdx)).map(_.result()).orNull
+    val agg = aggregators(colIdx)
+    if (agg != null) agg.result() else null
     // scalastyle:on null
   }
 

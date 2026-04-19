@@ -63,6 +63,9 @@ class AggregatingTimeSeriesPartition(
     }.toArray
   }
 
+  // Pre-compute column types for type-specialized aggregation
+  private val columnTypes: Array[Column.ColumnType] = schema.data.columns.map(_.columnType).toArray
+
   // If no aggregation, behave as a normal partition
   if (!hasAnyAggregation) {
     logger.info(s"AggregatingTimeSeriesPartition created but no aggregation configured for partition $partID")
@@ -70,7 +73,7 @@ class AggregatingTimeSeriesPartition(
 
   // Central bucket aggregation state managing ALL columns
   private lazy val bucketState: BucketAggregationState = {
-    new BucketAggregationState(aggConfigs, schema.numDataColumns)
+    new BucketAggregationState(aggConfigs, schema.numDataColumns, columnTypes)
   }
 
   // Get the primary aggregation config (used for interval/tolerance calculations)
@@ -107,16 +110,8 @@ class AggregatingTimeSeriesPartition(
 
     val timestamp = schema.timestamp(row)
 
-    // Extract all column values from the row
-    val columnValues = new Array[Any](schema.numDataColumns)
-    var i = 0
-    while (i < schema.numDataColumns) {
-      columnValues(i) = row.getAny(i)
-      i += 1
-    }
-
-    // Aggregate all columns into the bucket
-    val aggregated = bucketState.aggregate(timestamp, ingestionTime, columnValues)
+    // Pass RowReader directly to avoid Array[Any] boxing
+    val aggregated = bucketState.aggregate(timestamp, ingestionTime, row)
 
     if (!aggregated) {
       // Sample was outside tolerance or bucket was finalized
@@ -147,30 +142,33 @@ class AggregatingTimeSeriesPartition(
         config.intervalMs
       )
 
-      val bucketsToFinalize = bucketState.getBucketsToFinalize(thresholdTs)
+      // Fast guard: skip if no active buckets are old enough
+      if (bucketState.earliestBucketTimestamp < thresholdTs) {
+        val bucketsToFinalize = bucketState.getBucketsToFinalize(thresholdTs)
 
-      if (bucketsToFinalize.nonEmpty) {
-        logger.debug(s"Finalizing ${bucketsToFinalize.size} buckets for partition $partID")
+        if (bucketsToFinalize.nonEmpty) {
+          logger.debug(s"Finalizing ${bucketsToFinalize.size} buckets for partition $partID")
 
-        bucketsToFinalize.foreach { bucketTs =>
-          bucketState.getBucketValues(bucketTs).foreach { columnValues =>
-            // Create a complete row with all columns
-            val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
+          bucketsToFinalize.foreach { bucketTs =>
+            bucketState.getBucketValues(bucketTs).foreach { columnValues =>
+              // Create a complete row with all columns
+              val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
 
-            logger.trace(s"Writing finalized bucket $bucketTs to vectors for partition $partID")
+              logger.trace(s"Writing finalized bucket $bucketTs to vectors for partition $partID")
 
-            // Write the complete row using super.ingest
-            // Use acceptDuplicateSamples=true since buckets are written in order
-            super.ingest(ingestionTime, aggregatedRow, overflowBlockHolder,
-              createChunkAtFlushBoundary, flushIntervalMillis,
-              acceptDuplicateSamples = true, maxChunkTime)
+              // Write the complete row using super.ingest
+              // Use acceptDuplicateSamples=true since buckets are written in order
+              super.ingest(ingestionTime, aggregatedRow, overflowBlockHolder,
+                createChunkAtFlushBoundary, flushIntervalMillis,
+                acceptDuplicateSamples = true, maxChunkTime)
+            }
+
+            bucketState.markFinalized(bucketTs)
           }
 
-          bucketState.markFinalized(bucketTs)
+          // Periodically clean up old finalized tracking
+          bucketState.cleanupOldFinalizedTracking(thresholdTs)
         }
-
-        // Periodically clean up old finalized tracking
-        bucketState.cleanupOldFinalizedTracking(thresholdTs)
       }
     }
   }

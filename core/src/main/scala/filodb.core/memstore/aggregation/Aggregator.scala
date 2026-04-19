@@ -15,6 +15,12 @@ trait Aggregator {
    */
   def add(value: Any): Unit
 
+  /** Specialized add for Double values - avoids boxing. Default delegates to add(). */
+  def addDouble(value: Double): Unit = add(value)
+
+  /** Specialized add for Long values - avoids boxing. Default delegates to add(). */
+  def addLong(value: Long): Unit = add(value)
+
   /**
    * Adds a value with its timestamp for time-sensitive aggregations (Last, First).
    * Default implementation ignores timestamp.
@@ -22,6 +28,12 @@ trait Aggregator {
    * @param timestamp the timestamp of the value
    */
   def addWithTimestamp(value: Any, timestamp: Long): Unit = add(value)
+
+  /** Specialized addWithTimestamp for Double - avoids boxing. */
+  def addDoubleWithTimestamp(value: Double, timestamp: Long): Unit = addDouble(value)
+
+  /** Specialized addWithTimestamp for Long - avoids boxing. */
+  def addLongWithTimestamp(value: Long, timestamp: Long): Unit = addLong(value)
 
   /**
    * Returns the aggregated result.
@@ -59,6 +71,11 @@ class SumAggregator extends Aggregator {
     }
   }
 
+  override def addDouble(value: Double): Unit =
+    if (!value.isNaN && !value.isInfinity) { sum += value; count += 1 }
+
+  override def addLong(value: Long): Unit = { sum += value.toDouble; count += 1 }
+
   def result(): Any = if (count > 0) sum else Double.NaN
 
   def reset(): Unit = {
@@ -85,6 +102,11 @@ class AvgAggregator extends Aggregator {
       case _                                       => // ignore
     }
   }
+
+  override def addDouble(value: Double): Unit =
+    if (!value.isNaN && !value.isInfinity) { sum += value; count += 1 }
+
+  override def addLong(value: Long): Unit = { sum += value.toDouble; count += 1 }
 
   def result(): Any = if (count > 0) sum / count else Double.NaN
 
@@ -115,6 +137,16 @@ class MinAggregator extends Aggregator {
       min = d
       initialized = true
     }
+  }
+
+  override def addDouble(value: Double): Unit =
+    if (!value.isNaN && !value.isInfinity) {
+      if (!initialized || value < min) { min = value; initialized = true }
+    }
+
+  override def addLong(value: Long): Unit = {
+    val d = value.toDouble
+    if (!initialized || d < min) { min = d; initialized = true }
   }
 
   def result(): Any = if (initialized) min else Double.NaN
@@ -148,6 +180,16 @@ class MaxAggregator extends Aggregator {
     }
   }
 
+  override def addDouble(value: Double): Unit =
+    if (!value.isNaN && !value.isInfinity) {
+      if (!initialized || value > max) { max = value; initialized = true }
+    }
+
+  override def addLong(value: Long): Unit = {
+    val d = value.toDouble
+    if (!initialized || d > max) { max = d; initialized = true }
+  }
+
   def result(): Any = if (initialized) max else Double.NaN
 
   def reset(): Unit = {
@@ -177,6 +219,10 @@ class LastAggregator extends Aggregator {
     }
   }
 
+  override def addDouble(value: Double): Unit = { lastValue = value; initialized = true }
+
+  override def addLong(value: Long): Unit = { lastValue = value.toDouble; initialized = true }
+
   override def addWithTimestamp(value: Any, timestamp: Long): Unit = {
     if (timestamp >= lastTimestamp) {
       value match {
@@ -188,6 +234,12 @@ class LastAggregator extends Aggregator {
       }
     }
   }
+
+  override def addDoubleWithTimestamp(value: Double, timestamp: Long): Unit =
+    if (timestamp >= lastTimestamp) { lastValue = value; lastTimestamp = timestamp; initialized = true }
+
+  override def addLongWithTimestamp(value: Long, timestamp: Long): Unit =
+    if (timestamp >= lastTimestamp) { lastValue = value.toDouble; lastTimestamp = timestamp; initialized = true }
 
   def result(): Any = lastValue
 
@@ -221,6 +273,12 @@ class FirstAggregator extends Aggregator {
     }
   }
 
+  override def addDouble(value: Double): Unit =
+    if (!initialized) { firstValue = value; initialized = true }
+
+  override def addLong(value: Long): Unit =
+    if (!initialized) { firstValue = value.toDouble; initialized = true }
+
   override def addWithTimestamp(value: Any, timestamp: Long): Unit = {
     if (timestamp < firstTimestamp) {
       value match {
@@ -232,6 +290,12 @@ class FirstAggregator extends Aggregator {
       }
     }
   }
+
+  override def addDoubleWithTimestamp(value: Double, timestamp: Long): Unit =
+    if (timestamp < firstTimestamp) { firstValue = value; firstTimestamp = timestamp; initialized = true }
+
+  override def addLongWithTimestamp(value: Long, timestamp: Long): Unit =
+    if (timestamp < firstTimestamp) { firstValue = value.toDouble; firstTimestamp = timestamp; initialized = true }
 
   def result(): Any = firstValue
 
@@ -256,6 +320,10 @@ class CountAggregator extends Aggregator {
       count += 1
     }
   }
+
+  override def addDouble(value: Double): Unit = { count += 1 }
+
+  override def addLong(value: Long): Unit = { count += 1 }
 
   def result(): Any = count
 
