@@ -141,4 +141,172 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     // The empty histogram should have been skipped, so we should have only one record
     builder.allContainers.head.countRecords() shouldEqual 1
   }
+
+  // ── Java TreeMap overload compatibility tests ──────────────────────
+  // Verifies that TreeMap overloads produce byte-for-byte identical records
+  // to the original Scala Map overloads.
+
+  import filodb.memory.format.UnsafeUtils
+  import filodb.core.binaryrecord2.RecordBuilder.ContainerHeaderLen
+
+  val treeTags = {
+    val t = new java.util.TreeMap[String, String]()
+    baseTags.foreach { case (k, v) => t.put(k, v) }
+    t
+  }
+
+  /** Extract full record bytes from a builder's first container, first record */
+  private def firstRecordBytes(b: RecordBuilder, schema: filodb.core.metadata.Schema): Array[Byte] = {
+    val container = b.allContainers.head
+    val base = container.base
+    val off = container.offset + ContainerHeaderLen
+    val len = UnsafeUtils.getInt(base, off) + 4
+    val recBytes = new Array[Byte](len)
+    UnsafeUtils.unsafe.copyMemory(base, off, recBytes, UnsafeUtils.arayOffset, len)
+    recBytes
+  }
+
+  it("TreeMap writeGaugeRecord should match Scala Map version") {
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeGaugeRecord(b1, metric, baseTags, 100000L, 42.5)
+    InputRecord.writeGaugeRecord(b2, metric, treeTags, 100000L, 42.5)
+
+    firstRecordBytes(b1, Schemas.gauge) shouldEqual
+      firstRecordBytes(b2, Schemas.gauge)
+  }
+
+  it("TreeMap writePromCounterRecord should match Scala Map version") {
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writePromCounterRecord(b1, metric, baseTags, 100000L, 99.0)
+    InputRecord.writePromCounterRecord(b2, metric, treeTags, 100000L, 99.0)
+
+    firstRecordBytes(b1, Schemas.promCounter) shouldEqual
+      firstRecordBytes(b2, Schemas.promCounter)
+  }
+
+  it("TreeMap writeDeltaCounterRecord should match Scala Map version") {
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeDeltaCounterRecord(b1, metric, baseTags, 100000L, 7.0)
+    InputRecord.writeDeltaCounterRecord(b2, metric, treeTags, 100000L, 7.0)
+
+    firstRecordBytes(b1, Schemas.deltaCounter) shouldEqual
+      firstRecordBytes(b2, Schemas.deltaCounter)
+  }
+
+  it("TreeMap writeUntypedRecord should match Scala Map version") {
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeUntypedRecord(b1, metric, baseTags, 100000L, 3.14)
+    InputRecord.writeUntypedRecord(b2, metric, treeTags, 100000L, 3.14)
+
+    firstRecordBytes(b1, Schemas.untyped) shouldEqual
+      firstRecordBytes(b2, Schemas.untyped)
+  }
+
+  it("TreeMap writePromHistRecord should match Scala Map version") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq ++ sumCountKVs
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writePromHistRecord(b1, metric, baseTags, 100000L, bucketKVs)
+    InputRecord.writePromHistRecord(b2, metric, treeTags, 100000L, bucketKVs)
+
+    firstRecordBytes(b1, Schemas.promHistogram) shouldEqual
+      firstRecordBytes(b2, Schemas.promHistogram)
+  }
+
+  it("TreeMap writeDeltaHistRecord should match Scala Map version") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq ++ sumCountKVs
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeDeltaHistRecord(b1, metric, baseTags, 100000L, bucketKVs)
+    InputRecord.writeDeltaHistRecord(b2, metric, treeTags, 100000L, bucketKVs)
+
+    firstRecordBytes(b1, Schemas.deltaHistogram) shouldEqual
+      firstRecordBytes(b2, Schemas.deltaHistogram)
+  }
+
+  it("TreeMap writeOtelCumulativeHistRecord should match Scala Map version") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq ++ sumCountMinMaxKVs
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeOtelCumulativeHistRecord(b1, metric, baseTags, 100000L, bucketKVs)
+    InputRecord.writeOtelCumulativeHistRecord(b2, metric, treeTags, 100000L, bucketKVs)
+
+    firstRecordBytes(b1, Schemas.otelCumulativeHistogram) shouldEqual
+      firstRecordBytes(b2, Schemas.otelCumulativeHistogram)
+  }
+
+  it("TreeMap writeOtelDeltaHistRecord should match Scala Map version") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq ++ sumCountMinMaxKVs
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeOtelDeltaHistRecord(b1, metric, baseTags, 100000L, bucketKVs)
+    InputRecord.writeOtelDeltaHistRecord(b2, metric, treeTags, 100000L, bucketKVs)
+
+    firstRecordBytes(b1, Schemas.otelDeltaHistogram) shouldEqual
+      firstRecordBytes(b2, Schemas.otelDeltaHistogram)
+  }
+
+  it("TreeMap overloads should handle many tags identically") {
+    val manyTags = baseTags ++ (0 until 15).map(i => f"label_$i%02d" -> s"value_$i").toMap
+    val manyTreeTags = {
+      val t = new java.util.TreeMap[String, String]()
+      manyTags.foreach { case (k, v) => t.put(k, v) }
+      t
+    }
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeGaugeRecord(b1, metric, manyTags, 100000L, 1.0)
+    InputRecord.writeGaugeRecord(b2, metric, manyTreeTags, 100000L, 1.0)
+
+    firstRecordBytes(b1, Schemas.gauge) shouldEqual
+      firstRecordBytes(b2, Schemas.gauge)
+  }
+
+  it("TreeMap overloads should handle empty tags identically") {
+    val emptyTags = Map.empty[String, String]
+    val emptyTreeTags = new java.util.TreeMap[String, String]()
+
+    val b1 = new RecordBuilder(MemFactory.onHeapFactory)
+    val b2 = new RecordBuilder(MemFactory.onHeapFactory)
+
+    InputRecord.writeGaugeRecord(b1, metric, emptyTags, 100000L, 1.0)
+    InputRecord.writeGaugeRecord(b2, metric, emptyTreeTags, 100000L, 1.0)
+
+    firstRecordBytes(b1, Schemas.gauge) shouldEqual
+      firstRecordBytes(b2, Schemas.gauge)
+  }
 }
