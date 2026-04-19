@@ -1,6 +1,6 @@
 package filodb.core.memstore.aggregation
 
-import scala.collection.mutable
+import java.util.{TreeMap => JTreeMap}
 
 import filodb.core.metadata.Column
 import filodb.memory.format.RowReader
@@ -24,12 +24,16 @@ class BucketAggregationState(
   numColumns: Int,
   columnTypes: Array[Column.ColumnType] = Array.empty
 ) {
-  // Map from bucket timestamp -> column index -> aggregated value
-  // Using nested maps for efficient per-bucket access
-  private val activeBuckets = mutable.TreeMap.empty[Long, BucketState]
+  // Map from bucket timestamp -> aggregated values for all columns.
+  // Java TreeMap avoids Scala collection wrapper overhead while
+  // preserving sorted iteration needed by getBucketsToFinalize
+  // (headMap), bucketValuesIteratorInRange (subMap/tailMap),
+  // and earliestBucketTimestamp (firstKey).
+  private val activeBuckets = new JTreeMap[java.lang.Long, BucketState]()
 
-  // Track finalized bucket timestamps to reject late samples
-  private val finalizedBuckets = mutable.HashSet.empty[Long]
+  // Track finalized bucket timestamps to reject late samples.
+  // Java HashSet avoids Scala boxing overhead on Long keys.
+  private val finalizedBuckets = new java.util.HashSet[java.lang.Long]()
 
   // Track the latest sample timestamp seen for OOO detection
   private var latestSampleTimestamp: Long = Long.MinValue
@@ -44,6 +48,27 @@ class BucketAggregationState(
   // scalastyle:off null
   private val aggConfigsFlat: Array[AggregationConfig] = columnConfigs.map(_.orNull)
   // scalastyle:on null
+
+  // Small pool of BucketState objects to reduce allocation pressure.
+  // When a bucket is finalized, its BucketState is reset and returned to the pool.
+  // When a new bucket is needed, a pooled BucketState is reused if available.
+  private val bucketPool = new java.util.ArrayDeque[BucketState](8)
+
+  private def acquireBucketState(): BucketState = {
+    val pooled = bucketPool.pollFirst()
+    if (pooled != null) {
+      pooled.reset()
+      pooled
+    } else {
+      new BucketState(numColumns, aggConfigsFlat)
+    }
+  }
+
+  private def releaseBucketState(state: BucketState): Unit = {
+    if (bucketPool.size() < 8) {
+      bucketPool.offerLast(state)
+    }
+  }
 
   /**
    * Aggregates a sample into the appropriate bucket for each aggregating column.
@@ -73,8 +98,14 @@ class BucketAggregationState(
       return false
     }
 
-    // Get or create bucket state
-    val bucketState = activeBuckets.getOrElseUpdate(ts, new BucketState(numColumns))
+    // Get or create bucket state (Java TreeMap has no getOrElseUpdate)
+    // scalastyle:off null
+    var bucketState = activeBuckets.get(ts)
+    if (bucketState == null) {
+      bucketState = acquireBucketState()
+      activeBuckets.put(ts, bucketState)
+    }
+    // scalastyle:on null
 
     // Aggregate each column
     var aggregated = false
@@ -121,7 +152,13 @@ class BucketAggregationState(
     if (finalizedBuckets.contains(ts)) return false
     if (!isWithinTolerance(sampleTimestamp, ingestionTime)) return false
 
-    val bucketState = activeBuckets.getOrElseUpdate(ts, new BucketState(numColumns))
+    // scalastyle:off null
+    var bucketState = activeBuckets.get(ts)
+    if (bucketState == null) {
+      bucketState = acquireBucketState()
+      activeBuckets.put(ts, bucketState)
+    }
+    // scalastyle:on null
 
     var aggregated = false
     var i = 0
@@ -186,11 +223,21 @@ class BucketAggregationState(
 
   /**
    * Gets buckets that should be finalized (older than threshold).
-   * Uses TreeMap's sorted nature for efficient range iteration.
+   * Uses Java TreeMap's headMap view for efficient range iteration with no intermediate allocations.
    */
   def getBucketsToFinalize(thresholdTs: Long): Seq[Long] = {
     if (activeBuckets.isEmpty) return Seq.empty
-    activeBuckets.until(thresholdTs).keys.toSeq
+    val headView = activeBuckets.headMap(thresholdTs) // exclusive upper bound, returns view
+    if (headView.isEmpty) return Seq.empty
+    // Copy keys to a Seq since headView is a live view and we may mutate activeBuckets during finalization
+    val result = new Array[Long](headView.size())
+    val it = headView.keySet().iterator()
+    var i = 0
+    while (it.hasNext) {
+      result(i) = it.next()
+      i += 1
+    }
+    result.toSeq
   }
 
   /**
@@ -198,7 +245,7 @@ class BucketAggregationState(
    * Used for fast guard checks before attempting finalization.
    */
   def earliestBucketTimestamp: Long =
-    if (activeBuckets.isEmpty) Long.MaxValue else activeBuckets.firstKey
+    if (activeBuckets.isEmpty) Long.MaxValue else activeBuckets.firstKey()
 
   /**
    * Gets the complete aggregated row for a bucket.
@@ -208,26 +255,31 @@ class BucketAggregationState(
    * @return Some(array of column values) if bucket exists, None otherwise
    */
   def getBucketValues(bucketTs: Long): Option[Array[Any]] = {
-    activeBuckets.get(bucketTs).map { state =>
-      val values = new Array[Any](numColumns)
-      var i = 0
-      while (i < numColumns) {
-        if (isAggregating(i)) {
-          values(i) = state.getAggregatedValue(i, aggConfigsFlat(i))
-        } else {
-          values(i) = state.getValue(i)
-        }
-        i += 1
+    // scalastyle:off null
+    val state = activeBuckets.get(bucketTs)
+    if (state == null) return None
+    // scalastyle:on null
+    val values = new Array[Any](numColumns)
+    var i = 0
+    while (i < numColumns) {
+      if (isAggregating(i)) {
+        values(i) = state.getAggregatedValue(i, aggConfigsFlat(i))
+      } else {
+        values(i) = state.getValue(i)
       }
-      values
+      i += 1
     }
+    Some(values)
   }
 
   /**
    * Marks a bucket as finalized and removes it from active state.
    */
   def markFinalized(bucketTs: Long): Unit = {
-    activeBuckets.remove(bucketTs)
+    val state = activeBuckets.remove(bucketTs)
+    // scalastyle:off null
+    if (state != null) releaseBucketState(state)
+    // scalastyle:on null
     finalizedBuckets.add(bucketTs)
   }
 
@@ -236,45 +288,59 @@ class BucketAggregationState(
    * Each entry is (bucketTimestamp, columnValues) where histogram columns return MutableHistogram
    * objects directly (not serialized DirectBuffers), suitable for the query path.
    *
-   * Uses TreeMap's range view — no intermediate Set, Seq, or sort is allocated.
+   * Uses Java TreeMap's subMap/tailMap views — no intermediate Set, Seq, or sort is allocated.
    */
   def bucketValuesIteratorInRange(startTime: Long, endTime: Long): Iterator[(Long, Array[Any])] = {
-    // TreeMap.range(from, until) is [from, until). Use rangeFrom to avoid Long.MaxValue+1 overflow.
     val rangeView = if (endTime == Long.MaxValue) {
-      activeBuckets.rangeFrom(startTime)
+      activeBuckets.tailMap(startTime, true) // inclusive lower bound
     } else {
-      activeBuckets.range(startTime, endTime + 1)
+      activeBuckets.subMap(startTime, true, endTime, true) // inclusive both bounds
     }
-    rangeView.iterator.map { case (ts, state) =>
-      val values = new Array[Any](numColumns)
-      var i = 0
-      while (i < numColumns) {
-        columnConfigs(i) match {
-          case Some(_) =>
-            values(i) = state.getValueForQuery(i)
-          case None =>
-            values(i) = state.getValue(i)
+    // Wrap Java iterator as Scala iterator
+    val javaIt = rangeView.entrySet().iterator()
+    new Iterator[(Long, Array[Any])] {
+      def hasNext: Boolean = javaIt.hasNext
+      def next(): (Long, Array[Any]) = {
+        val entry = javaIt.next()
+        val ts = entry.getKey.longValue()
+        val state = entry.getValue
+        val values = new Array[Any](numColumns)
+        var i = 0
+        while (i < numColumns) {
+          columnConfigs(i) match {
+            case Some(_) =>
+              values(i) = state.getValueForQuery(i)
+            case None =>
+              values(i) = state.getValue(i)
+          }
+          i += 1
         }
-        i += 1
+        (ts, values)
       }
-      (ts, values)
     }
   }
 
   /**
    * Returns true if there are any active (non-finalized) buckets.
    */
-  def hasActiveBuckets: Boolean = activeBuckets.nonEmpty
+  def hasActiveBuckets: Boolean = !activeBuckets.isEmpty
 
   /**
    * Gets all active bucket timestamps.
    */
-  def activeBucketTimestamps: Set[Long] = activeBuckets.keySet.toSet
+  def activeBucketTimestamps: Set[Long] = {
+    val result = scala.collection.mutable.Set.empty[Long]
+    val it = activeBuckets.keySet().iterator()
+    while (it.hasNext) {
+      result += it.next()
+    }
+    result.toSet
+  }
 
   /**
    * Checks if a bucket is active (not finalized).
    */
-  def isActive(bucketTs: Long): Boolean = activeBuckets.contains(bucketTs)
+  def isActive(bucketTs: Long): Boolean = activeBuckets.containsKey(bucketTs)
 
   /**
    * Cleans up old finalized tracking to prevent unbounded growth.
@@ -282,7 +348,10 @@ class BucketAggregationState(
   def cleanupOldFinalizedTracking(thresholdTs: Long): Unit = {
     if (hasPrimaryConfig) {
       val cleanupThreshold = thresholdTs - (2 * primaryOooToleranceMs)
-      finalizedBuckets.retain(_ >= cleanupThreshold)
+      val it = finalizedBuckets.iterator()
+      while (it.hasNext) {
+        if (it.next() < cleanupThreshold) it.remove()
+      }
     }
   }
 
@@ -290,8 +359,8 @@ class BucketAggregationState(
    * Returns statistics about the current state.
    */
   def stats: BucketAggregationStats = BucketAggregationStats(
-    activeBucketCount = activeBuckets.size,
-    finalizedBucketCount = finalizedBuckets.size,
+    activeBucketCount = activeBuckets.size(),
+    finalizedBucketCount = finalizedBuckets.size(),
     latestSampleTimestamp = latestSampleTimestamp
   )
 
@@ -317,49 +386,72 @@ class BucketAggregationState(
    * Used for histogram queries.
    */
   def getAggregatedHistogram(colIdx: Int, bucketTs: Long): Option[MutableHistogram] = {
-    activeBuckets.get(bucketTs).flatMap(_.getHistogram(colIdx))
+    // scalastyle:off null
+    val state = activeBuckets.get(bucketTs)
+    if (state == null) None else state.getHistogram(colIdx)
+    // scalastyle:on null
   }
 }
 
 /**
  * State for a single time bucket, holding aggregated values for all columns.
  * Uses the Aggregator interface uniformly for all column types (scalar and histogram).
+ *
+ * Aggregators are pre-allocated at construction for all aggregating columns.
+ * This improves memory locality since objects allocated together in time are likely
+ * contiguous in memory due to TLAB allocation, and avoids per-sample null checks
+ * and lazy creation overhead.
+ *
+ * @param numColumns total number of data columns
+ * @param aggConfigs flat array of aggregation configs (null for non-aggregating columns)
  */
-private class BucketState(numColumns: Int) {
-  // Aggregators for all aggregating columns (scalar and histogram)
-  private val aggregators = new Array[Aggregator](numColumns)
+// scalastyle:off null
+private class BucketState(numColumns: Int, aggConfigs: Array[AggregationConfig]) {
+  // Aggregators for all aggregating columns — pre-allocated at construction
+  private val aggregators: Array[Aggregator] = {
+    val arr = new Array[Aggregator](numColumns)
+    var i = 0
+    while (i < numColumns) {
+      if (aggConfigs(i) != null) {
+        arr(i) = Aggregator.create(aggConfigs(i).aggType)
+      }
+      i += 1
+    }
+    arr
+  }
 
   // Raw values for non-aggregating columns
   private val rawValues = new Array[Any](numColumns)
 
-  def aggregate(colIdx: Int, config: AggregationConfig, value: Any, sampleTimestamp: Long): Unit = {
-    if (aggregators(colIdx) == null) {
-      aggregators(colIdx) = Aggregator.create(config.aggType)
+  /** Resets this BucketState for reuse from the pool. */
+  def reset(): Unit = {
+    var i = 0
+    while (i < numColumns) {
+      if (aggregators(i) != null) {
+        aggregators(i).reset()
+      }
+      rawValues(i) = null
+      i += 1
     }
+  }
+
+  def aggregate(colIdx: Int, config: AggregationConfig, value: Any, sampleTimestamp: Long): Unit = {
     aggregators(colIdx).addWithTimestamp(value, sampleTimestamp)
   }
 
   def aggregateDoubleWithTimestamp(colIdx: Int, config: AggregationConfig,
                                    value: Double, sampleTimestamp: Long): Unit = {
-    if (aggregators(colIdx) == null) {
-      aggregators(colIdx) = Aggregator.create(config.aggType)
-    }
     aggregators(colIdx).addDoubleWithTimestamp(value, sampleTimestamp)
   }
 
   def aggregateLongWithTimestamp(colIdx: Int, config: AggregationConfig,
                                  value: Long, sampleTimestamp: Long): Unit = {
-    if (aggregators(colIdx) == null) {
-      aggregators(colIdx) = Aggregator.create(config.aggType)
-    }
     aggregators(colIdx).addLongWithTimestamp(value, sampleTimestamp)
   }
 
   def getAggregatedValue(colIdx: Int, config: AggregationConfig): Any = {
-    // scalastyle:off null
     val agg = aggregators(colIdx)
     if (agg != null) agg.result() else null
-    // scalastyle:on null
   }
 
   /**
@@ -367,7 +459,6 @@ private class BucketState(numColumns: Int) {
    * MutableHistogram directly (not serialized DirectBuffer). For scalar columns,
    * returns the aggregator result (Double/Long). Returns null if no aggregator exists.
    */
-  // scalastyle:off null
   def getValueForQuery(colIdx: Int): Any = {
     val agg = aggregators(colIdx)
     if (agg == null) return null
@@ -377,7 +468,6 @@ private class BucketState(numColumns: Int) {
       case _ => agg.result()
     }
   }
-  // scalastyle:on null
 
   def getHistogram(colIdx: Int): Option[MutableHistogram] = {
     Option(aggregators(colIdx)).flatMap {
@@ -395,6 +485,7 @@ private class BucketState(numColumns: Int) {
 
   def getValue(colIdx: Int): Any = rawValues(colIdx)
 }
+// scalastyle:on null
 
 /**
  * Statistics about bucket aggregation state.
