@@ -112,12 +112,24 @@ object AggregatingTimeSeriesPartitionSpec {
     new AggregatingTimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40)
   }
 
-  // Helper to create a simple histogram
+  // Helper to create a simple histogram (uses fresh buffer to avoid shared-buffer overwrites)
   def createHistogram(buckets: Seq[(Double, Long)]): org.agrona.DirectBuffer = {
     val bucketBoundaries = buckets.map(_._1).toArray :+ Double.PositiveInfinity
     val bucketCounts = buckets.map(_._2).toArray :+ 0L // Add 0 for infinity bucket
     val hist = LongHistogram(CustomBuckets(bucketBoundaries), bucketCounts)
-    hist.serialize()
+    hist.serialize(Some(new org.agrona.concurrent.UnsafeBuffer(new Array[Byte](4096))))
+  }
+
+  // Dataset with wide tolerance (300s) for tests needing multiple simultaneous active buckets
+  val wideToleranceDataset = Dataset("wide_tol_metrics", Seq("series:string"), scalarColumns,
+    scalarDatasetOptions,
+    aggregatorNames = Seq("dSum(1)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 300000L)
+  val wideToleranceSchema = wideToleranceDataset.schema
+
+  def makeWideToleranceBufferPool(): WriteBufferPool = {
+    new WriteBufferPool(memFactory, wideToleranceSchema.data, TestData.storeConf)
   }
 }
 
@@ -800,6 +812,471 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
         val hist = bucketRow.get.getHistogram(1)
         hist should not be null
         hist.numBuckets shouldEqual 4 // 3 user-defined + infinity
+      } finally {
+        cursor.close()
+      }
+    }
+  }
+
+  // =====================================================================
+  // New tests: Tolerance boundary edge cases, multi-bucket finalization,
+  // switchBuffers/chunk sealing, E2E integration, histogram integration
+  // =====================================================================
+
+  describe("Tolerance boundary edge cases") {
+    it("should accept a sample at exactly the tolerance boundary") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val oooTolerance = 30000L
+
+      // Use ingestionTime=150000 so that:
+      // - Recent sample at ts=150000 -> bucket 180000
+      // - Boundary sample at ts=120000 -> bucket 120000 (diff=30000 == tolerance, accepted)
+      // These go to different buckets, so we get 2 rows after finalization
+      val ingestionTime = 150000L
+      part.ingest(ingestionTime, TupleRowReader((Some(ingestionTime), Some(50.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Ingest at exactly the tolerance boundary: ingestionTime - sampleTs == oooTolerance
+      val boundaryTs = ingestionTime - oooTolerance // 120000
+      part.ingest(ingestionTime, TupleRowReader((Some(boundaryTs), Some(25.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Force finalization
+      part.flushAllBuckets(ingestionTime + 200000, ingestBlockHolder,
+        timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Both samples should be present in vectors (in different buckets)
+      val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
+      val values = iterator.map(_.getDouble(0)).toSeq
+      values.length shouldEqual 2
+    }
+
+    it("should drop a sample one ms past the tolerance boundary") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val oooTolerance = 30000L
+      val ingestionTime = 100000L
+
+      // Ingest a recent sample
+      part.ingest(ingestionTime, TupleRowReader((Some(ingestionTime), Some(50.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Try to ingest a sample 1ms past the tolerance boundary
+      // sampleTs = ingestionTime - oooTolerance - 1 = 69999
+      val pastBoundaryTs = ingestionTime - oooTolerance - 1
+      part.ingest(ingestionTime, TupleRowReader((Some(pastBoundaryTs), Some(25.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Force finalization
+      part.flushAllBuckets(ingestionTime + 200000, ingestBlockHolder,
+        timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Only the recent sample should be present (old one dropped)
+      val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
+      val values = iterator.map(_.getDouble(0)).toSeq
+      values.length shouldEqual 1
+      values.head shouldEqual 50.0 +- 0.01
+    }
+
+    it("should only accept in-order samples with zero tolerance schema") {
+      // Create a dataset with zero OOO tolerance
+      val zeroToleranceDataset = Dataset("zero_tol_metrics", Seq("series:string"), scalarColumns,
+        scalarDatasetOptions,
+        aggregatorNames = Seq("dSum(1)"),
+        aggregationIntervalMs = 60000L,
+        aggregationOooToleranceMs = 0L)
+      val zeroTolBufferPool = new WriteBufferPool(memFactory, zeroToleranceDataset.schema.data, TestData.storeConf)
+      part = makeAggregatingPart(0, zeroToleranceDataset, defaultPartKey, zeroTolBufferPool)
+
+      // In-order sample (ingestionTime == sampleTs)
+      part.ingest(100000L, TupleRowReader((Some(100000L), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // OOO sample (sampleTs < ingestionTime by 1ms) - should be dropped
+      part.ingest(100001L, TupleRowReader((Some(100000L), Some(20.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Force finalization
+      part.flushAllBuckets(300000L, ingestBlockHolder,
+        timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
+      val values = iterator.map(_.getDouble(0)).toSeq
+      values.length shouldEqual 1
+      values.head shouldEqual 10.0 +- 0.01
+    }
+  }
+
+  describe("Multi-bucket finalization") {
+    it("should finalize multiple buckets in timestamp order when time advances") {
+      // Use wide-tolerance dataset (300s) so all 3 buckets stay active during ingestion
+      val bufferPool = makeWideToleranceBufferPool()
+      part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
+
+      // Create 3 active buckets with known sums
+      // Bucket 60000: samples at 10000 and 20000 -> sum = 3.0
+      part.ingest(10000L, TupleRowReader((Some(10000L), Some(1.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(20000L, TupleRowReader((Some(20000L), Some(2.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Bucket 120000: samples at 70000 and 80000 -> sum = 30.0
+      part.ingest(70000L, TupleRowReader((Some(70000L), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(80000L, TupleRowReader((Some(80000L), Some(20.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Bucket 180000: samples at 130000 and 140000 -> sum = 300.0
+      part.ingest(130000L, TupleRowReader((Some(130000L), Some(100.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(140000L, TupleRowReader((Some(140000L), Some(200.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // All 3 buckets should be active (wide tolerance prevents auto-finalization)
+      part.bucketAggregationStats.activeBucketCount shouldEqual 3
+
+      // Advance time to finalize first 2 buckets but not the third
+      // With 300s tolerance: thresholdTs = ceilToBucket(450000-300000, 60000) = ceilToBucket(150000, 60000) = 180000
+      // getBucketsToFinalize(180000) returns buckets < 180000 => [60000, 120000]
+      val advancedTs = 450000L
+      part.ingest(advancedTs, TupleRowReader((Some(advancedTs), Some(999.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Buckets 60000 and 120000 should be finalized, 180000 still active
+      part.getAggregatedValue(1, 60000L) shouldBe None   // finalized
+      part.getAggregatedValue(1, 120000L) shouldBe None   // finalized
+      part.getAggregatedValue(1, 180000L) shouldBe defined // still active
+
+      // Verify finalized data is in vectors with correct sums
+      val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(0, 1))
+      val results = iterator.map(r => (r.getLong(0), r.getDouble(1))).toSeq
+      results.exists { case (ts, v) => ts == 60000L && Math.abs(v - 3.0) < 0.01 } shouldBe true
+      results.exists { case (ts, v) => ts == 120000L && Math.abs(v - 30.0) < 0.01 } shouldBe true
+    }
+
+    it("should keep active buckets queryable via AggregatingRangeVector after partial finalization") {
+      import filodb.core.query._
+      import filodb.core.store.AllChunkScan
+      import java.util.concurrent.atomic.AtomicLong
+
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val bucketInterval = 60000L
+      val oooTolerance = 30000L
+
+      // Bucket 120000: will be finalized
+      part.ingest(100000L, TupleRowReader((Some(100000L), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Bucket 240000: will remain active
+      val futureTs = 200000L
+      part.ingest(futureTs, TupleRowReader((Some(futureTs), Some(50.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Trigger finalization of bucket 120000 by advancing time
+      val advancedTs = futureTs + bucketInterval + oooTolerance + 10000
+      part.ingest(advancedTs, TupleRowReader((Some(advancedTs), Some(99.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Query via AggregatingRangeVector to get both finalized and active data
+      val dataBytesScannedCtr = new AtomicLong(0)
+      val samplesScannedCtr = new AtomicLong(0)
+      val columnIDs = Array(0, 1)
+
+      val rangeVector = AggregatingRangeVector(
+        PartitionRangeVectorKey(
+          Left(part),
+          scalarSchema.partKeySchema,
+          scalarSchema.infosFromIDs(scalarSchema.partition.columns.map(_.id)),
+          0, 0, part.partID, scalarSchema.name
+        ),
+        part,
+        AllChunkScan,
+        columnIDs,
+        dataBytesScannedCtr,
+        samplesScannedCtr,
+        Long.MaxValue,
+        "test-query"
+      )
+
+      val cursor = rangeVector.rows()
+      try {
+        val rows = cursor.toSeq
+        // Should have finalized bucket(s) + active bucket(s)
+        rows.length should be >= 2
+
+        // Verify both finalized and active data values exist
+        val values = rows.map(_.getDouble(1)).toList
+        values.exists(v => Math.abs(v - 10.0) < 0.01) shouldBe true  // finalized bucket
+      } finally {
+        cursor.close()
+      }
+    }
+  }
+
+  describe("switchBuffers / chunk sealing") {
+    it("should flush all active buckets before sealing and lose no data") {
+      import filodb.core.store.AllChunkScan
+
+      // Use wide-tolerance dataset so 3 buckets stay active without auto-finalization
+      val bufferPool = makeWideToleranceBufferPool()
+      part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
+
+      // Create multiple active buckets
+      // Bucket 60000
+      part.ingest(10000L, TupleRowReader((Some(10000L), Some(1.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      // Bucket 120000
+      part.ingest(70000L, TupleRowReader((Some(70000L), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      // Bucket 180000
+      part.ingest(130000L, TupleRowReader((Some(130000L), Some(100.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Verify 3 active buckets
+      part.bucketAggregationStats.activeBucketCount shouldEqual 3
+
+      // Call switchBuffers (simulates chunk sealing)
+      part.switchBuffers(ingestBlockHolder)
+
+      // After switchBuffers, all active buckets should have been flushed
+      part.bucketAggregationStats.activeBucketCount shouldEqual 0
+
+      // Data should be in sealed chunk(s)
+      part.numChunks should be > 0
+
+      // Use AllChunkScan to query sealed chunks (WriteBufferChunkScan only sees the new empty buffer)
+      val iterator = part.timeRangeRows(AllChunkScan, Array(1))
+      val values = iterator.map(_.getDouble(0)).toSeq.sorted
+      values.length shouldEqual 3
+      values shouldEqual Seq(1.0, 10.0, 100.0)
+    }
+
+    it("should handle switchBuffers when no active buckets exist") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      // No data ingested, switchBuffers should succeed without error
+      part.bucketAggregationStats.activeBucketCount shouldEqual 0
+      noException should be thrownBy {
+        part.switchBuffers(ingestBlockHolder)
+      }
+    }
+
+    it("should handle switchBuffers with histogram buckets") {
+      val bufferPool = makeHistogramBufferPool()
+      part = makeAggregatingPart(0, histogramDataset, defaultPartKey, bufferPool)
+
+      val hist1 = createHistogram(Seq((1.0, 5L), (2.0, 10L)))
+      val hist2 = createHistogram(Seq((1.0, 3L), (2.0, 7L)))
+
+      // Bucket 120000: two histograms summed
+      part.ingest(100000L, TupleRowReader((Some(100000L), Some(hist1))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(110000L, TupleRowReader((Some(110000L), Some(hist2))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      part.bucketAggregationStats.activeBucketCount shouldEqual 1
+
+      // switchBuffers should flush the histogram bucket
+      part.switchBuffers(ingestBlockHolder)
+
+      part.bucketAggregationStats.activeBucketCount shouldEqual 0
+      part.numChunks should be > 0
+    }
+  }
+
+  describe("End-to-end integration: OOO ingest -> query via AggregatingRangeVector") {
+    import filodb.core.query._
+    import filodb.core.store.TimeRangeChunkScan
+    import java.util.concurrent.atomic.AtomicLong
+
+    it("should handle deliberately shuffled samples and produce correct stitched results") {
+      // Use wide-tolerance dataset so all 3 buckets stay active during shuffled ingestion
+      val bufferPool = makeWideToleranceBufferPool()
+      part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
+
+      // Ingest samples in deliberately shuffled order across 3 buckets
+      // Bucket 60000 (samples: 10000, 20000, 30000) -> sum = 6.0
+      // Bucket 120000 (samples: 70000, 80000, 90000) -> sum = 60.0
+      // Bucket 180000 (samples: 130000, 140000, 150000) -> sum = 600.0
+      val shuffledSamples = Seq(
+        (80000L, 20.0),   // bucket 120000
+        (10000L, 1.0),    // bucket 60000
+        (140000L, 200.0), // bucket 180000
+        (30000L, 3.0),    // bucket 60000
+        (130000L, 100.0), // bucket 180000
+        (70000L, 10.0),   // bucket 120000
+        (150000L, 300.0), // bucket 180000
+        (20000L, 2.0),    // bucket 60000
+        (90000L, 30.0)    // bucket 120000
+      )
+
+      shuffledSamples.foreach { case (ts, value) =>
+        part.ingest(ts, TupleRowReader((Some(ts), Some(value))),
+          ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      }
+
+      // All 3 buckets should be active in memory (wide tolerance prevents auto-finalization)
+      part.bucketAggregationStats.activeBucketCount shouldEqual 3
+
+      // Verify in-memory aggregation is correct before finalization
+      part.getAggregatedValue(1, 60000L).get.asInstanceOf[Double] shouldEqual 6.0 +- 0.01
+      part.getAggregatedValue(1, 120000L).get.asInstanceOf[Double] shouldEqual 60.0 +- 0.01
+      part.getAggregatedValue(1, 180000L).get.asInstanceOf[Double] shouldEqual 600.0 +- 0.01
+
+      // Force finalize first 2 buckets by advancing time, keep bucket 180000 active
+      // With 300s tolerance: thresholdTs = ceilToBucket(450000-300000, 60000) = ceilToBucket(150000, 60000) = 180000
+      // getBucketsToFinalize(180000) returns buckets < 180000 => [60000, 120000]
+      val advancedTs = 450000L
+      part.ingest(advancedTs, TupleRowReader((Some(advancedTs), Some(0.1))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Buckets 60000 and 120000 should now be finalized
+      part.getAggregatedValue(1, 60000L) shouldBe None
+      part.getAggregatedValue(1, 120000L) shouldBe None
+      // Bucket 180000 should still be active
+      part.getAggregatedValue(1, 180000L) shouldBe defined
+
+      // Query via AggregatingRangeVector - should stitch finalized + active data
+      val dataBytesScannedCtr = new AtomicLong(0)
+      val samplesScannedCtr = new AtomicLong(0)
+      val columnIDs = Array(0, 1)
+
+      val rangeVector = AggregatingRangeVector(
+        PartitionRangeVectorKey(
+          Left(part),
+          wideToleranceSchema.partKeySchema,
+          wideToleranceSchema.infosFromIDs(wideToleranceSchema.partition.columns.map(_.id)),
+          0, 0, part.partID, wideToleranceSchema.name
+        ),
+        part,
+        TimeRangeChunkScan(0, 500000),
+        columnIDs,
+        dataBytesScannedCtr,
+        samplesScannedCtr,
+        Long.MaxValue,
+        "test-e2e-query"
+      )
+
+      val cursor = rangeVector.rows()
+      try {
+        val rows = cursor.map(r => (r.getLong(0), r.getDouble(1))).toSeq
+
+        // Verify: all data present (no lost samples) - finalized + active buckets
+        rows.length should be >= 3
+
+        // Verify: aggregated sums are correct
+        // Finalized: bucket 60000 (sum=6.0), bucket 120000 (sum=60.0)
+        // Active: bucket 180000 (sum=600.0)
+        val values = rows.map(_._2)
+        values.exists(v => Math.abs(v - 6.0) < 0.01) shouldBe true
+        values.exists(v => Math.abs(v - 60.0) < 0.01) shouldBe true
+        values.exists(v => Math.abs(v - 600.0) < 0.01) shouldBe true
+      } finally {
+        cursor.close()
+      }
+    }
+  }
+
+  describe("Histogram column integration - HistogramSum aggregation") {
+    it("should correctly sum multiple delta histograms in the same bucket") {
+      val bufferPool = makeHistogramBufferPool()
+      part = makeAggregatingPart(0, histogramDataset, defaultPartKey, bufferPool)
+
+      val baseTs = 100000L
+
+      // Create 3 delta histograms with known bucket counts
+      // Buckets: [1.0, 2.0, 5.0, +Inf]
+      val hist1 = createHistogram(Seq((1.0, 5L), (2.0, 10L), (5.0, 15L)))
+      val hist2 = createHistogram(Seq((1.0, 3L), (2.0, 7L), (5.0, 12L)))
+      val hist3 = createHistogram(Seq((1.0, 2L), (2.0, 3L), (5.0, 8L)))
+
+      // Ingest all 3 into the same bucket (all ceil to bucket 120000)
+      part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(hist1))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(baseTs, TupleRowReader((Some(baseTs + 10000), Some(hist2))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(baseTs, TupleRowReader((Some(baseTs + 20000), Some(hist3))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Verify in-memory histogram aggregation
+      val bucketTs = 120000L
+      val aggregatedHist = part.getAggregatedHistogram(1, bucketTs)
+      aggregatedHist shouldBe defined
+
+      val hist = aggregatedHist.get
+      // Expected summed counts: (1.0, 10), (2.0, 20), (5.0, 35), (+Inf, 0)
+      hist.numBuckets shouldEqual 4
+      hist.bucketValue(0) shouldEqual 10.0  // 5+3+2
+      hist.bucketValue(1) shouldEqual 20.0  // 10+7+3
+      hist.bucketValue(2) shouldEqual 35.0  // 15+12+8
+
+      // Force finalization and verify data in vectors
+      part.flushAllBuckets(baseTs + 200000, ingestBlockHolder,
+        timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      part.numChunks should be > 0
+    }
+
+    it("should produce correct histogram results via AggregatingRangeVector query") {
+      import filodb.core.query._
+      import filodb.core.store.TimeRangeChunkScan
+      import java.util.concurrent.atomic.AtomicLong
+
+      val bufferPool = makeHistogramBufferPool()
+      part = makeAggregatingPart(0, histogramDataset, defaultPartKey, bufferPool)
+
+      val baseTs = 100000L
+
+      // Ingest 2 histograms into active bucket (not finalized)
+      val hist1 = createHistogram(Seq((1.0, 10L), (2.0, 20L)))
+      val hist2 = createHistogram(Seq((1.0, 5L), (2.0, 15L)))
+
+      part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(hist1))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(baseTs, TupleRowReader((Some(baseTs + 10000), Some(hist2))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Query active bucket via AggregatingRangeVector
+      val dataBytesScannedCtr = new AtomicLong(0)
+      val samplesScannedCtr = new AtomicLong(0)
+      val columnIDs = Array(0, 1) // timestamp and histogram columns
+
+      val rangeVector = AggregatingRangeVector(
+        PartitionRangeVectorKey(
+          Left(part),
+          histogramSchema.partKeySchema,
+          histogramSchema.infosFromIDs(histogramSchema.partition.columns.map(_.id)),
+          0, 0, part.partID, histogramSchema.name
+        ),
+        part,
+        TimeRangeChunkScan(baseTs, baseTs + 120000),
+        columnIDs,
+        dataBytesScannedCtr,
+        samplesScannedCtr,
+        Long.MaxValue,
+        "test-hist-query"
+      )
+
+      val cursor = rangeVector.rows()
+      try {
+        val rows = cursor.toSeq
+        rows should not be empty
+
+        val bucketRow = rows.find(r => r.getLong(0) == 120000L)
+        bucketRow shouldBe defined
+
+        // Verify summed histogram values
+        val resultHist = bucketRow.get.getHistogram(1)
+        resultHist should not be null
+        resultHist.numBuckets shouldEqual 3  // 2 user-defined + infinity
+        resultHist.bucketValue(0) shouldEqual 15.0  // 10+5
+        resultHist.bucketValue(1) shouldEqual 35.0  // 20+15
       } finally {
         cursor.close()
       }

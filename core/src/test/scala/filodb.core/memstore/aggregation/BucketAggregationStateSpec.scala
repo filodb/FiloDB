@@ -114,6 +114,44 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("BucketAggregationState.aggregate - tolerance boundary edge cases") {
+    it("should accept sample at exactly the tolerance boundary (ingestionTime - sampleTs == toleranceMs)") {
+      val toleranceMs = 30000L
+      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+
+      // ingestionTime=50000, sampleTs=20000, diff=30000 == toleranceMs => accepted
+      val result = state.aggregate(20000L, 50000L, Array(10.0: Any))
+      result shouldEqual true
+      state.activeBucketTimestamps should not be empty
+    }
+
+    it("should reject sample one ms past tolerance boundary (ingestionTime - sampleTs == toleranceMs + 1)") {
+      val toleranceMs = 30000L
+      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+
+      // ingestionTime=50001, sampleTs=20000, diff=30001 > toleranceMs => rejected
+      val result = state.aggregate(20000L, 50001L, Array(10.0: Any))
+      result shouldEqual false
+      state.activeBucketTimestamps shouldBe empty
+    }
+
+    it("should drop all OOO samples with zero tolerance") {
+      val state = new BucketAggregationState(singleSumConfig(toleranceMs = 0L), 1)
+
+      // In-order sample (ingestionTime == sampleTs) should be accepted
+      val inOrderResult = state.aggregate(100000L, 100000L, Array(10.0: Any))
+      inOrderResult shouldEqual true
+
+      // Any OOO sample (ingestionTime > sampleTs by even 1ms) should be rejected
+      val oooResult = state.aggregate(99999L, 100000L, Array(20.0: Any))
+      oooResult shouldEqual false
+
+      // Only the in-order sample's bucket should exist
+      state.activeBucketTimestamps.size shouldEqual 1
+      state.getBucketValues(120000L).get(0).asInstanceOf[Double] shouldEqual 10.0
+    }
+  }
+
   describe("BucketAggregationState.aggregate - finalized buckets") {
     it("should reject samples for finalized buckets") {
       val state = new BucketAggregationState(singleSumConfig(), 1)
