@@ -3,7 +3,6 @@ package filodb.core.query
 import java.util.concurrent.atomic.AtomicLong
 
 import filodb.core.memstore.AggregatingTimeSeriesPartition
-import filodb.core.metadata.Column
 import filodb.core.store.{ChunkScanMethod, CountingChunkInfoIterator}
 import filodb.memory.format.RowReader
 import filodb.memory.format.vectors.MutableHistogram
@@ -47,68 +46,44 @@ final case class AggregatingRangeVector(
       )
     )
 
-    // Get active bucket data within the query time range
-    val bucketRows = getActiveBucketRows(chunkMethod.startTime, chunkMethod.endTime)
-
-    if (bucketRows.isEmpty) {
-      baseCursor
-    } else {
-      new MergingRangeVectorCursor(baseCursor, bucketRows.iterator, columnIDs)
+    // Fast path: skip bucket iteration entirely when no active buckets exist
+    if (!partition.hasActiveBuckets) {
+      return baseCursor
     }
+
+    // Always create MergingRangeVectorCursor when active buckets exist.
+    // It handles the case where no buckets are in the query range gracefully.
+    val bucketRowsIter = getActiveBucketRows(chunkMethod.startTime, chunkMethod.endTime)
+    new MergingRangeVectorCursor(baseCursor, bucketRowsIter, columnIDs)
   }
 
   /**
    * Gets rows from active buckets that fall within the query time range.
-   * Returns a sequence of BucketRowData, sorted by timestamp.
+   * Returns a lazy iterator of BucketRowData, sorted by timestamp (TreeMap order).
+   * No intermediate collections (Set, Seq) are materialized; no redundant sort is performed.
    */
-  private def getActiveBucketRows(startTime: Long, endTime: Long): Seq[BucketRowData] = {
-    // Get all active bucket timestamps
-    val allBuckets = partition.activeBucketTimestamps
-
-    if (allBuckets.isEmpty) {
-      return Seq.empty
-    }
-
-    // Filter buckets within the query time range
-    val bucketsInRange = allBuckets.filter(ts => ts >= startTime && ts <= endTime).toSeq.sorted
-
-    // Determine which columns are histogram columns for proper value extraction
-    val isHistogramCol = columnIDs.map { colIdx =>
-      if (colIdx == 0) false // timestamp column
-      else if (colIdx < partition.schema.data.columns.size) {
-        partition.schema.data.columns(colIdx).columnType == Column.ColumnType.HistogramColumn
-      } else false
-    }
-
-    // Collect rows from active buckets
-    // scalastyle:off null
-    bucketsInRange.flatMap { bucketTs =>
-      partition.getBucketColumnValues(bucketTs).map { allColumnValues =>
-        // Map column values to the requested column IDs
-        val values = new Array[Any](columnIDs.length)
-        var i = 0
-        while (i < columnIDs.length) {
-          val colIdx = columnIDs(i)
-          if (colIdx == 0) {
-            // Timestamp column - use the bucket timestamp
-            values(i) = bucketTs
-          } else if (colIdx < allColumnValues.length) {
-            // For histogram columns, get the MutableHistogram directly
-            if (isHistogramCol(i)) {
-              values(i) = partition.getAggregatedHistogram(colIdx, bucketTs).orNull
-            } else {
-              values(i) = allColumnValues(colIdx)
-            }
-          } else {
-            values(i) = null
-          }
-          i += 1
+  // scalastyle:off null
+  private def getActiveBucketRows(startTime: Long, endTime: Long): Iterator[BucketRowData] = {
+    partition.bucketValuesIteratorInRange(startTime, endTime).map { case (bucketTs, allColumnValues) =>
+      // Map column values to the requested column IDs
+      val values = new Array[Any](columnIDs.length)
+      var i = 0
+      while (i < columnIDs.length) {
+        val colIdx = columnIDs(i)
+        if (colIdx == 0) {
+          // Timestamp column - use the bucket timestamp
+          values(i) = bucketTs
+        } else if (colIdx < allColumnValues.length) {
+          values(i) = allColumnValues(colIdx)
+        } else {
+          values(i) = null
         }
-        BucketRowData(bucketTs, values)
+        i += 1
       }
+      BucketRowData(bucketTs, values)
     }
-    // scalastyle:on null
   }
+  // scalastyle:on null
 
   def publishInterval: Option[Long] = partition.publishInterval
 
@@ -139,10 +114,15 @@ private[query] class MergingRangeVectorCursor(
 
   private var lastFinalizedTimestamp: Long = Long.MinValue
   private var exhaustedBase = false
-  private var currentBucketRow: Option[BucketRowData] = None
+  // scalastyle:off null
+  private var currentBucketRow: BucketRowData = null  // null means no row staged
+  private var lastBaseRow: RowReader = null  // reference to last row from base cursor
+  // Prefetched next bucket row — avoids BufferedIterator wrapper overhead
+  private var nextBucketRow: BucketRowData = if (bucketRowsIter.hasNext) bucketRowsIter.next() else null
+  // scalastyle:on null
 
-  // Use a BufferedIterator to advance through sorted bucket rows without eager materialization
-  private val sortedBucketRows = bucketRowsIter.buffered
+  // Pre-compute: does column 0 contain the timestamp?
+  private val hasTimestampCol: Boolean = columnIDs.nonEmpty && columnIDs(0) == 0
 
   // The current row reader for bucket data
   private val bucketRowReader = new BucketDataRowReader(columnIDs)
@@ -151,13 +131,22 @@ private[query] class MergingRangeVectorCursor(
     if (!exhaustedBase && baseCursor.hasNext) {
       true
     } else {
-      exhaustedBase = true
+      if (!exhaustedBase) {
+        // Base cursor just became exhausted — capture last finalized timestamp once
+        exhaustedBase = true
+        // scalastyle:off null
+        if (lastBaseRow != null && hasTimestampCol) {
+          lastFinalizedTimestamp = lastBaseRow.getLong(0)
+          lastBaseRow = null  // release reference
+        }
+        // scalastyle:on null
+      }
       // Only find next bucket row if we don't already have one staged
-      if (currentBucketRow.isDefined) {
+      if (currentBucketRow != null) {
         true
       } else {
         currentBucketRow = findNextBucketRow()
-        currentBucketRow.isDefined
+        currentBucketRow != null
       }
     }
   }
@@ -165,31 +154,36 @@ private[query] class MergingRangeVectorCursor(
   override def next(): RowReader = {
     if (!exhaustedBase) {
       val row = baseCursor.next()
-      // Track the last finalized timestamp (column 0 is always timestamp)
-      if (columnIDs.nonEmpty && columnIDs(0) == 0) {
-        lastFinalizedTimestamp = row.getLong(0)
-      }
+      // Store reference to last row — timestamp is read lazily when base is exhausted
+      lastBaseRow = row
       row
     } else {
-      currentBucketRow match {
-        case Some(bucketData) =>
-          bucketRowReader.setData(bucketData)
-          currentBucketRow = None
-          bucketRowReader
-        case None =>
-          throw new NoSuchElementException("No more rows")
-      }
+      // scalastyle:off null
+      if (currentBucketRow == null) throw new NoSuchElementException("No more rows")
+      bucketRowReader.setData(currentBucketRow)
+      currentBucketRow = null
+      // scalastyle:on null
+      bucketRowReader
     }
   }
 
   // Advance past bucket rows that are <= lastFinalizedTimestamp, then return the next one.
   // Since bucket rows are sorted by timestamp, we only need to skip forward (O(1) amortized).
-  private def findNextBucketRow(): Option[BucketRowData] = {
-    while (sortedBucketRows.hasNext && sortedBucketRows.head.timestamp <= lastFinalizedTimestamp) {
-      sortedBucketRows.next() // skip rows already covered by finalized data
+  // Returns null if no more bucket rows are available.
+  // scalastyle:off null
+  private def findNextBucketRow(): BucketRowData = {
+    while (nextBucketRow != null && nextBucketRow.timestamp <= lastFinalizedTimestamp) {
+      nextBucketRow = if (bucketRowsIter.hasNext) bucketRowsIter.next() else null
     }
-    if (sortedBucketRows.hasNext) Some(sortedBucketRows.next()) else None
+    if (nextBucketRow != null) {
+      val result = nextBucketRow
+      nextBucketRow = if (bucketRowsIter.hasNext) bucketRowsIter.next() else null
+      result
+    } else {
+      null
+    }
   }
+  // scalastyle:on null
 
   override def close(): Unit = {
     baseCursor.close()
@@ -222,7 +216,8 @@ private[query] class BucketDataRowReader(columnIDs: Array[Int]) extends RowReade
   }
 
   override def getInt(columnNo: Int): Int = {
-    data.values(columnNo) match {
+    if (columnIDs(columnNo) == 0) data.timestamp.toInt
+    else data.values(columnNo) match {
       case i: Int => i
       case l: Long => l.toInt
       case d: Double => d.toInt
@@ -244,7 +239,8 @@ private[query] class BucketDataRowReader(columnIDs: Array[Int]) extends RowReade
   }
 
   override def getDouble(columnNo: Int): Double = {
-    data.values(columnNo) match {
+    if (columnIDs(columnNo) == 0) data.timestamp.toDouble
+    else data.values(columnNo) match {
       case d: Double => d
       case l: Long => l.toDouble
       case i: Int => i.toDouble

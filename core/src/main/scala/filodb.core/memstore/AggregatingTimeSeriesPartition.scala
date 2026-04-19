@@ -211,6 +211,21 @@ class AggregatingTimeSeriesPartition(
   def activeBucketTimestamps: Set[Long] = bucketState.activeBucketTimestamps
 
   /**
+   * Returns true if there are any active (non-finalized) buckets.
+   * Cheap O(1) check to short-circuit query path when no buckets exist.
+   */
+  def hasActiveBuckets: Boolean = bucketState.hasActiveBuckets
+
+  /**
+   * Returns an iterator over active bucket values in [startTime, endTime].
+   * For histogram columns, returns MutableHistogram objects (not serialized).
+   * Uses TreeMap range view — no intermediate collections are allocated.
+   */
+  def bucketValuesIteratorInRange(startTime: Long, endTime: Long): Iterator[(Long, Array[Any])] = {
+    bucketState.bucketValuesIteratorInRange(startTime, endTime)
+  }
+
+  /**
    * Gets all column values for a specific bucket.
    * Returns an array where index 0 is the bucket timestamp.
    *

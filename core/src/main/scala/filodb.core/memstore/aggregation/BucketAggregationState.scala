@@ -139,6 +139,41 @@ class BucketAggregationState(
   }
 
   /**
+   * Returns an iterator over active buckets in the given time range [startTime, endTime].
+   * Each entry is (bucketTimestamp, columnValues) where histogram columns return MutableHistogram
+   * objects directly (not serialized DirectBuffers), suitable for the query path.
+   *
+   * Uses TreeMap's range view — no intermediate Set, Seq, or sort is allocated.
+   */
+  def bucketValuesIteratorInRange(startTime: Long, endTime: Long): Iterator[(Long, Array[Any])] = {
+    // TreeMap.range(from, until) is [from, until). Use rangeFrom to avoid Long.MaxValue+1 overflow.
+    val rangeView = if (endTime == Long.MaxValue) {
+      activeBuckets.rangeFrom(startTime)
+    } else {
+      activeBuckets.range(startTime, endTime + 1)
+    }
+    rangeView.iterator.map { case (ts, state) =>
+      val values = new Array[Any](numColumns)
+      var i = 0
+      while (i < numColumns) {
+        columnConfigs(i) match {
+          case Some(_) =>
+            values(i) = state.getValueForQuery(i)
+          case None =>
+            values(i) = state.getValue(i)
+        }
+        i += 1
+      }
+      (ts, values)
+    }
+  }
+
+  /**
+   * Returns true if there are any active (non-finalized) buckets.
+   */
+  def hasActiveBuckets: Boolean = activeBuckets.nonEmpty
+
+  /**
    * Gets all active bucket timestamps.
    */
   def activeBucketTimestamps: Set[Long] = activeBuckets.keySet.toSet
@@ -223,6 +258,23 @@ private class BucketState(numColumns: Int) {
     Option(aggregators(colIdx)).map(_.result()).orNull
     // scalastyle:on null
   }
+
+  /**
+   * Returns the aggregated value for the query path. For histogram columns, returns
+   * MutableHistogram directly (not serialized DirectBuffer). For scalar columns,
+   * returns the aggregator result (Double/Long). Returns null if no aggregator exists.
+   */
+  // scalastyle:off null
+  def getValueForQuery(colIdx: Int): Any = {
+    val agg = aggregators(colIdx)
+    if (agg == null) return null
+    agg match {
+      case ha: HistogramAggregator => ha.getAccumulator.orNull
+      case hla: HistogramLastAggregator => hla.getCurrentHistogram.orNull
+      case _ => agg.result()
+    }
+  }
+  // scalastyle:on null
 
   def getHistogram(colIdx: Int): Option[MutableHistogram] = {
     Option(aggregators(colIdx)).flatMap {
