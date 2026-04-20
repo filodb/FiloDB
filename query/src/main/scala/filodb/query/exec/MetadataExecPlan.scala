@@ -485,9 +485,9 @@ final case object TsCardExec {
    */
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.LongColumn),
-                                       ColumnInfo("billable", ColumnType.LongColumn),
                                        ColumnInfo("shortTerm", ColumnType.LongColumn),
-                                       ColumnInfo("longTerm", ColumnType.LongColumn)), 1)
+                                       ColumnInfo("longTerm", ColumnType.LongColumn),
+                                       ColumnInfo("billable", ColumnType.LongColumn)), 1)
 
   /**
    * @param prefix ShardKeyPrefix from the Cardinality Record
@@ -524,9 +524,9 @@ final case object TsCardExec {
     override def getInt(columnNo: Int): Int = ???
     override def getLong(columnNo: Int): Long = columnNo match {
       case 1 => counts.active
-      case 2 => counts.billable
-      case 3 => counts.shortTerm
-      case 4 => counts.longTerm
+      case 2 => counts.shortTerm
+      case 3 => counts.longTerm
+      case 4 => counts.billable
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
     override def getDouble(columnNo: Int): Double = ???
@@ -550,9 +550,11 @@ final case object TsCardExec {
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
-      val counts = CardCounts(
-        rr.getLong(1), rr.getLong(2),
-        rr.getLong(3), rr.getLong(4))
+      val active = rr.getLong(1)
+      val shortTerm = rr.getLong(2)
+      val longTerm = rr.getLong(3)
+      val billable = rr.getLong(4)
+      val counts = CardCounts(active, billable, shortTerm, longTerm)
       RowData(group, counts)
     }
   }
