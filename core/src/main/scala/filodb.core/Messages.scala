@@ -29,5 +29,5 @@ final case class NotFoundError(what: String) extends Exception(what)
 final case class StorageEngineException(t: Throwable) extends Exception(t)
 final case class MetadataException(t: Throwable) extends Exception(t)
 final case class SystemLimitsReachedException(msg: String) extends Exception(msg)
-final case class QueryTimeoutException(elapsedQueryTime: Long, timedOutAt: String) extends
-  Exception (s"Query timeout in $timedOutAt after ${elapsedQueryTime/1000} seconds")
+final case class QueryTimeoutException(elapsedQueryTime: Long, timedOutAt: String, ex: Option[Exception] = None) extends
+  RuntimeException(s"Query timeout in $timedOutAt after ${elapsedQueryTime/1000} seconds", ex.orNull)

@@ -59,9 +59,9 @@ class RecordBuilder(memFactory: MemFactory,
   def currentTimeMillis: Long = System.currentTimeMillis()
 
   // Reset last container and all pointers
-  def reset(): Unit = if (containers.nonEmpty) {
+  def reset(skipTime: Boolean = false): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
-    containers.last.updateTimestamp(currentTimeMillis)
+    if (!skipTime) containers.last.updateTimestamp(currentTimeMillis)
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -493,6 +493,8 @@ class RecordBuilder(memFactory: MemFactory,
    * Returns the list of all current containers
    */
   def allContainers: Seq[RecordContainer] = containers.toSeq
+
+  def lastContainer: RecordContainer = containers.last
 
   // Used for debugging...  throws exception if there is no data.  Be careful here.
   def curContainerBase: Any = currentContainer.get.base
