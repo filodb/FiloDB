@@ -3,9 +3,13 @@ package filodb.labelchurnfinder
 import com.typesafe.config.ConfigFactory
 import io.circe.parser._
 import io.circe.syntax._
+import org.apache.kafka.clients.producer.{Callback, KafkaProducer, ProducerRecord, RecordMetadata}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
+import org.mockito.ArgumentMatchers.any
+import org.mockito.MockitoSugar
+import org.mockito.invocation.InvocationOnMock
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +19,7 @@ import java.time.Instant
 /**
  * Unit tests for LabelStatsKafkaProducer.
  */
-class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
+class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with MockitoSugar {
 
   import LabelStatisticsMessage._
 
@@ -208,7 +212,6 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
   }
 
   describe("Producer configuration") {
-
     it("should use correct Kafka configuration values") {
       val config = ConfigFactory.parseString(
         """
@@ -227,6 +230,66 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
       producer.topic shouldBe "test-topic"
       producer.kafkaProps("pie.queue.kaffe.connect") shouldBe "test-server:9092"
       producer.mosaicPartition shouldBe "us-east-1-p1"
+    }
+  }
+
+  describe("Accumulator tracking") {
+
+    val accConfig = ConfigFactory.parseString(
+      """
+        |partition = "us-east-1-p1"
+        |labelchurnfinder.kafka {
+        |  topic = "test-topic"
+        |  pie.queue.kaffe.connect = "localhost:9092"
+        |}
+        |""".stripMargin)
+
+    it("should increment labelsAcc by the number of labels in the published row") {
+      val failuresAcc   = spark.sparkContext.longAccumulator("failures")
+      val labelsAcc     = spark.sparkContext.longAccumulator("labels")
+      val workspacesAcc = spark.sparkContext.longAccumulator("workspaces")
+
+      val df = createTestDataFrame(Seq(
+        ("ws-1", "All", "pod",      100L, 200L, 300L, Array[Byte](1), Array[Byte](2), Array[Byte](3)),
+        ("ws-1", "All", "instance",  50L, 100L, 150L, Array[Byte](4), Array[Byte](5), Array[Byte](6)),
+        ("ws-1", "All", "container", 30L,  60L,  90L, Array[Byte](7), Array[Byte](8), Array[Byte](9))
+      ))
+
+      val producer = new LabelStatsKafkaProducer(accConfig, failuresAcc, labelsAcc, workspacesAcc)
+      val row = producer.groupLabelsByWorkspace(df).collect().head
+
+      val mockProducer = mock[KafkaProducer[String, String]]
+      LabelStatsKafkaProducer.publishRow(row, mockProducer, "test-topic", "us-east-1-p1",
+        Instant.now(), failuresAcc, labelsAcc)
+
+      labelsAcc.value shouldBe 3
+      failuresAcc.value shouldBe 0
+    }
+
+    it("should increment failuresAcc when Kafka send callback fires with an exception") {
+      val failuresAcc   = spark.sparkContext.longAccumulator("failures")
+      val labelsAcc     = spark.sparkContext.longAccumulator("labels")
+      val workspacesAcc = spark.sparkContext.longAccumulator("workspaces")
+
+      val df = createTestDataFrame(Seq(
+        ("ws-2", "All", "pod", 100L, 200L, 300L, Array[Byte](1), Array[Byte](2), Array[Byte](3))
+      ))
+
+      val producer = new LabelStatsKafkaProducer(accConfig, failuresAcc, labelsAcc, workspacesAcc)
+      val row = producer.groupLabelsByWorkspace(df).collect().head
+
+      val mockProducer = mock[KafkaProducer[String, String]]
+      doAnswer((invocation: InvocationOnMock) => {
+        val callback = invocation.getArgument[Callback](1)
+        callback.onCompletion(null, new RuntimeException("broker unavailable"))
+        null.asInstanceOf[java.util.concurrent.Future[RecordMetadata]]
+      }).when(mockProducer).send(any[ProducerRecord[String, String]], any[Callback])
+
+      LabelStatsKafkaProducer.publishRow(row, mockProducer, "test-topic", "us-east-1-p1",
+        Instant.now(), failuresAcc, labelsAcc)
+
+      failuresAcc.value shouldBe 1
+      labelsAcc.value shouldBe 1
     }
   }
 }

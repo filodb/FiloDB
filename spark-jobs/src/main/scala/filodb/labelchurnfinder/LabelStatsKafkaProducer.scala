@@ -184,7 +184,7 @@ object LabelStatsKafkaProducer {
   ): Unit = {
     val workspaceId = row.getAs[String](WsCol)
     val nsGroup = row.getAs[String](NsGroupCol)
-    val labelsArray = row.getAs[Seq[Row]]("labels")
+    val labelsArray = row.getAs[scala.collection.Seq[Row]]("labels")
 
     val labels = buildLabelsFromRows(labelsArray)
     labelsAcc.add(labels.size)
@@ -203,7 +203,8 @@ object LabelStatsKafkaProducer {
   /**
    * Builds label statistics from Spark Row data.
    */
-  private[labelchurnfinder] def buildLabelsFromRows(labelsArray: Seq[Row]): Seq[LabelStatDto] = {
+  private[labelchurnfinder] def buildLabelsFromRows(labelsArray: scala.collection.Seq[Row]):
+  scala.collection.Seq[LabelStatDto] = {
     labelsArray.map { labelRow =>
       LabelStatDto(
         labelName = labelRow.getAs[String](0),
