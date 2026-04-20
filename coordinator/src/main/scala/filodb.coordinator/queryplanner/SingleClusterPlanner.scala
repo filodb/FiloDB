@@ -928,9 +928,15 @@ class SingleClusterPlanner(val dataset: Dataset,
       // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
       // doesnt fully fall into the retention period. Data required for that instant involves
       // going backwards from that instant up to windowMs + offsetMs milli-seconds.
-      val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
-      val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
-      lastInstantBeforeRetention + stepMs
+      if (stepMs == 0L) {
+        // Instant query: single data point is outside retention period.
+        // Return startMs + 1 so caller sees newStartMs > endMs and returns EmptyResultExec.
+        startMs + 1
+      } else {
+        val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
+        val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
+        lastInstantBeforeRetention + stepMs
+      }
     } else {
       startMs
     }
