@@ -40,6 +40,219 @@ object InputRecord {
   import filodb.core.metadata.Schemas._
   import ZCUTF8._
 
+  // ── Java TreeMap overloads ─────────────────────────────────────────
+  // These accept java.util.TreeMap[String, String] directly, avoiding:
+  //   - convertToScalaImmutableMap (Stream, Tuple2, HashMap construction)
+  //   - Scala Map.toSeq.sortBy (TreeMap is already sorted)
+  //   - ZeroCopyUTF8String wrapping (k.utf8, v.utf8)
+  //
+  // Produces identical wire format — same bytes, same partition hash.
+  // Use from Java callers (e.g. MosaicRecordBuilder) for lower allocation overhead.
+
+  def writeGaugeRecord(builder: RecordBuilder,
+                       metric: String,
+                       tags: java.util.TreeMap[String, String],
+                       timestamp: Long,
+                       value: Double): Unit =
+    writeKVRecordJ(builder, metric, tags, timestamp, value, gauge)
+
+  def writePromCounterRecord(builder: RecordBuilder,
+                             metric: String,
+                             tags: java.util.TreeMap[String, String],
+                             timestamp: Long,
+                             count: Double): Unit =
+    writeKVRecordJ(builder, metric, tags, timestamp, count, promCounter)
+
+  def writeDeltaCounterRecord(builder: RecordBuilder,
+                              metric: String,
+                              tags: java.util.TreeMap[String, String],
+                              timestamp: Long,
+                              count: Double): Unit =
+    writeKVRecordJ(builder, metric, tags, timestamp, count, deltaCounter)
+
+  def writeUntypedRecord(builder: RecordBuilder,
+                         metric: String,
+                         tags: java.util.TreeMap[String, String],
+                         timestamp: Long,
+                         value: Double): Unit =
+    writeKVRecordJ(builder, metric, tags, timestamp, value, untyped)
+
+  private def writeKVRecordJ(builder: RecordBuilder,
+                             metric: String,
+                             tags: java.util.TreeMap[String, String],
+                             timestamp: Long,
+                             value: Double,
+                             schema: Schema): Unit = {
+    builder.startNewRecord(schema)
+    builder.addLong(timestamp)
+    builder.addDouble(value)
+    builder.addString(metric)
+    builder.encodeMapFrom(tags)
+    builder.endRecord()
+  }
+
+  def writePromHistRecord(builder: RecordBuilder,
+                          metric: String,
+                          tags: java.util.TreeMap[String, String],
+                          timestamp: Long,
+                          kvs: Seq[(String, Double)]): Unit = {
+    val (sum, count, sortedBuckets) = extractSumCountBuckets(kvs)
+    if (sortedBuckets.nonEmpty) {
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(promHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+
+  def writeDeltaHistRecord(builder: RecordBuilder,
+                           metric: String,
+                           tags: java.util.TreeMap[String, String],
+                           timestamp: Long,
+                           kvs: Seq[(String, Double)]): Unit = {
+    val (sum, count, sortedBuckets) = extractSumCountBuckets(kvs)
+    if (sortedBuckets.nonEmpty) {
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(deltaHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+
+  def writeOtelCumulativeHistRecord(builder: RecordBuilder,
+                                    metric: String,
+                                    tags: java.util.TreeMap[String, String],
+                                    timestamp: Long,
+                                    kvs: Seq[(String, Double)]): Unit = {
+    val (sum, count, min, max, sortedBuckets) = extractSumCountMinMaxBuckets(kvs)
+    if (sortedBuckets.nonEmpty) {
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(otelCumulativeHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+
+  def writeOtelDeltaHistRecord(builder: RecordBuilder,
+                               metric: String,
+                               tags: java.util.TreeMap[String, String],
+                               timestamp: Long,
+                               kvs: Seq[(String, Double)]): Unit = {
+    val (sum, count, min, max, sortedBuckets) = extractSumCountMinMaxBuckets(kvs)
+    if (sortedBuckets.nonEmpty) {
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(otelDeltaHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+
+  //scalastyle:off method.length
+  def writeOtelExponentialHistRecord(builder: RecordBuilder,
+                                     metric: String,
+                                     tags: java.util.TreeMap[String, String],
+                                     timestamp: Long,
+                                     kvs: Seq[(String, Double)],
+                                     isDelta: Boolean): Unit = {
+    require(isDelta, "Cumulative exponential histograms not supported")
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+    var posBucketOffset = Double.NaN
+    var scale = Double.NaN
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v; false
+      case ("count", v) => count = v; false
+      case ("min", v) => min = v; false
+      case ("max", v) => max = v; false
+      case ("posBucketOffset", v) => posBucketOffset = v; false
+      case ("scale", v) => scale = v; false
+      case _ => true
+    }.map { case (k, v) => (k.toInt, v.toLong) }.sorted
+    if (sortedBuckets.nonEmpty) {
+      val buckets = Base2ExpHistogramBuckets(scale.toInt, posBucketOffset.toInt, sortedBuckets.length - 1)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(otelExpDeltaHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+  //scalastyle:on method.length
+
+  // ── Shared helpers for histogram bucket extraction ─────────────────
+
+  private def extractSumCountBuckets(kvs: Seq[(String, Double)])
+    : (Double, Double, Seq[(Double, Long)]) = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v; false
+      case ("count", v) => count = v; false
+      case _ => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+    (sum, count, sortedBuckets)
+  }
+
+  private def extractSumCountMinMaxBuckets(kvs: Seq[(String, Double)])
+    : (Double, Double, Double, Double, Seq[(Double, Long)]) = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v; false
+      case ("count", v) => count = v; false
+      case ("min", v) => min = v; false
+      case ("max", v) => max = v; false
+      case _ => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+    (sum, count, min, max, sortedBuckets)
+  }
+
+  // ── Original Scala Map overloads (unchanged) ───────────────────────
+
   /**
    * Writes a BinaryRecord for the built-in gauge schema.  Note that tags are NOT manipulated at all.
    */
