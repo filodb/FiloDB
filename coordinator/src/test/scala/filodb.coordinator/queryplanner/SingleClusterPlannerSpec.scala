@@ -2100,6 +2100,40 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     res.result.isEmpty shouldEqual true
   }
 
+  it("should not throw div by zero for instant queries with window and offset outside retention") {
+    val nowSeconds = System.currentTimeMillis() / 1000
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
+
+    // Instant query with window and offset that pushes data need before retention boundary.
+    // This is the query pattern from the original bug: max_over_time(...[5m] offset 5m)
+    // For an instant query step=0, so boundToStartTimeToEarliestRetained must not divide by zero.
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      """max_over_time(foo{job="bar"}[5m] offset 5m)""",
+      TimeStepParams(nowSeconds - 4.days.toSeconds, 0, nowSeconds - 4.days.toSeconds))
+
+    val ep = planner.materialize(logicalPlan, QueryContext())
+    // The instant is outside retention, so we should get an empty result
+    ep.isInstanceOf[EmptyResultExec] shouldEqual true
+  }
+
+  it("should not throw div by zero for instant query within retention with window and offset") {
+    val nowSeconds = System.currentTimeMillis() / 1000
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
+
+    // Instant query where the timestamp is recent enough that data window is within retention.
+    // step=0 but the guard condition in boundToStartTimeToEarliestRetained should be false,
+    // so it returns startMs as-is.
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      """max_over_time(foo{job="bar"}[5m] offset 5m)""",
+      TimeStepParams(nowSeconds, 0, nowSeconds))
+
+    val ep = planner.materialize(logicalPlan, QueryContext())
+    // Should materialize successfully, not throw or return empty
+    ep.isInstanceOf[EmptyResultExec] shouldEqual false
+  }
+
   it("should materialize instant queries with lookback == retention correctly") {
     val nowSeconds = System.currentTimeMillis() / 1000
     val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
