@@ -835,14 +835,24 @@ extends ChunkedRangeFunction[TransientRow] {
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
     if (endRowNum >= 0) {
-      val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
-      if (ts >= startTime && ts > timestamp) {
-        val dblReader = valueReader.asDoubleReader
-        val doubleVal = dblReader(valueVectorAcc, valueVector, endRowNum)
-        if (!doubleVal.isNaN) {
-          timestamp = ts
-          value = ts.toDouble / 1000.0
+      val dblReader = valueReader.asDoubleReader
+      var rowNum = endRowNum
+      var done = false
+      while (rowNum >= 0 && !done) {
+        val ts = tsReader(tsVectorAcc, tsVector, rowNum)
+        if (ts < startTime) {
+          done = true
+        } else if (ts > timestamp) {
+          val doubleVal = dblReader(valueVectorAcc, valueVector, rowNum)
+          if (!doubleVal.isNaN) {
+            timestamp = ts
+            value = ts.toDouble / 1000.0
+            done = true
+          }
+        } else {
+          done = true
         }
+        rowNum -= 1
       }
     }
   }

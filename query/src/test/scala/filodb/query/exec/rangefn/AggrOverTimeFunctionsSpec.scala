@@ -2694,4 +2694,47 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     result.head.isNaN shouldBe true
   }
 
+  it("should handle NaN stale markers in ts_of_last chunked function") {
+    // Last sample is NaN (stale marker), but earlier samples are valid
+    val data = Seq(1.0, 2.0, 3.0, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 4
+    val step = 4
+
+    // Chunked: should return timestamp of last non-NaN (3.0 at index 2)
+    val expectedTs = (defaultStartTS + 2 * pubFreq).toDouble / 1000.0
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head shouldEqual expectedTs
+  }
+
+  it("should return NaN from ts_of_last chunked function when all values are NaN") {
+    val data = Seq(Double.NaN, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 3
+    val step = 3
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head.isNaN shouldBe true
+  }
+
+  it("should handle multiple trailing NaN stale markers in ts_of_last chunked function") {
+    // Multiple trailing NaNs with valid samples earlier
+    val data = Seq(10.0, 20.0, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 4
+    val step = 4
+
+    val expectedTs = (defaultStartTS + 1 * pubFreq).toDouble / 1000.0
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head shouldEqual expectedTs
+  }
+
 }
