@@ -545,7 +545,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        // Return a failure that overlaps with the queried time range
+        // Return a failure that overlaps with the synthetic time range (now-5min, now)
         Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
       }
     }
@@ -564,7 +564,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     remoteExec.urlParams.contains("match[]") shouldEqual true
   }
 
-  it("should execute TsCardinalities locally when no failures are present at current time") {
+  it("should execute TsCardinalities locally when no failures are present") {
     val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
 
     val failureProvider = new FailureProvider {
@@ -578,7 +578,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
-    // Should NOT be a remote exec — should stay local
+    // No failures — should stay local
     execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
   }
