@@ -6,7 +6,7 @@ import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -601,5 +601,113 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     // Verify loop prevention: buddy should not attempt failover again
     execPlan.queryContext.plannerParams.processFailure shouldEqual false
     execPlan.queryContext.plannerParams.processMultiPartition shouldEqual false
+  }
+
+  it("should execute TsCardinalities locally when processMultiPartition=false (buddy received query)") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    // Simulate buddy receiving the rerouted query: processFailure=false skips HA routing
+    val qContext = QueryContext(origQueryParams = promQlQueryParams,
+      plannerParams = PlannerParams(processFailure = false, processMultiPartition = false))
+    val execPlan = engine.materialize(lp, qContext)
+
+    // Should execute locally even though failures exist — processFailure=false bypasses HA
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
+  }
+
+  it("should execute TsCardinalities locally when only remote failures exist") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        // Only remote/buddy failures — local is healthy
+        Seq(FailureTimeRange("remote", datasetRef, queryTimeRange, true))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Remote failure only — should stay local, not route to unhealthy buddy
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
+  }
+
+  it("should route TsCardinalities to buddy when both local and remote failures exist") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        // Both local and remote have failures
+        Seq(
+          FailureTimeRange("local", datasetRef, queryTimeRange, false),
+          FailureTimeRange("remote", datasetRef, queryTimeRange, true)
+        )
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Local failure exists — routes to buddy even if buddy also has failures.
+    // materializeLegacy only considers local failures for routing decisions.
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+  }
+
+  it("should route TsCardinalities with multiple datasets to buddy on local failure") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3,
+      Seq("raw", "recordingrules"), "raw,recordingrules")
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
+    // Verify datasets are passed through in URL params
+    remoteExec.urlParams("datasets") shouldEqual "raw,recordingrules"
+    remoteExec.urlParams("numGroupByFields") shouldEqual "3"
+  }
+
+  it("should route TsCardinalities with empty shardKeyPrefix to buddy on local failure") {
+    // Empty prefix (numGroupByFields=1) — dispatched to all partitions at MPP level,
+    // but at HA level it's the same all-or-nothing routing
+    val lp = TsCardinalities(Seq(), 1)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
+    remoteExec.urlParams("numGroupByFields") shouldEqual "1"
   }
 }

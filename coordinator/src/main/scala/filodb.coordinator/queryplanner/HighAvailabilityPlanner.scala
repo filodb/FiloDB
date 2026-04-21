@@ -226,6 +226,10 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       )
       val q = qContext.copy(plannerParams = plannerParams)
       localPlanner.materialize(logicalPlan, q)
+    } else if (logicalPlan.isInstanceOf[TsCardinalities]) {
+      // Metadata query — shard-level failover is unnecessary. Use materializeLegacy
+      // for simple all-or-nothing routing to buddy when local has failures.
+      materializeLegacy(logicalPlan, qContext)
     } else if (useShardLevelFailover || qContext.plannerParams.failoverMode == ShardLevelFailoverMode) {
       // we need to populate planner params with the shard maps
       val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)
