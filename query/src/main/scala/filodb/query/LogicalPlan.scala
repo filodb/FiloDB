@@ -18,13 +18,6 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 
   /**
-    * Whether this plan has an associated time range.
-    * Plans that return false cannot go through time-based failure routing (e.g. materializeLegacy).
-    * Override to false for timeless metadata queries like TsCardinalities.
-    */
-  def hasTimeRange: Boolean = true
-
-  /**
     * Whether to Time-Split queries into smaller range queries if the range exceeds configured limit.
     * This flag will be overridden by plans, which either do not support splitting or will not help in improving
     * performance. For e.g. metadata query plans.
@@ -362,8 +355,6 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
     "cannot group at the metric level when prefix does not contain ws and ns")
 
   override def isRoutable: Boolean = true
-  override def hasTimeRange: Boolean = false
-
   def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
     ColumnFilter(label, Equals(value))}
 
@@ -391,7 +382,6 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
                         filters: Seq[ColumnFilter],
                         column: String) extends PeriodicSeriesPlan {
   override def isRoutable: Boolean = false
-  override def hasTimeRange: Boolean = false
 
   // FIXME - TechDebt - This class should not be a PeriodicSeriesPlan
   override def startMs: Long = ???

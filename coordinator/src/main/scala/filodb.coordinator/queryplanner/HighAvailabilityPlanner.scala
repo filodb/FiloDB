@@ -204,12 +204,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     // at all since we know that both clusters have corrupted/invalid/non existent data.
     // Instead we should keep shards down and FailureTimeRanges information separate!
     // Keeping the existing logic in place for now but allow one to switch to the new logic.
-    // Some metadata plans (e.g. TsCardinalities) are timeless — they have no start/end times,
-    // so they cannot go through materializeLegacy which depends on time ranges for failure routing.
-    // Handle HA routing for them directly here.
-    if (!logicalPlan.hasTimeRange && logicalPlan.isRoutable && !notPromQlQuery && !markedNotToBeFailedOver) {
-      materializeTimelessHA(logicalPlan, qContext)
-    } else if (unroutableLogicalPlan || notPromQlQuery || markedNotToBeFailedOver || hasMultipleTimeRanges) {
+    if (unroutableLogicalPlan || notPromQlQuery || markedNotToBeFailedOver || hasMultipleTimeRanges) {
       // we don't want to do any complicated shard level logic and instead
       // even want to turn it off completely to make sure that the logic stays
       // exactly the same
@@ -273,50 +268,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       }
       logger.debug("Routes: " + routes)
       routeExecPlanMapper(routes, logicalPlan, qContext, lookBackTime)
-    }
-  }
-
-  /**
-    * Builds the URL parameters for a remote metadata exec call for timeless plans.
-    */
-  private def getTimelessPlanUrlParams(logicalPlan: LogicalPlan,
-                                       queryParams: PromQlQueryParams): Map[String, String] = {
-    logicalPlan match {
-      case lp: TsCardinalities => lp.queryParams()
-      case _ => Map("match[]" -> queryParams.promQl)
-    }
-  }
-
-  /**
-    * HA routing for timeless metadata plans that have no start/end times.
-    * These cannot use materializeLegacy which depends on time ranges for failure routing.
-    * Instead, we check current shard health (via ActiveShardMapper when available,
-    * or FailureProvider as fallback) and route accordingly:
-    *   - Local shards healthy → execute locally
-    *   - Local shards unhealthy → route to buddy via MetadataRemoteExec
-    */
-  private def materializeTimelessHA(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // Timeless plans only care about current cluster health, not historical failures.
-    // Use real-time shard health if available, otherwise check failure provider with a recent window.
-    val localShardsHealthy = buddyShardMapperProvider match {
-      case Some(_) => getLocalActiveShardMapper(qContext.plannerParams).allShardsActive
-      case None =>
-        // Check for failures in a recent 5-minute window to capture any active issues
-        val now = System.currentTimeMillis()
-        val fiveMinMs = 5 * 60 * 1000
-        failureProvider.getFailures(dsRef, TimeRange(now - fiveMinMs, now)).isEmpty
-    }
-    if (localShardsHealthy) {
-      localPlanner.materialize(logicalPlan, qContext)
-    } else {
-      // Local shards unhealthy — route entirely to buddy
-      val newQueryContext = qContext.copy(
-        plannerParams = qContext.plannerParams.copy(processFailure = false, processMultiPartition = false))
-      val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
-      MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-        getTimelessPlanUrlParams(logicalPlan, queryParams), newQueryContext,
-        inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
     }
   }
 
