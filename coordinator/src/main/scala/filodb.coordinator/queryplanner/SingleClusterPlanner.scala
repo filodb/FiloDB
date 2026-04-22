@@ -834,44 +834,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
-    val rawSeries = lp match {
-      case Right(value) => value.series
-      case Left(value)  => value.rawSeries
-    }
-
-    rawSeries match {
-      case rawSeriesLp: RawSeries =>
-
-        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
-          map(_.filter.valuesStrings.head.toString)
-        val leEqualsFilter = rawSeriesLp.filters.find(f => f.column == "le" && f.filter.isInstanceOf[Equals])
-        val leFilter = leEqualsFilter.map(_.filter.valuesStrings.head.toString)
-
-        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
-        else {
-          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
-          if (!nameFilter.get.endsWith("_bucket")) {
-            (nameFilter, leFilter, lp)
-          }
-          else if (leFilter.isDefined && parsePromLeValue(leFilter.get).isDefined) {
-            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-              filterNot(f => f.column == "le" && f.filter.isInstanceOf[Equals]) :+ ColumnFilter(PromMetricLabel,
-              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
-            val newLp =
-              if (lp.isLeft)
-                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-              else
-                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-            (nameFilter, leFilter, newLp)
-          }
-          else {
-            (nameFilter, None, lp)
-          }
-        }
-      case _ => (None, None, lp)
-    }
-  }
   override private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries,
                                         forceInProcess: Boolean): PlanResult = {
