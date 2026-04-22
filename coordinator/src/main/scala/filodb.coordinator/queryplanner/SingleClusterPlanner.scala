@@ -834,12 +834,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  private def parsePromLeValue(le: String): Option[Double] = le match {
-    case "+Inf" | "Inf" => Some(Double.PositiveInfinity)
-    case "-Inf"         => Some(Double.NegativeInfinity)
-    case other          => scala.util.Try(other.toDouble).toOption
-  }
-
   override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
     val rawSeries = lp match {
       case Right(value) => value.series
@@ -860,7 +854,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           if (!nameFilter.get.endsWith("_bucket")) {
             (nameFilter, leFilter, lp)
           }
-          else {
+          else if (leFilter.isDefined && parsePromLeValue(leFilter.get).isDefined) {
             val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
               filterNot(f => f.column == "le" && f.filter.isInstanceOf[Equals]) :+ ColumnFilter(PromMetricLabel,
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
@@ -870,6 +864,9 @@ class SingleClusterPlanner(val dataset: Dataset,
               else
                 Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
+          }
+          else {
+            (nameFilter, None, lp)
           }
         }
       case _ => (None, None, lp)

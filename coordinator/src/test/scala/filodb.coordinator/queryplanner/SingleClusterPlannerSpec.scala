@@ -2479,6 +2479,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
     // le NotEquals filter should be retained since this is not a specific bucket selection
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for NotEquals le filter
@@ -2493,6 +2496,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
     // le NotEquals filter should be retained
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for NotEquals le filter
@@ -2507,6 +2513,11 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for unparseable le value
     multiSchemaPartitionsExec.rangeVectorTransformers.exists(
       _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
@@ -2519,6 +2530,11 @@ class SingleClusterPlannerSpec extends AnyFunSpec
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for unparseable le value
     multiSchemaPartitionsExec.rangeVectorTransformers.exists(
       _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
