@@ -655,6 +655,7 @@ enum InternalRangeFunction {
   LAST_OVER_TIME_IS_MAD_OUTLIER = 30;
   TS_OF_MAX_OVER_TIME   = 31;
   TS_OF_MIN_OVER_TIME   = 32;
+  TS_OF_LAST_OVER_TIME = 33;
 }
 
 enum SortFunctionId {

@@ -68,6 +68,7 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object MinOverTime extends RangeFunctionId("min_over_time", Seq(RangeVectorParam()))
   case object TsOfMaxOverTime extends RangeFunctionId("ts_of_max_over_time", Seq(RangeVectorParam()))
   case object TsOfMinOverTime extends RangeFunctionId("ts_of_min_over_time", Seq(RangeVectorParam()))
+  case object TsOfLastOverTime extends RangeFunctionId("ts_of_last_over_time", Seq(RangeVectorParam()))
   case object PredictLinear extends RangeFunctionId("predict_linear", Seq(RangeVectorParam(), ScalarParam()))
   case object QuantileOverTime extends RangeFunctionId("quantile_over_time", Seq(ScalarParam(), RangeVectorParam()))
   case object Rate extends RangeFunctionId("rate", Seq(RangeVectorParam()))

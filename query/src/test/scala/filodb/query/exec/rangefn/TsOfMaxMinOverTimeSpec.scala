@@ -178,4 +178,127 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     tsMinResults.size shouldEqual expectedWindows
     tsMinResults.foreach { ts => ts.isNaN shouldBe false }
   }
+
+  it("should correctly aggregate ts_of_last_over_time using chunked iterators") {
+    // Create data with known timestamps and values
+    val data = (1 to 240).map(_.toDouble)
+    val rv = timeValueRV(data)
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(75) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Test ts_of_last_over_time
+      val tsLastChunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+      val tsLastAggregated = tsLastChunkedIt.map(_.getDouble(1)).toBuffer
+
+      // Expected: timestamp (in seconds) when last (most recent) value occurred in each window
+      val expectedTsLast = data.sliding(windowSize, step).zipWithIndex.map { case (window, windowIdx) =>
+        // Last value is always at the end of the window (highest index)
+        val lastIndex = window.size - 1
+        val timestampMillis = defaultStartTS + (windowIdx * step + lastIndex) * pubFreq
+        timestampMillis.toDouble / 1000.0
+      }.toBuffer
+
+      tsLastAggregated shouldEqual expectedTsLast
+    }
+  }
+
+  it("should handle NaN values correctly in ts_of_last_over_time") {
+    // Test data with NaN values
+    val dataWithNaN = Seq(1.0, 2.0, Double.NaN, 4.0, 5.0, Double.NaN, 3.0, 6.0)
+    val rv = timeValueRV(dataWithNaN)
+
+    val windowSize = 4
+    val step = 2
+
+    // Test ts_of_last_over_time - should ignore NaN values and find last non-NaN
+    val tsLastIt = chunkedWindowIt(dataWithNaN, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResults = tsLastIt.map(_.getDouble(1)).toBuffer
+
+    // Window 1: [1.0, 2.0, NaN, 4.0] -> last non-NaN is 4.0 at index 3
+    // Window 2: [Double.NaN, 4.0, 5.0, Double.NaN] -> last non-NaN is 5.0 at index 4
+    // Window 3: [5.0, Double.NaN, 3.0, 6.0] -> last non-NaN is 6.0 at index 7
+
+    tsLastResults.size shouldEqual 3
+    tsLastResults.foreach { ts => ts.isNaN shouldBe false }
+  }
+
+  it("should return NaN timestamp when all values in window are NaN for ts_of_last_over_time") {
+    // Test data with all NaN values
+    val allNaN = Seq(Double.NaN, Double.NaN, Double.NaN, Double.NaN)
+    val rv = timeValueRV(allNaN)
+
+    val windowSize = 4
+    val step = 1
+
+    // Test ts_of_last_over_time
+    val tsLastIt = chunkedWindowIt(allNaN, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResult = tsLastIt.next().getDouble(1)
+    tsLastResult.isNaN shouldEqual true
+  }
+
+  it("should correctly identify timestamp of last occurrence in ts_of_last_over_time") {
+    // Test data where we want to verify the last timestamp
+    val data = Seq(1.0, 5.0, 3.0, 5.0, 2.0, 1.0, 4.0, 1.0)
+    val rv = timeValueRV(data)
+
+    val windowSize = 8
+    val step = 1
+
+    // Test ts_of_last_over_time - should return timestamp of LAST value (1.0 at index 7)
+    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResult = tsLastIt.next().getDouble(1)
+    val expectedLastTs = (defaultStartTS + 7 * pubFreq).toDouble / 1000.0  // Index 7 (last)
+    tsLastResult shouldEqual expectedLastTs
+  }
+
+  it("should work correctly with single value windows for ts_of_last_over_time") {
+    val data = Seq(42.0)
+    val rv = timeValueRV(data)
+
+    val windowSize = 1
+    val step = 1
+
+    // Test ts_of_last_over_time
+    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResult = tsLastIt.next().getDouble(1)
+    val expectedTs = defaultStartTS.toDouble / 1000.0
+    tsLastResult shouldEqual expectedTs
+  }
+
+  it("should handle negative values correctly in ts_of_last_over_time") {
+    val dataWithNegatives = Seq(-5.0, -2.0, 3.0, -8.0, 1.0, -1.0)
+    val rv = timeValueRV(dataWithNegatives)
+
+    val windowSize = 6
+    val step = 1
+
+    // Test ts_of_last_over_time - last value is -1.0 at index 5
+    val tsLastIt = chunkedWindowIt(dataWithNegatives, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResult = tsLastIt.next().getDouble(1)
+    val expectedLastTs = (defaultStartTS + 5 * pubFreq).toDouble / 1000.0
+    tsLastResult shouldEqual expectedLastTs
+  }
+
+  it("should work correctly across multiple chunks for ts_of_last_over_time") {
+    // Create data that will span multiple chunks
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
+
+    val windowSize = 50
+    val step = 25
+
+    // Test ts_of_last_over_time
+    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastResults = tsLastIt.map(_.getDouble(1)).toBuffer
+
+    // Verify we got results for all windows
+    val expectedWindows = numWindows(data, windowSize, step)
+    tsLastResults.size shouldEqual expectedWindows
+
+    // All timestamps should be valid (not NaN)
+    tsLastResults.foreach { ts => ts.isNaN shouldBe false }
+  }
 }

@@ -1001,6 +1001,7 @@ object ProtoConverters {
         case InternalRangeFunction.Timestamp => GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP
         case InternalRangeFunction.TsOfMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME
         case InternalRangeFunction.TsOfMinOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME
+        case InternalRangeFunction.TsOfLastOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME
         case InternalRangeFunction.AbsentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME
         case InternalRangeFunction.PresentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME
         case InternalRangeFunction.MedianAbsoluteDeviationOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME
@@ -1042,6 +1043,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP => InternalRangeFunction.Timestamp
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME => InternalRangeFunction.TsOfMaxOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME => InternalRangeFunction.TsOfMinOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME => InternalRangeFunction.TsOfLastOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME => InternalRangeFunction.AbsentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME => InternalRangeFunction.PresentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME => InternalRangeFunction.MedianAbsoluteDeviationOverTime
