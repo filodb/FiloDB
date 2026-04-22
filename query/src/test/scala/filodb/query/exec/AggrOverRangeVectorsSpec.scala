@@ -1043,6 +1043,42 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     resultRows.foreach { case (_, q) => q.isNaN shouldEqual false }
   }
 
+  it("should handle empty RangeVectors in fastReduce without NoSuchElementException") {
+    val emptyRv = toRv(Seq.empty)
+
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.fastReduce(agg, skipMapPhase = false, Observable.fromIterable(Seq(emptyRv)), outputLen = 1)
+
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 0
+  }
+
+  it("should handle empty RangeVectors in fastReduce skipMapPhase without NoSuchElementException") {
+    val emptyRv = toRv(Seq.empty)
+
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.fastReduce(agg, skipMapPhase = true, Observable.fromIterable(Seq(emptyRv)), outputLen = 1)
+
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 0
+  }
+
+  it("should handle mismatched row counts in mapReduceInternal without NoSuchElementException") {
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, 1.0)), noKey),
+      toRv(Seq.empty, noKey)
+    )
+
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(
+      agg, skipMapPhase = false, Observable.fromIterable(samples), noGrouping, queryContext = qc, QueryWarnings()
+    )
+
+    val result = resultObs.toListL.runToFuture.futureValue
+    result.size shouldEqual 1
+    compareIter(result(0).rows().map(_.getDouble(1)), Seq(1.0d).iterator)
+  }
+
   @tailrec
   final private def compareIter2(it1: Iterator[Set[Double]], it2: Iterator[Set[Double]]) : Unit = {
     (it1.hasNext, it2.hasNext) match{
