@@ -2485,8 +2485,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     // le NotEquals filter should be retained since this is not a specific bucket selection
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for NotEquals le filter
-    multiSchemaPartitionsExec.rangeVectorTransformers.exists(
-      _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
   }
 
   it("should not throw NumberFormatException for rate histogram bucket query with le!=\"+Inf\" NotEquals filter") {
@@ -2502,8 +2504,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     // le NotEquals filter should be retained
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for NotEquals le filter
-    multiSchemaPartitionsExec.rangeVectorTransformers.exists(
-      _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
   }
 
   it("should not throw NumberFormatException for histogram bucket query with non-numeric le value") {
@@ -2519,8 +2523,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     // le filter should be retained since the value is not a valid number
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for unparseable le value
-    multiSchemaPartitionsExec.rangeVectorTransformers.exists(
-      _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
   }
 
   it("should not throw NumberFormatException for rate histogram bucket query with non-numeric le value") {
@@ -2536,8 +2542,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     // le filter should be retained since the value is not a valid number
     multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
     // HistogramBucket transformer should NOT be added for unparseable le value
-    multiSchemaPartitionsExec.rangeVectorTransformers.exists(
-      _.isInstanceOf[InstantVectorFunctionMapper]) shouldEqual false
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
   }
 
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
