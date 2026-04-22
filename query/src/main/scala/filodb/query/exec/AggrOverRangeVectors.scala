@@ -297,8 +297,10 @@ object RangeVectorAggregator extends StrictLogging {
           acc.resetToZero()
           queryContext.checkQueryTimeout(this.getClass.getName)
           itsAndKeys.foreach { case (rowIter, rvk) =>
-            val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
-            acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
+            if (rowIter.hasNext) {
+              val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
+              acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
+            }
           }
           acc
         }
@@ -328,12 +330,14 @@ object RangeVectorAggregator extends StrictLogging {
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
     val aggObs = if (skipMapPhase) {
       source.foldLeft(accs) { case (_, rv) =>
-        count += 1
         val rowIter = rv.rows
         if (period.isEmpty) period = rv.outputRange
         try {
-          cforRange { 0 until outputLen } { i =>
-            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next())
+          if (rowIter.hasNext) {
+            count += 1
+            cforRange { 0 until outputLen } { i =>
+              accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next())
+            }
           }
         } finally {
           rowIter.close()
@@ -343,13 +347,15 @@ object RangeVectorAggregator extends StrictLogging {
     } else {
       val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
       source.foldLeft(accs) { case (_, rv) =>
-        count += 1
         val rowIter = rv.rows
         if (period.isEmpty) period = rv.outputRange
         try {
-          cforRange { 0 until outputLen } { i =>
-            val mapped = rowAgg.map(rv.key, rowIter.next(), mapIntos(i))
-            accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+          if (rowIter.hasNext) {
+            count += 1
+            cforRange { 0 until outputLen } { i =>
+              val mapped = rowAgg.map(rv.key, rowIter.next(), mapIntos(i))
+              accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+            }
           }
         } finally {
           rowIter.close()
