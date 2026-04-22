@@ -365,6 +365,7 @@ object RangeFunction {
       case Some(MaxOverTime)                      => () => new MaxOverTimeChunkedFunctionD
       case Some(TsOfMinOverTime)                  => () => new TsOfMinOverTimeChunkedFunctionD
       case Some(TsOfMaxOverTime)                  => () => new TsOfMaxOverTimeChunkedFunctionD
+      case Some(TsOfLastOverTime)                 => () => new TsOfLastOverTimeChunkedFunctionD
       case Some(StdDevOverTime)                   => () => new StdDevOverTimeChunkedFunctionD
       case Some(StdVarOverTime)                   => () => new StdVarOverTimeChunkedFunctionD
       case Some(Changes)                          => () => new ChangesChunkedFunctionD()
@@ -498,6 +499,7 @@ object RangeFunction {
     case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
     case Some(TsOfMaxOverTime)                  => () => new TsOfMaxMinOverTimeFunction(Ordering[Double])
     case Some(TsOfMinOverTime)                  => () => new TsOfMaxMinOverTimeFunction(Ordering[Double].reverse)
+    case Some(TsOfLastOverTime)                 => () => new TsOfLastOverTimeFunction()
     case Some(CountOverTime)                    => () => new CountOverTimeFunction()
     case Some(SumOverTime)                      => () => new SumOverTimeFunction()
     case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()

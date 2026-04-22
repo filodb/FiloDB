@@ -136,12 +136,10 @@ class TsOfMaxOverTimeChunkedFunctionD(var max: Double = Double.NaN,
 
   // Need to override addChunks to access both timestamp and value vectors
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
-                tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr,
-                valueReader: VectorDataReader,
-                startTime: Long, endTime: Long,
-                info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+  override def addChunks(schema: Schema, tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                         tsReader: bv.LongVectorDataReader, valueVectorAcc: MemoryReader,
+                         valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
@@ -186,12 +184,10 @@ class TsOfMinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
 
   // Need to override addChunks to access both timestamp and value vectors
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
-                tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr,
-                valueReader: VectorDataReader,
-                startTime: Long, endTime: Long,
-                info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+  override def addChunks(schema: Schema, tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                         tsReader: bv.LongVectorDataReader, valueVectorAcc: MemoryReader,
+                         valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                         startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
@@ -213,6 +209,76 @@ class TsOfMinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
     }
   }
   // scalastyle:on parameter.number
+}
+
+/**
+ * Timestamp of Last Over Time - returns the timestamp when the last (most recent) value occurred.
+ * Extends LastSampleChunkedFunction to reuse the logic for finding the most recent sample.
+ */
+class TsOfLastOverTimeChunkedFunctionD extends LastSampleChunkedFunction[TransientRow] {
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    // Return the timestamp (in seconds) when last occurred
+    sampleToEmit.setValues(endTimestamp,
+      if (timestamp >= 0) timestamp.toDouble / 1000.0 else Double.NaN)
+  }
+
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
+                  valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val dblReader = valReader.asDoubleReader
+    val doubleVal = dblReader(valAcc, valVector, endRowNum)
+    // Only update if the value is not NaN
+    if (!doubleVal.isNaN) {
+      timestamp = ts
+    }
+  }
+}
+
+/**
+ * Timestamp of Last Over Time - sliding window version for iterating functions.
+ * Returns the timestamp when the last (most recent) value occurred.
+ */
+class TsOfLastOverTimeFunction extends RangeFunction[TransientRow] {
+  private var lastTimestamp: Long = -1L
+  private var lastValue: Double = Double.NaN
+
+  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
+    if (!row.value.isNaN) {
+      // Update if this timestamp is later than current lastTimestamp
+      if (row.timestamp > lastTimestamp) {
+        lastTimestamp = row.timestamp
+        lastValue = row.value
+      }
+    }
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
+    // If the removed row was our last timestamp, we need to find the new last
+    if (row.timestamp == lastTimestamp) {
+      lastTimestamp = -1L
+      lastValue = Double.NaN
+
+      // Scan the remaining window to find the new last timestamp
+      for (i <- 0 until window.size) {
+        val windowRow = window(i)
+        if (!windowRow.value.isNaN && windowRow.timestamp > lastTimestamp) {
+          lastTimestamp = windowRow.timestamp
+          lastValue = windowRow.value
+        }
+      }
+    }
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
+                     sampleToEmit: TransientRow,
+                     queryConfig: QueryConfig): Unit = {
+    if (lastTimestamp >= 0) {
+      // Return the timestamp (in seconds) when the last value occurred
+      sampleToEmit.setValues(endTimestamp, lastTimestamp.toDouble / 1000.0)
+    } else {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
+  }
 }
 
 /**
