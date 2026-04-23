@@ -25,7 +25,7 @@ import filodb.memory.format.UnsafeUtils
  *   (1) only the least-significant prefix name is stored.
  *   (2) no shard ID is store
  */
-case class CardinalityValue(tsCount: Long, activeTsCount: Long,
+case class CardinalityValue(tsCount: Long, activeTsCount: Long, billableTsCount: Long,
                             childrenCount: Long, childrenQuota: Long)
 
 case object CardinalityValue {
@@ -40,13 +40,18 @@ class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
     output.writeLong(card.tsCount, true)
     output.writeLong(card.activeTsCount, true)
+    output.writeLong(card.billableTsCount, true)
     output.writeLong(card.childrenCount, true)
     output.writeLong(card.childrenQuota, true)
   }
 
   def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
-    CardinalityValue(input.readLong(true), input.readLong(true),
-                    input.readLong(true), input.readLong(true))
+    CardinalityValue(
+      input.readLong(true),
+      input.readLong(true),
+      input.readLong(true),
+      input.readLong(true),
+      input.readLong(true))
   }
 }
 
@@ -286,7 +291,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       // result reached MAX_RESULT_SIZE, but still more cardinalities
       if (it.isValid() && !complete) {
         // sum the remaining counts into these values
-        var tsCount, activeTsCount, childrenCount, childrenQuota = 0L
+        var tsCount, activeTsCount, billableTsCount, childrenCount, childrenQuota = 0L
         breakable {
           do {
             // note: the iterator is valid here on the first iteration
@@ -295,6 +300,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
               val node = bytesToCardinalityValue(it.value())
               tsCount = tsCount + node.tsCount
               activeTsCount = activeTsCount + node.activeTsCount
+              billableTsCount = billableTsCount + node.billableTsCount
               childrenCount = childrenCount + node.childrenCount
               childrenQuota = childrenQuota + node.childrenQuota
             } else {
@@ -304,7 +310,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
           } while (it.isValid())
         }
         buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX, CardinalityValue(
-          tsCount, activeTsCount, childrenCount, childrenQuota)))
+          tsCount, activeTsCount, billableTsCount, childrenCount, childrenQuota)))
       }
     } finally {
       it.close();
