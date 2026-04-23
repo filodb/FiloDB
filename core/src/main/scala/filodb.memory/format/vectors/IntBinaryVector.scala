@@ -487,6 +487,38 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
+  /**
+   * Overwrites the value at a specific index position.
+   * Default implementation for 32-bit ints. For other nbits sizes, this should be overridden.
+   */
+  override def overwriteAt(index: Int, value: Int): AddResponse = {
+    if (index < 0 || index >= length) {
+      VectorTooSmall(index, length - 1)
+    } else {
+      nbits match {
+        case 32 =>
+          val offset = addr + PrimitiveVector.OffsetData + index * 4
+          UnsafeUtils.setInt(offset, value)
+          Ack
+        case 16 =>
+          val offset = addr + PrimitiveVector.OffsetData + index * 2
+          UnsafeUtils.setShort(offset, value.toShort)
+          Ack
+        case 8 =>
+          val offset = addr + PrimitiveVector.OffsetData + index
+          UnsafeUtils.setByte(offset, value.toByte)
+          Ack
+        case _ =>
+          // For bit-packed values (nbits < 8), we'd need to read-modify-write
+          // For now, not implemented - would need specialized logic
+          VectorTooSmall(0, 0)  // Indicate unsupported operation
+      }
+    }
+  }
+
+  override def overwriteFromReaderNoNA(index: Int, reader: RowReader, col: Int): AddResponse =
+    overwriteAt(index, reader.getInt(col))
+
   final def minMax: (Int, Int) = {
     var min = Int.MaxValue
     var max = Int.MinValue

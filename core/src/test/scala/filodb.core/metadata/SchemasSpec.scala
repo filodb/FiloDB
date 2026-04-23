@@ -3,6 +3,7 @@ package filodb.core.metadata
 import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
+import filodb.core.memstore.aggregation.{AggregationType, ColumnAggregator}
 import filodb.core.query.ColumnInfo
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -119,6 +120,73 @@ class SchemasSpec extends AnyFunSpec with Matchers {
       schema.columns.map(_.id) shouldEqual Seq(0, 1, 2)
       schema.columns.map(_.columnType) shouldEqual Seq(TimestampColumn, LongColumn, StringColumn)
       schema.timestampColumn.name shouldEqual "timestamp"
+      schema.hasAggregation shouldEqual false
+    }
+
+    it("should parse schema with aggregation config") {
+      val conf2 = ConfigFactory.parseString("""
+                    {
+                      columns = ["timestamp:ts",
+                        "sum:double:{detectDrops=false,delta=true}",
+                        "count:double:{detectDrops=false,delta=true}",
+                        "h:hist:{counter=false,delta=true}"
+                      ]
+                      value-column = "h"
+                      downsamplers = []
+                      aggregators = ["dSum(1)", "dSum(2)", "hSum(3)"]
+                      aggregation-interval = 1m
+                      aggregation-ooo-tolerance = 2m
+                    }""")
+      val schema = DataSchema.fromConfig("dataset", conf2).get
+      schema.hasAggregation shouldEqual true
+      schema.aggregators.length shouldEqual 3
+      schema.aggregators(0) shouldEqual ColumnAggregator(1, AggregationType.Sum)
+      schema.aggregators(1) shouldEqual ColumnAggregator(2, AggregationType.Sum)
+      schema.aggregators(2) shouldEqual ColumnAggregator(3, AggregationType.HistogramSum)
+      schema.aggregationIntervalMs shouldEqual 60000L
+      schema.aggregationOooToleranceMs shouldEqual 120000L
+    }
+
+    it("should return error when aggregators present but no interval") {
+      val conf2 = ConfigFactory.parseString("""
+                    {
+                      columns = ["timestamp:ts", "value:double"]
+                      value-column = "value"
+                      downsamplers = []
+                      aggregators = ["dSum(1)"]
+                    }""")
+      val resp = DataSchema.fromConfig("dataset", conf2)
+      resp.isBad shouldEqual true
+      resp.swap.get shouldBe a[BadColumnParams]
+    }
+
+    it("should return error when aggregator references invalid column id") {
+      val conf2 = ConfigFactory.parseString("""
+                    {
+                      columns = ["timestamp:ts", "value:double"]
+                      value-column = "value"
+                      downsamplers = []
+                      aggregators = ["dSum(5)"]
+                      aggregation-interval = 1m
+                      aggregation-ooo-tolerance = 2m
+                    }""")
+      val resp = DataSchema.fromConfig("dataset", conf2)
+      resp.isBad shouldEqual true
+      resp.swap.get shouldBe a[BadColumnParams]
+    }
+
+    it("should default to no aggregation when aggregators not specified") {
+      val conf2 = ConfigFactory.parseString("""
+                    {
+                      columns = ["timestamp:ts", "value:double"]
+                      value-column = "value"
+                      downsamplers = []
+                    }""")
+      val schema = DataSchema.fromConfig("dataset", conf2).get
+      schema.hasAggregation shouldEqual false
+      schema.aggregators shouldBe empty
+      schema.aggregationIntervalMs shouldEqual 0L
+      schema.aggregationOooToleranceMs shouldEqual 0L
     }
   }
 

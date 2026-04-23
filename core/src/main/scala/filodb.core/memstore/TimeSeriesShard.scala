@@ -1209,9 +1209,16 @@ class TimeSeriesShard(val ref: DatasetRef,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
+
+      // Check if schema has aggregation configured
+      val hasAggregation = schema.data.hasAggregation
+
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
+      } else if (hasAggregation) {
+        logger.debug(s"Adding AggregatingTimeSeriesPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
+        new AggregatingTimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       } else {
         new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       }

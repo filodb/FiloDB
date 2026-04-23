@@ -159,6 +159,30 @@ object Column extends StrictLogging {
           colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName))) }
     yield { DataColumn(nextId, name, colType, params) }
 
+  /**
+   * Parses a time string like "30s", "1m", "5m", "1h", "1d" to milliseconds.
+   * @param s the time string to parse
+   * @return time in milliseconds
+   * @throws IllegalArgumentException if the format is invalid
+   */
+  def parseTimeString(s: String): Long = {
+    val pattern = """(\d+)([smhd])""".r
+    s match {
+      case pattern(value, unit) =>
+        val v = value.toLong
+        unit match {
+          case "s" => v * 1000
+          case "m" => v * 60 * 1000
+          case "h" => v * 60 * 60 * 1000
+          case "d" => v * 24 * 60 * 60 * 1000
+        }
+      case _ =>
+        throw new IllegalArgumentException(
+          s"Invalid time string: $s. Expected format: <number><unit> where unit is s,m,h,d"
+        )
+    }
+  }
+
   import Accumulation._
 
   /**
