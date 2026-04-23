@@ -3,10 +3,12 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
+import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
+import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -15,6 +17,7 @@ import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
+import filodb.query.Query.qLogger
 import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -28,6 +31,7 @@ import filodb.query.exec.InternalRangeFunction.Last
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
 trait  DefaultPlanner {
+    def flightEnabled: Boolean
     def queryConfig: QueryConfig
     def dataset: Dataset
     def schemas: Schemas
@@ -271,7 +275,7 @@ trait  DefaultPlanner {
                                      forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (vectors.plans.length > 1) {
-        val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
+        val targetActor = PlannerUtil.pickDispatcher(vectors.plans, flightEnabled)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
         topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
         PlanResult(Seq(topPlan), vectors.needsStitch)
@@ -286,7 +290,7 @@ trait  DefaultPlanner {
                               forceInProcess: Boolean = false): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (vectors.plans.length > 1) {
-        val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
+        val targetActor = PlannerUtil.pickDispatcher(vectors.plans, flightEnabled)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
         topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function,
           RangeParams(lp.startMs, lp.stepMs, lp.endMs)))
@@ -348,7 +352,7 @@ trait  DefaultPlanner {
         // If number of children is above a threshold, parallelize aggregation
         val groupSize = Math.sqrt(toReduceLevel.plans.size).ceil.toInt
         toReduceLevel.plans.grouped(groupSize).map { nodePlans =>
-          val reduceDispatcher = PlannerUtil.pickDispatcher(nodePlans)
+          val reduceDispatcher = PlannerUtil.pickDispatcher(nodePlans, flightEnabled)
           LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel.plans
@@ -361,7 +365,7 @@ trait  DefaultPlanner {
     *   Given that the work required to allow dispatcher updates and/or rework pushdown logic is nontrivial
     *   and the QueryStats bloat given by unnecessary aggregation plans is likely small, the fix is skipped for now.
     */
-    val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
+    val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2, flightEnabled))
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
     if (!qContext.plannerParams.skipAggregatePresent)
@@ -391,7 +395,7 @@ trait  DefaultPlanner {
                                forceInProcess: Boolean = false): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
     if (vectors.plans.length > 1) {
-      val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
+      val targetActor = PlannerUtil.pickDispatcher(vectors.plans, flightEnabled)
       val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(LimitFunctionMapper(lp.limit))
       PlanResult(Seq(topPlan), vectors.needsStitch)
@@ -609,7 +613,7 @@ trait  DefaultPlanner {
       val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
         val lhsCluster = lhs.plans.head.dispatcher.clusterName
         val rhsCluster = rhs.plans.head.dispatcher.clusterName
-        if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans)
+        if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans, flightEnabled)
         else inProcessPlanDispatcher
       } else inProcessPlanDispatcher
 
@@ -689,7 +693,7 @@ object PlannerUtil extends StrictLogging {
   /**
    * Picks one dispatcher randomly from child exec plans passed in as parameter
    */
-  def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+  def pickDispatcher(children: Seq[ExecPlan], flightEnabled: Boolean): PlanDispatcher = {
     val plannerParams = children.iterator.next().queryContext.plannerParams
     // there is a very subtle point on how to decide how we need to pick up the dispatcher
     // HA planner would inject the children that are created with HA planner with the active shard map
@@ -710,7 +714,7 @@ object PlannerUtil extends StrictLogging {
       if (!localActiveShardMapper.allShardsActive && buddyActiveShardMapper.allShardsActive) {
         pickDispatcherNormal(children)
       } else {
-        pickDispatcherShardLevelFailover(children, plannerParams)
+        pickDispatcherShardLevelFailover(children, flightEnabled)
       }
     } else {
       // this case is used for both:
@@ -739,7 +743,7 @@ object PlannerUtil extends StrictLogging {
    * Picks one dispatcher randomly from child exec plans passed in as parameter
    */
   def pickDispatcherShardLevelFailover(
-    children: Seq[ExecPlan], plannerParams: PlannerParams
+    children: Seq[ExecPlan], flightEnabled: Boolean
   ): PlanDispatcher = {
 
     children.find(_.dispatcher.isLocalCall).map(_.dispatcher).getOrElse {
@@ -766,17 +770,25 @@ object PlannerUtil extends StrictLogging {
         val path = localShardMapper.shards(randomActiveShard).address
         val serialization = SerializationExtension(ActorSystemHolder.system)
         val deserializedActorRef = serialization.system.provider.resolveActorRef(path)
-        val dispatcher = ActorPlanDispatcher(
-          deserializedActorRef, clusterName
-        )
-        dispatcher
+        getAkkaOrFlightDispatcher(deserializedActorRef, clusterName, flightEnabled)
       } else {
-        val dispatcher =
-          localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
-        dispatcher
+        localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
       }
    }
   }
+
+  def getAkkaOrFlightDispatcher(targetActor: ActorRef,
+                                clusterName: String,
+                                flightEnabled: Boolean): PlanDispatcher = {
+    if (flightEnabled) {
+      qLogger.debug(s"Converting $targetActor to Flight ... ")
+      val location = FiloDBFlightProducer.akkaActorToFlightLocation(targetActor)
+      SingleClusterFlightPlanDispatcher(location, clusterName)
+    } else {
+      ActorPlanDispatcher(targetActor, clusterName)
+    }
+  }
+
 
   def isScheduledLocally(d : PlanDispatcher): Boolean = {
     val scheduledLocally = (!d.isInstanceOf[RemoteActorPlanDispatcher]) && (!d.isInstanceOf[GrpcPlanDispatcher])

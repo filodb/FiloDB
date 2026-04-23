@@ -58,7 +58,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
                            clusterName: String,
-                           flightEnabled: Boolean = false,
+                           val flightEnabled: Boolean = false,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
                            timeSplitEnabled: Boolean = false,
@@ -211,17 +211,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       else
         throw new RuntimeException(s"Shard: $shard is not available")
     }
-    getAkkaOrFlightDispatcher(targetActor)
-  }
-
-  private def getAkkaOrFlightDispatcher(targetActor: ActorRef): PlanDispatcher = {
-    if (flightEnabled) {
-      qLogger.debug(s"Converting $targetActor to Flight ... ")
-      val location = FiloDBFlightProducer.akkaActorToFlightLocation(targetActor)
-      SingleClusterFlightPlanDispatcher(location, clusterName)
-    } else {
-      ActorPlanDispatcher(targetActor, clusterName)
-    }
+    PlannerUtil.getAkkaOrFlightDispatcher(targetActor, clusterName, flightEnabled)
   }
 
   private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
@@ -243,7 +233,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       if (targetActor == ActorRef.noSender) {
         getRemoteDispatcherForShard(shard, queryContext)
       } else {
-        getAkkaOrFlightDispatcher(targetActor)
+        PlannerUtil.getAkkaOrFlightDispatcher(targetActor, clusterName, flightEnabled)
       }
     } else {
       getRemoteDispatcherForShard(shard, queryContext)
@@ -337,7 +327,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         case Seq(one) => materializeTimeSplitPlan(one, qContext, false)
         case many =>
           val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext, false))
-          val targetActor = PlannerUtil.pickDispatcher(materializedPlans)
+          val targetActor = PlannerUtil.pickDispatcher(materializedPlans, flightEnabled)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
           // results back with StitchRvsMapper transformer.
@@ -361,7 +351,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         if (stitch) justOne.addRangeVectorTransformer(StitchRvsMapper(rvRangeFromPlan(logicalPlan)))
         justOne
       case PlanResult(many, stitch) =>
-        val targetActor = PlannerUtil.pickDispatcher(many)
+        val targetActor = PlannerUtil.pickDispatcher(many, flightEnabled)
         many.head match {
           case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
@@ -617,11 +607,11 @@ class SingleClusterPlanner(val dataset: Dataset,
                                               forceDispatcher: Option[PlanDispatcher]): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcess)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(lhs.plans), rvRangeFromPlan(lp), lhs.plans))
+      PlannerUtil.pickDispatcher(lhs.plans, flightEnabled), rvRangeFromPlan(lp), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceInProcess)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(rhs.plans), rvRangeFromPlan(lp), rhs.plans))
+      PlannerUtil.pickDispatcher(rhs.plans, flightEnabled), rvRangeFromPlan(lp), rhs.plans))
     else rhs.plans
 
     // TODO Currently we create separate exec plan node for stitching.
@@ -630,7 +620,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // In theory, more efficient to use transformer than to have separate exec plan node to avoid IO.
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
-    val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs))
+    val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs, flightEnabled))
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
@@ -1166,7 +1156,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     var toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
       qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     if (!canPushdownInner) {
-      val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans)
+      val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans, flightEnabled)
       val plan = if (toReduceLevel1.needsStitch) {
         StitchRvsExec(qContext, dispatcher, outputRvRange = None, children = toReduceLevel1.plans)
       } else if (toReduceLevel1.plans.size > 1) {

@@ -33,6 +33,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            partitionLocationProvider: PartitionLocationProvider,
                            config: QueryConfig,
+                           val flightEnabled: Boolean,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) {
 
@@ -110,7 +111,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else {
       val result = walkLogicalPlanTree(logicalPlan, qContext)
       if (result.plans.size > 1) {
-        val dispatcher = PlannerUtil.pickDispatcher(result.plans)
+        val dispatcher = PlannerUtil.pickDispatcher(result.plans, flightEnabled)
         MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
       } else result.plans.head
     }
