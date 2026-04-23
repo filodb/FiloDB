@@ -514,6 +514,29 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
 
+    // TsOfLastOverTime
+    parseSuccessfully("ts_of_last_over_time(some_metric[5m])")
+    parseError("ts_of_last_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_last_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_last_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // TsOfMaxOverTime
+    parseSuccessfully("ts_of_max_over_time(some_metric[5m])")
+    parseError("ts_of_max_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_max_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_max_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // TsOfMinOverTime
+    parseSuccessfully("ts_of_min_over_time(some_metric[5m])")
+    parseError("ts_of_min_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_min_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_min_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // Complex staleness detection query pattern
+    parseSuccessfully("(time() - ts_of_last_over_time(sum by (cluster) (your_metric)[24h:])) > 300")
+    parseSuccessfully("time() - ts_of_last_over_time(some_metric[1h])")
+    parseSuccessfully("ts_of_last_over_time(rate(http_requests_total[5m])[30m:])")
+
     // Trailing Commas
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations,)(some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations, )(some_metric)")
