@@ -122,15 +122,16 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     if (shardColumnFilters.exists(f =>  f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex])) {
       // to ensure that tests dont call something else that is not configured
       require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
-        && (
-        f.filter.asInstanceOf[EqualsRegex].pattern.toString == ".*Ns"
-        || f.filter.asInstanceOf[EqualsRegex].pattern.toString == "localNs.*")))
+        && Set(".*Ns", "localNs.*", "remoteNs.*").contains(f.filter.asInstanceOf[EqualsRegex].pattern.toString)))
+
       val nsCol = shardColumnFilters.find(_.column == "_ns_").get
       if (nsCol.filter.asInstanceOf[EqualsRegex].pattern.toString == "localNs.*") {
         Seq(
           Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs"))),
           Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs1")))
         )
+      } else if (nsCol.filter.asInstanceOf[EqualsRegex].pattern.toString == "remoteNs.*") {
+        Seq(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs"))))
       } else {
         Seq(
           Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs"))),
@@ -254,6 +255,18 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       |----FA1~StaticFuncArgs(0.0,RangeParams(1633913330,300,1634777330))
       |----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1613234495],downsample)""".stripMargin
+    validatePlan(execPlan, expected)
+  }
+
+  it("should correctly interpret escaped backslashes and add escapes for miscellaneous funcs") {
+    val lp = Parser.queryRangeToLogicalPlan(
+      """label_replace(foo{_ws_="my-ws", _ns_=~"remoteNs.*", otherFilter=~"foo\\.*"}, "newLabel", "$1", "sourceLabel", "(value-\\d+)-.*")""",
+      TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(
+      origQueryParams = queryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+    val expected =
+      """E~PromQlRemoteExec(PromQlQueryParams(label_replace(foo{otherFilter=~"foo\\.*",_ws_="demo",_ns_="remoteNs"},"newLabel","$1","sourceLabel","(value-\\d+)-.*"),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,true,false,false,true,10,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
     validatePlan(execPlan, expected)
   }
 
