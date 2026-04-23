@@ -28,13 +28,13 @@ object LabelChurnFinderMain extends App {
   private val jobStartMs = System.currentTimeMillis()
 
   @transient private lazy val jobDuration         =
-    FilodbMetrics.timeHistogram("label_churn_finder_job_duration", TimeUnit.MILLISECONDS)
+    FilodbMetrics.timeHistogram("lcf_job_duration", TimeUnit.MILLISECONDS)
   @transient private lazy val workspacesPublished =
-    FilodbMetrics.counter("label_churn_finder_workspaces_published_total")
+    FilodbMetrics.counter("lcf_workspaces_published_total")
   @transient private lazy val labelsPublished     =
-    FilodbMetrics.counter("label_churn_finder_labels_published_total")
+    FilodbMetrics.counter("lcf_labels_published_total")
   @transient private lazy val kafkaFailures       =
-    FilodbMetrics.counter("label_churn_finder_kafka_publish_failures_total")
+    FilodbMetrics.counter("lcf_kafka_publish_failures_total")
 
   private val dsSettings = new DownsamplerSettings()
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
