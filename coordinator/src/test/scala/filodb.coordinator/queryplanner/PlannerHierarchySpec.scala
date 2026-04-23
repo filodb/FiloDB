@@ -59,14 +59,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       earliestRetainedTimestampFn = now - rawRetention, queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = now - downsampleRetention, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
-      earliestRawTimestampFn = now - rawRetention, latestDownsampleTimestampFn = now - timeToDownsample,
-      inProcessDispatcher, queryConfig, dataset)
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
+      now - rawRetention, now - timeToDownsample, inProcessDispatcher, queryConfig, dataset)
     val recordingRulesPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = now - rrRetention,
       queryConfig, "recordingRules")
     val planners = Map("longTerm" -> longTermPlanner, "recordingRules" -> recordingRulesPlanner)
-    val singlePartitionPlanner = new SinglePartitionPlanner(planners, plannerSelector, dataset, queryConfig)
+    val singlePartitionPlanner = new SinglePartitionPlanner(planners, plannerSelector, dataset, queryConfig, false)
     Planners(singlePartitionPlanner, longTermPlanner, rawPlanner, downsamplePlanner, recordingRulesPlanner)
   }
 
@@ -113,9 +112,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   }
 
   val oneRemoteMultiPartitionPlanner = new MultiPartitionPlanner(oneRemotePartitionLocationProvider, singlePartitionPlanner,
-    "localPartition", dataset, queryConfig)
+    "localPartition", dataset, queryConfig, false)
   val twoRemoteMultiPartitionPlanner = new MultiPartitionPlanner(twoRemotePartitionLocationProvider, singlePartitionPlanner,
-    "localPartition", dataset, queryConfig)
+    "localPartition", dataset, queryConfig, false)
 
   private val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     // we may have mixed of a regex filter and a non-regex filter.
@@ -177,9 +176,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
   private val targetSchemaProvider = StaticTargetSchemaProvider()
 
-  val rootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, shardKeyMatcherFn, oneRemotePartitionLocationProvider, queryConfig)
-  val oneRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, oneRemoteShardKeyMatcherFn, oneRemotePartitionLocationProvider, queryConfig)
-  val twoRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, twoRemoteMultiPartitionPlanner, twoRemoteShardKeyMatcherFn, twoRemotePartitionLocationProvider, queryConfig)
+  val rootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, shardKeyMatcherFn, oneRemotePartitionLocationProvider, queryConfig, false)
+  val oneRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, oneRemoteShardKeyMatcherFn, oneRemotePartitionLocationProvider, queryConfig, false)
+  val twoRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, twoRemoteMultiPartitionPlanner, twoRemoteShardKeyMatcherFn, twoRemotePartitionLocationProvider, queryConfig, false)
 
 
   private val startSeconds = now / 1000 - 10.days.toSeconds
@@ -2487,7 +2486,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, singlePartitionPlanner, "local",
-      MetricsTestData.timeseriesDataset, queryConfig
+      MetricsTestData.timeseriesDataset, queryConfig, false
     )
     for (test <- tests) {
       val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
@@ -2701,7 +2700,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, singlePartitionPlanner, "local",
-      MetricsTestData.timeseriesDataset, queryConfig
+      MetricsTestData.timeseriesDataset, queryConfig, false
     )
     for (test <- tests) {
       val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
@@ -2766,7 +2765,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       MetricsTestData.timeseriesDataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
         supportRemoteRawExport = true,
         maxRemoteRawExportTimeRange = Duration(3, TimeUnit.DAYS),
-        periodOfUncertaintyMs = 3000)))
+        periodOfUncertaintyMs = 3000)), false)
 
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
     val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
@@ -2803,7 +2802,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       MetricsTestData.timeseriesDataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
         supportRemoteRawExport = true,
         maxRemoteRawExportTimeRange = Duration(3, TimeUnit.DAYS),
-        periodOfUncertaintyMs = 3000)))
+        periodOfUncertaintyMs = 3000)), false)
 
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
     val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
@@ -2838,7 +2837,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       MetricsTestData.timeseriesDataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
         supportRemoteRawExport = true,
         maxRemoteRawExportTimeRange = Duration(3, TimeUnit.DAYS),
-        periodOfUncertaintyMs = 3000)))
+        periodOfUncertaintyMs = 3000)), false)
 
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
     val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
@@ -2955,7 +2954,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       MetricsTestData.timeseriesDataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
         supportRemoteRawExport = true,
         maxRemoteRawExportTimeRange = Duration(3, TimeUnit.DAYS),
-        periodOfUncertaintyMs = 3000)))
+        periodOfUncertaintyMs = 3000)), false)
 
     for (test <- tests) {
       val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
@@ -3032,8 +3031,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange:  TimeRange): List[PartitionAssignment] = ???
 }
     val grpcRemoteMultiPartitionPlanner = new MultiPartitionPlanner(gRpcRemotePartitionLocationProvider, singlePartitionPlanner,
-      "localPartition", dataset, queryConfig)
-    val gRpcRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, grpcRemoteMultiPartitionPlanner, shardKeyMatcherFn, gRpcRemotePartitionLocationProvider, queryConfig)
+      "localPartition", dataset, queryConfig, false)
+    val gRpcRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, grpcRemoteMultiPartitionPlanner, shardKeyMatcherFn, gRpcRemotePartitionLocationProvider, queryConfig, false)
 
     val query4 = """topk(2, test{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1"})"""
     val lp4 = Parser.queryRangeToLogicalPlan(query4, TimeStepParams(startSeconds, step, endSeconds), Antlr)
@@ -3138,8 +3137,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
 
     val twoGrpcRemoteMpPlanner = new MultiPartitionPlanner(twoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
-      "localPartition", dataset, queryConfig)
-    val twoGrpcRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlanner, twoRemoteShardKeyMatcherFn, twoRemoteGrpcPartitionLocationProvider, queryConfig)
+      "localPartition", dataset, queryConfig, false)
+    val twoGrpcRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlanner, twoRemoteShardKeyMatcherFn, twoRemoteGrpcPartitionLocationProvider, queryConfig, false)
 
     val query8 = """topk(2, test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
     val lp8 =
@@ -3172,8 +3171,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
 
     val twoRemoteMpPlanner = new MultiPartitionPlanner(twoRemotePartitionLocationProvider, twoRemoteMultiPartitionPlanner,
-      "localPartition", dataset, queryConfig)
-    val oneRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoRemoteMpPlanner, twoRemoteShardKeyMatcherFn, twoRemotePartitionLocationProvider, queryConfig)
+      "localPartition", dataset, queryConfig, false)
+    val oneRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoRemoteMpPlanner, twoRemoteShardKeyMatcherFn, twoRemotePartitionLocationProvider, queryConfig, false)
     val query9 = """topk(2, test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
     val lp9 =
       Parser.queryRangeToLogicalPlan(query9, TimeStepParams(startSeconds, step, endSeconds), Antlr)
@@ -3195,9 +3194,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     val twoGrpcRemoteMpPlannerNoGrpc = new MultiPartitionPlanner(twoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
       "localPartition", dataset,
-      queryConfig.copy(grpcPartitionsDenyList = Set("remotepartition1")))
+      queryConfig.copy(grpcPartitionsDenyList = Set("remotepartition1")), false)
     val twoGrpcRemoteShardKeyRegexPlannerNoGrpc =
-      new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlannerNoGrpc, twoRemoteShardKeyMatcherFn, twoRemoteGrpcPartitionLocationProvider, queryConfig)
+      new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlannerNoGrpc, twoRemoteShardKeyMatcherFn, twoRemoteGrpcPartitionLocationProvider, queryConfig, false)
 
     val query10 = """sum(test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
     val lp10 =
@@ -3855,8 +3854,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }
 
       val spp = getPlanners(2, dataset).spp
-      val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, spp, "local", dataset, queryConfig)
-      val shardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFunc, partitionLocationProvider, queryConfig, targetSchemaProvider)
+      val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, spp, "local", dataset, queryConfig, false)
+      val shardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFunc, partitionLocationProvider, queryConfig, false, targetSchemaProvider)
 
       val tschema = FunctionalTargetSchemaProvider(tschemaProviderFunc)
 
@@ -3985,8 +3984,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
                      |--E~PromQlRemoteExec(PromQlQueryParams(sum(my_cool_metric{_ws_="demo",_ns_=~"i-part2|j-part2"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,true,true,false,false,true,2,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=part2-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,Some(10000),None,None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0)))""".stripMargin
 
     val spp = getPlanners(2, dataset).spp
-    val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, spp, "part1", dataset, queryConfig)
-    val shardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFunc, partitionLocationProvider, queryConfig, targetSchemaProvider)
+    val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, spp, "part1", dataset, queryConfig, false)
+    val shardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFunc, partitionLocationProvider, queryConfig, false, targetSchemaProvider)
 
     val lp = Parser.queryRangeToLogicalPlan(query, timeParams)
     val context = QueryContext(

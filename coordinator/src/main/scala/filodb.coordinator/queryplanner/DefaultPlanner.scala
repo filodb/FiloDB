@@ -7,8 +7,8 @@ import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
+import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -770,9 +770,6 @@ object PlannerUtil extends StrictLogging {
         val path = localShardMapper.shards(randomActiveShard).address
         val serialization = SerializationExtension(ActorSystemHolder.system)
         val deserializedActorRef = serialization.system.provider.resolveActorRef(path)
-        logger.warn(s"Using Actor Plan Dispatcher for SLF non leaf plan since no child plans have local dispatchers. " +
-          s"Cluster: $clusterName, Active Shards: ${activeShards.size}, " +
-          s"Randomly picked active shard: $randomActiveShard, Actor Path: $path")
         getAkkaOrFlightDispatcher(deserializedActorRef, clusterName, flightEnabled)
       } else {
         localDispatchers.iterator.drop(rnd.nextInt(localDispatchers.size)).next
