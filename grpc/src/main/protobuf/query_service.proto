@@ -608,6 +608,7 @@ enum InstantFunctionId {
   YEAR                    = 21;
   OR_VECTOR_DOUBLE        = 22;
   HISTOGRAM_FRACTION      = 23;
+  HISTOGRAM_MAX_QUANTILE_EVEN = 24;
 }
 
 enum ScalarFunctionId {
