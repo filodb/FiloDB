@@ -10,6 +10,7 @@ import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, Produce
 import org.apache.kafka.common.serialization.StringSerializer
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.functions._
+import org.apache.spark.util.LongAccumulator
 
 /**
  * Distributed Kafka producer for publishing label statistics from Spark executors.
@@ -20,7 +21,10 @@ import org.apache.spark.sql.functions._
  * 3. Publish messages in parallel from all executors
  *
  */
-class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
+class LabelStatsKafkaProducer(config: Config,
+                               failuresAcc: LongAccumulator,
+                               labelsAcc: LongAccumulator,
+                               workspacesAcc: LongAccumulator) extends StrictLogging {
 
   import LabelChurnFinder._
 
@@ -103,7 +107,9 @@ class LabelStatsKafkaProducer(config: Config) extends StrictLogging {
       try {
         partition.foreach { row =>
           LabelStatsKafkaProducer.publishRow(row, localProducer,
-            broadcastTopic.value, broadcastPartition.value, jobTimestamp)
+            broadcastTopic.value, broadcastPartition.value, jobTimestamp,
+            failuresAcc, labelsAcc)
+          workspacesAcc.add(1)
         }
         localProducer.flush()
       } finally {
@@ -167,18 +173,22 @@ object LabelStatsKafkaProducer {
    * Publishes a single row (workspace) to Kafka.
    * Extracts labels, builds message, and sends asynchronously.
    */
-  private def publishRow(
+  private[labelchurnfinder] def publishRow(
     row: Row,
     producer: KafkaProducer[String, String],
     topic: String,
     partition: String,
-    jobTimestamp: Instant
+    jobTimestamp: Instant,
+    failuresAcc: LongAccumulator,
+    labelsAcc: LongAccumulator
   ): Unit = {
     val workspaceId = row.getAs[String](WsCol)
     val nsGroup = row.getAs[String](NsGroupCol)
-    val labelsArray = row.getAs[Seq[Row]]("labels")
+    val labelsArray = row.getAs[scala.collection.Seq[Row]]("labels")
 
     val labels = buildLabelsFromRows(labelsArray)
+    labelsAcc.add(labels.size)
+
     val message = LabelStatisticsMessage(
       workspaceId = workspaceId,
       mosaicPartition = partition,
@@ -187,13 +197,14 @@ object LabelStatsKafkaProducer {
       labels = labels
     )
 
-    sendToKafka(producer, topic, workspaceId, message, partition)
+    sendToKafka(producer, topic, workspaceId, message, partition, failuresAcc)
   }
 
   /**
    * Builds label statistics from Spark Row data.
    */
-  private[labelchurnfinder] def buildLabelsFromRows(labelsArray: Seq[Row]): Seq[LabelStatDto] = {
+  private[labelchurnfinder] def buildLabelsFromRows(labelsArray: scala.collection.Seq[Row]):
+  scala.collection.Seq[LabelStatDto] = {
     labelsArray.map { labelRow =>
       LabelStatDto(
         labelName = labelRow.getAs[String](0),
@@ -215,13 +226,15 @@ object LabelStatsKafkaProducer {
     topic: String,
     key: String,
     message: LabelStatisticsMessage,
-    partition: String
+    partition: String,
+    failuresAcc: LongAccumulator
   ): Unit = {
     val record = new ProducerRecord[String, String](topic, key, message.asJson.noSpaces)
 
     producer.send(record, (metadata: RecordMetadata, exception: Exception) => {
       if (exception != null) {
         logger.error(s"Failed to publish for workspace=$key, partition=$partition: ${exception.getMessage}")
+        failuresAcc.add(1)
       }
     })
   }
