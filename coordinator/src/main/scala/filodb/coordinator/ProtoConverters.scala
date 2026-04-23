@@ -1005,6 +1005,9 @@ object ProtoConverters {
         case InternalRangeFunction.PresentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME
         case InternalRangeFunction.MedianAbsoluteDeviationOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME
         case InternalRangeFunction.LastOverTimeIsMadOutlier => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_OVER_TIME_IS_MAD_OUTLIER
+        case InternalRangeFunction.TsOfLastOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME
+        case InternalRangeFunction.TsOfMinOverTime  => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME
+        case InternalRangeFunction.TsOfMaxOverTime  => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME
       }
       function
     }
@@ -1044,6 +1047,9 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME => InternalRangeFunction.PresentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME => InternalRangeFunction.MedianAbsoluteDeviationOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_OVER_TIME_IS_MAD_OUTLIER => InternalRangeFunction.LastOverTimeIsMadOutlier
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME => InternalRangeFunction.TsOfLastOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME  => InternalRangeFunction.TsOfMinOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME  => InternalRangeFunction.TsOfMaxOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.UNRECOGNIZED =>
           throw new IllegalArgumentException(s"Unrecognized InternalRangeFunction ${f}")
       }

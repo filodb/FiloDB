@@ -1,5 +1,7 @@
 package filodb.query.exec.rangefn
 
+// scalastyle:off file.size.limit
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schema
 import filodb.core.query._
@@ -373,6 +375,9 @@ object RangeFunction {
       case Some(PredictLinear)                    => () => new PredictLinearChunkedFunctionD(funcParams)
       case Some(PresentOverTime)                  => () => new PresentOverTimeChunkedFunctionD()
       case Some(MedianAbsoluteDeviationOverTime)  => () => new MedianAbsoluteDeviationOverTimeChunkedFunctionD()
+      case Some(TsOfLastOverTime)                 => () => new TsOfLastOverTimeChunkedFunctionD()
+      case Some(TsOfMinOverTime)                  => () => new TsOfMinOverTimeChunkedFunctionD()
+      case Some(TsOfMaxOverTime)                  => () => new TsOfMaxOverTimeChunkedFunctionD()
       case _                                      => iteratingFunction(func, schema, funcParams)
     }
   }
@@ -415,7 +420,7 @@ object RangeFunction {
    * Returns a function to generate the RangeFunction for SlidingWindowIterator.
    * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
    */
-  // scalastyle:off cyclomatic.complexity
+  // scalastyle:off cyclomatic.complexity method.length
   private def iteratingFunctionH(func: Option[InternalRangeFunction],
                                  schema: ResultSchema,
                                  funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
@@ -466,6 +471,9 @@ object RangeFunction {
     case Some(Timestamp)                       => throw new NotImplementedError(notImplemented("Timestamp"))
     case Some(AbsentOverTime)                  => throw new NotImplementedError(notImplemented("AbsentOverTime"))
     case Some(PresentOverTime)                 => throw new NotImplementedError(notImplemented("PresentOverTime"))
+    case Some(TsOfLastOverTime)                => throw new NotImplementedError(notImplemented("TsOfLastOverTime"))
+    case Some(TsOfMinOverTime)                 => throw new NotImplementedError(notImplemented("TsOfMinOverTime"))
+    case Some(TsOfMaxOverTime)                 => throw new NotImplementedError(notImplemented("TsOfMaxOverTime"))
   }
 
   /**
@@ -505,6 +513,9 @@ object RangeFunction {
     case Some(LastOverTimeIsMadOutlier)         => () => new LastOverTimeIsMadOutlierFunction(funcParams)
     case Some(PredictLinear)                    => () => new PredictLinearFunction(funcParams)
     case Some(Timestamp)                        => () => new TimestampIteratingFunction()
+    case Some(TsOfLastOverTime)                 => () => new TsOfLastSampleFunction()
+    case Some(TsOfMinOverTime)                  => () => new TsOfMinOverTimeFunction()
+    case Some(TsOfMaxOverTime)                  => () => new TsOfMaxOverTimeFunction()
   }
 }
 
@@ -585,6 +596,88 @@ class TimestampIteratingFunction extends RangeFunction[TransientRow] {
     } else {
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     }
+  }
+}
+
+/**
+ * Returns the timestamp (in seconds) of the last non-NaN sample in the window.
+ * Like LastSampleFunction but returns the timestamp instead of the value.
+ */
+class TsOfLastSampleFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    for (i <- (window.size - 1) to 0 by -1) {
+      val row = window.apply(i)
+      val rowValue = row.getDouble(1)
+      if (!rowValue.isNaN) {
+        sampleToEmit.setValues(endTimestamp, row.timestamp.toDouble / 1000.0)
+        return
+      }
+    }
+    sampleToEmit.setValues(endTimestamp, Double.NaN)
+  }
+}
+
+/**
+ * Returns the timestamp (in seconds) of the sample with the minimum value in the window.
+ * Iterates all samples, skipping NaN values.
+ */
+class TsOfMinOverTimeFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    var minVal = Double.NaN
+    var minTs = Long.MinValue
+    for (i <- 0 until window.size) {
+      val row = window.apply(i)
+      val v = row.getDouble(1)
+      if (!v.isNaN) {
+        if (minVal.isNaN || v < minVal) {
+          minVal = v
+          minTs = row.timestamp
+        }
+      }
+    }
+    if (minVal.isNaN) sampleToEmit.setValues(endTimestamp, Double.NaN)
+    else sampleToEmit.setValues(endTimestamp, minTs.toDouble / 1000.0)
+  }
+}
+
+/**
+ * Returns the timestamp (in seconds) of the sample with the maximum value in the window.
+ * Iterates all samples, skipping NaN values.
+ */
+class TsOfMaxOverTimeFunction extends RangeFunction[TransientRow] {
+  def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window[TransientRow],
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    var maxVal = Double.NaN
+    var maxTs = Long.MinValue
+    for (i <- 0 until window.size) {
+      val row = window.apply(i)
+      val v = row.getDouble(1)
+      if (!v.isNaN) {
+        if (maxVal.isNaN || v > maxVal) {
+          maxVal = v
+          maxTs = row.timestamp
+        }
+      }
+    }
+    if (maxVal.isNaN) sampleToEmit.setValues(endTimestamp, Double.NaN)
+    else sampleToEmit.setValues(endTimestamp, maxTs.toDouble / 1000.0)
   }
 }
 
@@ -719,6 +812,127 @@ class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedR
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+/**
+ * Chunked implementation for ts_of_last_over_time.
+ * Returns the timestamp (in seconds) of the last non-NaN sample in the time window.
+ * Extends ChunkedRangeFunction directly to access both timestamp and value vectors.
+ */
+class TsOfLastOverTimeChunkedFunctionD(var timestamp: Long = -1L, var value: Double = Double.NaN)
+extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+
+  // scalastyle:off parameter.number
+  def addChunks(schema: Schema, tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (endRowNum >= 0) {
+      val dblReader = valueReader.asDoubleReader
+      var rowNum = endRowNum
+      var done = false
+      while (rowNum >= 0 && !done) {
+        val ts = tsReader(tsVectorAcc, tsVector, rowNum)
+        if (ts < startTime) {
+          done = true
+        } else if (ts > timestamp) {
+          val doubleVal = dblReader(valueVectorAcc, valueVector, rowNum)
+          if (!doubleVal.isNaN) {
+            timestamp = ts
+            value = ts.toDouble / 1000.0
+            done = true
+          }
+        } else {
+          done = true
+        }
+        rowNum -= 1
+      }
+    }
+  }
+}
+
+/**
+ * Chunked implementation for ts_of_min_over_time.
+ * Returns the timestamp (in seconds) of the sample with the minimum value in the time window.
+ * Extends ChunkedRangeFunction directly to access both timestamp and value vectors.
+ */
+class TsOfMinOverTimeChunkedFunctionD(var minVal: Double = Double.NaN, var minTs: Long = -1L)
+extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { minVal = Double.NaN; minTs = -1L }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    if (minVal.isNaN) sampleToEmit.setValues(endTimestamp, Double.NaN)
+    else sampleToEmit.setValues(endTimestamp, minTs.toDouble / 1000.0)
+  }
+
+  // scalastyle:off parameter.number
+  def addChunks(schema: Schema, tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (startRowNum <= endRowNum) {
+      val dblReader = valueReader.asDoubleReader
+      val it = dblReader.iterate(valueVectorAcc, valueVector, startRowNum)
+      var rowNum = startRowNum
+      while (rowNum <= endRowNum) {
+        val v = it.next
+        if (!v.isNaN) {
+          if (minVal.isNaN || v < minVal) {
+            minVal = v
+            minTs = tsReader(tsVectorAcc, tsVector, rowNum)
+          }
+        }
+        rowNum += 1
+      }
+    }
+  }
+}
+
+/**
+ * Chunked implementation for ts_of_max_over_time.
+ * Returns the timestamp (in seconds) of the sample with the maximum value in the time window.
+ * Extends ChunkedRangeFunction directly to access both timestamp and value vectors.
+ */
+class TsOfMaxOverTimeChunkedFunctionD(var maxVal: Double = Double.NaN, var maxTs: Long = -1L)
+extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { maxVal = Double.NaN; maxTs = -1L }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    if (maxVal.isNaN) sampleToEmit.setValues(endTimestamp, Double.NaN)
+    else sampleToEmit.setValues(endTimestamp, maxTs.toDouble / 1000.0)
+  }
+
+  // scalastyle:off parameter.number
+  def addChunks(schema: Schema, tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (startRowNum <= endRowNum) {
+      val dblReader = valueReader.asDoubleReader
+      val it = dblReader.iterate(valueVectorAcc, valueVector, startRowNum)
+      var rowNum = startRowNum
+      while (rowNum <= endRowNum) {
+        val v = it.next
+        if (!v.isNaN) {
+          if (maxVal.isNaN || v > maxVal) {
+            maxVal = v
+            maxTs = tsReader(tsVectorAcc, tsVector, rowNum)
+          }
+        }
+        rowNum += 1
+      }
+    }
   }
 }
 

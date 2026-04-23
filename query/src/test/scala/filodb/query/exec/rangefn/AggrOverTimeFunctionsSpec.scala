@@ -2532,4 +2532,209 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     result.head.isNaN shouldBe true
   }
 
+  it("should correctly compute ts_of_last_over_time using both chunked and sliding iterators") {
+    val data = (1 to 240).map(_.toDouble)
+    val rv = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(75) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Expected: timestamp of last sample in each window, in seconds
+      val expected = data.zipWithIndex.map { case (_, i) => (defaultStartTS + i * pubFreq, 1.0) }
+        .sliding(windowSize, step).map { window =>
+          val lastNonNaN = window.lastOption
+          lastNonNaN.map(_._1.toDouble / 1000.0).getOrElse(Double.NaN)
+        }.toBuffer
+
+      val slidingIt = slidingWindowIt(data, rv, new TsOfLastSampleFunction(), windowSize, step)
+      val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+      aggregated shouldEqual expected
+
+      val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual expected
+    }
+  }
+
+  it("should correctly compute ts_of_min_over_time using both chunked and sliding iterators") {
+    val data = (1 to 240).map(_.toDouble)
+    val rv = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(75) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Expected: timestamp of minimum value in each window, in seconds
+      // With monotonically increasing data, min is always the first element
+      val expected = data.zipWithIndex.map { case (d, i) => (defaultStartTS + i * pubFreq, d) }
+        .sliding(windowSize, step).map { window =>
+          val minEntry = window.minBy(_._2)
+          minEntry._1.toDouble / 1000.0
+        }.toBuffer
+
+      val slidingIt = slidingWindowIt(data, rv, new TsOfMinOverTimeFunction(), windowSize, step)
+      val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+      aggregated shouldEqual expected
+
+      val chunkedIt = chunkedWindowIt(data, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual expected
+    }
+  }
+
+  it("should correctly compute ts_of_max_over_time using both chunked and sliding iterators") {
+    val data = (1 to 240).map(_.toDouble)
+    val rv = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(75) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
+
+      // Expected: timestamp of maximum value in each window, in seconds
+      // With monotonically increasing data, max is always the last element
+      val expected = data.zipWithIndex.map { case (d, i) => (defaultStartTS + i * pubFreq, d) }
+        .sliding(windowSize, step).map { window =>
+          val maxEntry = window.maxBy(_._2)
+          maxEntry._1.toDouble / 1000.0
+        }.toBuffer
+
+      val slidingIt = slidingWindowIt(data, rv, new TsOfMaxOverTimeFunction(), windowSize, step)
+      val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
+      slidingIt.close()
+      aggregated shouldEqual expected
+
+      val chunkedIt = chunkedWindowIt(data, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual expected
+    }
+  }
+
+  it("should return NaN for ts_of_* functions on empty window") {
+    val rv = timeValueRVPk(Seq.empty)
+    val endTime = defaultStartTS + pubFreq
+    val windowTime = pubFreq
+
+    val lastIt = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, windowTime,
+      new TsOfLastOverTimeChunkedFunctionD(), querySession)
+    val lastResult = lastIt.map(_.getDouble(1)).toList
+    lastResult should have size 1
+    lastResult.head.isNaN shouldBe true
+
+    val minIt = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, windowTime,
+      new TsOfMinOverTimeChunkedFunctionD(), querySession)
+    val minResult = minIt.map(_.getDouble(1)).toList
+    minResult should have size 1
+    minResult.head.isNaN shouldBe true
+
+    val maxIt = new ChunkedWindowIteratorD(rv, endTime, pubFreq, endTime, windowTime,
+      new TsOfMaxOverTimeChunkedFunctionD(), querySession)
+    val maxResult = maxIt.map(_.getDouble(1)).toList
+    maxResult should have size 1
+    maxResult.head.isNaN shouldBe true
+  }
+
+  it("should handle NaN values correctly in ts_of_* functions") {
+    // Data with some NaN values
+    val data = Seq(1.0, Double.NaN, 3.0, Double.NaN, 5.0)
+    val rv = timeValueRV(data)
+    val windowSize = 5
+    val step = 5
+
+    // ts_of_last: should return timestamp of last non-NaN (5.0 at index 4)
+    val lastSliding = slidingWindowIt(data, rv, new TsOfLastSampleFunction(), windowSize, step)
+    val lastResult = lastSliding.map(_.getDouble(1)).toBuffer
+    lastSliding.close()
+    lastResult should have size 1
+    lastResult.head shouldEqual (defaultStartTS + 4 * pubFreq).toDouble / 1000.0
+
+    // ts_of_min: should return timestamp of min non-NaN (1.0 at index 0)
+    val minSliding = slidingWindowIt(data, rv, new TsOfMinOverTimeFunction(), windowSize, step)
+    val minResult = minSliding.map(_.getDouble(1)).toBuffer
+    minSliding.close()
+    minResult should have size 1
+    minResult.head shouldEqual defaultStartTS.toDouble / 1000.0
+
+    // ts_of_max: should return timestamp of max non-NaN (5.0 at index 4)
+    val maxSliding = slidingWindowIt(data, rv, new TsOfMaxOverTimeFunction(), windowSize, step)
+    val maxResult = maxSliding.map(_.getDouble(1)).toBuffer
+    maxSliding.close()
+    maxResult should have size 1
+    maxResult.head shouldEqual (defaultStartTS + 4 * pubFreq).toDouble / 1000.0
+  }
+
+  it("should return timestamps in seconds for ts_of_* functions") {
+    // Verify timestamps are in seconds, not milliseconds
+    val data = Seq(10.0, 20.0, 30.0)
+    val rv = timeValueRV(data)
+    val windowSize = 3
+    val step = 3
+
+    val lastSliding = slidingWindowIt(data, rv, new TsOfLastSampleFunction(), windowSize, step)
+    val lastResult = lastSliding.map(_.getDouble(1)).toBuffer
+    lastSliding.close()
+    lastResult should have size 1
+    // defaultStartTS is 100000ms = 100s, last sample at index 2 = 100000 + 2*10000 = 120000ms = 120s
+    lastResult.head shouldEqual (defaultStartTS + 2 * pubFreq).toDouble / 1000.0
+    lastResult.head shouldEqual 120.0
+  }
+
+  it("should return NaN for ts_of_last_over_time when all values are NaN") {
+    val data = Seq(Double.NaN, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 3
+    val step = 3
+
+    val slidingIt = slidingWindowIt(data, rv, new TsOfLastSampleFunction(), windowSize, step)
+    val result = slidingIt.map(_.getDouble(1)).toBuffer
+    slidingIt.close()
+    result should have size 1
+    result.head.isNaN shouldBe true
+  }
+
+  it("should handle NaN stale markers in ts_of_last chunked function") {
+    // Last sample is NaN (stale marker), but earlier samples are valid
+    val data = Seq(1.0, 2.0, 3.0, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 4
+    val step = 4
+
+    // Chunked: should return timestamp of last non-NaN (3.0 at index 2)
+    val expectedTs = (defaultStartTS + 2 * pubFreq).toDouble / 1000.0
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head shouldEqual expectedTs
+  }
+
+  it("should return NaN from ts_of_last chunked function when all values are NaN") {
+    val data = Seq(Double.NaN, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 3
+    val step = 3
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head.isNaN shouldBe true
+  }
+
+  it("should handle multiple trailing NaN stale markers in ts_of_last chunked function") {
+    // Multiple trailing NaNs with valid samples earlier
+    val data = Seq(10.0, 20.0, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val windowSize = 4
+    val step = 4
+
+    val expectedTs = (defaultStartTS + 1 * pubFreq).toDouble / 1000.0
+
+    val chunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val chunkedResult = chunkedIt.map(_.getDouble(1)).toBuffer
+    chunkedResult should have size 1
+    chunkedResult.head shouldEqual expectedTs
+  }
+
 }
