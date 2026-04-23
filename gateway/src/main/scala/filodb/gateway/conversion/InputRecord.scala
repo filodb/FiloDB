@@ -215,6 +215,44 @@ object InputRecord {
   }
   //scalastyle:on method.length
 
+  def writeLastDeltaHistRecord(builder: RecordBuilder,
+                               metric: String,
+                               tags: java.util.TreeMap[String, String],
+                               timestamp: Long,
+                               kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+    var min = Double.NaN
+    var max = Double.NaN
+    var sumLast = Double.NaN
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v; false
+      case ("count", v) => count = v; false
+      case ("min", v) => min = v; false
+      case ("max", v) => max = v; false
+      case ("sumLast", v) => sumLast = v; false
+      case _ => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+    if (sortedBuckets.nonEmpty) {
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+      builder.startNewRecord(deltaHistogramV2)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+      builder.addDouble(min)
+      builder.addDouble(max)
+      builder.addDouble(sumLast)
+      builder.addString(metric)
+      builder.encodeMapFrom(tags)
+      builder.endRecord()
+    }
+  }
+
   // ── Shared helpers for histogram bucket extraction ─────────────────
 
   private def extractSumCountBuckets(kvs: Seq[(String, Double)])
