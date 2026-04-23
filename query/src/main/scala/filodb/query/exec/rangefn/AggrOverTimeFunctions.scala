@@ -15,7 +15,8 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.{DoubleIterator, LongVectorDataReader}
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
-class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
+class MinMaxOverTimeFunction(ord: Ordering[Double],
+                             val emitTimestamp: Boolean = false) extends RangeFunction[TransientRow] {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
   override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
@@ -32,8 +33,13 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[Transi
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    if (minMaxDeque.isEmpty) sampleToEmit.setValues(endTimestamp, Double.NaN)
-    else sampleToEmit.setValues(endTimestamp, minMaxDeque.peekFirst().value)
+    if (minMaxDeque.isEmpty) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    } else {
+      sampleToEmit.setValues(endTimestamp,
+        if (emitTimestamp) minMaxDeque.peekFirst().timestamp.toDouble / 1000.0
+            else minMaxDeque.peekFirst().value)
+    }
   }
 }
 
@@ -211,6 +217,7 @@ class TsOfMinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
   // scalastyle:on parameter.number
 }
 
+
 /**
  * Timestamp of Last Over Time - returns the timestamp when the last (most recent) value occurred.
  * Extends LastSampleChunkedFunction to reuse the logic for finding the most recent sample.
@@ -234,81 +241,6 @@ class TsOfLastOverTimeChunkedFunctionD extends LastSampleChunkedFunction[Transie
   }
 }
 
-/**
- * Timestamp of Last Over Time - sliding window version for iterating functions.
- * Returns the timestamp when the last (most recent) value occurred.
- */
-class TsOfLastOverTimeFunction extends RangeFunction[TransientRow] {
-  private var lastTimestamp: Long = -1L
-  private var lastValue: Double = Double.NaN
-
-  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    if (!row.value.isNaN) {
-      // Update if this timestamp is later than current lastTimestamp
-      if (row.timestamp > lastTimestamp) {
-        lastTimestamp = row.timestamp
-        lastValue = row.value
-      }
-    }
-  }
-
-  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    // If the removed row was our last timestamp, we need to find the new last
-    if (row.timestamp == lastTimestamp) {
-      lastTimestamp = -1L
-      lastValue = Double.NaN
-
-      // Scan the remaining window to find the new last timestamp
-      for (i <- 0 until window.size) {
-        val windowRow = window(i)
-        if (!windowRow.value.isNaN && windowRow.timestamp > lastTimestamp) {
-          lastTimestamp = windowRow.timestamp
-          lastValue = windowRow.value
-        }
-      }
-    }
-  }
-
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
-                     sampleToEmit: TransientRow,
-                     queryConfig: QueryConfig): Unit = {
-    if (lastTimestamp >= 0) {
-      // Return the timestamp (in seconds) when the last value occurred
-      sampleToEmit.setValues(endTimestamp, lastTimestamp.toDouble / 1000.0)
-    } else {
-      sampleToEmit.setValues(endTimestamp, Double.NaN)
-    }
-  }
-}
-
-/**
- * Timestamp of Max/Min Over Time - sliding window version for iterating functions.
- * Returns the timestamp when the maximum or minimum value occurred.
- * Reuses MaxMinTracker to avoid duplicating monotonic deque logic.
- */
-class TsOfMaxMinOverTimeFunction(ord: Ordering[Double]) extends RangeFunction[TransientRow] {
-  private val tracker = MaxMinTracker(ord)
-
-  override def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    tracker.offer(row.timestamp, row.value)
-  }
-
-  override def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {
-    tracker.removeValuesOlderThan(row.timestamp)
-  }
-
-  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window[TransientRow],
-                     sampleToEmit: TransientRow,
-                     queryConfig: QueryConfig): Unit = {
-    tracker.headValue() match {
-      case Some((timestamp, _)) =>
-        // Return the timestamp (in seconds) when the extremum occurred
-        sampleToEmit.setValues(endTimestamp, timestamp.toDouble / 1000.0)
-      case None =>
-        sampleToEmit.setValues(endTimestamp, Double.NaN)
-    }
-  }
-}
 
 /**
  * Sliding window tracker for finding maximum or minimum values efficiently over time windows.
