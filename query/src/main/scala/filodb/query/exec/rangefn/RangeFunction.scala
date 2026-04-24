@@ -363,6 +363,9 @@ object RangeFunction {
       case Some(AvgOverTime)                      => () => new AvgOverTimeChunkedFunctionD
       case Some(MinOverTime)                      => () => new MinOverTimeChunkedFunctionD
       case Some(MaxOverTime)                      => () => new MaxOverTimeChunkedFunctionD
+      case Some(TsOfMinOverTime)                  => () => new TsOfMinOverTimeChunkedFunctionD
+      case Some(TsOfMaxOverTime)                  => () => new TsOfMaxOverTimeChunkedFunctionD
+      case Some(TsOfLastOverTime)                 => () => new LastSampleChunkedFunctionD(emitTimestamp = true)
       case Some(StdDevOverTime)                   => () => new StdDevOverTimeChunkedFunctionD
       case Some(StdVarOverTime)                   => () => new StdVarOverTimeChunkedFunctionD
       case Some(Changes)                          => () => new ChangesChunkedFunctionD()
@@ -494,6 +497,11 @@ object RangeFunction {
     case Some(Deriv)                            => () => DerivFunction
     case Some(MaxOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double])
     case Some(MinOverTime)                      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+    case Some(TsOfMaxOverTime)                  => () =>
+      new MinMaxOverTimeFunction(Ordering[Double], emitTimestamp = true)
+    case Some(TsOfMinOverTime)                  => () =>
+      new MinMaxOverTimeFunction(Ordering[Double].reverse, emitTimestamp = true)
+    case Some(TsOfLastOverTime)                 => () => new LastSampleFunction(emitTimestamp = true)
     case Some(CountOverTime)                    => () => new CountOverTimeFunction()
     case Some(SumOverTime)                      => () => new SumOverTimeFunction()
     case Some(AvgOverTime)                      => () => new AvgOverTimeFunction()
@@ -544,7 +552,7 @@ class LastSampleFunctionH(val isMinMaxHistogram: Boolean = false) extends RangeF
  * answer sub-queries which require the last non-NaN sample in the window, while LastSampleChunkedFunctionD is designed
  * raw data queries which can have the staleness sample marker.
  */
-object LastSampleFunction extends RangeFunction[TransientRow] {
+class LastSampleFunction(val emitTimestamp: Boolean = false) extends RangeFunction[TransientRow] {
   def addedToWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window[TransientRow]): Unit = {}
   def apply(startTimestamp: Long,
@@ -555,14 +563,17 @@ object LastSampleFunction extends RangeFunction[TransientRow] {
     for (i <- (window.size - 1) to 0 by -1) {
       val row = window.apply(i)
       val rowValue = row.getDouble(1)
-      if (!rowValue.isNaN ) {
-        sampleToEmit.setValues(endTimestamp, rowValue)
+      if (!rowValue.isNaN) {
+        sampleToEmit.setValues(endTimestamp, if (emitTimestamp) row.timestamp.toDouble / 1000.0 else row.value)
         return
       }
     }
-      sampleToEmit.setValues(endTimestamp, Double.NaN)
-    }
+    sampleToEmit.setValues(endTimestamp, Double.NaN)
   }
+}
+
+// Keep the object for backward compatibility
+object LastSampleFunction extends LastSampleFunction(emitTimestamp = false)
 
 /**
  * Timestamp function for iterating (sliding window) mode.
@@ -681,7 +692,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
   }
 }
 
-class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
+class LastSampleChunkedFunctionD(val emitTimestamp: Boolean = false) extends LastSampleChunkedFuncDblVal() {
   def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
@@ -689,7 +700,7 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
     // Respect Prometheus staleness: if the last value is NaN (stale marker),
     // propagate it so the series is correctly reported as stale.
     timestamp = ts
-    value = doubleVal
+    value = if (emitTimestamp && !doubleVal.isNaN) timestamp.toDouble / 1000.0 else doubleVal
   }
 }
 
