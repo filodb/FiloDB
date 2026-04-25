@@ -4,7 +4,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
+import filodb.coordinator.flight.{FiloDBFlightProducer, FlightPlanDispatcher}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
@@ -24,7 +24,7 @@ case class RemoteActorPlanDispatcher(path: String, clusterName: String) extends 
 
     val dispatcher = if (plan.querySession.flightAllocator.isDefined) {
       val location = FiloDBFlightProducer.akkaActorToFlightLocation(deserializedActorRef)
-      SingleClusterFlightPlanDispatcher(location, clusterName)
+      FlightPlanDispatcher(location, clusterName)
     } else {
       ActorPlanDispatcher(deserializedActorRef, clusterName)
     }

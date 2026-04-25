@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import scala.util.Using
 
+import com.google.protobuf.ByteString
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -17,10 +18,14 @@ import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
+import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope
+import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope.SerializationType
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
-case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: String)
+case class FlightPlanDispatcher(location: Location,
+
+                                clusterName: String)
   extends PlanDispatcher {
 
   import filodb.query.Query.qLogger
@@ -45,7 +50,10 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     qLogger.debug(s"FlightPlanDispatcher dispatching queryPlanId=${plan.execPlan.planId} " +
       s"${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
-    val ticket = new Ticket(FlightKryoSerDeser.serializeToBytes(plan.execPlan))
+    val fte = FlightTicketEnvelope.newBuilder().setType(SerializationType.KRYO)
+      .setTicketData(ByteString.copyFrom(FlightKryoSerDeser.serializeToBytes(plan.execPlan)))
+      .build().toByteArray
+    val ticket = new Ticket(fte)
     executeFlightRequest(plan.execPlan, client, ticket, remainingTimeMs, plan.querySession)
   }
 

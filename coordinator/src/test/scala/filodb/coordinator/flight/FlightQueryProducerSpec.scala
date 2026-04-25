@@ -74,7 +74,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
     val filters = Seq(ColumnFilter("region", Filter.Equals("region1")))
     val mspe1 = MultiSchemaPartitionsExec(
       QueryContext(),
-      SingleClusterFlightPlanDispatcher(location, "test"),
+      FlightPlanDispatcher(location, "test"),
       timeseriesDatasetWithMetric.ref,
       0,
       filters,
@@ -83,7 +83,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     val mspe2 = MultiSchemaPartitionsExec(
       QueryContext(),
-      SingleClusterFlightPlanDispatcher(location, "test"),
+      FlightPlanDispatcher(location, "test"),
       timeseriesDatasetWithMetric.ref,
       0,
       filters,
@@ -92,7 +92,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     val bje = BinaryJoinExec(
       QueryContext(),
-      SingleClusterFlightPlanDispatcher(location, "test"),
+      FlightPlanDispatcher(location, "test"),
       Seq(mspe1),
       Seq(mspe2),
       BinaryOperator.ADD,
@@ -137,7 +137,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val dce = LocalPartitionDistConcatExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         Seq(mspe1, mspe2)
       )
 
@@ -211,7 +211,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val agg = LocalPartitionReduceAggregateExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         Seq(bje),
         Count,
         Nil)
@@ -236,7 +236,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val lve = LabelValuesExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         timeseriesDatasetWithMetric.ref,
         0,
         filters,
@@ -245,7 +245,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val lvdce = LabelValuesDistConcatExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         Seq(lve)
       )
 
@@ -267,7 +267,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
       val allocatedMemBeforeQuery = allocator.getAllocatedMemory
       val pke = PartKeysExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         timeseriesDatasetWithMetric.ref,
         0,
         filters,
@@ -276,7 +276,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
       val pkdce = PartKeysDistConcatExec(
         QueryContext(),
-        SingleClusterFlightPlanDispatcher(location, "test"),
+        FlightPlanDispatcher(location, "test"),
         Seq(pke)
       )
 

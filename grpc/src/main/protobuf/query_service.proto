@@ -7,7 +7,14 @@ import "range_vector.proto";
 option java_outer_classname = "GrpcMultiPartitionQueryService";
 option java_generate_equals_and_hash = true;
 
-
+message FlightTicketEnvelope {
+  enum SerializationType {
+    PROTO = 0;
+    KRYO = 1;
+  }
+  SerializationType type = 1;
+  bytes ticket_data = 2;
+}
 
 message QueryParams {
       uint64 start                         = 1;

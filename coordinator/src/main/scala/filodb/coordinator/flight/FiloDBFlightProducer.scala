@@ -8,16 +8,22 @@ import java.util.concurrent.Executors
 import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor,
-                Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
+import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata,
+                MethodDescriptor, Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
 import io.grpc.netty.NettyServerBuilder
 import org.apache.arrow.flight._
 import org.apache.arrow.flight.FlightProducer.ServerStreamListener
 import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.memory.BufferAllocator
 
+import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.memstore.TimeSeriesStore
 import filodb.core.query._
+import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope
+import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.parse.Parser
+import filodb.query.ProtoConverters.{PlannerParamsFromProtoConverter, QueryParamsFromProtoConversion}
 import filodb.query.exec.ExecPlan
 
 /**
@@ -27,6 +33,7 @@ import filodb.query.exec.ExecPlan
 class FiloDBFlightProducer(val memStore: TimeSeriesStore,
                            val allocator: BufferAllocator,
                            val location: Location,
+                           queryPlannerSelector: String => QueryPlanner,
                            val sysConfig: Config) extends NoOpFlightProducer with FlightQueryExecutor {
 
   override def listActions(context: FlightProducer.CallContext,
@@ -59,15 +66,30 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
                          ticket: Ticket,
                          listener: ServerStreamListener): Unit = {
 
-    // scalastyle:off null
     try {
-      FlightKryoSerDeser.deserialize(ticket.getBytes) match {
-        case execPlan: ExecPlan =>
+      val env = FlightTicketEnvelope.parseFrom(ticket.getBytes)
+      env.getType match {
+        case FlightTicketEnvelope.SerializationType.KRYO =>
+          FlightKryoSerDeser.deserialize(env.getTicketData.toByteArray) match { // todo avoid allocation
+            case execPlan: ExecPlan =>
+              executePhysicalPlanEntry(context, execPlan, listener)
+            case other =>
+              val errMsg = s"Invalid ticket type ${other.getClass.getName}, expected ExecPlan"
+              logger.error(errMsg)
+              listener.error(new IllegalArgumentException(errMsg))
+          }
+        case FlightTicketEnvelope.SerializationType.PROTO =>
+          val request = GrpcMultiPartitionQueryService.Request.parseFrom(env.getTicketData)
+          val queryParams = request.getQueryParams
+          val qContext = QueryContext(origQueryParams = request.getQueryParams.fromProto,
+            plannerParams = request.getPlannerParams.fromProto)
+          val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
+          // Catch parsing errors, query materialization and errors in dispatch
+          val logicalPlan = Parser.queryRangeToLogicalPlan(
+            queryParams.getPromQL,
+            TimeStepParams(queryParams.getStart, queryParams.getStep, queryParams.getEnd))
+          val execPlan = queryPlanner.materialize(logicalPlan, qContext)
           executePhysicalPlanEntry(context, execPlan, listener)
-        case other =>
-          val errMsg = s"Invalid ticket type ${other.getClass.getName}, expected ExecPlan"
-          logger.error(errMsg)
-          listener.error(new IllegalArgumentException(errMsg))
       }
     } catch {
       case ex: Throwable =>
@@ -103,7 +125,7 @@ object FiloDBFlightProducer extends StrictLogging {
                                 incoming: util.Iterator[Array[Byte]]): Boolean = true
     }
     val svc: BindableService = FlightGrpcUtils.createFlightService(FlightAllocator.serverAllocator,
-      new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig),
+      new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, null, allConfig),
       noAuthHandler,
       executor)
 

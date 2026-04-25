@@ -8,7 +8,7 @@ import akka.serialization.SerializationExtension
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.{ActorPlanDispatcher, ActorSystemHolder, GrpcPlanDispatcher, RemoteActorPlanDispatcher}
-import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
+import filodb.coordinator.flight.{FiloDBFlightProducer, FlightPlanDispatcher}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -783,7 +783,7 @@ object PlannerUtil extends StrictLogging {
     if (flightEnabled) {
       qLogger.debug(s"Converting $targetActor to Flight ... ")
       val location = FiloDBFlightProducer.akkaActorToFlightLocation(targetActor)
-      SingleClusterFlightPlanDispatcher(location, clusterName)
+      FlightPlanDispatcher(location, clusterName)
     } else {
       ActorPlanDispatcher(targetActor, clusterName)
     }
