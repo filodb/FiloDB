@@ -10,6 +10,7 @@ import io.grpc.ManagedChannel
 
 import filodb.coordinator.GrpcPlanDispatcher
 import filodb.coordinator.ShardMapper
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.core.DatasetRef
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ActiveShardMapper, DownPartition, LegacyFailoverMode, PlannerParams, ShardLevelFailoverMode}
@@ -156,7 +157,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient, queryConfig)
             case _                       =>
-              if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+              if (remoteGrpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
+                queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+                val endpoint = remoteGrpcEndpoint.get
+                PromQLFlightRemoteExec(newQueryContext, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
+                  dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")
+              } else if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
                 queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
                 val endpoint = remoteGrpcEndpoint.get
                 val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
@@ -166,7 +172,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                 PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
-
       }
     }
 

@@ -124,8 +124,13 @@ object FiloDBFlightProducer extends StrictLogging {
       override def authenticate(outgoing: ServerAuthHandler.ServerAuthSender,
                                 incoming: util.Iterator[Array[Byte]]): Boolean = true
     }
+
+    def queryPlannerSelector(plannerSelector: String): QueryPlanner = {
+      throw new UnsupportedOperationException("This Flight Producer instance does not plan queries")
+    }
+
     val svc: BindableService = FlightGrpcUtils.createFlightService(FlightAllocator.serverAllocator,
-      new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, null, allConfig),
+      new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, queryPlannerSelector, allConfig),
       noAuthHandler,
       executor)
 

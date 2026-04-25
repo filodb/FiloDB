@@ -34,7 +34,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(config))
 
   private val dummyQueryStats = QueryStats()
-  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long, querySession: QuerySession)
                           (implicit sched: Scheduler): Task[QueryResponse] = {
     import PromCirceSupport._
     import io.circe.parser

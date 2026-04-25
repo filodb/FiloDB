@@ -10,6 +10,7 @@ import scala.jdk.CollectionConverters._
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.coordinator.queryplanner.PlannerUtil.rewritePlanWithRemoteRawExport
 import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
@@ -146,7 +147,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     }
   }
 
-  // scalastyle:off method.length
+  // scalastyle:off method.length cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
@@ -231,7 +232,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               generateRemoteExecParams(qContext, startMs, endMs, logicalPlan)
           }
           // Single partition but remote, send the entire plan remotely
-          if (grpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+          if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
+            queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+            val endpoint = grpcEndpoint.get
+            PromQLFlightRemoteExec(remoteContext, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
+              dataset.ref, plannerSelector, s"${partitionName}-$workUnit")
+          } else if (grpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
             queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
             val endpoint = grpcEndpoint.get
             val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
@@ -830,7 +836,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       localPartitionPlanner.materialize(lpWithUpdatedTime, qContextWithOverride)
     } else {
       val ctx = generateRemoteExecParams(qContextWithOverride, timeRange.startMs, timeRange.endMs, logicalPlan)
-      if (grpcEndpoint.isDefined &&
+      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
+        queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+        val endpoint = grpcEndpoint.get
+        PromQLFlightRemoteExec(ctx, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
+          dataset.ref, plannerSelector, s"$partitionName-${partition.workUnit}")
+      } else if (grpcEndpoint.isDefined &&
         !(queryConfig.grpcPartitionsDenyList.contains("*") ||
           queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,
@@ -873,7 +884,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       localPartitionPlanner.materialize(lpWithUpdatedTime, qContextWithOverride)
     } else {
       val ctx = generateRemoteExecParams(qContextWithOverride, timeRange.startMs, timeRange.endMs, logicalPlan)
-      if (grpcEndpoint.isDefined &&
+      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
+        queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+        val endpoint = grpcEndpoint.get
+        PromQLFlightRemoteExec(ctx, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
+          dataset.ref, plannerSelector, s"$partitionName-$workUnit")
+      } else if (grpcEndpoint.isDefined &&
         !(queryConfig.grpcPartitionsDenyList.contains("*") ||
           queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,

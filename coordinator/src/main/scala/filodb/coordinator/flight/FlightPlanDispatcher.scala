@@ -18,13 +18,13 @@ import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
+import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope
 import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope.SerializationType
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
 case class FlightPlanDispatcher(location: Location,
-
                                 clusterName: String)
   extends PlanDispatcher {
 
@@ -50,10 +50,16 @@ case class FlightPlanDispatcher(location: Location,
     qLogger.debug(s"FlightPlanDispatcher dispatching queryPlanId=${plan.execPlan.planId} " +
       s"${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
-    val fte = FlightTicketEnvelope.newBuilder().setType(SerializationType.KRYO)
-      .setTicketData(ByteString.copyFrom(FlightKryoSerDeser.serializeToBytes(plan.execPlan)))
-      .build().toByteArray
-    val ticket = new Ticket(fte)
+
+    val ticket = plan.execPlan match {
+      case remoteExec: PromQLFlightRemoteExec =>
+        new Ticket(remoteExec.grpcRequest.toByteArray)
+      case otherExec =>
+        val fte = FlightTicketEnvelope.newBuilder().setType(SerializationType.KRYO)
+          .setTicketData(ByteString.copyFrom(FlightKryoSerDeser.serializeToBytes(otherExec)))
+          .build().toByteArray
+        new Ticket(fte)
+    }
     executeFlightRequest(plan.execPlan, client, ticket, remainingTimeMs, plan.querySession)
   }
 

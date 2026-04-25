@@ -438,6 +438,7 @@ message QueryConfig {
   repeated string grpcPartitionsDenyList     = 16;
   optional string plannerSelector            = 17;
   map<string,int32> recordContainerOverrides = 18;
+  repeated string flightPartitionsDenyList   = 19;
 }
 
 enum ChunkScanType {

@@ -64,7 +64,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     val span = Kamon.currentSpan()
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      val qResTask = sendRequest(span, requestTimeoutMs).map {
+      val qResTask = sendRequest(span, requestTimeoutMs, querySession).map {
         // FIXME: QueryResponse should contain fields common to Result/Error
         case qr: QueryResult =>
           querySession.queryStats.add(qr.queryStats)
@@ -81,7 +81,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     }
   }
 
-  def sendRequest(span: Span, timeoutMs: Long)
+  def sendRequest(span: Span, timeoutMs: Long, session: QuerySession)
                  (implicit sched: Scheduler): Task[QueryResponse]
 
   def getUrlParams(): Map[String, String] = {
