@@ -1,4 +1,4 @@
-package filodb.coordinator.flight
+package filodb.http
 
 import java.util
 import java.util.Optional
@@ -9,6 +9,7 @@ import akka.serialization.SerializationExtension
 import com.typesafe.config.ConfigFactory
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.{Server, ServerBuilder}
+import monix.execution.Scheduler
 import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.flight.{FlightGrpcUtils, Location, Ticket}
 import org.scalatest.BeforeAndAfterAll
@@ -17,9 +18,10 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.{FilodbSettings, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryplanner.SingleClusterPlanner
+import filodb.coordinator.flight._
+import filodb.coordinator.queryplanner.{QueryPlanner, SingleClusterPlanner}
 import filodb.core.MachineMetricsData.records
 import filodb.core.MetricsTestData.{timeSeriesData, timeseriesDatasetWithMetric}
 import filodb.core.memstore.TimeSeriesMemStore
@@ -51,8 +53,6 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(50, Millis))
 
   private val akkaPort          = 33816
-  private val multiPartPort     = 48816
-  private val multiPartLocation = Location.forGrpcInsecure("localhost", multiPartPort)
 
   // -----------------------------------------------------------------------
   // Config: port 33816 with explicit hostname so actor refs carry 127.0.0.1
@@ -69,6 +69,10 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
        |""".stripMargin)
     .withFallback(ConfigFactory.load("application_test.conf"))
     .resolve()
+
+  val settings = new FilodbSettings(config)
+  private val multiPartPort     = settings.allConfig.getInt("filodb.grpc.bind-grpc-port")
+  private val multiPartLocation = Location.forGrpcInsecure("localhost", multiPartPort)
 
   // -----------------------------------------------------------------------
   // Step 1: TimeSeriesMemStore + data ingestion
@@ -134,7 +138,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     FlightAllocator.serverAllocator,
     multiPartLocation,
     config)
-  private val multiPartServer = startGrpcServer(producer, multiPartPort)
+  private val multiPartServer = startGrpcServer(_ => planner, settings, Scheduler.global)
 
   // Allocator for test clients — child of root so leaks are detectable
   private val testAllocator =
@@ -144,7 +148,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // Lifecycle
   // -----------------------------------------------------------------------
   override def afterAll(): Unit = {
-    multiPartServer.shutdown()
+    multiPartServer.stop()
     singlePartServer.shutdown()
     memStore.shutdown()
     actorSystem.terminate()
@@ -155,20 +159,11 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // Helpers
   // -----------------------------------------------------------------------
 
-  private def startGrpcServer(prod: FiloDBMultiPartitionFlightProducer, port: Int): Server = {
-    val noAuth = new ServerAuthHandler {
-      override def isValid(token: Array[Byte]): Optional[String] = Optional.of("")
-      override def authenticate(out: ServerAuthHandler.ServerAuthSender,
-                                in: util.Iterator[Array[Byte]]): Boolean = true
-    }
-    val executor = Executors.newCachedThreadPool()
-    val svc = FlightGrpcUtils.createFlightService(
-      FlightAllocator.serverAllocator, prod, noAuth, executor)
-    ServerBuilder.forPort(port)
-      .asInstanceOf[ServerBuilder[NettyServerBuilder]]
-      .addService(svc)
-      .build()
-      .start()
+  private def startGrpcServer(queryPlannerSelector: String => QueryPlanner,
+                              filoSettings: FilodbSettings, scheduler: Scheduler): PromQLGrpcServer = {
+    val server = new PromQLGrpcServer(queryPlannerSelector, filoSettings, scheduler)
+    server.start()
+    server
   }
 
   /**

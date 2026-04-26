@@ -17,7 +17,6 @@ import org.apache.arrow.flight.FlightProducer.ServerStreamListener
 import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.memory.BufferAllocator
 
-import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.memstore.TimeSeriesStore
 import filodb.core.query._
 import filodb.query.{QueryError, QueryResponse}
@@ -119,9 +118,9 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
       noAuthHandler,
       executor)
 
-    val server1 = ServerBuilder.forPort(port)
+    val server1 = NettyServerBuilder.forPort(port)
     val server2 = if (compressionEnabled) server1.intercept(GzipServerInterceptor) else server1
-    val server3 = server2.asInstanceOf[ServerBuilder[NettyServerBuilder]].addService(svc).build()
+    val server3 = server2.addService(svc).build()
     logger.info(s"Starting FiloDB Flight server on $host:$port with compression = $compressionEnabled")
     server3.start()
     server3

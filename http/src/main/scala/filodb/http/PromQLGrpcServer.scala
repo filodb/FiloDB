@@ -31,9 +31,6 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec.{ExecPlanWithClientParams, UnsupportedChunkSource}
 
-
-
-
 /**
  *
  * @param queryPlannerSelector a function that will map the datasetId (usually cluster-dataset but not always true) to
@@ -65,17 +62,17 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
   private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
   private val server = {
-    val s1 = ServerBuilder.forPort(this.port)
-      .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+    val s1 = NettyServerBuilder.forPort(this.port)
+      .intercept(TracingInterceptor)
       .maxInboundMessageSize(maxInboundMessageSizeBytes)
-      //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+      //.executor(scheduler)
       .addService(new PromQLGrpcService())
     val s2 = if (flightMultiPartitionServerEnabled) s1.addService(makeFlightBindableService()) else s1
-    s2.asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
+    s2.build()
   }
 
   val queryConfig = QueryConfig(filoSettings.allConfig.getConfig("filodb.query"))
-  val queryServerConfig = filoSettings.allConfig.getConfig("server")
+  lazy val queryServerConfig = filoSettings.allConfig.getConfig("server")
 
   private val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")
 
@@ -83,7 +80,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
   private def makeFlightBindableService() = {
 //    val compressionEnabled = filoSettings.allConfig.getBoolean("filodb.flight.compression-enabled")
-    val location = Location.forGrpcInsecure("", port) // TODO - fetch public hostname (its okay - not used for now)
+    val location = Location.forGrpcInsecure("localhost", port) // TODO - fetch public hostname (okay - not used for now)
     val executor = Executors.newCachedThreadPool() // io executor on which flight requests are served
     FiloDBMultiPartitionFlightProducer.makeBindableService(queryPlannerSelector, FlightAllocator.serverAllocator,
         location, filoSettings.allConfig, executor)
@@ -307,9 +304,9 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
         }
       }
 
-
   def stop(): Unit = {
     if (server != null) {
+      server.shutdown()
       server.awaitTermination(1, TimeUnit.MINUTES)
     }
   }
