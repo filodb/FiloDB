@@ -13,7 +13,7 @@ import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.memory.BufferAllocator
 
 import filodb.coordinator.queryplanner.QueryPlanner
-import filodb.core.query.{FlightAllocator, QueryContext, QuerySession}
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
