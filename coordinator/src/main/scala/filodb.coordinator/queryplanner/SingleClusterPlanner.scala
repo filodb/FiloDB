@@ -9,7 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.flight.{FiloDBFlightProducer, FlightPlanDispatcher}
+import filodb.coordinator.flight.{FiloDBSinglePartitionFlightProducer, FlightPlanDispatcher}
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder

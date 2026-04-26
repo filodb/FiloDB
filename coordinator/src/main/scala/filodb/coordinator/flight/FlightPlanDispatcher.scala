@@ -5,22 +5,17 @@ import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import scala.util.Using
 
-import com.google.protobuf.ByteString
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.arrow.flight.{CallOptions, CallStatus, FlightClient, FlightRuntimeException, Location, Ticket}
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.flight._
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, QueryStats}
+import filodb.core.query.{QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
-import filodb.grpc.GrpcMultiPartitionQueryService
-import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope
-import filodb.grpc.GrpcMultiPartitionQueryService.FlightTicketEnvelope.SerializationType
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
@@ -52,13 +47,8 @@ case class FlightPlanDispatcher(location: Location,
     val client = FlightClientManager.getClient(location)
 
     val ticket = plan.execPlan match {
-      case remoteExec: PromQLFlightRemoteExec =>
-        new Ticket(remoteExec.grpcRequest.toByteArray)
-      case otherExec =>
-        val fte = FlightTicketEnvelope.newBuilder().setType(SerializationType.KRYO)
-          .setTicketData(ByteString.copyFrom(FlightKryoSerDeser.serializeToBytes(otherExec)))
-          .build().toByteArray
-        new Ticket(fte)
+      case remoteExec: PromQLFlightRemoteExec =>  new Ticket(remoteExec.grpcRequest.toByteArray)
+      case otherExec =>                           new Ticket(FlightKryoSerDeser.serializeToBytes(otherExec))
     }
     executeFlightRequest(plan.execPlan, client, ticket, remainingTimeMs, plan.querySession)
   }

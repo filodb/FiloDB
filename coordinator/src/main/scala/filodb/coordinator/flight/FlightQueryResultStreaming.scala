@@ -10,6 +10,7 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.catnap.CircuitBreaker
 import monix.eval.Task
+import monix.execution.Scheduler
 import monix.execution.exceptions.ExecutionRejectedException
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -23,11 +24,9 @@ import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationStat
 import filodb.core.QueryTimeoutException
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.binaryrecord2.RecordContainer.BRIterator
-import filodb.core.memstore.{FiloSchedulers, TimeSeriesStore}
+import filodb.core.memstore.FiloSchedulers
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{ArrowSerializedRangeVector, FlightAllocator, QueryConfig, QueryContext,
-  QueryLimitException, QuerySession, QueryStats, SerializableRangeVector, SerializedRangeVector}
-import filodb.core.store.CorruptVectorException
+import filodb.core.query._
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
 
@@ -37,14 +36,13 @@ import filodb.query.exec.ExecPlan
  * to Flight client
  *
  */
-trait FlightQueryExecutor extends StrictLogging {
+trait FlightQueryResultStreaming extends StrictLogging {
 
   // FIXME enable debugging for now until we stabilize and productionize. Then remove.
   //  It has performance overhead.
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
 
-  def memStore: TimeSeriesStore
-  def allocator: BufferAllocator
+  def serverAllocator: BufferAllocator
   def sysConfig: com.typesafe.config.Config
 
   // metric names below are kept same as QueryActor for continuity and easier migration to Flight
@@ -69,12 +67,12 @@ trait FlightQueryExecutor extends StrictLogging {
   )
 
   private val queryConfig = QueryConfig(sysConfig.getConfig("filodb.query"))
-  private val queryScheduler = QueryScheduler.queryScheduler
+  protected val queryScheduler: Scheduler = QueryScheduler.queryScheduler
 
   // scalastyle:off method.length
-  def executePhysicalPlanEntry(flightContext: FlightProducer.CallContext,
-                               execPlan: ExecPlan,
-                               listener: ServerStreamListener): Unit = {
+  def executePhysicalPlanAndRespond(flightContext: FlightProducer.CallContext,
+                                    execPlan: ExecPlan,
+                                    listener: ServerStreamListener): Unit = {
     execPhysicalPlanInner(execPlan)
 
     def execPhysicalPlanInner(q: ExecPlan): Unit = {
@@ -91,7 +89,7 @@ trait FlightQueryExecutor extends StrictLogging {
       Kamon.runWithSpan(querySpan, finishSpan = false) {
         querySpan.tag("query", q.getClass.getSimpleName)
         querySpan.tag("query-id", q.queryContext.queryId)
-        val reqAllocator = allocator.newChildAllocator(s"query-flight-producer-req-${q.planId}",
+        val reqAllocator = serverAllocator.newChildAllocator(s"query-flight-producer-req-${q.planId}",
           0, perReqAllocatorLimit)
         val flightAllocator = new FlightAllocator(reqAllocator)
         val querySession = QuerySession(q.queryContext,
@@ -101,30 +99,25 @@ trait FlightQueryExecutor extends StrictLogging {
           catchMultipleLockSetErrors = true)
         querySpan.mark("query-actor-received-execute-start")
 
-        val execTask = q.execute(memStore, querySession)(queryScheduler)
-          .executeOn(queryScheduler)
-          .asyncBoundary
-          .onErrorHandle { t =>
-            QueryError(q.queryContext.queryId, querySession.queryStats, t)
-          }.flatMap { res =>
-            logger.debug(s"Query execution pipeline constructed by Flight producer for queryPlanId=${q.planId}")
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-            streamResults(res, flightAllocator, listener, q, querySpan)
-          }.onErrorRecover {
-              // if for any reason streamResults thew exception, do it here
-              case f: FlightRuntimeException =>
-                if (f.status() == CallStatus.TIMED_OUT) {
-                  throw QueryTimeoutException(System.currentTimeMillis() - q.queryContext.submitTime,
-                                                this.getClass.getName, Some(f))
-                } // convert to QueryTimeoutException for circuit breaker handling
-                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
-                                          querySession.queryStats, Some(f))
-              case qte: QueryTimeoutException =>
-                throw qte // rethrow so circuit breaker can handle
-              case e =>
-                sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
-                                          querySession.queryStats, Some(e))
-          }
+        val execTask = executePlan(q, querySession).flatMap { res =>
+          logger.debug(s"Query execution pipeline constructed by Flight producer for queryPlanId=${q.planId}")
+          FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+          streamResults(res, flightAllocator, listener, q, querySpan)
+        }.onErrorRecover {
+            // if for any reason streamResults thew exception, do it here
+            case f: FlightRuntimeException =>
+              if (f.status() == CallStatus.TIMED_OUT) {
+                throw QueryTimeoutException(System.currentTimeMillis() - q.queryContext.submitTime,
+                                              this.getClass.getName, Some(f))
+              } // convert to QueryTimeoutException for circuit breaker handling
+              sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
+                                        querySession.queryStats, Some(f))
+            case qte: QueryTimeoutException =>
+              throw qte // rethrow so circuit breaker can handle
+            case e =>
+              sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
+                                        querySession.queryStats, Some(e))
+        }
         circuitBreaker.protect(execTask).onErrorRecover { case t =>
           // typically a logged QueryTimeout will be thrown here; all other errors are already handled above
           sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(t))
@@ -170,11 +163,11 @@ trait FlightQueryExecutor extends StrictLogging {
           logger.error(s"Query Error queryId=${execPlan.queryContext.queryId} " +
             s"${execPlan.queryContext.origQueryParams}", e)
       }
-      // debug logging
-      t match {
-        case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(execPlan.dataset, cve)
-        case t: Throwable =>
-      }
+//      // debug logging
+//      t match {
+//        case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(execPlan.dataset, cve)
+//        case t: Throwable =>
+//      }
     }
 
     def streamResults(queryResult: QueryResponse,
@@ -348,7 +341,14 @@ trait FlightQueryExecutor extends StrictLogging {
       listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))
       listener.completed()
     }
-
-
   }
+
+  /**
+   * Method that subclasses should implement to decide how to execute the physical plan.
+   * Query response will be streamed back to client.
+   * @param q
+   * @param querySession
+   * @return query response
+   */
+  def executePlan(q: ExecPlan, querySession: QuerySession): Task[QueryResponse]
 }

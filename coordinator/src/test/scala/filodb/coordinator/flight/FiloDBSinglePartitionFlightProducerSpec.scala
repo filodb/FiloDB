@@ -20,7 +20,7 @@ import filodb.query.AggregationOperator.Count
 import filodb.query.exec._
 import filodb.query.{BinaryOperator, Cardinality, QueryResult}
 
-class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfter
+class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfter
                                                   with BeforeAndAfterAll with ScalaFutures {
   System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
   implicit val s = monix.execution.Scheduler.Implicits.global
@@ -48,7 +48,7 @@ class FlightQueryProducerSpec extends AnyFunSpec with Matchers with BeforeAndAft
   memStore.ingest(timeseriesDatasetWithMetric.ref, 0, data)
   memStore.refreshIndexForTesting(timeseriesDatasetWithMetric.ref)
 
-  private val server = FiloDBFlightProducer.start(memStore, config)
+  private val server = FiloDBSinglePartitionFlightProducer.start(memStore, config)
 
   before {
     querySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig, flightAllocator = Some(new FlightAllocator(allocator)))
