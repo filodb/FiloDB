@@ -23,8 +23,12 @@ import filodb.query.{QueryError, QueryResponse}
 import filodb.query.exec.ExecPlan
 
 /**
- * FiloDB Flight Producer - serves Flight RPCs for FiloDB
- * It extends FlightQueryExecutor to execute queries
+ * FiloDB Flight Producer for single-partition queries - serves Flight RPCs for FiloDB single-partition queries
+ * It extends FlightQueryExecutor to execute query plans and stream results back to client using Flight.
+ * @param memStore memstore to execute queries against
+ * @param serverAllocator allocator for Flight buffers
+ * @param location location advertised to clients for where to connect for flight RPCs. Not used during invocation now.
+ * @param sysConfig system config
  */
 class FiloDBSinglePartitionFlightProducer(
             val memStore: TimeSeriesStore,

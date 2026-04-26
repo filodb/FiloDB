@@ -42,7 +42,7 @@ import filodb.query.{ProtoConverters, QueryResult}
  * Port allocation (distinct from FiloDBSinglePartitionFlightProducerSpec which uses 33815):
  *   - Akka remote:                           33816
  *   - FiloDBSinglePartitionFlightProducer:   38816  (akkaPort + 5000)
- *   - FiloDBMultiPartitionFlightProducer:    48816
+ *   - FiloDBMultiPartitionFlightProducer:    filodb.grpc.bind-grpc-port
  */
 class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     with Matchers with BeforeAndAfterAll with ScalaFutures {
@@ -133,11 +133,6 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // -----------------------------------------------------------------------
   // Step 5: FiloDBMultiPartitionFlightProducer + plain gRPC server (port 48816)
   // -----------------------------------------------------------------------
-  private val producer = new FiloDBMultiPartitionFlightProducer(
-    _ => planner,                       // selector string is ignored; always use our planner
-    FlightAllocator.serverAllocator,
-    multiPartLocation,
-    config)
   private val multiPartServer = startGrpcServer(_ => planner, settings, Scheduler.global)
 
   // Allocator for test clients — child of root so leaks are detectable
@@ -152,6 +147,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     singlePartServer.shutdown()
     memStore.shutdown()
     actorSystem.terminate()
+    testAllocator.close()
     // Global allocators are shared across test suites; leave them open
   }
 
@@ -184,7 +180,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     // and does not get propagated to remote planner
     val remoteExec = PromQLFlightRemoteExec(
       queryContext          = qCtx,
-      dispatcher            = FlightPlanDispatcher(multiPartLocation, "testCluster"),
+      dispatcher            = new InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
       queryEndpoint         = multiPartLocation.getUri.toString,
       requestTimeoutMs      = 60000,
       dataset               = timeseriesDatasetWithMetric.ref,
@@ -198,6 +194,8 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
       .runToFuture
       .futureValue
       .asInstanceOf[QueryResult]
+
+    // session is not closed here since we reuse the same allocator for multiple tests
   }
 
   // -----------------------------------------------------------------------

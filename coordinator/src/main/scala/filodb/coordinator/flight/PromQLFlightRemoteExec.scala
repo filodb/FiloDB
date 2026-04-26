@@ -20,6 +20,9 @@ case class PromQLFlightRemoteExec(queryContext: QueryContext,
                                   plannerSelector: String,
                                   destinationTsdbWorkUnit: String) extends RemoteExec {
 
+  require(dispatcher.isInstanceOf[InProcessPlanDispatcher], "PromQLFlightRemoteExec should only be used with " +
+    "an InProcessPlanDispatcher since the client is invoked locally")
+
   def grpcRequest: Request = {
     val builder = Request.newBuilder()
     builder.setQueryParams(queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].toProto)
@@ -30,7 +33,8 @@ case class PromQLFlightRemoteExec(queryContext: QueryContext,
 
   override def sendRequest(span: Span, timeoutMs: Long,
                            querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
-
+    // Here we create a new flight dispatcher to send the query off. The dispatcher has
+    // logic for flight client
     val dispatcher = FlightPlanDispatcher(new Location(queryEndpoint), "promql-flight")
     val planWithParams = ExecPlanWithClientParams(
       this,

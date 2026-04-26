@@ -21,6 +21,14 @@ import filodb.query.ProtoConverters.{PlannerParamsFromProtoConverter, QueryParam
 import filodb.query.QueryResponse
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
 
+/**
+ * FiloDB Flight Producer for multi-partition queries - serves Flight RPCs for FiloDB multi-partition queries
+ * It extends FlightQueryExecutor to execute PromQL queries and stream results back to client.
+ * @param queryPlannerSelector selects a query planner
+ * @param serverAllocator allocator for Flight buffers
+ * @param location location advertised to clients for where to connect for flight RPCs. Not used during invocation now.
+ * @param sysConfig system config
+ */
 class FiloDBMultiPartitionFlightProducer(
                                     val queryPlannerSelector: String => QueryPlanner,
                                     val serverAllocator: BufferAllocator,
