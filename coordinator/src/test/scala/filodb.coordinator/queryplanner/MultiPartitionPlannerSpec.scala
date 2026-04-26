@@ -5,8 +5,10 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.Equals
@@ -1513,7 +1515,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
+    val queryConfigRegularGrpc = queryConfig.copy(flightPartitionDenyList = Set("*"))
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfigRegularGrpc, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
@@ -1529,6 +1532,36 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     queryParams.endSecs shouldEqual 10000
     execPlan.asInstanceOf[PromQLGrpcRemoteExec].plannerSelector shouldEqual "plannerSelector"
   }
+
+  it ("should generate PromQLFlightRemoteExec plan for BinaryJoin when lhs and rhs are in same remote partition and flight-grpc is enabled") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs), grpcEndPoint = Some("grpcEndpoint"), workUnit = "testWorkUnit"))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PromQLFlightRemoteExec] shouldEqual (true)
+    val queryParams = execPlan.asInstanceOf[PromQLFlightRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual 1000
+    queryParams.endSecs shouldEqual 10000
+    execPlan.asInstanceOf[PromQLFlightRemoteExec].plannerSelector shouldEqual "plannerSelector"
+  }
+
 
   it ("should generate Exec plan for Metadata query without shardkey") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =

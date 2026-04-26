@@ -3,10 +3,12 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
-import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 
+import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import scala.concurrent.duration._
+
 import monix.execution.Scheduler
+
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
@@ -17,6 +19,8 @@ import filodb.query._
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 
 
 class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec {
@@ -451,7 +455,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       earliestRawTime, latestDownsampleTime, disp, queryConfigWithGrpcEndpoint, dataset)
 
     val execPlan = longTimeRangePlanner.materialize(lp, QueryContext(origQueryParams = promQlParams))
-    execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
+    execPlan.isInstanceOf[PromQLFlightRemoteExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "(sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])) / " +
         "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])))"
