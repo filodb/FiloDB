@@ -24,7 +24,7 @@ object QueryConfig {
     val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
     val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
-    val flightDenyList = queryConfig.getString("flight.partitions-deny-list")
+    val flightDenyList = queryConfig.getString("grpc.flight.partitions-deny-list")
     val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
     val numRvsPerResultMessage = queryConfig.getInt("num-rvs-per-result-message")
 

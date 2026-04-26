@@ -59,14 +59,20 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
       "neither bind-grpc-port nor grpc-port-list with localhost-ordinal are defined"
     )
   }
+
+  private val flightMultiPartitionServerEnabled = filoSettings.allConfig
+                                 .getBoolean("filodb.query.grpc.flight.multi-partition-server-enabled")
+
   private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
-  private val server = ServerBuilder.forPort(this.port)
-    .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
-    .maxInboundMessageSize(maxInboundMessageSizeBytes)
-    //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
-    .addService(new PromQLGrpcService())
-    .addService(makeFlightBindableService())
-    .asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
+  private val server = {
+    val s1 = ServerBuilder.forPort(this.port)
+      .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+      .maxInboundMessageSize(maxInboundMessageSizeBytes)
+      //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+      .addService(new PromQLGrpcService())
+    val s2 = if (flightMultiPartitionServerEnabled) s1.addService(makeFlightBindableService()) else s1
+    s2.asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
+  }
 
   val queryConfig = QueryConfig(filoSettings.allConfig.getConfig("filodb.query"))
   val queryServerConfig = filoSettings.allConfig.getConfig("server")
