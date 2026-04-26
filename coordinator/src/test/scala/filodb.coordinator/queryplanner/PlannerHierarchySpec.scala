@@ -2703,7 +2703,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, singlePartitionPlanner, "local",
-      MetricsTestData.timeseriesDataset, queryConfig.copy(flightPartitionDenyList = Set("*")), false
+      MetricsTestData.timeseriesDataset, queryConfig.copy(flightPartitionsDenyList = Set("*")), false
     )
     for (test <- tests) {
       val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
@@ -3198,7 +3198,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     val twoGrpcRemoteMpPlannerNoGrpc = new MultiPartitionPlanner(twoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
       "localPartition", dataset,
-      queryConfig.copy(grpcPartitionsDenyList = Set("remotepartition1"), flightPartitionDenyList = Set("remotepartition1")), false)
+      queryConfig.copy(grpcPartitionsDenyList = Set("remotepartition1"), flightPartitionsDenyList = Set("remotepartition1")), false)
     val twoGrpcRemoteShardKeyRegexPlannerNoGrpc =
       new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlannerNoGrpc, twoRemoteShardKeyMatcherFn, twoRemoteGrpcPartitionLocationProvider, queryConfig, false)
 

@@ -157,8 +157,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient, queryConfig)
             case _                       =>
-              if (remoteGrpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
-                queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+              if (remoteGrpcEndpoint.isDefined && !(queryConfig.flightPartitionsDenyList.contains("*") ||
+                queryConfig.flightPartitionsDenyList.contains(partitionName.toLowerCase))) {
                 val endpoint = remoteGrpcEndpoint.get
                 PromQLFlightRemoteExec(newQueryContext, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
                   dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")

@@ -58,7 +58,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
   }
 
   private val flightMultiPartitionServerEnabled = filoSettings.allConfig
-                                 .getBoolean("filodb.query.grpc.flight.multi-partition-server-enabled")
+                                 .getBoolean("filodb.grpc.flight-multi-partition-service-enabled")
 
   private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
   private val server = {

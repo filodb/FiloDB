@@ -1515,7 +1515,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val queryConfigRegularGrpc = queryConfig.copy(flightPartitionDenyList = Set("*"))
+    val queryConfigRegularGrpc = queryConfig.copy(flightPartitionsDenyList = Set("*"))
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfigRegularGrpc, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))

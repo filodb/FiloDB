@@ -62,7 +62,7 @@ object ProtoConverters {
       builder.setAllowPartialResultsRangeQuery(qc.allowPartialResultsRangeQuery)
       builder.setAllowPartialResultsMetadataQuery(qc.allowPartialResultsMetadataQuery)
       builder.addAllGrpcPartitionsDenyList(qc.grpcPartitionsDenyList.asJava)
-      builder.addAllFlightPartitionsDenyList(qc.flightPartitionDenyList.asJava)
+      builder.addAllFlightPartitionsDenyList(qc.flightPartitionsDenyList.asJava)
       qc.plannerSelector.foreach(plannerSelector => builder.setPlannerSelector(plannerSelector))
       qc.recordContainerOverrides.foreach(overrides => builder.putRecordContainerOverrides(overrides._1, overrides._2))
       builder.build()

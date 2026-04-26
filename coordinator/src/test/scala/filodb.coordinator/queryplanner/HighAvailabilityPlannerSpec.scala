@@ -172,7 +172,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val queryConfigWithGrpcEndpoint = QueryConfig(
       config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
-      .copy(plannerSelector = Some("plannerSelector"), flightPartitionDenyList = Set("*"))
+      .copy(plannerSelector = Some("plannerSelector"), flightPartitionsDenyList = Set("*"))
 
     val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
       queryConfigWithGrpcEndpoint,
@@ -207,7 +207,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val queryConfigWithGrpcEndpoint = QueryConfig(
       config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
-      .copy(grpcPartitionsDenyList = Set("*"), flightPartitionDenyList = Set("*"), plannerSelector = Some("plannerSelector"))
+      .copy(grpcPartitionsDenyList = Set("*"), flightPartitionsDenyList = Set("*"), plannerSelector = Some("plannerSelector"))
 
     val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
       queryConfigWithGrpcEndpoint,

@@ -232,8 +232,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
               generateRemoteExecParams(qContext, startMs, endMs, logicalPlan)
           }
           // Single partition but remote, send the entire plan remotely
-          if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
-            queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+          if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionsDenyList.contains("*") ||
+            queryConfig.flightPartitionsDenyList.contains(partitionName.toLowerCase))) {
             val endpoint = grpcEndpoint.get
             PromQLFlightRemoteExec(remoteContext, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
               dataset.ref, plannerSelector, s"${partitionName}-$workUnit")
@@ -836,8 +836,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       localPartitionPlanner.materialize(lpWithUpdatedTime, qContextWithOverride)
     } else {
       val ctx = generateRemoteExecParams(qContextWithOverride, timeRange.startMs, timeRange.endMs, logicalPlan)
-      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
-        queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionsDenyList.contains("*") ||
+        queryConfig.flightPartitionsDenyList.contains(partitionName.toLowerCase))) {
         val endpoint = grpcEndpoint.get
         PromQLFlightRemoteExec(ctx, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
           dataset.ref, plannerSelector, s"$partitionName-${partition.workUnit}")
@@ -884,8 +884,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       localPartitionPlanner.materialize(lpWithUpdatedTime, qContextWithOverride)
     } else {
       val ctx = generateRemoteExecParams(qContextWithOverride, timeRange.startMs, timeRange.endMs, logicalPlan)
-      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionDenyList.contains("*") ||
-        queryConfig.flightPartitionDenyList.contains(partitionName.toLowerCase))) {
+      if (grpcEndpoint.isDefined && !(queryConfig.flightPartitionsDenyList.contains("*") ||
+        queryConfig.flightPartitionsDenyList.contains(partitionName.toLowerCase))) {
         val endpoint = grpcEndpoint.get
         PromQLFlightRemoteExec(ctx, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
           dataset.ref, plannerSelector, s"$partitionName-$workUnit")

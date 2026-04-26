@@ -1,17 +1,10 @@
 package filodb.http
 
-import java.util
-import java.util.Optional
-import java.util.concurrent.Executors
-
 import akka.actor.{ActorSystem, Address, RootActorPath}
 import akka.serialization.SerializationExtension
 import com.typesafe.config.ConfigFactory
-import io.grpc.netty.NettyServerBuilder
-import io.grpc.{Server, ServerBuilder}
 import monix.execution.Scheduler
-import org.apache.arrow.flight.auth.ServerAuthHandler
-import org.apache.arrow.flight.{FlightGrpcUtils, Location, Ticket}
+import org.apache.arrow.flight.{Location, Ticket}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
