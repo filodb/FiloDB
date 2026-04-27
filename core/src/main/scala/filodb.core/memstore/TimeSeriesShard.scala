@@ -1994,9 +1994,15 @@ class TimeSeriesShard(val ref: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
-      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
+      val result = partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit)
+      if (result.length == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+      }
+      result.iterator.map { pk =>
         val partKeyMap = convertPartKeyWithTimesToMap(
           PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
         partKeyMap ++ Map(
@@ -2005,6 +2011,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     } else {
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, limit)
+      if (partIds.length == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+      }
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
