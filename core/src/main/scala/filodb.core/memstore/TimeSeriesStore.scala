@@ -202,7 +202,8 @@ trait TimeSeriesStore extends ChunkSource {
     */
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

@@ -339,7 +339,8 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: TimeSeriesStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanLeafSamples)
+          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanLeafSamples,
+          querySession)
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case _ => Observable.empty
@@ -373,8 +374,12 @@ final case class LabelValuesExec(queryContext: QueryContext,
       filters.isEmpty match {
         // retrieves label values for a single label - no column filter
         case true if (columns.size == 1) =>
-          val labels = memStore.labelValues(dataset, shard, columns.head,
-            queryContext.plannerParams.enforcedLimits.execPlanSamples).map(_.term.toString)
+          val limit = queryContext.plannerParams.enforcedLimits.execPlanSamples
+          val labels = memStore.labelValues(dataset, shard, columns.head, limit).map(_.term.toString)
+          if (labels.size == limit) {
+            querySession.resultCouldBePartial = true
+            querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+          }
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             StringArrayRowReader(labels), None))
           val sch = if (labels.isEmpty) ResultSchema.empty

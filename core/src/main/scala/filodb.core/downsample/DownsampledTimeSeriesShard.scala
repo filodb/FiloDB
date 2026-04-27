@@ -162,8 +162,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    val result = partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit)
+    if (result.length == limit) {
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+    }
+    result.iterator.map { pk =>
       val partKey = PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
       schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
         pair._1.utf8 -> pair._2.utf8
@@ -557,6 +563,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
       val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
       var partLoopIndex = 0
+      var limitReached = false
       val matched = partKeyIndex.foreachPartKeyMatchingFilter(filters, startTime, endTime,
         nextPart => {
           if (rows.size < limit) {
@@ -572,9 +579,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
             if (currVal.nonEmpty) rows.add(currVal)
             partLoopIndex += 1
-          } else throw new CollectionTerminatedException
+          } else {
+            limitReached = true
+            throw new CollectionTerminatedException
+          }
         }
       )
+      if (limitReached) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+      }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
       rows.toIterator
     }
@@ -601,6 +615,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       val rows = new mutable.HashSet[ZeroCopyUTF8String]()
       val colIndex = schemas.part.binSchema.colNames.indexOf(label)
       var partLoopIndex = 0
+      var limitReached = false
       val matched = partKeyIndex.foreachPartKeyMatchingFilter(filters, startTime, endTime,
         nextPart => {
           if (rows.size < limit) {
@@ -613,9 +628,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
               schemas.part.binSchema.singleColValues(pk, UnsafeUtils.arayOffset, label, rows)
 
             partLoopIndex += 1
-          } else throw new CollectionTerminatedException
+          } else {
+            limitReached = true
+            throw new CollectionTerminatedException
+          }
         }
       )
+      if (limitReached) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+      }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
       rows.toIterator
     }
