@@ -311,6 +311,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Configuration to enable/disable real-time publishing of index updates for downstream consumers.
   private val partKeyUpdatesPublishingEnabled = filodbConfig.getBoolean("memstore.index-updates-publishing-enabled")
 
+  /**
+   * Billable cardinality counts are updated according to the multipliers returned here.
+   * For example: if one prom-histogram series maps to 25 "billable" series per "physical"
+   *   active series, then cardinality counters will increment/decrement by 25 for
+   *   each series accounted/unaccounted for.
+    */
+  val schemaNameToBillableCardinalityPerActiveSeries =
+    filodbConfig.getConfig("cardinality.schema-name-to-billable-cardinality-per-active-series")
+      .entrySet().asScala.map { entry =>
+        entry.getKey -> entry.getValue.unwrapped.asInstanceOf[Int]
+      }.toMap
+
   /////// END CONFIGURATION FIELDS ///////////////////
 
   /////// START MEMBER STATE FIELDS ///////////////////
@@ -355,7 +367,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     case x => sys.error(s"Unsupported part key index type: '$x'")
   }
 
-  private val cardTracker: CardinalityTracker = initCardTracker()
+  private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -833,7 +845,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (storeConfig.meteringEnabled) {
         val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
           schema.options.shardKeyColumns)
-        modifyCardinalityCountNoThrow(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
+        modifyCardinalityCountNoThrow(shardKey, schema, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
@@ -1001,7 +1013,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (storeConfig.meteringEnabled) {
           val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
                                                           p.schema.options.shardKeyColumns)
-          cardTracker.modifyCount(shardKey, 0, -1)
+          modifyCardinalityCount(shardKey, p.schema, 0, -1)
         }
       }
     }
@@ -1081,13 +1093,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         updatedPartIdsForPublishing.foreach(publisher => publisher.store(partId))
         shardStats.partKeyIndexAdded.increment()
         if (storeConfig.meteringEnabled) {
-          modifyCardinalityCountNoThrow(shardKey, 1, 1)
+          modifyCardinalityCountNoThrow(shardKey, schema, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
         if (storeConfig.meteringEnabled) {
-          modifyCardinalityCountNoThrow(shardKey, 0, 1)
+          modifyCardinalityCountNoThrow(shardKey, schema, 0, 1)
           // TODO remove temporary debugging since we were seeing some negative counts when this increment was absent
           if (partId % 100 < 5) { // log for 5% of the cases
             logger.info(s"Increment activeDelta for ${newPart.stringPartition}")
@@ -1150,7 +1162,7 @@ class TimeSeriesShard(val ref: DatasetRef,
               val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                 tsp.schema.options.shardKeyColumns)
               if (storeConfig.meteringEnabled) {
-                modifyCardinalityCountNoThrow(shardKey, 0, 1)
+                modifyCardinalityCountNoThrow(shardKey, schema, 0, 1)
               }
             }
           }
@@ -1211,14 +1223,37 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Modifies a cardinality count and catches/logs any exceptions.
+   * Billable cardinality counts are updated according to the multipliers returned here.
+   * For example: if one prom-histogram series maps to 25 "billable" series per "physical"
+   *   active series, then cardinality counters will increment/decrement by 25 for
+   *   each series accounted/unaccounted for.
+   */
+  private def getBillableCardinalityPerActiveSeries(schema: Schema): Int = {
+    schemaNameToBillableCardinalityPerActiveSeries.getOrElse(schema.name, 1)
+  }
+
+  /**
+   * Modifies the cardinality count.
+   */
+  private[memstore] def modifyCardinalityCount(shardKey: Seq[String],
+                                               schema: Schema,
+                                               totalDelta: Int,
+                                               activeDelta: Int): Unit = {
+    val billableCardinalityPerSeries = getBillableCardinalityPerActiveSeries(schema)
+    val billableDelta = activeDelta * billableCardinalityPerSeries
+    cardTracker.modifyCount(shardKey, totalDelta, activeDelta, billableDelta)
+  }
+
+  /**
+   * Modifies the cardinality count and catches/logs any exceptions.
    * Should only be used where an exception would otherwise cause ingestion/boostrap to fail.
    */
   private def modifyCardinalityCountNoThrow(shardKey: Seq[String],
+                                            schema: Schema,
                                             totalDelta: Int,
                                             activeDelta: Int): Unit = {
     try {
-      cardTracker.modifyCount(shardKey, totalDelta, activeDelta)
+      modifyCardinalityCount(shardKey, schema, totalDelta, activeDelta)
     } catch {
       case t: Throwable =>
           logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)

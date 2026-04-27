@@ -9,19 +9,21 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{Filter, _}
+import filodb.core.query._
 import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.{exec, _}
+import filodb.query._
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
-import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.Query.qLogger
+import filodb.query.exec._
 import filodb.query.exec.InternalRangeFunction.Last
 
 // scalastyle:off file.size.limit
@@ -56,6 +58,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
                            clusterName: String,
+                           val flightEnabled: Boolean = false,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
                            timeSplitEnabled: Boolean = false,
@@ -208,10 +211,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       else
         throw new RuntimeException(s"Shard: $shard is not available")
     }
-    ActorPlanDispatcher(targetActor, clusterName)
+    PlannerUtil.getAkkaOrFlightDispatcher(targetActor, clusterName, flightEnabled)
   }
-
-
 
   private def shardLevelFailoverDispatcherForShard(shard: Int, queryContext: QueryContext): PlanDispatcher = {
     val pp = queryContext.plannerParams
@@ -232,7 +233,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       if (targetActor == ActorRef.noSender) {
         getRemoteDispatcherForShard(shard, queryContext)
       } else {
-        ActorPlanDispatcher(targetActor, clusterName)
+        PlannerUtil.getAkkaOrFlightDispatcher(targetActor, clusterName, flightEnabled)
       }
     } else {
       getRemoteDispatcherForShard(shard, queryContext)
@@ -326,7 +327,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         case Seq(one) => materializeTimeSplitPlan(one, qContext, false)
         case many =>
           val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext, false))
-          val targetActor = PlannerUtil.pickDispatcher(materializedPlans)
+          val targetActor = PlannerUtil.pickDispatcher(materializedPlans, flightEnabled)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
           // results back with StitchRvsMapper transformer.
@@ -350,7 +351,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         if (stitch) justOne.addRangeVectorTransformer(StitchRvsMapper(rvRangeFromPlan(logicalPlan)))
         justOne
       case PlanResult(many, stitch) =>
-        val targetActor = PlannerUtil.pickDispatcher(many)
+        val targetActor = PlannerUtil.pickDispatcher(many, flightEnabled)
         many.head match {
           case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
@@ -606,11 +607,11 @@ class SingleClusterPlanner(val dataset: Dataset,
                                               forceDispatcher: Option[PlanDispatcher]): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcess)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(lhs.plans), rvRangeFromPlan(lp), lhs.plans))
+      PlannerUtil.pickDispatcher(lhs.plans, flightEnabled), rvRangeFromPlan(lp), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceInProcess)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(rhs.plans), rvRangeFromPlan(lp), rhs.plans))
+      PlannerUtil.pickDispatcher(rhs.plans, flightEnabled), rvRangeFromPlan(lp), rhs.plans))
     else rhs.plans
 
     // TODO Currently we create separate exec plan node for stitching.
@@ -619,7 +620,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // In theory, more efficient to use transformer than to have separate exec plan node to avoid IO.
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
-    val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs))
+    val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs, flightEnabled))
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         lp.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
@@ -792,16 +793,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Add the le filter transformer to select the required bucket
     (nameFilter, leFilter) match {
       case (Some(filter), Some (le)) if filter.endsWith("_bucket") => {
-        // if le filter matches for Inf or +Inf, set the double value to PositiveInfinity
-        val doubleVal = le match {
-          case "+Inf" => Double.PositiveInfinity
-          case "Inf" => Double.PositiveInfinity
-          case _ => le.toDouble
+        parsePromLeValue(le).foreach { doubleVal =>
+          val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs / 1000,
+            realScanStepMs / 1000, realScanEndMs / 1000))
+          series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+            Seq(paramsExec))))
         }
-        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs / 1000,
-          realScanStepMs / 1000, realScanEndMs / 1000))
-        series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-          Seq(paramsExec))))
       }
       case _ => //NOP
     }
@@ -827,40 +824,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
-    val rawSeries = lp match {
-      case Right(value) => value.series
-      case Left(value)  => value.rawSeries
-    }
-
-    rawSeries match {
-      case rawSeriesLp: RawSeries =>
-
-        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
-          map(_.filter.valuesStrings.head.toString)
-        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
-
-        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
-        else {
-          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
-          if (!nameFilter.get.endsWith("_bucket")) {
-            (nameFilter, leFilter, lp)
-          }
-          else {
-            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
-            val newLp =
-              if (lp.isLeft)
-                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-              else
-                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-            (nameFilter, leFilter, newLp)
-          }
-        }
-      case _ => (None, None, lp)
-    }
-  }
   override private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries,
                                         forceInProcess: Boolean): PlanResult = {
@@ -884,10 +847,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       realScanEndMs, None, None, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
-        realScanEndMs/1000))
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-        Seq(paramsExec))))
+      parsePromLeValue(leFilter.head).foreach { doubleVal =>
+        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
+          realScanEndMs/1000))
+        rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+          Seq(paramsExec))))
+      }
     }
     // repeat the same value for each step if '@' is specified
     if (lp.atMs.nonEmpty) {
@@ -917,9 +882,15 @@ class SingleClusterPlanner(val dataset: Dataset,
       // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
       // doesnt fully fall into the retention period. Data required for that instant involves
       // going backwards from that instant up to windowMs + offsetMs milli-seconds.
-      val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
-      val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
-      lastInstantBeforeRetention + stepMs
+      if (stepMs == 0L) {
+        // Instant query: single data point is outside retention period.
+        // Return startMs + 1 so caller sees newStartMs > endMs and returns EmptyResultExec.
+        startMs + 1
+      } else {
+        val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
+        val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
+        lastInstantBeforeRetention + stepMs
+      }
     } else {
       startMs
     }
@@ -1149,7 +1120,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     var toReduceLevel1 = walkLogicalPlanTree(lp.vectors,
       qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = false)), forceInProcess)
     if (!canPushdownInner) {
-      val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans)
+      val dispatcher = PlannerUtil.pickDispatcher(toReduceLevel1.plans, flightEnabled)
       val plan = if (toReduceLevel1.needsStitch) {
         StitchRvsExec(qContext, dispatcher, outputRvRange = None, children = toReduceLevel1.plans)
       } else if (toReduceLevel1.plans.size > 1) {

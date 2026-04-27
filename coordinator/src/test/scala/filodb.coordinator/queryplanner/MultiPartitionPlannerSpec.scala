@@ -41,7 +41,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       routingConfig = RoutingConfig(supportRemoteRawExport = true))
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, 1)))
+    queryConfig, "raw", spreadProvider = StaticSpreadProvider(SpreadChange(0, 1)))
 
   val startSeconds = 1000
   val endSeconds = 10000
@@ -84,7 +84,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(1000, 100, 2000))
 
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000)
@@ -118,7 +118,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
 
     }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
@@ -157,7 +157,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = Nil
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(test{job = "app1"}[10m])""",
       TimeStepParams(1000, 100, 10000))
 
@@ -234,7 +234,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = Nil
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(test{job = "app1"}[10m])""",
       TimeStepParams(1000, 100, 10000))
 
@@ -270,7 +270,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
     }
     val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
     )
     val lp = Parser.queryRangeToLogicalPlan(
       """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
@@ -320,7 +320,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
   //    }
   //    val engine = new MultiPartitionPlanner(
-  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
   //    )
   //    val lp = Parser.queryRangeToLogicalPlan(
   //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
@@ -382,7 +382,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
   //    }
   //    val engine = new MultiPartitionPlanner(
-  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
   //    )
   //    val lp = Parser.queryRangeToLogicalPlan(
   //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
@@ -434,7 +434,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
     )
     val query = """(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
@@ -482,7 +482,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
     )
     val query = """(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
@@ -528,7 +528,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false
     )
     val query = """sum((test{job = "app1"} + test{job = "app2"}))[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
@@ -579,7 +579,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
     }
     val query = "avg_over_time(test{job = \"app\"}[10m:1m])"
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, step, queryEndSecs), Parser.Antlr)
     val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, step, queryEndSecs)
     val execPlan = engine.materialize(
@@ -613,7 +613,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
     }
     val query = "avg_over_time(test{job = \"app\"}[10m:1m])"
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, stepSecs, queryEndSecs), Parser.Antlr)
     val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, stepSecs, queryEndSecs)
     val execPlan = engine.materialize(
@@ -653,7 +653,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val query = """avg_over_time((test{job = "app1"} + test{job = "app2"})[10m:1m])"""
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, stepSecs, queryEndSecs), Parser.Antlr)
     val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, stepSecs, queryEndSecs)
     val execPlan = engine.materialize(
@@ -693,7 +693,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val query = """min_over_time((sum_over_time(sum(test{job = "app1"})[10m:1m]) + sum_over_time(sum(test{job = "app2"})[10m:1m]))[10m:1m])"""
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, stepSecs, queryEndSecs), Parser.Antlr)
     val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, stepSecs, queryEndSecs)
     val execPlan = engine.materialize(
@@ -725,7 +725,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("time()", TimeStepParams(1000, 100, 2000))
 
     val promQlQueryParams = PromQlQueryParams("time()", 1000, 100, 2000)
@@ -745,7 +745,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
@@ -770,7 +770,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
@@ -796,7 +796,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
@@ -822,7 +822,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
@@ -850,7 +850,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} ",
       TimeStepParams(1000, 100, 2000))
 
@@ -880,7 +880,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
@@ -912,7 +912,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(test{job = "app"}[10m])""",
       TimeStepParams(1000, 100, 2000))
 
@@ -966,7 +966,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""sum(absent_over_time(test{job = "app"}[10m])) + 1""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1029,7 +1029,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app"} + test2{job = "app"}""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1110,7 +1110,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""scalar(test{job = "app"}) + 5""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1170,7 +1170,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""5 + test{job = "app"}""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1228,7 +1228,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""sum(test{job = "app"}) or vector(5)""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1300,7 +1300,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""abs(test{job = "app"})""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1355,7 +1355,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""histogram_quantile(0.9, test{job = "app"})""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1413,7 +1413,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""sort(test{job = "app"})""",
       TimeStepParams(1000, 100, 2000))
 
@@ -1485,7 +1485,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
@@ -1513,7 +1513,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
@@ -1548,7 +1548,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val schemas = Schemas(dataset.schema)
     val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
       queryConfig, "raw")
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{method=\"GET\"}",
       TimeStepParams(startSeconds, step, endSeconds))
 
@@ -1591,7 +1591,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val schemas = Schemas(dataset.schema)
     val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
       queryConfig, "raw")
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{_ws_=\"demo\", method=\"GET\"}",
       TimeStepParams(startSeconds, step, endSeconds))
 
@@ -1630,7 +1630,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
       TimeStepParams(startSeconds, step, endSeconds))
 
@@ -1679,7 +1679,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             thirdPartitionStart * 1000 - 1), workUnit = "testWorkUnit"),
           PartitionAssignment("local", "local-url", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
     }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
@@ -1723,7 +1723,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
           localPartitionStartSec * 1000 - 1), workUnit = "testWorkUnit"), PartitionAssignment("local", "local-url",
           TimeRange(localPartitionStartSec * 1000, endSeconds * 1000), workUnit = "testWorkUnit"))
     }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}[100s]", startSeconds, step, endSeconds)
@@ -1769,7 +1769,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   //          TimeRange(localPartitionStartMs, endSeconds * 1000)))
   //
   //    }
-  //    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+  //    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
   //    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
   //
   //    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
@@ -1816,7 +1816,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
 
     val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo""""), TimeStepParams(startSeconds, step, endSeconds) )
 
@@ -1856,7 +1856,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local",
-      dataset, queryConfig)
+      dataset, queryConfig, false)
     val lp = TsCardinalities(Seq("a", "b"), 3, Seq("longtime-prometheus","recordingrules-prometheus_rules_1m")
       , "raw,recordingrules")
     val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds,
@@ -1891,7 +1891,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app1"} + test2{job = "app2"}""",
       TimeStepParams(1000, 100, 10000))
 
@@ -1920,7 +1920,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         List.empty
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(1000, 100, 2000))
 
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000)
@@ -1944,7 +1944,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         List.empty
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
 
     val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo""""), TimeStepParams(startSeconds, step, endSeconds) )
 
@@ -1964,7 +1964,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List.empty
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
       TimeStepParams(startSeconds, step, endSeconds))
 
@@ -2000,7 +2000,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
           TimeRange(localPartitionStartMs, endSeconds * 1000), workUnit = "testWorkUnit"))
 
     }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
@@ -2027,7 +2027,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     (startSeconds, endSeconds, engine)
   }
 
@@ -2140,7 +2140,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""ln(test1{job = "app1"} + test2{job = "app2"})""",
       TimeStepParams(1000, 100, 10000))
 
@@ -2193,7 +2193,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""absent(test1{job = "app1"} and test2{job = "app2"})""",
       TimeStepParams(1000, 100, 10000))
 
@@ -2243,7 +2243,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val query =
       """sum(test1{job = "app1"}) * sum(test2{job = "app1"}) +
         |ln(sum(test3{job = "app2"}) + sum(test4{job = "app3"}))""".stripMargin
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
 
     val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
@@ -2308,7 +2308,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val query =
       """sum(test1{job = "app1"}) * sum(test2{job = "app1"}) +
         |ln(sum(test3{job = "app2"}) + sum(test4{job = "app2"}))""".stripMargin
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
 
     val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
@@ -2367,7 +2367,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val query =
       """sum(test1{job = "app2"}) * sum(test2{job = "app2"}) +
         |ln(sum(test3{job = "app2"}) + sum(test4{job = "app2"}))""".stripMargin.replaceAll("\n", "")
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
 
     val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
@@ -2402,7 +2402,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         partitions(timeRange)
     }
 
-    val mpPlanner = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val mpPlanner = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
 
     val localPlan = LabelCardinality(Seq(ColumnFilter("job", Equals("app1")), ColumnFilter("__name__", Equals("test"))),
       startSeconds * 1000, endSeconds * 1000)
@@ -2484,7 +2484,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(7300000,10000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#885676802],raw)""".stripMargin
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local",
-      dataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(supportRemoteRawExport = true)))
+      dataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(supportRemoteRawExport = true)), false)
     val query1 = "sum(rate(test{job = \"app\"}[10m]))"
     val lp1 = Parser.queryRangeToLogicalPlan(query1, TimeStepParams(1000, stepSecs, 10000))
 
@@ -2571,7 +2571,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine1 = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local",
       dataset, queryConfig.copy(routingConfig = queryConfig.routingConfig.copy(
         supportRemoteRawExport = true,
-        periodOfUncertaintyMs = 3000)))
+        periodOfUncertaintyMs = 3000)), false)
     val lp5 = Parser.queryRangeToLogicalPlan(query1, TimeStepParams(1000, 400, 10000))
     val promQlQueryParam5 = PromQlQueryParams(query1, 1000, 400, 10000)
 
@@ -2587,7 +2587,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = ???
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
     }
-    val mpp = new MultiPartitionPlanner(dummyPartitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val mpp = new MultiPartitionPlanner(dummyPartitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
     val lp = Parser.queryRangeToLogicalPlan("""foo{job=~"abc|def"} + foo{job="ghi"}""", TimeStepParams(1000, 100, 2000))
     val expected = Set(Map("job" -> "abc"), Map("job" -> "def"), Map("job" -> "ghi"))
     mpp.getRoutingKeys(lp) shouldEqual expected
@@ -2606,7 +2606,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         localPlanner,
         "local",
         dataset,
-        qc
+        qc,
+        false
       )
     }
 
@@ -2680,5 +2681,63 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     }
   }
 
+  it("should generate correct remote plans for PromQL queries with metric names " +
+     "that cannot prepend selector curly braces") {
+    val queries = Seq(
+      """{__name__="foo bar baz"}""",
+      """{__name__="!@#$%^&*()"}""",
+      """{job="app1",__name__="foo bar baz"}""",
+      """sum({job="app1",__name__="foo bar baz"})""",
+      """histogram_quantile({job="app1",__name__="foo bar baz"})""",
+      """({job="app1",__name__="foo bar baz"} + {job="app1",__name__="foo bar baz"})"""
+    )
 
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = {
+        List(PartitionAssignmentV2(
+          Map("remote" -> PartitionDetails("remote", "remote-url", None, 1.0f, "testWorkUnit")),
+          TimeRange(1000 * 1000, 10000 * 1000)
+        ))
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: scala.Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
+
+    for (query <- queries) {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
+      val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+      val remoteExecQuery = execPlan.asInstanceOf[PromQlRemoteExec].promQlQueryParams.promQl
+      remoteExecQuery shouldEqual query
+    }
+  }
+
+  it("should generate correct remote plans for metadata queries with metric names " +
+     "that cannot prepend selector curly braces") {
+    val queries = Seq(
+      """{__name__="foo bar baz"}""",
+      """{__name__="!@#$%^&*()"}""",
+      """{job="app1",__name__="!@#$%^&*()"}"""
+    )
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
+      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = Nil
+      override def getMetadataPartitions(nonMetricShardKeyFilters: scala.Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
+        List(PartitionAssignment("remote", "remote-url", TimeRange(1000 * 1000, 10000 * 1000), None, "testWorkUnit"))
+      }
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig, false)
+
+    for (query <- queries) {
+      val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 100, 10000))
+      val promQlQueryParams = PromQlQueryParams(query, 1000, 100, 10000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+      val remoteExecQuery = execPlan.asInstanceOf[MetadataRemoteExec].promQlQueryParams.promQl
+      remoteExecQuery shouldEqual query
+    }
+  }
 }

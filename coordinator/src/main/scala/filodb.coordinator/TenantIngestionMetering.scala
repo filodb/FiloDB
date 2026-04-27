@@ -42,6 +42,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
   private val FILODB_PARTITION = settings.config.getString("partition")
 
   private val METRIC_ACTIVE = "tsdb_metering_active_timeseries"
+  private val METRIC_BILLABLE = "tsdb_metering_billable_timeseries"
   private val METRIC_TOTAL = "tsdb_metering_total_timeseries"
   private val METRIC_LONGTERM = "tsdb_metering_longterm_timeseries"
 
@@ -96,6 +97,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
             }
             else {
               FilodbMetrics.gauge(METRIC_ACTIVE, tags).update(data.counts.active.toDouble)
+              FilodbMetrics.gauge(METRIC_BILLABLE, tags).update(data.counts.billable.toDouble)
               FilodbMetrics.gauge(METRIC_TOTAL, tags).update(data.counts.shortTerm.toDouble)
             }
           })

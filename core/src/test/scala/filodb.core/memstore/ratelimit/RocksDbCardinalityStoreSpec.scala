@@ -15,14 +15,14 @@ class RocksDbCardinalityStoreSpec extends AnyFunSpec with Matchers {
 
     (0 until MAX_RESULT_SIZE + numOverflow).foreach{ i =>
       val prefix = Seq("ws", "ns", s"metric-$i")
-      db.store(CardinalityRecord(shard, prefix, CardinalityValue(1, 1, 1, 1)))
+      db.store(CardinalityRecord(shard, prefix, CardinalityValue(1, 1, 1, 1, 1)))
     }
 
     Seq(Nil, Seq("ws"), Seq("ws", "ns")).foreach{ prefix =>
       val res = db.scanChildren(prefix, 3)
       res.size shouldEqual MAX_RESULT_SIZE + 1  // one extra for the overflow CardinalityRecord
       res.contains(CardinalityRecord(shard, OVERFLOW_PREFIX,
-        CardinalityValue(numOverflow, numOverflow, numOverflow, numOverflow))) shouldEqual true
+        CardinalityValue(numOverflow, numOverflow, numOverflow, numOverflow, numOverflow))) shouldEqual true
     }
   }
 
@@ -34,7 +34,7 @@ class RocksDbCardinalityStoreSpec extends AnyFunSpec with Matchers {
     (0 until 1000).foreach{ i =>
       val prefix = Seq("ws", "ns", s"metric-$i")
       // storing 3 billion ( this value is greater than ~2.15 billion max limit of int32)
-      val cardnalityVal = CardinalityValue(3000000000L+i, 3000000000L+i, 3000000000L+i, 3000000000L+i)
+      val cardnalityVal = CardinalityValue(3000000000L+i, 3000000000L+i, 3000000000L+i, 3000000000L+i, 3000000000L+i)
       db.store(CardinalityRecord(shard, prefix, cardnalityVal))
     }
 

@@ -137,8 +137,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Seq(dummyPlan), // cannot be empty as some compose's rely on the schema
+      Seq(null: ExecPlan), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "__name__", None)
@@ -176,8 +176,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       None, Seq("role", "mode"), Seq("role"), "__name__", None)
@@ -221,8 +221,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Nil, "__name__", None)
@@ -271,8 +271,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeVar.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.MUL,
       Cardinality.OneToMany,
       None, Seq("role"),
@@ -309,8 +309,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.DIV,
       Cardinality.ManyToOne, None,
       Seq("mode"), Seq("dummy"), "__name__", None)
@@ -401,8 +401,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Seq(dummyPlan), // cannot be empty as some compose's rely on the schema
+      Seq(null: ExecPlan), // empty since we test compose, not execute or doExecute
       BinaryOperator.GTR,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "metric", None)
@@ -440,8 +440,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Seq(dummyPlan), // cannot be empty as some compose's rely on the schema
+      Seq(null: ExecPlan), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Seq("role"), "__name__", None)
@@ -471,8 +471,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
       None, Seq("role", "mode"), Seq("role"), "__name__", None)
@@ -508,8 +508,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
+      Seq(dummyPlan),
+      Seq(null: ExecPlan),
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
       Some(Seq("instance")), Nil, Nil, "__name__", None)

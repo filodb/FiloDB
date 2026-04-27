@@ -704,7 +704,8 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                          source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
+                                          ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000),
+                                          querySession), source)
           .onErrorHandle { ex: Throwable =>
             QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
           }.map {
@@ -782,8 +783,8 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
                                           (dispatcher.isLocalCall || qSession.preventRangeVectorSerialization)
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
-        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000
-        , preventRangeVectorSerialization)), source)
+        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000,
+                     preventRangeVectorSerialization), qSession), source)
           .onErrorHandle { ex: Throwable =>
             QueryError(queryContext.queryId, qSession.queryStats, ex)
           }
@@ -800,7 +801,7 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000,
-          qSession.preventRangeVectorSerialization)), source)
+          qSession.preventRangeVectorSerialization), qSession), source)
           .onErrorHandle { ex: Throwable =>
             StreamQueryError(queryContext.queryId, planId, qSession.queryStats, ex)
           }
@@ -1013,6 +1014,6 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
 
 // deadline is set to QueryContext.plannerParams.queryTimeoutMillis for the top level call
 case class ClientParams(deadlineMs: Long, preventRangeVectorSerialization: Boolean = false)
-case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams)
+case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams, querySession: QuerySession)
 
 trait MetadataLeafExecPlan extends  LeafExecPlan with MetadataExecPlan

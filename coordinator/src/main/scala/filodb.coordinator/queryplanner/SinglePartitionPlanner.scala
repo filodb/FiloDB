@@ -17,7 +17,8 @@ import filodb.query.exec._
 class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
                              plannerSelector: String => String,
                              val dataset: Dataset,
-                             val queryConfig: QueryConfig)
+                             val queryConfig: QueryConfig,
+                             val flightEnabled: Boolean)
   extends QueryPlanner with DefaultPlanner {
 
   override val schemas: Schemas = Schemas(dataset.schema)
