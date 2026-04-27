@@ -793,16 +793,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Add the le filter transformer to select the required bucket
     (nameFilter, leFilter) match {
       case (Some(filter), Some (le)) if filter.endsWith("_bucket") => {
-        // if le filter matches for Inf or +Inf, set the double value to PositiveInfinity
-        val doubleVal = le match {
-          case "+Inf" => Double.PositiveInfinity
-          case "Inf" => Double.PositiveInfinity
-          case _ => le.toDouble
+        parsePromLeValue(le).foreach { doubleVal =>
+          val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs / 1000,
+            realScanStepMs / 1000, realScanEndMs / 1000))
+          series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+            Seq(paramsExec))))
         }
-        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs / 1000,
-          realScanStepMs / 1000, realScanEndMs / 1000))
-        series.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-          Seq(paramsExec))))
       }
       case _ => //NOP
     }
@@ -828,40 +824,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  override private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
-    val rawSeries = lp match {
-      case Right(value) => value.series
-      case Left(value)  => value.rawSeries
-    }
-
-    rawSeries match {
-      case rawSeriesLp: RawSeries =>
-
-        val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
-          map(_.filter.valuesStrings.head.toString)
-        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
-
-        if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
-        else {
-          // the convention for histogram bucket queries is to have the "_bucket" string in the suffix
-          if (!nameFilter.get.endsWith("_bucket")) {
-            (nameFilter, leFilter, lp)
-          }
-          else {
-            val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
-              Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
-            val newLp =
-              if (lp.isLeft)
-                Left(lp.swap.toOption.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-              else
-                Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
-            (nameFilter, leFilter, newLp)
-          }
-        }
-      case _ => (None, None, lp)
-    }
-  }
   override private[queryplanner] def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries,
                                         forceInProcess: Boolean): PlanResult = {
@@ -885,10 +847,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       realScanEndMs, None, None, stepMultipleNotationUsed = false, Nil, lp.offsetMs)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
-        realScanEndMs/1000))
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-        Seq(paramsExec))))
+      parsePromLeValue(leFilter.head).foreach { doubleVal =>
+        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(realScanStartMs/1000, realScanStepMs/1000,
+          realScanEndMs/1000))
+        rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+          Seq(paramsExec))))
+      }
     }
     // repeat the same value for each step if '@' is specified
     if (lp.atMs.nonEmpty) {

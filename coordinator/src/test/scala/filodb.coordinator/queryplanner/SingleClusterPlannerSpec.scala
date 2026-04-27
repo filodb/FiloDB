@@ -2472,6 +2472,102 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     validatePlan(execPlan, expected)
   }
 
+  it("should handle le=\"+Inf\" correctly for non-windowed histogram bucket query") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le="+Inf"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist") shouldEqual true
+    // le filter should be removed
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual false
+    // HistogramBucket transformer should be added with PositiveInfinity
+    val histBucketMapper = multiSchemaPartitionsExec.rangeVectorTransformers.collectFirst {
+      case t: InstantVectorFunctionMapper if t.function == InstantFunctionId.HistogramBucket => t
+    }
+    histBucketMapper shouldBe defined
+    histBucketMapper.get.funcParams.head.asInstanceOf[StaticFuncArgs].scalar shouldEqual Double.PositiveInfinity
+  }
+
+  it("should not throw NumberFormatException for histogram bucket query with le!=\"+Inf\" NotEquals filter") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le!="+Inf"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le NotEquals filter should be retained since this is not a specific bucket selection
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for NotEquals le filter
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for rate histogram bucket query with le!=\"+Inf\" NotEquals filter") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """sum(rate(my_hist_bucket{job="prometheus",le!="+Inf"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le NotEquals filter should be retained
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for NotEquals le filter
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for histogram bucket query with non-numeric le value") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le="notanumber"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for unparseable le value
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for rate histogram bucket query with non-numeric le value") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """sum(rate(my_hist_bucket{job="prometheus",le="notanumber"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for unparseable le value
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)
