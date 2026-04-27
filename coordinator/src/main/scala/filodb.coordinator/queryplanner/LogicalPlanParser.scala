@@ -51,7 +51,7 @@ object LogicalPlanParser {
         val metricNameNoQuotes = value.replaceAll("^\"|\"$", "")
         s"$metricNameNoQuotes$colSuffix"
       }.get
-    val metricCanPrefixBraces = PREPENDABLE_METRIC_NAME_REGEX.matches(fullMetricName)
+    val metricCanPrefixBraces = PREPENDABLE_METRIC_NAME_REGEX.pattern.matcher(fullMetricName).matches()
 
     val filterStringWithoutMetric = filters
       .filter { case (name, op, value) => name != PromMetricLabel }
@@ -76,7 +76,7 @@ object LogicalPlanParser {
     } else {  // Metric cannot prepend braces.
       // Add a metric filter inside the curly braces.
       val (filterName, filterOp, filterVal) = metricFilter.get
-      val metricFilterString = s"$filterName$filterOp\"${fullMetricName}\""
+      val metricFilterString = s"$filterName$filterOp$Quotes$fullMetricName$Quotes"
       if (filterStringWithoutMetric.nonEmpty) {
         s"$OpeningCurlyBraces$filterStringWithoutMetric,$metricFilterString$ClosingCurlyBraces"
       } else {
