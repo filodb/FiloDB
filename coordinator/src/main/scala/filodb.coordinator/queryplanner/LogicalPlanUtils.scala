@@ -74,8 +74,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
-      case lp: TsCardinalities             => throw new UnsupportedOperationException(
-                                                          "TsCardinalities does not have times")
+      case lp: TsCardinalities             => val now = System.currentTimeMillis()
+                                              TimeRange(now - 300000, now)
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -88,6 +88,7 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
   // scalastyle:on cyclomatic.complexity
+
 
   /**
    * Used to change start and end time (with 'second' precision) of LogicalPlan

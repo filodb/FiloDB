@@ -6,7 +6,7 @@ import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -15,7 +15,8 @@ import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
+// scalastyle:off line.size.limit
+class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec {
 
   private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
@@ -538,5 +539,186 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.startSecs shouldEqual (from)
     queryParams.endSecs shouldEqual (to)
 
+  }
+
+  it("should generate MetadataRemoteExec for TsCardinalities when local failure is present") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        // Return a failure that overlaps with the synthetic time range (now-5min, now)
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    execPlan.queryContext.plannerParams.processFailure shouldEqual false
+
+    val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
+    remoteExec.urlParams.contains("numGroupByFields") shouldEqual true
+    remoteExec.urlParams("numGroupByFields") shouldEqual "3"
+    remoteExec.urlParams.contains("match[]") shouldEqual true
+
+    // Validate the complete plan tree
+    val expected =
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expected)
+  }
+
+  it("should execute TsCardinalities locally when no failures are present") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq.empty
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // No failures — should stay local
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
+  }
+
+  it("should route TsCardinalities to buddy and set processFailure=false to prevent loop") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    // Verify loop prevention: buddy should not attempt failover again
+    execPlan.queryContext.plannerParams.processFailure shouldEqual false
+    execPlan.queryContext.plannerParams.processMultiPartition shouldEqual false
+  }
+
+  it("should execute TsCardinalities locally when processMultiPartition=false (buddy received query)") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    // Simulate buddy receiving the rerouted query: processFailure=false skips HA routing
+    val qContext = QueryContext(origQueryParams = promQlQueryParams,
+      plannerParams = PlannerParams(processFailure = false, processMultiPartition = false))
+    val execPlan = engine.materialize(lp, qContext)
+
+    // Should execute locally even though failures exist — processFailure=false bypasses HA
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
+  }
+
+  it("should execute TsCardinalities locally when only remote failures exist") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        // Only remote/buddy failures — local is healthy
+        Seq(FailureTimeRange("remote", datasetRef, queryTimeRange, true))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Remote failure only — should stay local, not route to unhealthy buddy
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual false
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual false
+  }
+
+  it("should route TsCardinalities to buddy when both local and remote failures exist") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        // Both local and remote have failures
+        Seq(
+          FailureTimeRange("local", datasetRef, queryTimeRange, false),
+          FailureTimeRange("remote", datasetRef, queryTimeRange, true)
+        )
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    // Local failure exists — routes to buddy even if buddy also has failures.
+    // materializeLegacy only considers local failures for routing decisions.
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+
+    // Validate the complete plan tree
+    val expected =
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expected)
+  }
+
+  it("should route TsCardinalities with multiple datasets to buddy on local failure") {
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3,
+      Seq("raw", "recordingrules"), "raw,recordingrules")
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
+    // Verify datasets are passed through in URL params
+    remoteExec.urlParams("datasets") shouldEqual "raw,recordingrules"
+    remoteExec.urlParams("numGroupByFields") shouldEqual "3"
+  }
+
+  it("should route TsCardinalities with empty shardKeyPrefix to buddy on local failure") {
+    // Empty prefix (numGroupByFields=1) — dispatched to all partitions at MPP level,
+    // but at HA level it's the same all-or-nothing routing
+    val lp = TsCardinalities(Seq(), 1)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
+    remoteExec.urlParams("numGroupByFields") shouldEqual "1"
   }
 }

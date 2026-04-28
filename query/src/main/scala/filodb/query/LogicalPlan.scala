@@ -354,9 +354,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String],
   require(numGroupByFields < 3 || shardKeyPrefix.size >= 2,
     "cannot group at the metric level when prefix does not contain ws and ns")
 
-  // TODO: this should eventually be "true" to enable HAP/LTRP routing
-  override def isRoutable: Boolean = false
-
+  override def isRoutable: Boolean = true
   def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
     ColumnFilter(label, Equals(value))}
 
