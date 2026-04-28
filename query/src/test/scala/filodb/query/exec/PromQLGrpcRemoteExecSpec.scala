@@ -265,7 +265,7 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val exec = new PromQlRemoteExec("my.cool.endpoint",
       requestTimeoutMs = 5000, QueryContext(origQueryParams = queryParams), dispatcher,
       timeseriesDataset.ref, RemoteHttpClient.defaultClient) {
-      override def sendRequest(execPlan2Span: trace.Span, httpTimeoutMs: Long)(implicit sched: Scheduler): Task[QueryResponse] = {
+      override def sendRequest(execPlan2Span: trace.Span, httpTimeoutMs: Long, querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
         val rvs = data.map { case (key, tsValPairs) =>
           MetricsTestData.makeRv(key, tsValPairs, range)
         }

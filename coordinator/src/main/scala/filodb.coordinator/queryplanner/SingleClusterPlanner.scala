@@ -7,9 +7,8 @@ import akka.actor.ActorRef
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator.{ActorPlanDispatcher, GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
+import filodb.coordinator.{GrpcPlanDispatcher, RemoteActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder

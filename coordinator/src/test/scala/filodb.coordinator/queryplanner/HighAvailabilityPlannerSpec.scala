@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
+
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
@@ -14,6 +15,8 @@ import filodb.query._
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 
 class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
@@ -118,6 +121,39 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.endSecs shouldEqual(to/1000)
   }
 
+  it("should generate PromQLFlightRemoteExec when failure is present only in local and remote flight-gRPC is configured") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(1000, 6000), false))
+      }
+    }
+
+    val queryConfigWithGrpcEndpoint = QueryConfig(
+      config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
+      .copy(plannerSelector = Some("plannerSelector"))
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
+      queryConfigWithGrpcEndpoint,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[PromQLFlightRemoteExec] shouldEqual (true)
+    val queryParams = execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual(from/1000)
+    queryParams.endSecs shouldEqual(to/1000)
+    execPlan.queryContext.plannerParams.processFailure shouldEqual false
+    execPlan.asInstanceOf[PromQLFlightRemoteExec].queryEndpoint shouldEqual "grpcEndpoint"
+    execPlan.asInstanceOf[PromQLFlightRemoteExec].plannerSelector shouldEqual "plannerSelector"
+  }
 
   it("should generate PromQLGrpcExec when failure is present only in local and remote gRPC is configured") {
     val to = 10000
@@ -136,7 +172,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val queryConfigWithGrpcEndpoint = QueryConfig(
       config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
-      .copy(plannerSelector = Some("plannerSelector"))
+      .copy(plannerSelector = Some("plannerSelector"), flightPartitionsDenyList = Set("*"))
 
     val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
       queryConfigWithGrpcEndpoint,
@@ -171,7 +207,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
     val queryConfigWithGrpcEndpoint = QueryConfig(
       config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
-      .copy(grpcPartitionsDenyList = Set("*"), plannerSelector = Some("plannerSelector"))
+      .copy(grpcPartitionsDenyList = Set("*"), flightPartitionsDenyList = Set("*"), plannerSelector = Some("plannerSelector"))
 
     val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider,
       queryConfigWithGrpcEndpoint,

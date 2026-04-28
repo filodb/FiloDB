@@ -9,8 +9,9 @@ import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor,
-                Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
+  Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
 import io.grpc.netty.NettyServerBuilder
+import monix.eval.Task
 import org.apache.arrow.flight._
 import org.apache.arrow.flight.FlightProducer.ServerStreamListener
 import org.apache.arrow.flight.auth.ServerAuthHandler
@@ -18,16 +19,22 @@ import org.apache.arrow.memory.BufferAllocator
 
 import filodb.core.memstore.TimeSeriesStore
 import filodb.core.query._
+import filodb.query.{QueryError, QueryResponse}
 import filodb.query.exec.ExecPlan
 
 /**
- * FiloDB Flight Producer - serves Flight RPCs for FiloDB
- * It extends FlightQueryExecutor to execute queries
+ * FiloDB Flight Producer for single-partition queries - serves Flight RPCs for FiloDB single-partition queries
+ * It extends FlightQueryExecutor to execute query plans and stream results back to client using Flight.
+ * @param memStore memstore to execute queries against
+ * @param serverAllocator allocator for Flight buffers
+ * @param location location advertised to clients for where to connect for flight RPCs. Not used during invocation now.
+ * @param sysConfig system config
  */
-class FiloDBFlightProducer(val memStore: TimeSeriesStore,
-                           val allocator: BufferAllocator,
-                           val location: Location,
-                           val sysConfig: Config) extends NoOpFlightProducer with FlightQueryExecutor {
+class FiloDBSinglePartitionFlightProducer(
+            val memStore: TimeSeriesStore,
+            val serverAllocator: BufferAllocator,
+            val location: Location,
+            val sysConfig: Config) extends NoOpFlightProducer with FlightQueryResultStreaming {
 
   override def listActions(context: FlightProducer.CallContext,
                            listener: FlightProducer.StreamListener[ActionType]): Unit = {
@@ -51,6 +58,15 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
     }
   }
 
+  def executePlan(q: ExecPlan, querySession: QuerySession): Task[QueryResponse] = {
+    q.execute(memStore, querySession)(queryScheduler)
+      .executeOn(queryScheduler)
+      .asyncBoundary
+      .onErrorHandle { t =>
+        QueryError(q.queryContext.queryId, querySession.queryStats, t)
+      }
+  }
+
   /**
    * Handle doGet requests - execute query plan and stream results
    */
@@ -58,17 +74,15 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
   override def getStream(context: FlightProducer.CallContext,
                          ticket: Ticket,
                          listener: ServerStreamListener): Unit = {
-
-    // scalastyle:off null
     try {
-      FlightKryoSerDeser.deserialize(ticket.getBytes) match {
-        case execPlan: ExecPlan =>
-          executePhysicalPlanEntry(context, execPlan, listener)
-        case other =>
-          val errMsg = s"Invalid ticket type ${other.getClass.getName}, expected ExecPlan"
-          logger.error(errMsg)
-          listener.error(new IllegalArgumentException(errMsg))
-      }
+        FlightKryoSerDeser.deserialize(ticket.getBytes) match {
+          case execPlan: ExecPlan =>
+            executePhysicalPlanAndRespond(context, execPlan, listener)
+          case other =>
+            val errMsg = s"Invalid ticket type ${other.getClass.getName}, expected ExecPlan"
+            logger.error(errMsg)
+            listener.error(new IllegalArgumentException(errMsg))
+        }
     } catch {
       case ex: Throwable =>
         logger.error("Error executing plan", ex)
@@ -77,7 +91,7 @@ class FiloDBFlightProducer(val memStore: TimeSeriesStore,
   }
 }
 
-object FiloDBFlightProducer extends StrictLogging {
+object FiloDBSinglePartitionFlightProducer extends StrictLogging {
 
   def akkaPortToFlightPort(akkaPort: Int): Int = akkaPort + 5000
 
@@ -102,14 +116,15 @@ object FiloDBFlightProducer extends StrictLogging {
       override def authenticate(outgoing: ServerAuthHandler.ServerAuthSender,
                                 incoming: util.Iterator[Array[Byte]]): Boolean = true
     }
+
     val svc: BindableService = FlightGrpcUtils.createFlightService(FlightAllocator.serverAllocator,
-      new FiloDBFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig),
+      new FiloDBSinglePartitionFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig),
       noAuthHandler,
       executor)
 
-    val server1 = ServerBuilder.forPort(port)
+    val server1 = NettyServerBuilder.forPort(port)
     val server2 = if (compressionEnabled) server1.intercept(GzipServerInterceptor) else server1
-    val server3 = server2.asInstanceOf[ServerBuilder[NettyServerBuilder]].addService(svc).build()
+    val server3 = server2.addService(svc).build()
     logger.info(s"Starting FiloDB Flight server on $host:$port with compression = $compressionEnabled")
     server3.start()
     server3

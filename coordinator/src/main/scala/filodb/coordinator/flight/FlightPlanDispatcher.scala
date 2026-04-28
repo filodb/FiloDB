@@ -8,19 +8,19 @@ import scala.util.Using
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.arrow.flight.{CallOptions, CallStatus, FlightClient, FlightRuntimeException, Location, Ticket}
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.flight._
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, QueryStats}
+import filodb.core.query.{QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
-case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: String)
+case class FlightPlanDispatcher(location: Location,
+                                clusterName: String)
   extends PlanDispatcher {
 
   import filodb.query.Query.qLogger
@@ -45,7 +45,11 @@ case class SingleClusterFlightPlanDispatcher(location: Location, clusterName: St
     qLogger.debug(s"FlightPlanDispatcher dispatching queryPlanId=${plan.execPlan.planId} " +
       s"${plan.execPlan.getClass.getSimpleName} to $location")
     val client = FlightClientManager.getClient(location)
-    val ticket = new Ticket(FlightKryoSerDeser.serializeToBytes(plan.execPlan))
+
+    val ticket = plan.execPlan match {
+      case remoteExec: PromQLFlightRemoteExec =>  new Ticket(remoteExec.grpcRequest.toByteArray)
+      case otherExec =>                           new Ticket(FlightKryoSerDeser.serializeToBytes(otherExec))
+    }
     executeFlightRequest(plan.execPlan, client, ticket, remainingTimeMs, plan.querySession)
   }
 

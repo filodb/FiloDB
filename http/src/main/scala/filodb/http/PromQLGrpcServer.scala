@@ -1,13 +1,13 @@
 package filodb.http
 
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{Executors, TimeUnit}
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.{Metadata, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
+import io.grpc._
 import io.grpc.ServerCall.Listener
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
@@ -17,21 +17,19 @@ import kamon.trace.Trace.SamplingDecision
 import monix.eval.Task
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
+import org.apache.arrow.flight.Location
 
 import filodb.coordinator.FilodbSettings
+import filodb.coordinator.flight.FiloDBMultiPartitionFlightProducer
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.metrics.{FilodbMetrics, MetricsHistogram}
-import filodb.core.query.{FlightAllocator, IteratorBackedRangeVector, QueryConfig, QueryContext,
-                          QuerySession, QueryStats, SerializedRangeVector}
+import filodb.core.query._
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec.{ExecPlanWithClientParams, UnsupportedChunkSource}
-
-
-
 
 /**
  *
@@ -58,19 +56,35 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
       "neither bind-grpc-port nor grpc-port-list with localhost-ordinal are defined"
     )
   }
+
+  private val flightMultiPartitionServerEnabled = filoSettings.allConfig
+                                 .getBoolean("filodb.grpc.flight-multi-partition-service-enabled")
+
   private val maxInboundMessageSizeBytes = filoSettings.allConfig.getInt("filodb.grpc.max-inbound-message-size")
-  private val server = ServerBuilder.forPort(this.port)
-    .intercept(TracingInterceptor).asInstanceOf[ServerBuilder[NettyServerBuilder]]
-    .maxInboundMessageSize(maxInboundMessageSizeBytes)
-    //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
-    .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
+  private val server = {
+    val s1 = NettyServerBuilder.forPort(this.port)
+      .intercept(TracingInterceptor)
+      .maxInboundMessageSize(maxInboundMessageSizeBytes)
+      //.executor(scheduler)
+      .addService(new PromQLGrpcService())
+    val s2 = if (flightMultiPartitionServerEnabled) s1.addService(makeFlightBindableService()) else s1
+    s2.build()
+  }
 
   val queryConfig = QueryConfig(filoSettings.allConfig.getConfig("filodb.query"))
-  val queryServerConfig = filoSettings.allConfig.getConfig("server")
+  lazy val queryServerConfig = filoSettings.allConfig.getConfig("server")
 
   private val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")
 
   private val queryResponseLatency = FilodbMetrics.timeHistogram("grpc-query-latency", TimeUnit.NANOSECONDS)
+
+  private def makeFlightBindableService() = {
+//    val compressionEnabled = filoSettings.allConfig.getBoolean("filodb.flight.compression-enabled")
+    val location = Location.forGrpcInsecure("localhost", port) // TODO - fetch public hostname (okay - not used for now)
+    val executor = Executors.newCachedThreadPool() // io executor on which flight requests are served
+    FiloDBMultiPartitionFlightProducer.makeBindableService(queryPlannerSelector, FlightAllocator.serverAllocator,
+        location, filoSettings.allConfig, executor)
+  }
 
   private class PromQLGrpcService extends RemoteExecImplBase {
 
@@ -290,9 +304,9 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
         }
       }
 
-
   def stop(): Unit = {
     if (server != null) {
+      server.shutdown()
       server.awaitTermination(1, TimeUnit.MINUTES)
     }
   }

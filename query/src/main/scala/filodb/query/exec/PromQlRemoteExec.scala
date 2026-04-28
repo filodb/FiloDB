@@ -43,7 +43,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
   private val dummyQueryStats = QueryStats()
 
-  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long, querySession: QuerySession)
                           (implicit sched: Scheduler): Task[QueryResponse] = {
 
     import PromCirceSupport._

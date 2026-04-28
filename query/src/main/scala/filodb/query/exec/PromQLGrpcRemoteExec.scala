@@ -14,7 +14,7 @@ import monix.reactive.subjects.ConcurrentSubject
 import filodb.core.DatasetRef
 import filodb.core.GlobalConfig
 import filodb.core.metrics.FilodbMetrics
-import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryContext, QuerySession}
 import filodb.grpc._
 import filodb.grpc.GrpcMultiPartitionQueryService._
 import filodb.query.ProtoConverters._
@@ -34,8 +34,8 @@ trait GrpcRemoteExec extends RemoteExec {
 
     def remoteExecHttpClient: RemoteExecHttpClient = ???
 
-    override def sendRequest(span: Span, timeoutMs: Long)(implicit sched: Scheduler):
-    Task[QueryResponse] = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
+    def sendRequest(span: Span, timeoutMs: Long, querySession: QuerySession)(implicit sched: Scheduler):
+      Task[QueryResponse] = sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.iterator.toQueryResponse)
 
     override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +
