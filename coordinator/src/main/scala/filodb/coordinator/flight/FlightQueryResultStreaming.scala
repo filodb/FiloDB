@@ -30,6 +30,10 @@ import filodb.core.query._
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
 
+object FlightQueryResultStreaming {
+  val ACCEPT_RESPONSE_VERSION1 = "1.0"
+}
+
 /**
  * Trait that executes physical plans received over Flight RPC
  * Implements query execution with circuit breaker, metrics, and result streaming

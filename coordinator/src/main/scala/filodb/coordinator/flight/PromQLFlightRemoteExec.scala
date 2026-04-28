@@ -24,18 +24,21 @@ case class PromQLFlightRemoteExec(queryContext: QueryContext,
     "an InProcessPlanDispatcher since the client is invoked locally")
 
   def grpcRequest: Request = {
-    val builder = Request.newBuilder()
-    builder.setQueryParams(queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].toProto)
-    builder.setPlannerParams(queryContext.plannerParams.copy(processMultiPartition = false).toProto)
-    builder.setPlannerSelector(plannerSelector)
-    builder.build()
+    Request.newBuilder()
+      .setQueryParams(queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].toProto)
+      .setPlannerParams(queryContext.plannerParams.copy(processMultiPartition = false).toProto)
+      .setPlannerSelector(plannerSelector)
+      .setFlightResponseAcceptVersion(FlightQueryResultStreaming.ACCEPT_RESPONSE_VERSION1)
+      .build()
   }
 
   override def sendRequest(span: Span, timeoutMs: Long,
                            querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
-    // Here we create a new flight dispatcher to send the query off. The dispatcher has logic for flight client
+    // Ensure the queryEndpoint has a scheme, if not default to grpc scheme. Flight clients
+    // are particular about scheme being present. Cannot have just host:port as endpoint, needs to be grpc://host:port
     val queryEndpointWithScheme = if (queryEndpoint.contains("://")) queryEndpoint
                                   else s"grpc://$queryEndpoint"
+    // Here we create a new flight dispatcher to send the query off. The dispatcher has logic for flight client
     val dispatcher = FlightPlanDispatcher(new Location(queryEndpointWithScheme), "promql-flight")
     val planWithParams = ExecPlanWithClientParams(
       this,

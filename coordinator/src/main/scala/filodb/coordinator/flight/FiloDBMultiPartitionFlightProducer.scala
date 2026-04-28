@@ -12,6 +12,7 @@ import org.apache.arrow.flight.FlightProducer.ServerStreamListener
 import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.memory.BufferAllocator
 
+import filodb.coordinator.flight.FlightQueryResultStreaming.ACCEPT_RESPONSE_VERSION1
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.query.{QueryContext, QuerySession}
 import filodb.grpc.GrpcMultiPartitionQueryService
@@ -74,6 +75,10 @@ class FiloDBMultiPartitionFlightProducer(
 
     try {
       val request = GrpcMultiPartitionQueryService.Request.parseFrom(ticket.getBytes)
+      require(request.hasFlightResponseAcceptVersion &&
+              request.getFlightResponseAcceptVersion == ACCEPT_RESPONSE_VERSION1,
+        s"Unsupported FlightResponse Accept Version ${request.getFlightResponseAcceptVersion}, " +
+          s"expected version is $ACCEPT_RESPONSE_VERSION1")
       val queryParams = request.getQueryParams
       val qContext = QueryContext(origQueryParams = request.getQueryParams.fromProto,
         plannerParams = request.getPlannerParams.fromProto)

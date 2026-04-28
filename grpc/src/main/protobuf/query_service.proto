@@ -78,6 +78,7 @@ message Request {
       PlannerParams plannerParams   = 2;
       string dataset                = 3;
       string plannerSelector        = 4;
+      optional string flightResponseAcceptVersion = 5;
 }
 
 message StreamingErrorResponse {
