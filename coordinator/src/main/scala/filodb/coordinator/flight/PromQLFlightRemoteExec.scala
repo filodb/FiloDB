@@ -33,9 +33,10 @@ case class PromQLFlightRemoteExec(queryContext: QueryContext,
 
   override def sendRequest(span: Span, timeoutMs: Long,
                            querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
-    // Here we create a new flight dispatcher to send the query off. The dispatcher has
-    // logic for flight client
-    val dispatcher = FlightPlanDispatcher(new Location(queryEndpoint), "promql-flight")
+    // Here we create a new flight dispatcher to send the query off. The dispatcher has logic for flight client
+    val queryEndpointWithScheme = if (queryEndpoint.contains("://")) queryEndpoint
+                                  else s"grpc://$queryEndpoint"
+    val dispatcher = FlightPlanDispatcher(new Location(queryEndpointWithScheme), "promql-flight")
     val planWithParams = ExecPlanWithClientParams(
       this,
       ClientParams(queryContext.plannerParams.queryTimeoutMillis),
