@@ -62,7 +62,8 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
         ColumnFilter("id", Filter.Equals("0".utf8)))
-    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false, now, now - 5000, 10)
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false, now, now - 5000, 10,
+      QuerySession.makeForTestingOnly)
     val tsPartData = metadata.next()
     tsPartData shouldEqual jobQueryResult2
   }
@@ -86,7 +87,8 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
       ColumnFilter("id", Filter.Equals("0".utf8)))
-    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, true, endTime, endTime - 5000, 10)
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, true, endTime, endTime - 5000, 10,
+      QuerySession.makeForTestingOnly)
     val tsPartData = metadata.next()
     val jobQueryResult = jobQueryResult2 ++
       Map(("_firstSampleTime_".utf8, startTime.toString.utf8), ("_lastSampleTime_".utf8, endTime.toString.utf8))
@@ -159,6 +161,32 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
   it("should not throw error when empty QueryContext() for scanTsCardinalities") {
     noException should be thrownBy memStore.scanTsCardinalities(
       QueryContext(), timeseriesDataset.ref, Seq(1, 2, 3), Seq("testws", "testns"), 3)
+  }
+
+  it("should set resultCouldBePartial when partKeysWithFilters (fetchFirstLastSampleTimes=false) hits limit") {
+    // There is exactly 1 partition matching id=5. With limit=1, partIds.length == limit → partial flag.
+    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("id", Filter.Equals("5".utf8)))
+    val session = QuerySession.makeForTestingOnly
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false,
+      now, now - numRawSamples * reportingInterval, 1, session)
+    metadata.toSeq.size shouldEqual 1
+    session.resultCouldBePartial shouldEqual true
+    session.partialResultsReason shouldEqual
+      Some("Result may be partial since some shards exceeded the query limit")
+  }
+
+  it("should not set resultCouldBePartial when partKeysWithFilters (fetchFirstLastSampleTimes=false) does not hit limit") {
+    // There is exactly 1 partition matching id=5. With limit=2, partIds.length < limit → no partial flag.
+    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("id", Filter.Equals("5".utf8)))
+    val session = QuerySession.makeForTestingOnly
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false,
+      now, now - numRawSamples * reportingInterval, 2, session)
+    metadata.toSeq.size shouldEqual 1
+    session.resultCouldBePartial shouldEqual false
   }
 
 }

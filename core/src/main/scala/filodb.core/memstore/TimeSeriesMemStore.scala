@@ -209,9 +209,10 @@ extends TimeSeriesStore with StrictLogging {
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, fetchFirstLastSampleTimes,
-      end, start, limit)).getOrElse(Iterator.empty)
+      end, start, limit, querySession)).getOrElse(Iterator.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
