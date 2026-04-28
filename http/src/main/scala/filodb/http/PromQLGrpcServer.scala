@@ -14,13 +14,15 @@ import io.grpc.stub.StreamObserver
 import kamon.Kamon
 import kamon.trace.{Identifier, Span, Trace}
 import kamon.trace.Trace.SamplingDecision
+import monix.eval.Task
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.metrics.{FilodbMetrics, MetricsHistogram}
-import filodb.core.query.{IteratorBackedRangeVector, QueryConfig, QueryContext, QueryStats, SerializedRangeVector}
+import filodb.core.query.{FlightAllocator, IteratorBackedRangeVector, QueryConfig, QueryContext,
+                          QuerySession, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
@@ -64,6 +66,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 
   val queryConfig = QueryConfig(filoSettings.allConfig.getConfig("filodb.query"))
+  val queryServerConfig = filoSettings.allConfig.getConfig("server")
 
   private val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")
 
@@ -182,26 +185,36 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           implicit val dispatcherScheduler: Scheduler = scheduler
           rp.span.mark("Sending query request")
           val queryParams = request.getQueryParams
-          val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
+          val qContext = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
-          val eval = Try {
+
+          Task.eval {
+            // Create FlightAllocator if flight is enabled
+            val flightAllocator = if (queryServerConfig.hasPath("flight-client-enabled") &&
+                                      queryServerConfig.getBoolean("flight-client-enabled")) {
+              Some(new FlightAllocator(FlightAllocator.serverAllocator.newChildAllocator(
+                s"grpc-query-${qContext.queryId}", 0, queryServerConfig.getInt("flight-per-request-max-memory-bytes")
+              )))
+            } else None
+            QuerySession(qContext, queryConfig, catchMultipleLockSetErrors = true, flightAllocator = flightAllocator)
+          }.bracket { querySession =>
             val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
             // Catch parsing errors, query materialization and errors in dispatch
             val logicalPlan = Parser.queryRangeToLogicalPlan(
               queryParams.getPromQL,
               TimeStepParams(queryParams.getStart, queryParams.getStep, queryParams.getEnd))
 
-            val exec = queryPlanner.materialize(logicalPlan, config)
-            queryPlanner.dispatchExecPlan(exec, rp.span).foreach(
-              (qr: QueryResponse) => rp.processQueryResponse(qr)
-            )
-          }
-          eval match {
-            case Failure(t)   =>
+            val exec = queryPlanner.materialize(logicalPlan, qContext)
+            queryPlanner.dispatchExecPlan(exec, querySession, rp.span)
+              .map((qr: QueryResponse) => rp.processQueryResponse(qr))
+          } { querySession =>
+            Task.eval(querySession.close())
+          }.runAsync {
+            case Left(t) =>
               logger.error("Caught failure while executing query", t)
-              rp.processQueryResponse(QueryError(config.queryId, QueryStats(), t))
+              rp.processQueryResponse(QueryError(qContext.queryId, QueryStats(), t))
               rp.span.fail("Query execution failed", t)
-            case _            =>  rp.span.mark("query execution successful")
+            case Right(_) => rp.span.mark("query execution successful")
           }
         }
 
@@ -233,24 +246,37 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           import filodb.coordinator.ProtoConverters._
           val queryContextProto = remoteExecPlanProto.getQueryContext
           val queryContext = queryContextProto.fromProto
+
           val execPlan = remoteExecPlanProto.getExecPlan().fromProto(queryContext)
           val span = Kamon.currentSpan()
           val startNs = System.nanoTime()
           val dataset = execPlan.dataset.dataset
           val rp = new StreamingResponseProcessor(responseObserver, span, dataset, startNs)
-          val eval = Try {
+
+          Task.eval {
+            // Create FlightAllocator if flight is enabled
+            val flightAllocator = if (queryServerConfig.hasPath("flight-client-enabled") &&
+                                      queryServerConfig.getBoolean("flight-client-enabled")) {
+              Some(new FlightAllocator(FlightAllocator.serverAllocator.newChildAllocator(
+                  s"grpc-execplan-${queryContext.queryId}", 0,
+                  queryServerConfig.getInt("flight-per-request-max-memory-bytes"))))
+            } else None
+            QuerySession(queryContext, queryConfig, catchMultipleLockSetErrors = true,
+              flightAllocator = flightAllocator)
+          }.bracket { querySession =>
             val execPlanWParams = ExecPlanWithClientParams(
-              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)
-            )
-            execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource()).foreach(
-              (qr: QueryResponse) => rp.processQueryResponse(qr)
-            )
-          }
-          eval match {
-            case Failure(t) =>
+              execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
+              querySession)
+            execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource())
+              .map((qr: QueryResponse) => rp.processQueryResponse(qr))
+          } { querySession =>
+            Task.eval(querySession.close())
+          }.runAsync {
+            case Left(t) =>
               logger.error("Caught failure while dispatching execution plan", t)
-              rp.processQueryResponse(QueryError(execPlan.queryContext.queryId, QueryStats(), t))
-            case _            =>  rp.span.mark("exec plan dispatched successful")
+              rp.processQueryResponse(QueryError(queryContext.queryId, QueryStats(), t))
+              span.fail("Query execution failed", t)
+            case Right(_) => rp.span.mark("query execution successful")
           }
         }
 

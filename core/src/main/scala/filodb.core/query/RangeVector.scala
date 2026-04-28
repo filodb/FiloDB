@@ -4,21 +4,25 @@ import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
-import org.joda.time.DateTime
 import scala.util.Using
 
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
+import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
+import org.apache.arrow.vector.{VarBinaryVector, VectorSchemaRoot}
+import org.joda.time.DateTime
+
+import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.store._
 import filodb.memory.{BinaryRegionLarge, MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.Histogram
 
+// scalastyle:off number.of.types
+// scalastyle:off file.size.limit
 /**
   * Identifier for a single RangeVector.
   * Sub-classes must be a case class or override equals/hashcode since this class is used in a
@@ -144,6 +148,8 @@ trait RangeVector {
   *  implement this marker trait, then query engine will convert it to one that does.
   */
 sealed trait SerializableRangeVector extends RangeVector {
+
+  def hasFormulatedRows: Boolean
   /**
    * Used to calculate number of samples sent over the wire for limiting resources used by query
    */
@@ -172,6 +178,7 @@ object SerializableRangeVector {
   * Range Vector that represents a scalar result. Scalar results result in only one range vector.
   */
 sealed trait ScalarRangeVector extends SerializableRangeVector {
+  val hasFormulatedRows: Boolean = true
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
   def getValue(time: Long): Double
 }
@@ -258,6 +265,7 @@ final case class RepeatValueVector(rv: RangeVector,
 
 
 sealed trait ScalarSingleValue extends ScalarRangeVector {
+  override val hasFormulatedRows: Boolean = true
   def rangeParams: RangeParams
   override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
@@ -423,6 +431,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   val startRecordNo: Int,
                                   override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
+
+  override val hasFormulatedRows: Boolean = false
 
   override val numRows = {
     if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {
@@ -613,5 +623,121 @@ final case class BufferRangeVector(key: RangeVectorKey,
       row
     }
     def close(): Unit = {}
+  }
+}
+
+/**
+ * Arrow-based SerializedRangeVector that uses off-heap columnar storage.
+ * Compared to the RecordBuilder-based implementation, this provides:
+ * - Native off-heap storage (no MemFactory needed)
+ * - Columnar layout for better cache locality
+ * - Compatibility with Arrow ecosystem
+ */
+class ArrowSerializedRangeVector(val key: RangeVectorKey,
+                                 val vsrs: Seq[VectorSchemaRoot],
+                                 val schema: RecordSchema,
+                                 val startVsrIndex: Int,
+                                 val rvkRowIndex: Int,
+                                 val numRowsSerialized: Int,
+                                 val outputRange: Option[RvRange]) extends RangeVector with SerializableRangeVector {
+
+  val hasFormulatedRows: Boolean = false
+  val thisAsrv = this
+
+  // scalastyle:off method.length
+  override def rows(): RangeVectorCursor = {
+    new RangeVectorCursor {
+      private val reader = new BinaryRecordRowReader(schema, UnsafeUtils.ZeroPointer, 0)
+      private var currentVsrIndex = startVsrIndex
+      private var brVec = vsrs(currentVsrIndex).getVector(1).asInstanceOf[VarBinaryVector]
+      private var currentVsrRowCount = if (currentVsrIndex < vsrs.length) vsrs(currentVsrIndex).getRowCount else 0
+      // Start at startRowIndex + 1 to skip the RV key row
+      private var currentRowInVsr = rvkRowIndex + 1
+      private var offsetBufferPtr = brVec.getOffsetBuffer.memoryAddress() + currentRowInVsr * 4
+      private var validityVectorPointer = brVec.getValidityBuffer.memoryAddress()
+      private var rowsRead = 0
+      private val emptyDouble = new TransientRow(0L, Double.NaN)
+      private val emptyHist = new TransientHistRow(0L, Histogram.empty)
+      private var curTimestamp = outputRange.map(_.startMs).getOrElse(0L)
+      private val step = outputRange.map(_.stepMs).getOrElse(1L)
+      private val canRemoveEmptyDouble = SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
+        schema.columns(1).colType == DoubleColumn
+      private val canRemoveEmptyHist = SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
+        schema.columns(1).colType == HistogramColumn
+
+      final def hasNext: Boolean = rowsRead < numRowsSerialized
+
+      final def next(): RowReader = {
+        // Move to next VSR if we've exhausted current VSR
+        if (currentRowInVsr >= currentVsrRowCount) {
+          if (currentVsrIndex < vsrs.length - 1) {
+            currentVsrIndex += 1
+            brVec = vsrs(currentVsrIndex).getVector(1).asInstanceOf[VarBinaryVector]
+            currentVsrRowCount = vsrs(currentVsrIndex).getRowCount
+            currentRowInVsr = 0
+            offsetBufferPtr = brVec.getOffsetBuffer.memoryAddress()
+            validityVectorPointer = brVec.getValidityBuffer.memoryAddress()
+          } else {
+            throw new NoSuchElementException("No more VSRs available to read from")
+          }
+        }
+
+        def currentBrIsNull: Boolean = {
+          val byteIndex = currentRowInVsr >> 3
+          val bitIndex = currentRowInVsr & 7
+          val b = UnsafeUtils.getByte(validityVectorPointer + byteIndex)
+          ((b >> bitIndex) & 0x01) == 0
+        }
+
+        // Check if this is a null row (empty data that was filtered out during serialization)
+        val retRow = if (currentBrIsNull) {
+          if (canRemoveEmptyDouble) {
+            emptyDouble.timestamp = curTimestamp
+            emptyDouble
+          } else if (canRemoveEmptyHist) {
+            emptyHist.timestamp = curTimestamp
+            emptyHist
+          } else {
+            VSRDebug.debug(thisAsrv)
+            throw new IllegalStateException(s"Encountered null at row $currentRowInVsr that cannot" +
+              s" be removed. Debug info is available above.")
+          }
+        } else {
+          // Read the binary record from the vector
+          val start = UnsafeUtils.getInt(offsetBufferPtr)
+          reader.recordOffset = brVec.getDataBuffer.memoryAddress() + start
+          reader
+        }
+        currentRowInVsr += 1
+        rowsRead += 1
+        curTimestamp += step
+        offsetBufferPtr += 4 // Move to next offset (4 bytes per offset)
+        retRow
+      }
+
+      override def close(): Unit = {
+        // VSRs are owned by ArrowSerializedRangeVector2 and managed externally
+        // Don't close them here
+      }
+    }
+  }
+
+  override def numRows: Option[Int] = Some(numRowsSerialized)
+
+  /**
+   * Estimates the total size (in bytes) of all rows after serialization.
+   */
+  override def estimateSerializedRowBytes: Long = {
+    // FIXME since multiple RVs can be serialized into the same VSR, this may not be accurate for all RVs.
+    0L
+  }
+}
+
+object VSRDebug extends StrictLogging {
+  def debug(asrv: ArrowSerializedRangeVector): Unit = {
+    logger.info(s"Debugging ArrowSerializedRangeVector: key=${asrv.key}, " +
+      s"numRowsSerialized=${asrv.numRowsSerialized}, outputRange=${asrv.outputRange}, " +
+      s"schema=${asrv.schema}, startVsrIndex=${asrv.startVsrIndex}, rvkRowIndex=${asrv.rvkRowIndex}")
+    logger.info(s"Rows: \n ${asrv.vsrs.map(_.contentToTSVString()).mkString("\n")}")
   }
 }

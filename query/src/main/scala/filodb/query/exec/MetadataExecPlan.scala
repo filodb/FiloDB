@@ -56,7 +56,10 @@ trait MetadataDistConcatExec extends NonLeafExecPlan with MetadataExecPlan {
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv.head match {
             case srv: SerializedRangeVector =>
-              srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+              srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+            case srv: ArrowSerializedRangeVector =>
+              srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
                 .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
             case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
           }
@@ -95,13 +98,13 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       // Check if we either (1) won't increase the size or (2) have enough room for another.
       // Accordingly retrieve the key to update and the counts to increment.
       val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.contains(data.group) || acc.size < resultSize) {
-        (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
+        (data.group, accCountsOpt.getOrElse(CardCounts(0, 0, 0)))
       } else {
         // aggregate by dataset as well
         val groupArray = data.group.toString.split(TsCardExec.PREFIX_DELIM)
         val dataset = groupArray(groupArray.size - 1)
         val dataGroup = prefixToGroupWithDataset(CardinalityStore.OVERFLOW_PREFIX, dataset)
-        (dataGroup, acc.getOrElseUpdate(dataGroup, CardCounts(0, 0)))
+        (dataGroup, acc.getOrElseUpdate(dataGroup, CardCounts(0, 0, 0)))
       }
       acc.update(groupKey, accCounts.add(data.counts))
     }
@@ -179,6 +182,12 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
         case srv: SerializedRangeVector if colType == StringColumn =>
           srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
             .map (_._2).head
+        case srv: ArrowSerializedRangeVector if colType == StringColumn =>
+          srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (_._2).head
+        case srv: ArrowSerializedRangeVector if colType == MapColumn =>
+          srv.schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
         case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
       }
     }
@@ -285,6 +294,9 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
             val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
             rv.head match {
               case srv: SerializedRangeVector =>
+                srv.schema.consumeMapItems(binaryRowReader.recordBase, binaryRowReader.recordOffset, index = 0,
+                  mapConsumer(sketchMap))
+              case srv: ArrowSerializedRangeVector =>
                 srv.schema.consumeMapItems(binaryRowReader.recordBase, binaryRowReader.recordOffset, index = 0,
                   mapConsumer(sketchMap))
               case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
@@ -486,7 +498,8 @@ final case object TsCardExec {
   val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
                                        ColumnInfo("active", ColumnType.LongColumn),
                                        ColumnInfo("shortTerm", ColumnType.LongColumn),
-                                       ColumnInfo("longTerm", ColumnType.LongColumn)), 1)
+                                       ColumnInfo("longTerm", ColumnType.LongColumn),
+                                       ColumnInfo("billable", ColumnType.LongColumn)), 1)
 
   /**
    * @param prefix ShardKeyPrefix from the Cardinality Record
@@ -499,15 +512,19 @@ final case object TsCardExec {
 
   /**
    * @param active Actively (1 hourt) Ingesting Cardinality Count
+   * @param billable Series ingested within the last 1h (same as "active"), but where each series' cardinality
+   *                 is scaled by the multipliers defined in
+   *                 [[filodb.core.memstore.TimeSeriesShard.schemaNameToBillableCardinalityPerActiveSeries]]
    * @param shortTerm This is the 7 day running Cardinality Count
    * @param longTerm upto 6 month running Cardinality Count
    */
-  case class CardCounts(active: Long, shortTerm: Long, longTerm: Long = 0) {
+  case class CardCounts(active: Long, billable: Long, shortTerm: Long, longTerm: Long = 0) {
     if (shortTerm < active) {
       qLogger.warn(s"CardCounts created with total < active; shortTerm: $shortTerm, active: $active")
     }
     def add(other: CardCounts): CardCounts = {
       CardCounts(active + other.active,
+                 billable + other.billable,
                  shortTerm + other.shortTerm,
                  longTerm + other.longTerm)
     }
@@ -521,6 +538,7 @@ final case object TsCardExec {
       case 1 => counts.active
       case 2 => counts.shortTerm
       case 3 => counts.longTerm
+      case 4 => counts.billable
       case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
     override def getDouble(columnNo: Int): Double = ???
@@ -544,7 +562,11 @@ final case object TsCardExec {
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
-      val counts = CardCounts(rr.getLong(1), rr.getLong(2), rr.getLong(3))
+      val active = rr.getLong(1)
+      val shortTerm = rr.getLong(2)
+      val longTerm = rr.getLong(3)
+      val billable = rr.getLong(4)
+      val counts = CardCounts(active, billable, shortTerm, longTerm)
       RowData(group, counts)
     }
   }
@@ -594,12 +616,12 @@ final case class TsCardExec(queryContext: QueryContext,
             if (clusterNameLowercase.contains("downsample")) {
               CardRowReader(
                 groupKey,
-                CardCounts(0, 0, card.value.tsCount))
+                CardCounts(0, 0, 0, card.value.tsCount))
             }
             else {
               CardRowReader(
                 groupKey,
-                CardCounts(card.value.activeTsCount, card.value.tsCount))
+                CardCounts(card.value.activeTsCount, card.value.billableTsCount, card.value.tsCount))
             }
           }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)

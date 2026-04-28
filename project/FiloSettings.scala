@@ -202,6 +202,7 @@ object FiloSettings {
       case m if m.toLowerCase.matches("scala-collection-compat.properties") => MergeStrategy.first
       case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
+      case m if m.toLowerCase.matches("arrow-git.properties") => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*module-info.class") => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*\\.kotlin_module") => MergeStrategy.discard

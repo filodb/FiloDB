@@ -4,6 +4,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
+import filodb.coordinator.flight.{FiloDBFlightProducer, SingleClusterFlightPlanDispatcher}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
@@ -20,9 +21,13 @@ case class RemoteActorPlanDispatcher(path: String, clusterName: String) extends 
   )(implicit sched: Scheduler): Task[QueryResponse] = {
     val serialization = akka.serialization.SerializationExtension(ActorSystemHolder.system)
     val deserializedActorRef = serialization.system.provider.resolveActorRef(path)
-    val dispatcher = ActorPlanDispatcher(
-      deserializedActorRef, clusterName
-    )
+
+    val dispatcher = if (plan.querySession.flightAllocator.isDefined) {
+      val location = FiloDBFlightProducer.akkaActorToFlightLocation(deserializedActorRef)
+      SingleClusterFlightPlanDispatcher(location, clusterName)
+    } else {
+      ActorPlanDispatcher(deserializedActorRef, clusterName)
+    }
     dispatcher.dispatch(plan, source)
   }
 

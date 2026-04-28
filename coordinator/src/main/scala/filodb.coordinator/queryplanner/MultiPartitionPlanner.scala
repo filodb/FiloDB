@@ -90,6 +90,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                             localPartitionName: String,
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
+                            val flightEnabled: Boolean,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
                             new ConcurrentHashMap[String, ManagedChannel]().asScala,
@@ -452,7 +453,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       queryParams.copy(promQl = LogicalPlanParser.convertToQuery(binaryJoin.rhs)))
     val rhsPlan = materializeForAssignment(binaryJoin.rhs, assignment, rightContext, timeRangeOverride)
 
-    val dispatcher = PlannerUtil.pickDispatcher(Seq(lhsPlan, rhsPlan))
+    val dispatcher = PlannerUtil.pickDispatcher(Seq(lhsPlan, rhsPlan), flightEnabled)
     if (binaryJoin.operator.isInstanceOf[SetOperator])
       exec.SetOperatorExec(queryContext, dispatcher, Seq(lhsPlan), Seq(rhsPlan), binaryJoin.operator,
         binaryJoin.on.map(LogicalPlanUtils.renameLabels(_, dsOptions.metricColumn)),
@@ -493,7 +494,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         plans.filter(_.isInstanceOf[PromQlRemoteExec]).foreach(
           _.addRangeVectorTransformer(AggregateMapReduce(aggregate.operator, aggregate.params, aggregate.clauseOpt))
         )
-        val dispatcher = PlannerUtil.pickDispatcher(plans)
+        val dispatcher = PlannerUtil.pickDispatcher(plans, flightEnabled)
         val reducer = MultiPartitionReduceAggregateExec(queryContext, dispatcher,
           PlannerUtil.localPlansFirst(plans), aggregate.operator, aggregate.params)
         if (!queryContext.plannerParams.skipAggregatePresent) {
@@ -797,7 +798,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         partitionDetails.grpcEndPoint, partitionDetails.httpEndPoint, queryContext, timeRangeOverride,
         partitionDetails.workUnit)
     }).toSeq
-    val dispatcher = PlannerUtil.pickDispatcher(plans)
+    val dispatcher = PlannerUtil.pickDispatcher(plans, flightEnabled)
     MultiPartitionDistConcatExec(queryContext, dispatcher, plans)
   }
 

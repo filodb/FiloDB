@@ -59,9 +59,9 @@ class RecordBuilder(memFactory: MemFactory,
   def currentTimeMillis: Long = System.currentTimeMillis()
 
   // Reset last container and all pointers
-  def reset(): Unit = if (containers.nonEmpty) {
+  def reset(skipTime: Boolean = false): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
-    containers.last.updateTimestamp(currentTimeMillis)
+    if (!skipTime) containers.last.updateTimestamp(currentTimeMillis)
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -309,6 +309,39 @@ class RecordBuilder(memFactory: MemFactory,
     endMap()
   }
 
+  /**
+   * Encodes a Java TreeMap directly into the map field without Scala collection conversion.
+   * TreeMap is already sorted by key, so no re-sorting needed.
+   *
+   * This avoids the overhead of:
+   *   - convertToScalaImmutableMap (Stream, Tuple2, HashMap construction)
+   *   - Scala Map.toSeq.sortBy (TreeMap is already sorted)
+   *   - ZeroCopyUTF8String wrapping
+   *
+   * Produces the same wire format as addMap(Map[ZCUTF8, ZCUTF8]) — identical bytes,
+   * same predefined key handling, same partition hash.
+   *
+   * Usage from Java:
+   *   TreeMap<String, String> tags = new TreeMap<>();
+   *   tags.put("_ns_", "myapp");
+   *   tags.put("_ws_", "demo");
+   *   builder.startNewRecord(schema);
+   *   // ... add other fields ...
+   *   builder.encodeMapFrom(tags);
+   *   builder.endRecord();
+   */
+  final def encodeMapFrom(tags: java.util.TreeMap[String, String]): Unit = {
+    startMap()
+    val iter = tags.entrySet().iterator()
+    while (iter.hasNext) {
+      val entry = iter.next()
+      val keyBytes = entry.getKey.getBytes(StandardCharsets.UTF_8)
+      val valBytes = entry.getValue.getBytes(StandardCharsets.UTF_8)
+      addMapKeyValue(keyBytes, 0, keyBytes.length, valBytes, 0, valBytes.length)
+    }
+    endMap()
+  }
+
   final def updatePartitionHash(newHash: Int): Unit = {
     recHash = combineHash(recHash, newHash)
   }
@@ -493,6 +526,8 @@ class RecordBuilder(memFactory: MemFactory,
    * Returns the list of all current containers
    */
   def allContainers: Seq[RecordContainer] = containers.toSeq
+
+  def lastContainer: RecordContainer = containers.last
 
   // Used for debugging...  throws exception if there is no data.  Be careful here.
   def curContainerBase: Any = currentContainer.get.base

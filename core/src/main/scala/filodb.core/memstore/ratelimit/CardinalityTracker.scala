@@ -53,6 +53,12 @@ class CardinalityTracker(ref: DatasetRef,
   /**
    * Map used to track cardinality count in aggregated manner. This helps us to avoid frequent reads and writes to
    * RocksDB and increase the throughput when storing/measuring cardinality counts in burst scenarios.
+   * Maps key prefixes to tuples of (totalCardinalityDelta, childrenDelta).
+   *
+   * NOTE: As of this writing, this data structure is only made use of by
+   *   [[filodb.core.downsample.DownsampledTimeSeriesShard]];
+   *   [[filodb.core.memstore.TimeSeriesShard]] always initializes its [[CardinalityTracker]] with flushCount=None,
+   *   so [[modifyCountWithAggregation()]] is never invoked (see [[modifyCount()]]) for details.
    */
   private val cardinalityCountMap : collection.mutable.Map[Seq[String], (Int, Int)] = collection.mutable.Map()
 
@@ -65,7 +71,10 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[CardinalityRecord] = synchronized {
+  def modifyCount(shardKey: Seq[String],
+                  totalDelta: Int,
+                  activeDelta: Int,
+                  billableDelta: Int): Seq[CardinalityRecord] = synchronized {
 
     // note this method is synchronized since the read-modify-write pattern that happens here is not thread-safe
     // modifyCount and decrementCount methods are protected this way
@@ -76,10 +85,17 @@ class CardinalityTracker(ref: DatasetRef,
             totalDelta == 0 && activeDelta == 1 || // existing inactive ts that became active
             totalDelta == 0 && activeDelta == -1,  // existing active ts that became inactive
             "invalid values for totalDelta / activeDelta") // Note: totalDelta = -1 is done via decrementCount method
+    require(
+      activeDelta == 0 && billableDelta == 0
+        || activeDelta == 1 && billableDelta > 0
+        || activeDelta == -1 && billableDelta < 0,
+      s"Invalid values for activeDelta / billableDelta; must have the same sign: " +
+      s"activeDelta=$activeDelta; billableDelta=$billableDelta; shardKey=$shardKey"
+    )
 
     flushCount match {
       case Some(threshold) => modifyCountWithAggregation(shardKey, threshold, totalDelta)
-      case None => modifyCountWithoutAggregation(shardKey, totalDelta, activeDelta)
+      case None => modifyCountWithoutAggregation(shardKey, totalDelta, activeDelta, billableDelta)
     }
   }
 
@@ -93,16 +109,18 @@ class CardinalityTracker(ref: DatasetRef,
    *         will be shardKeyLen + 1 items in the return value
    */
   private def modifyCountWithoutAggregation(shardKey: Seq[String], totalDelta: Int,
-                                            activeDelta: Int): Seq[CardinalityRecord] = {
+                                            activeDelta: Int, billableDelta: Int): Seq[CardinalityRecord] = {
     val toStore = ArrayBuffer[CardinalityRecord]()
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix,
-        CardinalityRecord(shard, prefix, CardinalityValue(0L, 0L, 0L, defaultChildrenQuota(i))))
+        CardinalityRecord(shard, prefix, CardinalityValue(0L, 0L, 0L, 0L, defaultChildrenQuota(i))))
 
-      val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+      val neu = old.copy(value = old.value.copy(
+        tsCount = old.value.tsCount + totalDelta,
         activeTsCount = old.value.activeTsCount + activeDelta,
+        billableTsCount = old.value.billableTsCount + billableDelta,
         childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
 
       if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
@@ -192,9 +210,12 @@ class CardinalityTracker(ref: DatasetRef,
   def flushCardinalityCount(): Unit = {
     if (cardinalityCountMap.size > 0) {
       // iterate through map and store each prefix and count to the rocksDB
-      cardinalityCountMap.foreach(kv => {
-        storeCardinalityCountInRocksDB(kv._1, kv._2._1, kv._2._1, kv._2._2)
-      })
+      cardinalityCountMap.foreach { case (prefix, (totalDelta, childrenDelta)) =>
+        // NOTE: Since the current implementation only supports batch writes for
+        //   totalCardinality deltas, the totalDelta is just passed to all
+        //   cardinality delta params.
+        storeCardinalityCountInRocksDB(prefix, totalDelta, totalDelta, totalDelta, childrenDelta)
+      }
       // clear the map
       cardinalityCountMap.clear()
     }
@@ -206,18 +227,21 @@ class CardinalityTracker(ref: DatasetRef,
    * @param prefix usually contains labels _ws_, _ns_, _metric_ and different combinations of it
    * @param totalDelta Increase in total timeseries
    * @param activeDelta Increase in active timeseries
+   * @param billableDelta Increase in billable timeseries
    * @param childrenDelta Increase in children count
    */
   private def storeCardinalityCountInRocksDB(prefix: Seq[String],
-                            totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = {
+                            totalDelta: Int, activeDelta: Int, billableDelta: Int, childrenDelta: Int): Unit = {
 
     // get the current cardinality count from RocksDB for the given prefix. Also add a default if not present
     val old = store.getOrZero(prefix,
-      CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(prefix.length))))
+      CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, 0, defaultChildrenQuota(prefix.length))))
 
     // update the count with the provided delta values
-    val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+    val neu = old.copy(value = old.value.copy(
+      tsCount = old.value.tsCount + totalDelta,
       activeTsCount = old.value.activeTsCount + activeDelta,
+      billableTsCount = old.value.billableTsCount + billableDelta,
       childrenCount = old.value.childrenCount + childrenDelta))
 
     store.store(neu)
@@ -232,7 +256,8 @@ class CardinalityTracker(ref: DatasetRef,
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     store.getOrZero(
       shardKeyPrefix,
-      CardinalityRecord(shard, shardKeyPrefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
+      CardinalityRecord(
+        shard, shardKeyPrefix, CardinalityValue(0, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
   }
 
   /**
@@ -249,7 +274,8 @@ class CardinalityTracker(ref: DatasetRef,
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
     val old = store.getOrZero(
       shardKeyPrefix,
-      CardinalityRecord(shard, shardKeyPrefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
+      CardinalityRecord(
+        shard, shardKeyPrefix, CardinalityValue(0, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
     val neu = old.copy(value = old.value.copy(childrenQuota = childrenQuota))
     store.store(neu)
     neu
@@ -275,7 +301,7 @@ class CardinalityTracker(ref: DatasetRef,
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
         val old = store.getOrZero(prefix,
-          CardinalityRecord(shard, Nil, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+          CardinalityRecord(shard, Nil, CardinalityValue(0, 0, 0, 0, defaultChildrenQuota(i))))
         if (old.value.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")
@@ -284,7 +310,9 @@ class CardinalityTracker(ref: DatasetRef,
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        if (neu == CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(prefix.length)))) {
+        val zeroCardinalityRecord = CardinalityRecord(
+          shard, prefix, CardinalityValue(0, 0, 0, 0, defaultChildrenQuota(prefix.length)))
+        if (neu == zeroCardinalityRecord) {
           // node can be removed
           store.remove(prefix)
         } else {

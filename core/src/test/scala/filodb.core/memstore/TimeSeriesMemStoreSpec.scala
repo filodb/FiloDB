@@ -10,7 +10,8 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
-import filodb.core.binaryrecord2.{RecordBuilder}
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityValue}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
@@ -723,5 +724,36 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     } finally {
       store2.shutdown()    // release snd free the memory
     }
+  }
+
+  it("should correctly account for billable cardinality") {
+    memStore.setup(dataset2.ref, schemas2, 0, TestData.storeConf, 1, TestData.downsampleConf)
+
+    val shard = memStore.getShardE(dataset2.ref, 0)
+    val key = Seq("a", "b", "c")
+
+    def getBillableCardinality(): Long = {
+      val defaultCardinalityRecord = CardinalityRecord(0, Seq(), CardinalityValue(0, 0, 0, 0, 0))
+      shard.cardTracker.store.getOrZero(key, defaultCardinalityRecord).value.billableTsCount
+    }
+
+    def modifyCardinalityCount(activeDelta: Int): Unit = {
+      shard.modifyCardinalityCount(key, schema2, 0, activeDelta)
+    }
+
+    getBillableCardinality() shouldEqual 0
+
+    // NOTE: Cardinality per series is configured in application_test.conf.
+    modifyCardinalityCount(1)
+    getBillableCardinality() shouldEqual 5
+
+    modifyCardinalityCount(1)
+    getBillableCardinality() shouldEqual 10
+
+    modifyCardinalityCount(-1)
+    getBillableCardinality() shouldEqual 5
+
+    modifyCardinalityCount(-1)
+    getBillableCardinality() shouldEqual 0
   }
 }

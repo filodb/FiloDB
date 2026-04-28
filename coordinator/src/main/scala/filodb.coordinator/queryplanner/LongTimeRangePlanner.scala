@@ -29,6 +29,7 @@ import filodb.query.exec._
   */
   class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                              downsampleClusterPlanner: QueryPlanner,
+                             val flightEnabled: Boolean,
                              earliestRawTimestampFn: => Long,
                              latestDownsampleTimestampFn: => Long,
                              stitchDispatcher: => PlanDispatcher,

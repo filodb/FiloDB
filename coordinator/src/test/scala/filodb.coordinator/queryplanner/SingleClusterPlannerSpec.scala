@@ -4,6 +4,7 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
 import filodb.core.metadata.Column.ColumnType
@@ -20,12 +21,12 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
-
 import scala.concurrent.duration._
 
 object SingleClusterPlannerSpec {
@@ -2096,8 +2097,45 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     ep4.isInstanceOf[EmptyResultExec] shouldEqual true
     import GlobalScheduler._
     val res = ep4.dispatcher.dispatch(ExecPlanWithClientParams(ep4, ClientParams
-    (ep4.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+    (ep4.queryContext.plannerParams.queryTimeoutMillis), QuerySession(QueryContext(), queryConfig)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     res.result.isEmpty shouldEqual true
+  }
+
+  it("should not throw div by zero for instant queries with window and offset outside retention") {
+    val nowSeconds = System.currentTimeMillis() / 1000
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
+
+    // Place the instant timestamp just inside the retention boundary (retention - 2 min).
+    // The 5m window + 5m offset pushes the data need 10 minutes before startMs, which crosses
+    // the retention boundary. This matches the real-world bug: startMs is within retention
+    // but startMs - windowMs - offsetMs is before earliestRetainedTimestamp.
+    // For an instant query step=0, so boundToStartTimeToEarliestRetained must not divide by zero.
+    val queryTimestamp = nowSeconds - 3.days.toSeconds + 2.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      """max_over_time(foo{job="bar"}[5m] offset 5m)""",
+      TimeStepParams(queryTimestamp, 0, queryTimestamp))
+
+    val ep = planner.materialize(logicalPlan, QueryContext())
+    // The single instant's data window is outside retention, so we should get an empty result
+    ep.isInstanceOf[EmptyResultExec] shouldEqual true
+  }
+
+  it("should not throw div by zero for instant query within retention with window and offset") {
+    val nowSeconds = System.currentTimeMillis() / 1000
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
+
+    // Instant query where the timestamp is recent enough that data window is within retention.
+    // step=0 but the guard condition in boundToStartTimeToEarliestRetained should be false,
+    // so it returns startMs as-is.
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      """max_over_time(foo{job="bar"}[5m] offset 5m)""",
+      TimeStepParams(nowSeconds, 0, nowSeconds))
+
+    val ep = planner.materialize(logicalPlan, QueryContext())
+    // Should materialize successfully, not throw or return empty
+    ep.isInstanceOf[EmptyResultExec] shouldEqual false
   }
 
   it("should materialize instant queries with lookback == retention correctly") {
@@ -2434,6 +2472,102 @@ class SingleClusterPlannerSpec extends AnyFunSpec
     validatePlan(execPlan, expected)
   }
 
+  it("should handle le=\"+Inf\" correctly for non-windowed histogram bucket query") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le="+Inf"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // _bucket should be removed from name
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist") shouldEqual true
+    // le filter should be removed
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual false
+    // HistogramBucket transformer should be added with PositiveInfinity
+    val histBucketMapper = multiSchemaPartitionsExec.rangeVectorTransformers.collectFirst {
+      case t: InstantVectorFunctionMapper if t.function == InstantFunctionId.HistogramBucket => t
+    }
+    histBucketMapper shouldBe defined
+    histBucketMapper.get.funcParams.head.asInstanceOf[StaticFuncArgs].scalar shouldEqual Double.PositiveInfinity
+  }
+
+  it("should not throw NumberFormatException for histogram bucket query with le!=\"+Inf\" NotEquals filter") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le!="+Inf"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le NotEquals filter should be retained since this is not a specific bucket selection
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for NotEquals le filter
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for rate histogram bucket query with le!=\"+Inf\" NotEquals filter") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """sum(rate(my_hist_bucket{job="prometheus",le!="+Inf"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le is not an Equals filter
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le NotEquals filter should be retained
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for NotEquals le filter
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for histogram bucket query with non-numeric le value") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """my_hist_bucket{job="prometheus",le="notanumber"}""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for unparseable le value
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
+  it("should not throw NumberFormatException for rate histogram bucket query with non-numeric le value") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan(
+      """sum(rate(my_hist_bucket{job="prometheus",le="notanumber"}[2m])) by (job)""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val multiSchemaPartitionsExec = execPlan.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // metric name should NOT be rewritten when le value is not a valid number
+    multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
+      head.equals("my_hist_bucket") shouldEqual true
+    // le filter should be retained since the value is not a valid number
+    multiSchemaPartitionsExec.filters.exists(_.column == "le") shouldEqual true
+    // HistogramBucket transformer should NOT be added for unparseable le value
+    multiSchemaPartitionsExec.rangeVectorTransformers.exists {
+      case t: InstantVectorFunctionMapper => t.function == InstantFunctionId.HistogramBucket
+      case _ => false
+    } shouldEqual false
+  }
+
   it("should NOT convert to histogram bucket query when _bucket is not a suffix") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("""my_bucket_counter{job="prometheus"}""", t)
@@ -2471,6 +2605,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
       ("""floor(metric{job="app"})""", InstantFunctionId.Floor),
       ("""histogram_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramQuantile),
       ("""histogram_max_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantile),
+      ("""histogram_max_quantile_even(0.9, 1, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantileEven),
       ("""histogram_bucket(0.1, metric{job="app"})""", InstantFunctionId.HistogramBucket),
       ("""ln(metric{job="app"})""", InstantFunctionId.Ln),
       ("""log10(metric{job="app"})""", InstantFunctionId.Log10),
