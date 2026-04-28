@@ -15,7 +15,8 @@ import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
+// scalastyle:off line.size.limit
+class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec {
 
   private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
@@ -562,6 +563,11 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     remoteExec.urlParams.contains("numGroupByFields") shouldEqual true
     remoteExec.urlParams("numGroupByFields") shouldEqual "3"
     remoteExec.urlParams.contains("match[]") shouldEqual true
+
+    // Validate the complete plan tree
+    val expected =
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expected)
   }
 
   it("should execute TsCardinalities locally when no failures are present") {
@@ -666,6 +672,11 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     // Local failure exists — routes to buddy even if buddy also has failures.
     // materializeLegacy only considers local failures for routing decisions.
     execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+
+    // Validate the complete plan tree
+    val expected =
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+    validatePlan(execPlan, expected)
   }
 
   it("should route TsCardinalities with multiple datasets to buddy on local failure") {
