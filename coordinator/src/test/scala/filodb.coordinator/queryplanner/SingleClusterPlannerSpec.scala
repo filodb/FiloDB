@@ -2471,6 +2471,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec
       ("""floor(metric{job="app"})""", InstantFunctionId.Floor),
       ("""histogram_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramQuantile),
       ("""histogram_max_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantile),
+      ("""histogram_max_quantile_even(0.9, 1, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantileEven),
       ("""histogram_bucket(0.1, metric{job="app"})""", InstantFunctionId.HistogramBucket),
       ("""ln(metric{job="app"})""", InstantFunctionId.Ln),
       ("""log10(metric{job="app"})""", InstantFunctionId.Log10),
