@@ -630,6 +630,13 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       MapEncoder.getValue(encoded, partSchema, "missing") shouldBe null
     }
 
+    it("should return null for absent predefined key") {
+      val tags = sortedMap("dc" -> "us-west-2", "region" -> "us-east-1")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.getValue(encoded, partSchema, "_ws_") shouldBe null
+      MapEncoder.getValue(encoded, partSchema, "_ns_") shouldBe null
+    }
+
     it("should return null for null/empty data") {
       MapEncoder.getValue(null, partSchema, "_ws_") shouldBe null
       MapEncoder.getValue(MapEncoder.EMPTY, partSchema, "_ws_") shouldBe null
@@ -750,6 +757,13 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
         val retained = MapEncoder.retain(encoded, partSchema, keysToKeep)
         val decoded = MapEncoder.toJavaMap(retained, partSchema)
 
+        var expectedCount = 0
+        val keysIter = keysToKeep.iterator()
+        while (keysIter.hasNext) {
+          if (tags.containsKey(keysIter.next())) expectedCount += 1
+        }
+        decoded.size() shouldEqual expectedCount
+
         val iter = decoded.entrySet().iterator()
         while (iter.hasNext) {
           val entry = iter.next()
@@ -817,6 +831,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
 
         val retained = MapEncoder.toJavaMap(MapEncoder.retain(encoded, partSchema, keysToKeep), partSchema)
         val removed = MapEncoder.toJavaMap(MapEncoder.remove(encoded, partSchema, keysToKeep), partSchema)
+
+        // Sizes must be disjoint and sum to original
+        (retained.size() + removed.size()) shouldEqual tags.size()
 
         // No overlap
         val retainedIter = retained.keySet().iterator()
