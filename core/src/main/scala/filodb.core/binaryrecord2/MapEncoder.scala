@@ -8,6 +8,13 @@ import filodb.memory.UTF8StringShort
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.UnsafeUtils.{arayOffset, setByte}
 
+/**
+ * Callback for iterating over encoded map entries via MapEncoder.forEach.
+ */
+trait MapEntryConsumer {
+  def consume(key: String, value: String): Unit
+}
+
 // scalastyle:off null
 /**
  * Stateless utility for encoding/decoding tag maps in RecordBuilder's exact wire format.
@@ -123,4 +130,160 @@ object MapEncoder {
 
   /** Check if encoded map bytes are empty. */
   def isEmpty(data: Array[Byte]): Boolean = data == null || data.length == 0
+
+  /**
+   * Look up a single key's value in encoded bytes without decoding the entire map.
+   * Returns null if the key is not found.
+   */
+  def getValue(data: Array[Byte], schema: RecordSchema, key: String): String = {
+    if (data == null || data.length == 0 || key == null) return null
+
+    val keyBytes = key.getBytes(StandardCharsets.UTF_8)
+    var pos = 0
+    while (pos < data.length) {
+      if (keyMatchesAtPos(data, pos, schema, keyBytes)) {
+        return decodeValueAtPos(data, pos)
+      }
+      pos += entryByteLength(data, pos)
+    }
+    null
+  }
+
+  /**
+   * Iterate all entries, invoking consumer with decoded key and value Strings.
+   * No Map allocation — entries are streamed one at a time.
+   */
+  def forEach(data: Array[Byte], schema: RecordSchema, consumer: MapEntryConsumer): Unit = {
+    if (data == null || data.length == 0) return
+
+    var pos = 0
+    while (pos < data.length) {
+      consumer.consume(resolveKeyAtPos(data, pos, schema), decodeValueAtPos(data, pos))
+      pos += entryByteLength(data, pos)
+    }
+  }
+
+  /**
+   * Return new encoded bytes containing only entries whose key is in keysToKeep.
+   * Entry bytes are copied directly — values are never decoded to String.
+   */
+  def retain(data: Array[Byte], schema: RecordSchema,
+             keysToKeep: java.util.Set[String]): Array[Byte] = {
+    filterEntries(data, schema, keysToKeep, keep = true)
+  }
+
+  /**
+   * Return new encoded bytes with entries whose key is in keysToRemove removed.
+   * Entry bytes are copied directly — values are never decoded to String.
+   */
+  def remove(data: Array[Byte], schema: RecordSchema,
+             keysToRemove: java.util.Set[String]): Array[Byte] = {
+    filterEntries(data, schema, keysToRemove, keep = false)
+  }
+
+  /**
+   * Shared implementation for retain/remove. Walks encoded bytes, resolves each key,
+   * and copies entry bytes to the output buffer based on set membership.
+   *
+   * @param keep if true, keeps entries IN the set (retain). If false, keeps entries NOT in the set (remove).
+   */
+  private def filterEntries(data: Array[Byte], schema: RecordSchema,
+                            keySet: java.util.Set[String], keep: Boolean): Array[Byte] = {
+    if (data == null || data.length == 0) return EMPTY
+    if (keySet == null || keySet.isEmpty) {
+      return if (keep) EMPTY else util.Arrays.copyOf(data, data.length)
+    }
+
+    val buf = new Array[Byte](data.length) // output can't be larger than input
+    var outPos = 0
+    var pos = 0
+
+    while (pos < data.length) {
+      val keyStr = resolveKeyAtPos(data, pos, schema)
+      val entryLen = entryByteLength(data, pos)
+
+      val inSet = keySet.contains(keyStr)
+      if ((keep && inSet) || (!keep && !inSet)) {
+        System.arraycopy(data, pos, buf, outPos, entryLen)
+        outPos += entryLen
+      }
+      pos += entryLen
+    }
+
+    if (outPos == 0) EMPTY
+    else util.Arrays.copyOf(buf, outPos)
+  }
+
+  /** Check if the encoded key at pos matches keyBytes without allocating a String. */
+  private def keyMatchesAtPos(data: Array[Byte], pos: Int, schema: RecordSchema,
+                              keyBytes: Array[Byte]): Boolean = {
+    val firstByte = data(pos) & 0xFF
+    val predefIndex = firstByte ^ 0xC0
+    if (predefIndex < 64) {
+      val keyOff = schema.predefKeyOffsets(predefIndex)
+      val keyLen = UTF8StringShort.numBytes(schema.predefKeyBytes, keyOff)
+      if (keyLen != keyBytes.length) return false
+      val startIdx = (keyOff + 1 - UnsafeUtils.arayOffset).toInt
+      var i = 0
+      while (i < keyLen) {
+        if (keyBytes(i) != schema.predefKeyBytes(startIdx + i)) return false
+        i += 1
+      }
+      true
+    } else {
+      val keyLen = firstByte
+      if (keyLen != keyBytes.length) return false
+      var i = 0
+      while (i < keyLen) {
+        if (keyBytes(i) != data(pos + 1 + i)) return false
+        i += 1
+      }
+      true
+    }
+  }
+
+  /** Resolve the key String at the given position in encoded data. */
+  private def resolveKeyAtPos(data: Array[Byte], pos: Int, schema: RecordSchema): String = {
+    val firstByte = data(pos) & 0xFF
+    val predefIndex = firstByte ^ 0xC0
+    if (predefIndex < 64) {
+      val keyOff = schema.predefKeyOffsets(predefIndex)
+      val keyLen = UTF8StringShort.numBytes(schema.predefKeyBytes, keyOff)
+      new String(schema.predefKeyBytes,
+        (keyOff + 1 - UnsafeUtils.arayOffset).toInt, keyLen, StandardCharsets.UTF_8)
+    } else {
+      val keyLen = firstByte
+      new String(data, pos + 1, keyLen, StandardCharsets.UTF_8)
+    }
+  }
+
+  /** Decode the value String at the given entry position. */
+  private def decodeValueAtPos(data: Array[Byte], pos: Int): String = {
+    val firstByte = data(pos) & 0xFF
+    val predefIndex = firstByte ^ 0xC0
+    if (predefIndex < 64) {
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
+      new String(data, pos + 3, valLen, StandardCharsets.UTF_8)
+    } else {
+      val keyLen = firstByte
+      val valLenPos = pos + 1 + keyLen
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
+      new String(data, valLenPos + 2, valLen, StandardCharsets.UTF_8)
+    }
+  }
+
+  /** Compute the total byte length of the entry at the given position. */
+  private def entryByteLength(data: Array[Byte], pos: Int): Int = {
+    val firstByte = data(pos) & 0xFF
+    val predefIndex = firstByte ^ 0xC0
+    if (predefIndex < 64) {
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
+      3 + valLen
+    } else {
+      val keyLen = firstByte
+      val valLenPos = pos + 1 + keyLen
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
+      1 + keyLen + 2 + valLen
+    }
+  }
 }
