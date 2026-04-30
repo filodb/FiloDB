@@ -65,6 +65,7 @@ The normal configuration for real-time ingestion is deployment as stand-alone pr
 * **Massively Scalable** - designed to ingest many millions of entities, sharded across multiple processes, with distributed querying built in
 * **Prometheus PromQL Support**
 * **Tag-based Indexing** - Support for indexing and fast querying over flexible tags for each time series/partition, just like Prometheus
+* **Out-of-Order Tolerance** - Time-bucketed aggregation buffers allow handling samples that arrive out-of-order within configurable tolerance windows
 * **Efficient** - holds a huge amount of data in-memory thanks to columnar compression techniques
 * **Low-latency** - designed for highly concurrent, low-latency workloads such as dashboards and alerting
 * **Real Time** - data immediately available for querying once ingested

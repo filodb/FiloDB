@@ -72,6 +72,9 @@ final case class PeriodicSamplesMapper(startMs: Long,
                       sourceSchema.columns(2).name == "max" && sourceSchema.columns(3).name == "min"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
+    // Non-chunked generator for fallback when rv is not RawDataRangeVector (e.g. AggregatingRangeVector)
+    lazy val iterRangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType,
+                                                            querySession.queryConfig, funcParams, useChunked = false)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
@@ -83,50 +86,58 @@ final case class PeriodicSamplesMapper(startMs: Long,
     val rvs = sampleRangeFunc match {
       case _: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()
-          val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val chunkedHRangeFunc = rangeFuncGen().asChunkedH
-          val minResolutionMs = rdrv.minResolutionMs
-          val extendedWindow = extendLookback(rdrv, windowLength)
-          if (chunkedHRangeFunc.isInstanceOf[CumlDeltaTogglerChunkedFunction[_]] &&
-              extendedWindow < minResolutionMs * 2) {
-            // GOTCHA Note we are expanding this check to both cumulative & delta whereas this applies only
-            // to cumulative metrics. It is done this way since we do not have the information at data scan time to
-            // do this dynamically per time series, when a query can have both cumulative and delta metrics.
-            // Since the restriction applies to downsample dataset only, it is an accepted tradeoff for now.
-            // Improve when the need arises.
-            throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
-              s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
-              s"yield intended results for rate/increase functions since each lookback window can contain " +
-              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
+          rv match {
+            case rdrv: RawDataRangeVector =>
+              val histRow = if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()
+              val chunkedHRangeFunc = rangeFuncGen().asChunkedH
+              val minResolutionMs = rdrv.minResolutionMs
+              val extendedWindow = extendLookback(rdrv, windowLength)
+              if (chunkedHRangeFunc.isInstanceOf[CumlDeltaTogglerChunkedFunction[_]] &&
+                  extendedWindow < minResolutionMs * 2) {
+                throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
+                  s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
+                  s"yield intended results for rate/increase functions since each lookback window can contain " +
+                  s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
+              }
+              IteratorBackedRangeVector(rv.key,
+                new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
+                        extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
+            case _ =>
+              val windowPlusPubInt = extendLookback(rv, windowLength)
+              IteratorBackedRangeVector(rv.key,
+                new SlidingWindowIterator(rv.rows(), startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+                  iterRangeFuncGen().asSlidingH, querySession.queryConfig, leftInclusiveWindow,
+                  if (hasMaxMinCol) new TransientHistMaxMinRow() else new TransientHistRow()), outputRvRange)
           }
-          IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    extendedWindow, chunkedHRangeFunc, querySession, histRow), outputRvRange)
         }
       case _: ChunkedRangeFunction[_] =>
         source.map { rv =>
-          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
-            s"windowLength=$windowLength")
-          val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val minResolutionMs = rdrv.minResolutionMs
-          val chunkedDRangeFunc = rangeFuncGen().asChunkedD
-          val extendedWindow = extendLookback(rdrv, windowLength)
-          if (chunkedDRangeFunc.isInstanceOf[CumlDeltaTogglerChunkedFunction[_]] &&
-              extendedWindow < rdrv.minResolutionMs * 2) {
-            // GOTCHA Note we are expanding this check to both cumulative & delta whereas this applies only
-            // to cumulative metrics. It is done this way since we do not have the information at data scan time to
-            // do this dynamically per time series, when a query can have both cumulative and delta metrics.
-            // Since the restriction applies to downsample dataset only, it is an accepted tradeoff for now.
-            // Improve when the need arises.
-            throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
-              s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
-              s"yield intended results for rate/increase functions since each lookback window can contain " +
-              s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
+          rv match {
+            case rdrv: RawDataRangeVector =>
+              qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
+                s"windowLength=$windowLength")
+              val minResolutionMs = rdrv.minResolutionMs
+              val chunkedDRangeFunc = rangeFuncGen().asChunkedD
+              val extendedWindow = extendLookback(rdrv, windowLength)
+              if (chunkedDRangeFunc.isInstanceOf[CumlDeltaTogglerChunkedFunction[_]] &&
+                  extendedWindow < rdrv.minResolutionMs * 2) {
+                throw new IllegalArgumentException(s"Minimum resolution of data for this time range is " +
+                  s"${minResolutionMs}ms. However, a lookback of ${windowLength}ms was chosen. This will not " +
+                  s"yield intended results for rate/increase functions since each lookback window can contain " +
+                  s"lesser than 2 samples. Increase lookback to more than ${minResolutionMs * 2}ms")
+              }
+              IteratorBackedRangeVector(rv.key,
+                new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
+                        extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
+            case _ =>
+              val windowPlusPubInt = extendLookback(rv, windowLength)
+              val rowIter = if (valColType == ColumnType.LongColumn) new LongToDoubleIterator(rv.rows())
+                            else rv.rows()
+              IteratorBackedRangeVector(rv.key,
+                new SlidingWindowIterator(rowIter, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
+                  iterRangeFuncGen().asSlidingD, querySession.queryConfig, leftInclusiveWindow,
+                  new TransientRow()), outputRvRange)
           }
-          IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
       case _: RangeFunction[_] if valColType == ColumnType.LongColumn =>

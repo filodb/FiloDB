@@ -7,7 +7,7 @@ import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.InternalRangeFunction.{Increase, Resets}
 import filodb.query.exec.rangefn.RawDataWindowingSpec
@@ -195,5 +195,82 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     // 1 for 100 -> 20.  Not for 1 for 20 -> Double.NaN. Should not increase for Double.NaN -> Double.NaN
     resultRows.head.head._2 shouldEqual(1)
+  }
+
+  it("should handle non-RawDataRangeVector via sliding window fallback") {
+    // Simulates the AggregatingRangeVector case from OOO ingestion.
+    // IteratorBackedRangeVector extends RangeVector but NOT RawDataRangeVector,
+    // so PeriodicSamplesMapper must fall back to the SlidingWindowIterator path.
+    val testSamples = Seq(
+      100000L -> 100d,
+      153000L -> 160d,
+      200000L -> 200d
+    )
+
+    import NoCloseCursor._
+    val rows = testSamples.iterator.map { case (ts, v) =>
+      val tr = new TransientRow()
+      tr.setLong(0, ts)
+      tr.setDouble(1, v)
+      tr.asInstanceOf[RowReader]
+    }
+    val nonRawRv: RangeVector = IteratorBackedRangeVector(
+      CustomRangeVectorKey(Map.empty), rows, None
+    )
+
+    val expectedResults = List(100000L -> 100d,
+      200000L -> 200d,
+      300000L -> 200d,
+      400000L -> 200d,
+      500000L -> 200d
+    )
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None)
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(nonRawRv)),
+      querySession, 1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList shouldEqual expectedResults)
+  }
+
+  it("should handle non-RawDataRangeVector with sum_over_time via sliding window fallback") {
+    import NoCloseCursor._
+    val testSamples = Seq(
+      100000L -> 10d,
+      200000L -> 20d,
+      300000L -> 30d,
+      400000L -> 40d
+    )
+    val rows = testSamples.iterator.map { case (ts, v) =>
+      val tr = new TransientRow()
+      tr.setLong(0, ts)
+      tr.setDouble(1, v)
+      tr.asInstanceOf[RowReader]
+    }
+    val nonRawRv: RangeVector = IteratorBackedRangeVector(
+      CustomRangeVectorKey(Map.empty), rows, None
+    )
+
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(
+      200000L, 100000, 400000L, Some(200000L), Some(InternalRangeFunction.SumOverTime))
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(nonRawRv)),
+      querySession, 1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
+    (r => (r.getLong(0), r.getDouble(1))).toList)
+
+    resultRows should have size 1
+    val results = resultRows.head
+    results should have size 3
+    // At t=200000: window [0, 200000] contains samples at 100000->10, 200000->20, sum=30
+    results(0)._1 shouldEqual 200000L
+    results(0)._2 shouldEqual 30d
+    // At t=300000: window [100000, 300000] contains 100000->10, 200000->20, 300000->30, sum=60
+    results(1)._1 shouldEqual 300000L
+    results(1)._2 shouldEqual 60d
+    // At t=400000: window [200000, 400000] contains 200000->20, 300000->30, 400000->40, sum=90
+    results(2)._1 shouldEqual 400000L
+    results(2)._2 shouldEqual 90d
   }
 }

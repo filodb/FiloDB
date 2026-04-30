@@ -62,4 +62,32 @@ class ColumnSpec extends AnyFunSpec with Matchers {
       ColumnInfo(deltaCountColumn).isCumulative should equal (false)
     }
   }
+
+  describe("Time string parsing") {
+    it("should parse time strings correctly") {
+      Column.parseTimeString("30s") shouldEqual 30000L
+      Column.parseTimeString("1m") shouldEqual 60000L
+      Column.parseTimeString("5m") shouldEqual 300000L
+      Column.parseTimeString("1h") shouldEqual 3600000L
+      Column.parseTimeString("1d") shouldEqual 86400000L
+    }
+
+    it("should parse multi-digit time values") {
+      Column.parseTimeString("90s") shouldEqual 90000L
+      Column.parseTimeString("15m") shouldEqual 900000L
+      Column.parseTimeString("24h") shouldEqual 86400000L
+    }
+
+    it("should throw on invalid time strings") {
+      intercept[IllegalArgumentException] {
+        Column.parseTimeString("invalid")
+      }
+      intercept[IllegalArgumentException] {
+        Column.parseTimeString("30")
+      }
+      intercept[IllegalArgumentException] {
+        Column.parseTimeString("30x")
+      }
+    }
+  }
 }

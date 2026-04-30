@@ -305,6 +305,23 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
+  /**
+   * Overwrites the value at a specific index position.
+   * Useful for updating aggregated values in place when handling out-of-order samples.
+   */
+  override def overwriteAt(index: Int, value: Long): AddResponse = {
+    if (index < 0 || index >= length) {
+      VectorTooSmall(index, length - 1)
+    } else {
+      val offset = addr + PrimitiveVector.OffsetData + index * 8
+      UnsafeUtils.setLong(offset, value)
+      Ack
+    }
+  }
+
+  override def overwriteFromReaderNoNA(index: Int, reader: RowReader, col: Int): AddResponse =
+    overwriteAt(index, reader.getLong(col))
+
   private final val readVect = LongBinaryVector(nativePtrReader, addr)
   final def apply(index: Int): Long = readVect.apply(nativePtrReader, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64

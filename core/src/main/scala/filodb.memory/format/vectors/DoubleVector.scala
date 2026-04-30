@@ -429,6 +429,23 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getDouble(col))
 
+  /**
+   * Overwrites the value at a specific index position.
+   * Useful for updating aggregated values in place when handling out-of-order samples.
+   */
+  override def overwriteAt(index: Int, value: Double): AddResponse = {
+    if (index < 0 || index >= length) {
+      VectorTooSmall(index, length - 1)
+    } else {
+      val offset = addr + PrimitiveVector.OffsetData + index * 8
+      UnsafeUtils.setDouble(offset, value)
+      Ack
+    }
+  }
+
+  override def overwriteFromReaderNoNA(index: Int, reader: RowReader, col: Int): AddResponse =
+    overwriteAt(index, reader.getDouble(col))
+
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue
     var max = Double.MinValue
