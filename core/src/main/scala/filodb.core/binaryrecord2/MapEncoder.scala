@@ -36,13 +36,13 @@ object MapEncoder {
 
   /**
    * Encode a tag map into RecordBuilder's wire format with predefined key handling.
-   * TreeMap guarantees keys are sorted, matching RecordBuilder's convention.
+   * SortedMap guarantees keys are sorted, matching RecordBuilder's convention.
    *
-   * @param tags TreeMap of tag key-value pairs (sorted by key)
+   * @param tags SortedMap of tag key-value pairs (sorted by key)
    * @param schema the RecordSchema with predefined key definitions for encoding
    * @return encoded byte[] in RecordBuilder wire format
    */
-  def encode(tags: java.util.TreeMap[String, String], schema: RecordSchema): Array[Byte] = {
+  def encode(tags: java.util.SortedMap[String, String], schema: RecordSchema): Array[Byte] = {
     if (tags == null || tags.isEmpty) return EMPTY
 
     // Upper bound: each entry at most 1 + keyLen*3 + 2 + valLen*3 (UTF-8 worst case)
