@@ -595,6 +595,20 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("MapEncoder.size") {
+    it("should return correct size for all test maps") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+        MapEncoder.size(encoded) shouldEqual tags.size()
+      }
+    }
+
+    it("should return 0 for null/empty data") {
+      MapEncoder.size(null) shouldEqual 0
+      MapEncoder.size(MapEncoder.EMPTY) shouldEqual 0
+    }
+  }
+
   describe("MapEncoder.getValue") {
     it("should return value for predefined key") {
       val tags = sortedMap("_ws_" -> "aci-telemetry", "_ns_" -> "filodb-local", "dc" -> "us-west-2")
@@ -627,21 +641,20 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       MapEncoder.getValue(encoded, partSchema, null) shouldBe null
     }
 
-    it("should match getValue results with toJavaMap.get for all test maps") {
+    it("should match getValue results with map.get for all test maps") {
       testTagMaps.foreach { case (desc, tags) =>
         val encoded = MapEncoder.encode(tags, partSchema)
-        val decoded = MapEncoder.toJavaMap(encoded, partSchema)
         val iter = tags.entrySet().iterator()
         while (iter.hasNext) {
           val entry = iter.next()
-          MapEncoder.getValue(encoded, partSchema, entry.getKey) shouldEqual decoded.get(entry.getKey)
+          MapEncoder.getValue(encoded, partSchema, entry.getKey) shouldEqual tags.get(entry.getKey)
         }
       }
     }
   }
 
   describe("MapEncoder.forEach") {
-    it("should iterate all entries in order matching toJavaMap") {
+    it("should iterate all entries in order matching map") {
       val tags = sortedMap(
         "_ns_" -> "filodb-local", "_ws_" -> "aci-telemetry",
         "dc" -> "us-west-2", "region" -> "us-east-1"
@@ -653,10 +666,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
         override def consume(key: String, value: String): Unit = collected.put(key, value)
       })
 
-      val decoded = MapEncoder.toJavaMap(encoded, partSchema)
-      collected.size() shouldEqual decoded.size()
+      collected.size() shouldEqual tags.size()
       val collectedIter = collected.entrySet().iterator()
-      val decodedIter = decoded.entrySet().iterator()
+      val decodedIter = tags.entrySet().iterator()
       while (collectedIter.hasNext) {
         val c = collectedIter.next()
         val d = decodedIter.next()
@@ -698,10 +710,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       keysToKeep.add("_ns_")
 
       val retained = MapEncoder.retain(encoded, partSchema, keysToKeep)
-      val result = MapEncoder.toJavaMap(retained, partSchema)
-      result.size() shouldEqual 2
-      result.get("_ws_") shouldEqual "ws"
-      result.get("_ns_") shouldEqual "ns"
+      MapEncoder.size(retained) shouldEqual 2
+      MapEncoder.getValue(retained, partSchema, "_ws_") shouldEqual "ws"
+      MapEncoder.getValue(retained, partSchema, "_ns_") shouldEqual "ns"
     }
 
     it("should return EMPTY when no keys match") {
@@ -759,10 +770,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       keysToRemove.add("_ns_")
 
       val removed = MapEncoder.remove(encoded, partSchema, keysToRemove)
-      val result = MapEncoder.toJavaMap(removed, partSchema)
-      result.size() shouldEqual 2
-      result.get("dc") shouldEqual "us-west-2"
-      result.get("region") shouldEqual "us-east-1"
+      MapEncoder.size(removed) shouldEqual 2
+      MapEncoder.getValue(removed, partSchema, "dc") shouldEqual "us-west-2"
+      MapEncoder.getValue(removed, partSchema, "region") shouldEqual "us-east-1"
     }
 
     it("should return all entries when no keys match") {
@@ -773,6 +783,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       keysToRemove.add("missing")
 
       val removed = MapEncoder.remove(encoded, partSchema, keysToRemove)
+      MapEncoder.size(removed) shouldEqual tags.size()
+      MapEncoder.getValue(removed, partSchema, "_ws_") shouldEqual "ws"
+      MapEncoder.getValue(removed, partSchema, "_ns_") shouldEqual "ns"
       MapEncoder.toJavaMap(removed, partSchema) shouldEqual tags
     }
 
@@ -780,6 +793,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
       val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns")
       val encoded = MapEncoder.encode(tags, partSchema)
       val removed = MapEncoder.remove(encoded, partSchema, new JHashSet[String]())
+      MapEncoder.size(removed) shouldEqual tags.size()
+      MapEncoder.getValue(removed, partSchema, "_ws_") shouldEqual "ws"
+      MapEncoder.getValue(removed, partSchema, "_ns_") shouldEqual "ns"
       MapEncoder.toJavaMap(removed, partSchema) shouldEqual tags
     }
 

@@ -131,6 +131,18 @@ object MapEncoder {
   /** Check if encoded map bytes are empty. */
   def isEmpty(data: Array[Byte]): Boolean = data == null || data.length == 0
 
+  /** Return the number of entries in encoded map bytes. */
+  def size(data: Array[Byte]): Int = {
+    if (data == null || data.length == 0) return 0
+    var n = 0
+    var pos = 0
+    while (pos < data.length) {
+      pos += entryByteLength(data, pos)
+      n += 1
+    }
+    n
+  }
+
   /**
    * Look up a single key's value in encoded bytes without decoding the entire map.
    * Returns null if the key is not found.
