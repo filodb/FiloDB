@@ -207,8 +207,28 @@ object MapEncoder {
   }
 
   /**
-   * Shared implementation for retain/remove. Walks encoded bytes, resolves each key,
-   * and copies entry bytes to the output buffer based on set membership.
+   * Overload of retain that accepts pre-encoded UTF-8 key byte arrays.
+   * Both sides compared as raw bytes — zero per-entry String allocation.
+   * Caller should convert keys to bytes once and reuse across calls.
+   */
+  def retain(data: Array[Byte], schema: RecordSchema,
+             keysToKeep: Array[Array[Byte]]): Array[Byte] = {
+    filterEntriesByBytes(data, schema, keysToKeep, keep = true)
+  }
+
+  /**
+   * Overload of remove that accepts pre-encoded UTF-8 key byte arrays.
+   * Both sides compared as raw bytes — zero per-entry String allocation.
+   * Caller should convert keys to bytes once and reuse across calls.
+   */
+  def remove(data: Array[Byte], schema: RecordSchema,
+             keysToRemove: Array[Array[Byte]]): Array[Byte] = {
+    filterEntriesByBytes(data, schema, keysToRemove, keep = false)
+  }
+
+  /**
+   * Shared implementation for retain/remove (String version). Walks encoded bytes,
+   * resolves each key to a String, and checks set membership.
    *
    * @param keep if true, keeps entries IN the set (retain). If false, keeps entries NOT in the set (remove).
    */
@@ -219,7 +239,7 @@ object MapEncoder {
       return if (keep) EMPTY else util.Arrays.copyOf(data, data.length)
     }
 
-    val buf = new Array[Byte](data.length) // output can't be larger than input
+    val buf = new Array[Byte](data.length)
     var outPos = 0
     var pos = 0
 
@@ -237,6 +257,48 @@ object MapEncoder {
 
     if (outPos == 0) EMPTY
     else util.Arrays.copyOf(buf, outPos)
+  }
+
+  /**
+   * Shared implementation for retain/remove (byte array version). Walks encoded
+   * bytes, matches each key via byte comparison — zero per-entry String allocation.
+   *
+   * @param keep if true, keeps entries IN the set (retain). If false, keeps entries NOT in the set (remove).
+   */
+  private def filterEntriesByBytes(data: Array[Byte], schema: RecordSchema,
+                                   keys: Array[Array[Byte]], keep: Boolean): Array[Byte] = {
+    if (data == null || data.length == 0) return EMPTY
+    if (keys == null || keys.length == 0) {
+      return if (keep) EMPTY else util.Arrays.copyOf(data, data.length)
+    }
+
+    val buf = new Array[Byte](data.length)
+    var outPos = 0
+    var pos = 0
+
+    while (pos < data.length) {
+      val entryLen = entryByteLength(data, pos)
+      val inSet = entryKeyMatchesAny(data, pos, schema, keys)
+
+      if ((keep && inSet) || (!keep && !inSet)) {
+        System.arraycopy(data, pos, buf, outPos, entryLen)
+        outPos += entryLen
+      }
+      pos += entryLen
+    }
+
+    if (outPos == 0) EMPTY
+    else util.Arrays.copyOf(buf, outPos)
+  }
+
+  private def entryKeyMatchesAny(data: Array[Byte], pos: Int, schema: RecordSchema,
+                                 keys: Array[Array[Byte]]): Boolean = {
+    var i = 0
+    while (i < keys.length) {
+      if (keyMatchesAtPos(data, pos, schema, keys(i))) return true
+      i += 1
+    }
+    false
   }
 
   /** Check if the encoded key at pos matches keyBytes without allocating a String. */

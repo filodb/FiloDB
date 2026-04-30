@@ -305,6 +305,9 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
     hash1 shouldEqual hash2
   }
 
+  private def toByteArrays(keys: String*): Array[Array[Byte]] =
+    keys.map(_.getBytes(StandardCharsets.UTF_8)).toArray
+
   // ── RecordBuilder.encodeMapFrom(TreeMap) tests ─────────────────────
   // Verifies that encodeMapFrom produces identical records to addMap (Scala path).
 
@@ -842,6 +845,125 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
         }
 
         // Union equals original
+        val union = new TreeMap[String, String]()
+        union.putAll(retained)
+        union.putAll(removed)
+        union shouldEqual tags
+      }
+    }
+  }
+
+  describe("MapEncoder.retain (bytes)") {
+    it("should keep only specified keys (predefined and non-predefined)") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns", "dc" -> "us-west-2", "region" -> "us-east-1")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val retained = MapEncoder.retain(encoded, partSchema, toByteArrays("_ws_", "_ns_"))
+      MapEncoder.size(retained) shouldEqual 2
+      MapEncoder.getValue(retained, partSchema, "_ws_") shouldEqual "ws"
+      MapEncoder.getValue(retained, partSchema, "_ns_") shouldEqual "ns"
+    }
+
+    it("should return EMPTY when no keys match") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val retained = MapEncoder.retain(encoded, partSchema, toByteArrays("missing"))
+      MapEncoder.isEmpty(retained) shouldBe true
+    }
+
+    it("should return EMPTY for empty keys array") {
+      val tags = sortedMap("_ws_" -> "ws")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.isEmpty(MapEncoder.retain(encoded, partSchema, Array.empty[Array[Byte]])) shouldBe true
+    }
+
+    it("should handle null/empty data") {
+      val keys = toByteArrays("_ws_")
+      MapEncoder.isEmpty(MapEncoder.retain(null, partSchema, keys)) shouldBe true
+      MapEncoder.isEmpty(MapEncoder.retain(MapEncoder.EMPTY, partSchema, keys)) shouldBe true
+    }
+
+    it("should produce identical results to String-based retain") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+        val keysToKeep = new JHashSet[String]()
+        keysToKeep.add("_ws_")
+        keysToKeep.add("_ns_")
+
+        val fromString = MapEncoder.retain(encoded, partSchema, keysToKeep)
+        val fromBytes = MapEncoder.retain(encoded, partSchema, toByteArrays("_ws_", "_ns_"))
+
+        MapEncoder.toJavaMap(fromBytes, partSchema) shouldEqual MapEncoder.toJavaMap(fromString, partSchema)
+      }
+    }
+  }
+
+  describe("MapEncoder.remove (bytes)") {
+    it("should remove specified keys") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns", "dc" -> "us-west-2", "region" -> "us-east-1")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val removed = MapEncoder.remove(encoded, partSchema, toByteArrays("_ws_", "_ns_"))
+      MapEncoder.size(removed) shouldEqual 2
+      MapEncoder.getValue(removed, partSchema, "dc") shouldEqual "us-west-2"
+      MapEncoder.getValue(removed, partSchema, "region") shouldEqual "us-east-1"
+    }
+
+    it("should return all entries when no keys match") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val removed = MapEncoder.remove(encoded, partSchema, toByteArrays("missing"))
+      MapEncoder.size(removed) shouldEqual tags.size()
+      MapEncoder.toJavaMap(removed, partSchema) shouldEqual tags
+    }
+
+    it("should return copy of all entries for empty keys array") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      val removed = MapEncoder.remove(encoded, partSchema, Array.empty[Array[Byte]])
+      MapEncoder.size(removed) shouldEqual tags.size()
+      MapEncoder.toJavaMap(removed, partSchema) shouldEqual tags
+    }
+
+    it("should handle null/empty data") {
+      val keys = toByteArrays("_ws_")
+      MapEncoder.isEmpty(MapEncoder.remove(null, partSchema, keys)) shouldBe true
+      MapEncoder.isEmpty(MapEncoder.remove(MapEncoder.EMPTY, partSchema, keys)) shouldBe true
+    }
+
+    it("should produce identical results to String-based remove") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+        val keysToRemove = new JHashSet[String]()
+        keysToRemove.add("_ws_")
+        keysToRemove.add("_ns_")
+
+        val fromString = MapEncoder.remove(encoded, partSchema, keysToRemove)
+        val fromBytes = MapEncoder.remove(encoded, partSchema, toByteArrays("_ws_", "_ns_"))
+
+        MapEncoder.toJavaMap(fromBytes, partSchema) shouldEqual MapEncoder.toJavaMap(fromString, partSchema)
+      }
+    }
+  }
+
+  describe("retain(bytes) and remove(bytes) are complementary") {
+    it("should produce non-overlapping partitions that union to original") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+        val keys = toByteArrays("_ws_", "_ns_")
+
+        val retained = MapEncoder.toJavaMap(MapEncoder.retain(encoded, partSchema, keys), partSchema)
+        val removed = MapEncoder.toJavaMap(MapEncoder.remove(encoded, partSchema, keys), partSchema)
+
+        (retained.size() + removed.size()) shouldEqual tags.size()
+
+        val retainedIter = retained.keySet().iterator()
+        while (retainedIter.hasNext) {
+          removed.containsKey(retainedIter.next()) shouldBe false
+        }
+
         val union = new TreeMap[String, String]()
         union.putAll(retained)
         union.putAll(removed)
