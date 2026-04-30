@@ -139,12 +139,25 @@ object MapEncoder {
     if (data == null || data.length == 0 || key == null) return null
 
     val keyBytes = key.getBytes(StandardCharsets.UTF_8)
-    var pos = 0
-    while (pos < data.length) {
-      if (keyMatchesAtPos(data, pos, schema, keyBytes)) {
-        return decodeValueAtPos(data, pos)
+    val keyKey = RecordSchema.makeKeyKey(keyBytes, 0, keyBytes.length, 7)
+    val predefNum = schema.predefKeyNumMap.getOrElse(keyKey, -1)
+
+    if (predefNum >= 0) {
+      val expectedByte = (0xC0 | predefNum).toByte
+      var pos = 0
+      while (pos < data.length) {
+        if (data(pos) == expectedByte) return decodeValueAtPos(data, pos)
+        pos += entryByteLength(data, pos)
       }
-      pos += entryByteLength(data, pos)
+    } else {
+      var pos = 0
+      while (pos < data.length) {
+        val firstByte = data(pos) & 0xFF
+        if ((firstByte ^ 0xC0) >= 64 && keyMatchesAtPos(data, pos, schema, keyBytes)) {
+          return decodeValueAtPos(data, pos)
+        }
+        pos += entryByteLength(data, pos)
+      }
     }
     null
   }
