@@ -15,6 +15,17 @@ trait MapEntryConsumer {
   def consume(key: String, value: String): Unit
 }
 
+/**
+ * Zero-allocation callback for iterating over encoded map entries via
+ * MapEncoder.forEachBytes.  Key and value are delivered as (base, offset, length)
+ * triples pointing directly into either the encoded data or the schema's
+ * predefined-key byte array — no String objects are created.
+ */
+trait MapEntryBytesConsumer {
+  def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+              valBase: Array[Byte], valOffset: Int, valLen: Int): Unit
+}
+
 // scalastyle:off null
 /**
  * Stateless utility for encoding/decoding tag maps in RecordBuilder's exact wire format.
@@ -177,14 +188,47 @@ object MapEncoder {
   /**
    * Iterate all entries, invoking consumer with decoded key and value Strings.
    * No Map allocation — entries are streamed one at a time.
+   * Delegates to forEachBytes so the entry header is parsed exactly once per entry.
    */
   def forEach(data: Array[Byte], schema: RecordSchema, consumer: MapEntryConsumer): Unit = {
+    forEachBytes(data, schema, new MapEntryBytesConsumer {
+      override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                           valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+        consumer.consume(
+          new String(keyBase, keyOffset, keyLen, StandardCharsets.UTF_8),
+          new String(valBase, valOffset, valLen, StandardCharsets.UTF_8))
+      }
+    })
+  }
+
+  /**
+   * Zero-allocation iteration: delivers raw byte slices for each key and value.
+   * Key bytes point into schema.predefKeyBytes (predefined keys) or data (full keys).
+   * Value bytes always point into data.  The entry header is parsed exactly once
+   * per entry — no redundant helper calls.
+   */
+  def forEachBytes(data: Array[Byte], schema: RecordSchema, consumer: MapEntryBytesConsumer): Unit = {
     if (data == null || data.length == 0) return
 
     var pos = 0
     while (pos < data.length) {
-      consumer.consume(resolveKeyAtPos(data, pos, schema), decodeValueAtPos(data, pos))
-      pos += entryByteLength(data, pos)
+      val firstByte = data(pos) & 0xFF
+      val predefIndex = firstByte ^ 0xC0
+      if (predefIndex < 64) {
+        val keyOff = schema.predefKeyOffsets(predefIndex)
+        val keyLen = UTF8StringShort.numBytes(schema.predefKeyBytes, keyOff)
+        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
+        consumer.consume(schema.predefKeyBytes, (keyOff + 1 - UnsafeUtils.arayOffset).toInt, keyLen,
+                         data, pos + 3, valLen)
+        pos += 3 + valLen
+      } else {
+        val keyLen = firstByte
+        val valLenPos = pos + 1 + keyLen
+        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
+        consumer.consume(data, pos + 1, keyLen,
+                         data, valLenPos + 2, valLen)
+        pos += 1 + keyLen + 2 + valLen
+      }
     }
   }
 

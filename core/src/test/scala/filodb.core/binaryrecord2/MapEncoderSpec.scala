@@ -710,6 +710,131 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("MapEncoder.forEachBytes") {
+    it("should deliver correct byte slices for predefined and non-predefined keys") {
+      val tags = sortedMap(
+        "_ns_" -> "filodb-local", "_ws_" -> "aci-telemetry",
+        "dc" -> "us-west-2", "region" -> "us-east-1"
+      )
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val collected = new JLinkedHashMap[String, String]()
+      MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+          val k = new String(keyBase, keyOffset, keyLen, StandardCharsets.UTF_8)
+          val v = new String(valBase, valOffset, valLen, StandardCharsets.UTF_8)
+          collected.put(k, v)
+        }
+      })
+
+      collected.size() shouldEqual tags.size()
+      val collectedIter = collected.entrySet().iterator()
+      val tagsIter = tags.entrySet().iterator()
+      while (collectedIter.hasNext) {
+        val c = collectedIter.next()
+        val t = tagsIter.next()
+        c.getKey shouldEqual t.getKey
+        c.getValue shouldEqual t.getValue
+      }
+    }
+
+    it("should handle empty/null data") {
+      var called = false
+      val consumer = new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = called = true
+      }
+      MapEncoder.forEachBytes(null, partSchema, consumer)
+      called shouldBe false
+      MapEncoder.forEachBytes(MapEncoder.EMPTY, partSchema, consumer)
+      called shouldBe false
+    }
+
+    it("should produce identical results to String-based forEach for all test maps") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+
+        val fromString = new TreeMap[String, String]()
+        MapEncoder.forEach(encoded, partSchema, new MapEntryConsumer {
+          override def consume(key: String, value: String): Unit = fromString.put(key, value)
+        })
+
+        val fromBytes = new TreeMap[String, String]()
+        MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+          override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                               valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+            fromBytes.put(
+              new String(keyBase, keyOffset, keyLen, StandardCharsets.UTF_8),
+              new String(valBase, valOffset, valLen, StandardCharsets.UTF_8))
+          }
+        })
+
+        fromBytes shouldEqual fromString
+      }
+    }
+
+    it("should handle predefined-keys-only maps") {
+      val tags = sortedMap("_ns_" -> "ns", "_ws_" -> "ws")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val collected = new TreeMap[String, String]()
+      MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+          collected.put(
+            new String(keyBase, keyOffset, keyLen, StandardCharsets.UTF_8),
+            new String(valBase, valOffset, valLen, StandardCharsets.UTF_8))
+        }
+      })
+      collected shouldEqual tags
+    }
+
+    it("should handle non-predefined-keys-only maps") {
+      val tags = sortedMap("custom1" -> "val1", "custom2" -> "val2", "region" -> "us-east-1")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      val collected = new TreeMap[String, String]()
+      MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+          collected.put(
+            new String(keyBase, keyOffset, keyLen, StandardCharsets.UTF_8),
+            new String(valBase, valOffset, valLen, StandardCharsets.UTF_8))
+        }
+      })
+      collected shouldEqual tags
+    }
+
+    it("should point key bytes into schema.predefKeyBytes for predefined keys") {
+      val tags = sortedMap("_ws_" -> "ws")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      var receivedKeyBase: Array[Byte] = null
+      MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+          receivedKeyBase = keyBase
+        }
+      })
+      (receivedKeyBase eq partSchema.predefKeyBytes) shouldBe true
+    }
+
+    it("should point key bytes into data array for non-predefined keys") {
+      val tags = sortedMap("custom" -> "val")
+      val encoded = MapEncoder.encode(tags, partSchema)
+
+      var receivedKeyBase: Array[Byte] = null
+      MapEncoder.forEachBytes(encoded, partSchema, new MapEntryBytesConsumer {
+        override def consume(keyBase: Array[Byte], keyOffset: Int, keyLen: Int,
+                             valBase: Array[Byte], valOffset: Int, valLen: Int): Unit = {
+          receivedKeyBase = keyBase
+        }
+      })
+      (receivedKeyBase eq encoded) shouldBe true
+    }
+  }
+
   describe("MapEncoder.retain") {
     it("should keep only specified keys") {
       val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns", "dc" -> "us-west-2", "region" -> "us-east-1")
