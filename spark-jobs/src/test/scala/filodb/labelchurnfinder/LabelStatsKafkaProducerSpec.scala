@@ -8,7 +8,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
 import org.mockito.ArgumentMatchers.any
-import org.mockito.MockitoSugar
+import org.mockito.{Mockito, MockitoSugar}
 import org.mockito.invocation.InvocationOnMock
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funspec.AnyFunSpec
@@ -290,6 +290,31 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
 
       failuresAcc.value shouldBe 1
       labelsAcc.value shouldBe 1
+    }
+
+    it("should update accumulators for all labels and workspaces via publishLabelStats") {
+      val failuresAcc   = spark.sparkContext.longAccumulator("failures")
+      val labelsAcc     = spark.sparkContext.longAccumulator("labels")
+      val workspacesAcc = spark.sparkContext.longAccumulator("workspaces")
+
+      val factory = new (Map[String, String] => KafkaProducer[String, String]) with Serializable {
+        override def apply(props: Map[String, String]): KafkaProducer[String, String] =
+          Mockito.mock(classOf[KafkaProducer[String, String]])
+      }
+
+      val producer = new LabelStatsKafkaProducer(accConfig, failuresAcc, labelsAcc, workspacesAcc, factory)
+
+      val df = createTestDataFrame(Seq(
+        ("ws-1", "All", "pod",      100L, 200L, 300L, Array[Byte](1), Array[Byte](2), Array[Byte](3)),
+        ("ws-1", "All", "instance",  50L, 100L, 150L, Array[Byte](4), Array[Byte](5), Array[Byte](6)),
+        ("ws-2", "All", "pod",       75L, 125L, 175L, Array[Byte](7), Array[Byte](8), Array[Byte](9))
+      ))
+
+      producer.publishLabelStats(df)
+
+      workspacesAcc.value shouldBe 2
+      labelsAcc.value shouldBe 3
+      failuresAcc.value shouldBe 0
     }
   }
 }

@@ -126,7 +126,6 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
    */
   private def fetchLabelValues(split: (String, String),
                        shard: Int): Iterator[LabelValRow] = {
-    logger.info(s"fetchLabelValues: shard=$shard, filters=$filters")
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
       .flatMap { pk  =>
