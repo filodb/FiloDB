@@ -106,36 +106,9 @@ object MapEncoder {
    */
   def toJavaMap(data: Array[Byte], schema: RecordSchema): java.util.Map[String, String] = {
     val map = new util.TreeMap[String, String]()
-    if (data == null || data.length == 0) return map
-
-    var pos = 0
-    while (pos < data.length) {
-      val firstByte = data(pos) & 0xFF
-      val predefIndex = firstByte ^ 0xC0
-
-      if (predefIndex < 64) {
-        // Predefined key — decode from schema
-        val keyOff = schema.predefKeyOffsets(predefIndex)
-        val keyLen = UTF8StringShort.numBytes(schema.predefKeyBytes, keyOff)
-        val keyStr = new String(schema.predefKeyBytes,
-          (keyOff + 1 - UnsafeUtils.arayOffset).toInt, keyLen, StandardCharsets.UTF_8)
-
-        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
-        val valStr = new String(data, pos + 3, valLen, StandardCharsets.UTF_8)
-        map.put(keyStr, valStr)
-        pos += 3 + valLen
-      } else {
-        // Full key
-        val keyLen = firstByte
-        val keyStr = new String(data, pos + 1, keyLen, StandardCharsets.UTF_8)
-
-        val valLenPos = pos + 1 + keyLen
-        val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
-        val valStr = new String(data, valLenPos + 2, valLen, StandardCharsets.UTF_8)
-        map.put(keyStr, valStr)
-        pos += 1 + keyLen + 2 + valLen
-      }
-    }
+    forEach(data, schema, new MapEntryConsumer {
+      override def consume(key: String, value: String): Unit = { map.put(key, value) }
+    })
     map
   }
 
@@ -159,30 +132,17 @@ object MapEncoder {
    * Returns null if the key is not found.
    */
   def getValue(data: Array[Byte], schema: RecordSchema, key: String): String = {
-    if (data == null || data.length == 0 || key == null) return null
+    val pos = findKeyPos(data, schema, key)
+    if (pos < 0) null else decodeValueAtPos(data, pos)
+  }
 
-    val keyBytes = key.getBytes(StandardCharsets.UTF_8)
-    val keyKey = RecordSchema.makeKeyKey(keyBytes, 0, keyBytes.length, 7)
-    val predefNum = schema.predefKeyNumMap.getOrElse(keyKey, -1)
-
-    if (predefNum >= 0) {
-      val expectedByte = (0xC0 | predefNum).toByte
-      var pos = 0
-      while (pos < data.length) {
-        if (data(pos) == expectedByte) return decodeValueAtPos(data, pos)
-        pos += entryByteLength(data, pos)
-      }
-    } else {
-      var pos = 0
-      while (pos < data.length) {
-        val firstByte = data(pos) & 0xFF
-        if ((firstByte ^ 0xC0) >= 64 && keyMatchesAtPos(data, pos, schema, keyBytes)) {
-          return decodeValueAtPos(data, pos)
-        }
-        pos += entryByteLength(data, pos)
-      }
-    }
-    null
+  /**
+   * Look up a single key's value in encoded bytes, returning raw UTF-8 bytes.
+   * Returns null if the key is not found.  No String allocation on the value.
+   */
+  def getValueBytes(data: Array[Byte], schema: RecordSchema, key: String): Array[Byte] = {
+    val pos = findKeyPos(data, schema, key)
+    if (pos < 0) null else copyValueBytesAtPos(data, pos)
   }
 
   /**
@@ -335,6 +295,34 @@ object MapEncoder {
     else util.Arrays.copyOf(buf, outPos)
   }
 
+  /** Scan encoded bytes for the given key. Returns the entry position, or -1 if not found. */
+  private def findKeyPos(data: Array[Byte], schema: RecordSchema, key: String): Int = {
+    if (data == null || data.length == 0 || key == null) return -1
+
+    val keyBytes = key.getBytes(StandardCharsets.UTF_8)
+    val keyKey = RecordSchema.makeKeyKey(keyBytes, 0, keyBytes.length, 7)
+    val predefNum = schema.predefKeyNumMap.getOrElse(keyKey, -1)
+
+    if (predefNum >= 0) {
+      val expectedByte = (0xC0 | predefNum).toByte
+      var pos = 0
+      while (pos < data.length) {
+        if (data(pos) == expectedByte) return pos
+        pos += entryByteLength(data, pos)
+      }
+    } else {
+      var pos = 0
+      while (pos < data.length) {
+        val firstByte = data(pos) & 0xFF
+        if ((firstByte ^ 0xC0) >= 64 && keyMatchesAtPos(data, pos, schema, keyBytes)) {
+          return pos
+        }
+        pos += entryByteLength(data, pos)
+      }
+    }
+    -1
+  }
+
   private def entryKeyMatchesAny(data: Array[Byte], pos: Int, schema: RecordSchema,
                                  keys: Array[Array[Byte]]): Boolean = {
     var i = 0
@@ -400,6 +388,21 @@ object MapEncoder {
       val valLenPos = pos + 1 + keyLen
       val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
       new String(data, valLenPos + 2, valLen, StandardCharsets.UTF_8)
+    }
+  }
+
+  /** Copy the value bytes at the given entry position into a new byte[]. */
+  private def copyValueBytesAtPos(data: Array[Byte], pos: Int): Array[Byte] = {
+    val firstByte = data(pos) & 0xFF
+    val predefIndex = firstByte ^ 0xC0
+    if (predefIndex < 64) {
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + pos + 1) & 0xFFFF
+      util.Arrays.copyOfRange(data, pos + 3, pos + 3 + valLen)
+    } else {
+      val keyLen = firstByte
+      val valLenPos = pos + 1 + keyLen
+      val valLen = UnsafeUtils.getShort(data, UnsafeUtils.arayOffset + valLenPos) & 0xFFFF
+      util.Arrays.copyOfRange(data, valLenPos + 2, valLenPos + 2 + valLen)
     }
   }
 
