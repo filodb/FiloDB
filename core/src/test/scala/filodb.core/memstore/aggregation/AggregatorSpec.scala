@@ -1,10 +1,12 @@
 package filodb.core.memstore.aggregation
 
-import org.agrona.DirectBuffer
+import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
+import org.agrona.concurrent.UnsafeBuffer
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, BinaryHistogram, CustomBuckets,
+  GeometricBuckets, HistogramBuckets, LongHistogram, MutableHistogram}
 
 class AggregatorSpec extends AnyFunSpec with Matchers {
 
@@ -15,6 +17,54 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
     val counts = bucketCounts.map(_._2).toArray :+ 0L
     LongHistogram(CustomBuckets(boundaries), counts)
       .serialize(Some(new org.agrona.concurrent.UnsafeBuffer(new Array[Byte](4096))))
+  }
+
+  // --- Helpers for multi-format histogram creation ---
+
+  private def freshBuf(): MutableDirectBuffer = new ExpandableArrayBuffer(4096)
+
+  private def makeDeltaBuf(buckets: HistogramBuckets, values: Array[Long]): DirectBuffer = {
+    val buf = freshBuf()
+    BinaryHistogram.writeDelta(buckets, values, buf)
+    buf
+  }
+
+  private def makeXorBuf(buckets: HistogramBuckets, values: Array[Double]): DirectBuffer = {
+    val buf = freshBuf()
+    BinaryHistogram.writeDoubles(buckets, values, buf)
+    buf
+  }
+
+  private val geoNoBuckets  = GeometricBuckets(1.0, 2.0, 8, minusOne = false)
+  private val geo1Buckets   = GeometricBuckets(1.0, 2.0, 8, minusOne = true)
+  private val customBuckets8 = CustomBuckets(Array(1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, Double.PositiveInfinity))
+  private val otelBuckets   = Base2ExpHistogramBuckets(1, 1, 7)
+
+  private def monotonicLongValues(sampleIdx: Int, numBuckets: Int): Array[Long] = {
+    val base = sampleIdx * 10L
+    (0 until numBuckets).map(b => base + b * 5L).toArray
+  }
+
+  private def monotonicDoubleValues(sampleIdx: Int, numBuckets: Int): Array[Double] =
+    monotonicLongValues(sampleIdx, numBuckets).map(_.toDouble)
+
+  private def referenceAggregate(samples: Seq[DirectBuffer]): MutableDirectBuffer = {
+    var acc: MutableHistogram = null
+    samples.foreach { buf =>
+      val hist = BinaryHistogram.BinHistogram(buf).toHistogram
+      if (acc == null) acc = MutableHistogram(hist)
+      else acc.add(hist)
+    }
+    val out = new ExpandableArrayBuffer(4096)
+    acc.serialize(Some(out))
+    out
+  }
+
+  private def bytesEqual(a: DirectBuffer, b: DirectBuffer): Boolean = {
+    val lenA = a.getShort(0).toInt + 2
+    val lenB = b.getShort(0).toInt + 2
+    if (lenA != lenB) return false
+    (0 until lenA).forall(i => a.getByte(i) == b.getByte(i))
   }
 
   describe("SumAggregator") {
@@ -354,6 +404,253 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       agg.add(null)
 
       agg.asInstanceOf[HistogramAggregator].getAccumulator shouldEqual None
+    }
+  }
+
+  // ==========================================================================
+  // In-place histogram aggregation fast path (Tier 1 optimization)
+  // ==========================================================================
+
+  describe("BinaryHistogram.addValuesTo") {
+
+    // --- Correctness parity: delta formats ---
+
+    it("should produce identical output for HistFormat_Geometric_Delta") {
+      val N = 10
+      val samples = (1 to N).map(i => makeDeltaBuf(geoNoBuckets, monotonicLongValues(i, 8)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    it("should produce identical output for HistFormat_Custom_Delta") {
+      val N = 10
+      val samples = (1 to N).map(i => makeDeltaBuf(customBuckets8, monotonicLongValues(i, 8)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    it("should produce identical output for HistFormat_OtelExp_Delta") {
+      val N = 10
+      val numBuckets = otelBuckets.numBuckets  // 7+1=8
+      val samples = (1 to N).map(i => makeDeltaBuf(otelBuckets, monotonicLongValues(i, numBuckets)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    it("should produce identical output for HistFormat_Geometric1_Delta") {
+      val N = 10
+      val samples = (1 to N).map(i => makeDeltaBuf(geo1Buckets, monotonicLongValues(i, 8)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    // --- Correctness parity: XOR formats ---
+
+    it("should produce identical output for HistFormat_Geometric_XOR") {
+      val N = 10
+      val samples = (1 to N).map(i => makeXorBuf(geoNoBuckets, monotonicDoubleValues(i, 8)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    it("should produce identical output for HistFormat_Custom_XOR") {
+      val N = 10
+      val samples = (1 to N).map(i => makeXorBuf(customBuckets8, monotonicDoubleValues(i, 8)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    it("should produce identical output for HistFormat_OtelExp_XOR") {
+      val N = 10
+      val numBuckets = otelBuckets.numBuckets
+      val samples = (1 to N).map(i => makeXorBuf(otelBuckets, monotonicDoubleValues(i, numBuckets)))
+      val ref = referenceAggregate(samples)
+
+      val firstHist = BinaryHistogram.BinHistogram(samples.head).toHistogram
+      val acc = MutableHistogram(firstHist)
+      samples.tail.foreach { buf =>
+        BinaryHistogram.addValuesTo(buf, acc.values)
+      }
+      acc.makeMonotonic()
+      val result = new ExpandableArrayBuffer(4096)
+      acc.serialize(Some(result))
+
+      bytesEqual(ref, result) shouldBe true
+    }
+
+    // --- Deferred monotonic correction ---
+
+    it("should produce monotonic result for non-monotonic merged buckets") {
+      // Buckets where individual samples are monotonic, but sum may temporarily violate monotonicity
+      val buckets = CustomBuckets(Array(1.0, 2.0, 4.0, Double.PositiveInfinity))
+      val sample1 = makeDeltaBuf(buckets, Array(100L, 50L, 200L, 300L))  // NOT monotonic: 100, 50, 200, 300
+      val sample2 = makeDeltaBuf(buckets, Array(10L, 20L, 30L, 40L))
+
+      val firstHist = BinaryHistogram.BinHistogram(sample1).toHistogram
+      val acc = MutableHistogram(firstHist)
+      BinaryHistogram.addValuesTo(sample2, acc.values)
+      acc.makeMonotonic()
+
+      // After makeMonotonic, values should be non-decreasing
+      (0 until acc.numBuckets - 1).foreach { b =>
+        acc.bucketValue(b) should be <= acc.bucketValue(b + 1)
+      }
+    }
+
+    // --- Schema mismatch rejection ---
+
+    it("should throw IllegalArgumentException on bucket count mismatch") {
+      val smallBuckets = GeometricBuckets(1.0, 2.0, 4)
+      val largeBuckets = GeometricBuckets(1.0, 2.0, 8)
+
+      val smallBuf = makeDeltaBuf(smallBuckets, monotonicLongValues(1, 4))
+
+      val firstHist = BinaryHistogram.BinHistogram(
+        makeDeltaBuf(largeBuckets, monotonicLongValues(1, 8))
+      ).toHistogram
+      val acc = MutableHistogram(firstHist)
+
+      intercept[IllegalArgumentException] {
+        BinaryHistogram.addValuesTo(smallBuf, acc.values)
+      }
+    }
+
+    // --- First-sample cold path ---
+
+    it("should initialize accumulator with correct bucket scheme on first sample") {
+      val agg = new HistogramAggregator
+      val buf = makeDeltaBuf(geoNoBuckets, monotonicLongValues(1, 8))
+      agg.add(buf)
+
+      val accOpt = agg.getAccumulator
+      accOpt shouldBe defined
+      accOpt.get.numBuckets shouldEqual 8
+      accOpt.get.bucketValue(0) shouldEqual 10.0  // sampleIdx=1 → base=10, first bucket=10+0*5=10
+    }
+  }
+
+  describe("HistogramAggregator fast path integration") {
+
+    it("should aggregate multiple delta-format DirectBuffers correctly") {
+      val agg = new HistogramAggregator
+      val N = 10
+      val samples = (1 to N).map(i => makeDeltaBuf(geoNoBuckets, monotonicLongValues(i, 8)))
+      samples.foreach(agg.add)
+
+      val result = agg.result().asInstanceOf[DirectBuffer]
+      val resultHist = BinaryHistogram.BinHistogram(result).toHistogram
+
+      // Verify summed values: for bucket b, sum over i=1..10 of (i*10 + b*5)
+      // = 10*(1+2+...+10) + b*5*10 = 550 + 50b
+      (0 until 8).foreach { b =>
+        resultHist.bucketValue(b) shouldEqual (550.0 + 50.0 * b)
+      }
+    }
+
+    it("should aggregate multiple XOR-format DirectBuffers correctly") {
+      val agg = new HistogramAggregator
+      val N = 10
+      val samples = (1 to N).map(i => makeXorBuf(geoNoBuckets, monotonicDoubleValues(i, 8)))
+      samples.foreach(agg.add)
+
+      val result = agg.result().asInstanceOf[DirectBuffer]
+      val resultHist = BinaryHistogram.BinHistogram(result).toHistogram
+
+      (0 until 8).foreach { b =>
+        resultHist.bucketValue(b) shouldEqual (550.0 + 50.0 * b)
+      }
+    }
+
+    it("should defer makeMonotonic until result() and still produce monotonic output") {
+      val agg = new HistogramAggregator
+      val buckets = CustomBuckets(Array(1.0, 2.0, 4.0, Double.PositiveInfinity))
+      // Non-monotonic values: bucket 1 < bucket 0
+      agg.add(makeDeltaBuf(buckets, Array(100L, 50L, 200L, 300L)))
+      agg.add(makeDeltaBuf(buckets, Array(10L, 20L, 30L, 40L)))
+
+      val result = agg.result().asInstanceOf[DirectBuffer]
+      val resultHist = BinaryHistogram.BinHistogram(result).toHistogram
+
+      (0 until resultHist.numBuckets - 1).foreach { b =>
+        resultHist.bucketValue(b) should be <= resultHist.bucketValue(b + 1)
+      }
+    }
+
+    it("should handle mixed delta and XOR format samples in same aggregator") {
+      val agg = new HistogramAggregator
+      val deltaSample = makeDeltaBuf(geoNoBuckets, monotonicLongValues(1, 8))
+      val xorSample = makeXorBuf(geoNoBuckets, monotonicDoubleValues(2, 8))
+
+      agg.add(deltaSample)
+      agg.add(xorSample)
+
+      val result = agg.result().asInstanceOf[DirectBuffer]
+      val resultHist = BinaryHistogram.BinHistogram(result).toHistogram
+
+      // sum of sample 1 (base=10) and sample 2 (base=20) for each bucket b: (10+b*5) + (20+b*5) = 30+10b
+      (0 until 8).foreach { b =>
+        resultHist.bucketValue(b) shouldEqual (30.0 + 10.0 * b)
+      }
     }
   }
 

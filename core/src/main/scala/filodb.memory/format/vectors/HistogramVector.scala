@@ -232,6 +232,76 @@ object BinaryHistogram extends StrictLogging {
     buf.putShort(0, (finalPos - 2).toShort)
     finalPos
   }
+
+  // Thread-local temporary arrays for zero-allocation decode in addValuesTo hot path
+  private val tlTempLongs = new ThreadLocal[Array[Long]]()
+  private val tlTempDoubles = new ThreadLocal[Array[Double]]()
+  private val tlDecodeSink = new ThreadLocal[NibblePack.DeltaSink]()
+
+  /**
+   * Decodes histogram bucket values from `buf` and adds each bucket's value
+   * to `target(i)`. Skips full materialization — no HistogramBuckets object,
+   * no wrapper allocation.
+   *
+   * Caller guarantees buf's bucket scheme matches target's length. Throws
+   * IllegalArgumentException if bucket counts differ.
+   *
+   * @return true if the source was a delta/counter-increment format that may
+   *         require downstream makeMonotonic() correction.
+   */
+  def addValuesTo(buf: DirectBuffer, target: Array[Double]): Boolean = {
+    val binHist = BinHistogram(buf)
+    val numSrcBuckets = binHist.numBuckets
+    if (numSrcBuckets != target.length) {
+      throw new IllegalArgumentException(
+        s"Bucket count mismatch: buf has $numSrcBuckets, target has ${target.length}")
+    }
+    binHist.formatCode match {
+      case HistFormat_Geometric_Delta | HistFormat_Geometric1_Delta
+         | HistFormat_Custom_Delta | HistFormat_OtelExp_Delta =>
+        decodePackedLongsInto(binHist, target)
+        true
+      case HistFormat_Geometric_XOR | HistFormat_Custom_XOR | HistFormat_OtelExp_XOR =>
+        decodeXorDoublesInto(binHist, target)
+        false
+      case x =>
+        logger.debug(s"Unrecognizable histogram format $x")
+        false
+    }
+  }
+
+  private def decodePackedLongsInto(binHist: BinHistogram, target: Array[Double]): Unit = {
+    val numBuckets = target.length
+    var tempArr = tlTempLongs.get
+    var sink = tlDecodeSink.get
+    if (tempArr == null || tempArr.length < numBuckets) {
+      tempArr = new Array[Long](numBuckets)
+      tlTempLongs.set(tempArr)
+      sink = NibblePack.DeltaSink(tempArr)
+      tlDecodeSink.set(sink)
+    } else {
+      sink.reset()
+      sink.setLength(numBuckets)
+    }
+    NibblePack.unpackToSink(binHist.valuesByteSlice, sink, numBuckets)
+    cforRange { 0 until numBuckets } { i =>
+      target(i) += tempArr(i).toDouble
+    }
+  }
+
+  private def decodeXorDoublesInto(binHist: BinHistogram, target: Array[Double]): Unit = {
+    val numBuckets = target.length
+    var tempArr = tlTempDoubles.get
+    if (tempArr == null || tempArr.length < numBuckets) {
+      tempArr = new Array[Double](numBuckets)
+      tlTempDoubles.set(tempArr)
+    }
+    java.util.Arrays.fill(tempArr, 0, numBuckets, 0.0)
+    NibblePack.unpackDoubleXOR(binHist.valuesByteSlice, tempArr)
+    cforRange { 0 until numBuckets } { i =>
+      target(i) += tempArr(i)
+    }
+  }
 }
 
 object HistogramVector extends StrictLogging {

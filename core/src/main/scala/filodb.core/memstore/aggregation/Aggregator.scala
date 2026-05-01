@@ -347,61 +347,51 @@ class CountAggregator extends Aggregator {
  */
 class HistogramAggregator extends Aggregator {
   private var accumulator: Option[MutableHistogram] = None
-  private var initialized: Boolean = false
+  private var needsMonotonicCorrection: Boolean = false
 
   def add(value: Any): Unit = {
     value match {
       case buf: DirectBuffer =>
-        // Convert BinaryHistogram to HistogramWithBuckets
-        val binHist = BinaryHistogram.BinHistogram(buf)
-        val hist = binHist.toHistogram
-
         accumulator match {
           case Some(acc) =>
-            // Add to existing accumulator
-            acc.add(hist)
+            val requiresMonotonic = BinaryHistogram.addValuesTo(buf, acc.values)
+            if (requiresMonotonic) needsMonotonicCorrection = true
           case None =>
-            // Initialize accumulator with first histogram
+            val binHist = BinaryHistogram.BinHistogram(buf)
+            val hist = binHist.toHistogram
             accumulator = Some(MutableHistogram(hist))
-            initialized = true
         }
 
       case h: HistogramWithBuckets =>
         accumulator match {
           case Some(acc) =>
-            // Add to existing accumulator
             acc.add(h)
           case None =>
-            // Initialize accumulator from histogram
             accumulator = Some(MutableHistogram(h))
-            initialized = true
         }
 
       case _ =>
-        // Ignore non-histogram values (including Histogram without buckets)
     }
   }
 
   def result(): Any = accumulator match {
     case Some(hist) =>
-      // Serialize to DirectBuffer for storage
+      if (needsMonotonicCorrection) {
+        hist.makeMonotonic()
+        needsMonotonicCorrection = false
+      }
       hist.serialize()
     case None =>
-      // Return empty histogram buffer - Histogram.empty.serialize() already returns the buffer
       filodb.memory.format.vectors.Histogram.empty.serialize()
   }
 
   def reset(): Unit = {
     accumulator = None
-    initialized = false
+    needsMonotonicCorrection = false
   }
 
   def copy(): Aggregator = new HistogramAggregator
 
-  /**
-   * Gets the current accumulated MutableHistogram.
-   * Useful for direct access without serialization.
-   */
   def getAccumulator: Option[MutableHistogram] = accumulator
 }
 
