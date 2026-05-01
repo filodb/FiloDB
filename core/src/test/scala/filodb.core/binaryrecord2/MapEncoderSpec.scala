@@ -663,6 +663,56 @@ class MapEncoderSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("MapEncoder.getValueBytes") {
+    it("should return UTF-8 bytes for predefined key") {
+      val tags = sortedMap("_ws_" -> "aci-telemetry", "_ns_" -> "filodb-local", "dc" -> "us-west-2")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.getValueBytes(encoded, partSchema, "_ws_") shouldEqual
+        "aci-telemetry".getBytes(StandardCharsets.UTF_8)
+      MapEncoder.getValueBytes(encoded, partSchema, "_ns_") shouldEqual
+        "filodb-local".getBytes(StandardCharsets.UTF_8)
+    }
+
+    it("should return UTF-8 bytes for non-predefined key") {
+      val tags = sortedMap("_ws_" -> "ws", "region" -> "us-east-1", "custom_key" -> "custom_val")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.getValueBytes(encoded, partSchema, "region") shouldEqual
+        "us-east-1".getBytes(StandardCharsets.UTF_8)
+      MapEncoder.getValueBytes(encoded, partSchema, "custom_key") shouldEqual
+        "custom_val".getBytes(StandardCharsets.UTF_8)
+    }
+
+    it("should return null for missing key") {
+      val tags = sortedMap("_ws_" -> "ws", "_ns_" -> "ns")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.getValueBytes(encoded, partSchema, "missing") shouldBe null
+    }
+
+    it("should return null for null/empty data") {
+      MapEncoder.getValueBytes(null, partSchema, "_ws_") shouldBe null
+      MapEncoder.getValueBytes(MapEncoder.EMPTY, partSchema, "_ws_") shouldBe null
+    }
+
+    it("should return null for null key") {
+      val tags = sortedMap("_ws_" -> "ws")
+      val encoded = MapEncoder.encode(tags, partSchema)
+      MapEncoder.getValueBytes(encoded, partSchema, null) shouldBe null
+    }
+
+    it("should match getValue results for all test maps") {
+      testTagMaps.foreach { case (_, tags) =>
+        val encoded = MapEncoder.encode(tags, partSchema)
+        val iter = tags.entrySet().iterator()
+        while (iter.hasNext) {
+          val entry = iter.next()
+          val fromString = MapEncoder.getValue(encoded, partSchema, entry.getKey)
+          val fromBytes = MapEncoder.getValueBytes(encoded, partSchema, entry.getKey)
+          fromBytes shouldEqual fromString.getBytes(StandardCharsets.UTF_8)
+        }
+      }
+    }
+  }
+
   describe("MapEncoder.forEach") {
     it("should iterate all entries in order matching map") {
       val tags = sortedMap(
