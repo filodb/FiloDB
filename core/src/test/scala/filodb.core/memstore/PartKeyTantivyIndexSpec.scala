@@ -142,4 +142,63 @@ class PartKeyTantivyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAft
       -1, -1, -1, -1, -1, -1, -1, 127, // Long.MAX_VALUE
       0) // End boolean
   }
+
+  it("should filter correctly when a label has the same name as the map column") {
+    import filodb.core.MachineMetricsData
+    import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
+
+    // dataset2 has partition schema: Seq("series:string", "tags:map")
+    // This reproduces the production schema where the MapColumn is named "tags"
+    val ds = MachineMetricsData.dataset2
+    val tmpDir = new File(System.getProperty("java.io.tmpdir"), "part-key-tantivy-map-collision-test")
+    val mapIndex = new PartKeyTantivyIndex(ds.ref, ds.schema.partition, 0, 1.hour.toMillis, Some(tmpDir))
+
+    try {
+      mapIndex.reset()
+      mapIndex.refreshReadersBlocking()
+
+      val partBuilder2 = new RecordBuilder(TestData.nativeMem)
+
+      // Create a partition key where the map includes a "tags" entry (same name as the MapColumn)
+      val tagsMap = Map("tags".utf8 -> "b1.metal".utf8,
+                        "cell".utf8 -> "A".utf8,
+                        "region".utf8 -> "us-central-2".utf8)
+      val seriesName = "test_metric"
+
+      partBuilder2.partKeyFromObjects(ds.schema, seriesName, tagsMap)
+      val container = partBuilder2.allContainers.head
+      val partKeyAddr = container.allOffsets(0)
+      val partKeyBytes = ds.partKeySchema.asByteArray(container.base, partKeyAddr)
+
+      val start = System.currentTimeMillis()
+      mapIndex.addPartKey(partKeyBytes, 0, start)()
+      mapIndex.refreshReadersBlocking()
+
+      val end = System.currentTimeMillis()
+
+      // Filtering by "cell" (a regular label, not colliding with MapColumn name) should work
+      val cellFilter = Seq(ColumnFilter("cell", Equals("A")))
+      val cellResults = mapIndex.partIdsFromFilters(cellFilter, start, end)
+      cellResults.length shouldEqual 1
+
+      // Filtering by "tags" (same name as the MapColumn) should also work
+      val tagsFilter = Seq(ColumnFilter("tags", Equals("b1.metal")))
+      val tagsResults = mapIndex.partIdsFromFilters(tagsFilter, start, end)
+      tagsResults.length shouldEqual 1
+
+      // Filtering by "tags" with a non-matching value should return no results
+      val tagsMissFilter = Seq(ColumnFilter("tags", Equals("nonexistent")))
+      val tagsMissResults = mapIndex.partIdsFromFilters(tagsMissFilter, start, end)
+      tagsMissResults.length shouldEqual 0
+
+      // Filtering by "tags" with regex should also work
+      val tagsRegexFilter = Seq(ColumnFilter("tags", EqualsRegex("b1\\..*")))
+      val tagsRegexResults = mapIndex.partIdsFromFilters(tagsRegexFilter, start, end)
+      tagsRegexResults.length shouldEqual 1
+
+    } finally {
+      mapIndex.closeIndex()
+      partBuilder.removeAndFreeContainers(partBuilder.allContainers.length)
+    }
+  }
 }
