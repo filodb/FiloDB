@@ -71,6 +71,10 @@ class AggregatingTimeSeriesPartition(
     logger.info(s"AggregatingTimeSeriesPartition created but no aggregation configured for partition $partID")
   }
 
+  // Side-channel: set by TimeSeriesShard before calling ingest() so the Kafka offset
+  // is threaded into BucketAggregationState without changing the ingest signature.
+  var currentIngestOffset: Long = -1L
+
   // Central bucket aggregation state managing ALL columns
   private lazy val bucketState: BucketAggregationState = {
     new BucketAggregationState(aggConfigs, schema.numDataColumns, columnTypes)
@@ -110,8 +114,10 @@ class AggregatingTimeSeriesPartition(
 
     val timestamp = schema.timestamp(row)
 
-    // Pass RowReader directly to avoid Array[Any] boxing
-    val aggregated = bucketState.aggregate(timestamp, ingestionTime, row)
+    // Pass RowReader directly to avoid Array[Any] boxing.
+    // Only propagate offset if it was set by the shard (>= 0); test code leaves it at -1.
+    val effectiveOffset = if (currentIngestOffset >= 0) currentIngestOffset else Long.MaxValue
+    val aggregated = bucketState.aggregateRow(timestamp, ingestionTime, row, effectiveOffset)
 
     if (!aggregated) {
       // Sample was outside tolerance or bucket was finalized
@@ -273,18 +279,16 @@ class AggregatingTimeSeriesPartition(
   }
 
   /**
-   * Override switchBuffers to flush all active buckets before switching.
-   * This ensures no data is lost when chunks are sealed.
+   * Override switchBuffers to reap stale buckets instead of force-flushing all.
+   * Active buckets whose tolerance window hasn't expired remain in memory so that
+   * late OOO samples can still be aggregated into them. The Kafka commit watermark
+   * is held back accordingly (see TimeSeriesShard.prepareFlushGroup).
    */
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
     if (hasAnyAggregation && !isSwitchingBuffers) {
       isSwitchingBuffers = true
       try {
-        // Use the latest sample timestamp from bucket state instead of wall clock
-        val latestTs = bucketState.stats.latestSampleTimestamp
-        val flushTime = if (latestTs == Long.MinValue) 0L else latestTs
-        flushAllBuckets(flushTime, blockHolder, createChunkAtFlushBoundary = false,
-          flushIntervalMillis = None, acceptDuplicateSamples = true)
+        reapStaleBuckets(System.currentTimeMillis(), blockHolder)
       } finally {
         isSwitchingBuffers = false
       }
@@ -292,6 +296,22 @@ class AggregatingTimeSeriesPartition(
 
     super.switchBuffers(blockHolder, encode)
   }
+
+  private def reapStaleBuckets(nowMs: Long, blockHolder: BlockMemFactory): Unit = {
+    primaryConfig.foreach { cfg =>
+      val stale = bucketState.getStaleBuckets(nowMs, cfg.oooToleranceMs)
+      stale.foreach { bucketTs =>
+        bucketState.getBucketValues(bucketTs).foreach { columnValues =>
+          val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
+          super.ingest(nowMs, aggregatedRow, blockHolder, false, None, acceptDuplicateSamples = true)
+        }
+        bucketState.markFinalized(bucketTs)
+      }
+    }
+  }
+
+  /** Returns the smallest Kafka offset referenced by any active (unfinalized) bucket. */
+  def earliestActiveBucketOffset: Long = bucketState.earliestActiveOffset
 }
 
 object AggregatingTimeSeriesPartition {

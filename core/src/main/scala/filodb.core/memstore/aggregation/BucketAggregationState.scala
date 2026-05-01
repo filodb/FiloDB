@@ -31,6 +31,12 @@ class BucketAggregationState(
   // and earliestBucketTimestamp (firstKey).
   private val activeBuckets = new JTreeMap[java.lang.Long, BucketState]()
 
+  // Per-bucket minimum Kafka offset (for watermark hold-back during flush)
+  private val bucketMinOffset = new JTreeMap[java.lang.Long, java.lang.Long]()
+
+  // Per-bucket last ingestion wall-clock time (for stale-bucket reaping)
+  private val bucketLastIngestTime = new JTreeMap[java.lang.Long, java.lang.Long]()
+
   // Track finalized bucket timestamps to reject late samples.
   // Java HashSet avoids Scala boxing overhead on Long keys.
   private val finalizedBuckets = new java.util.HashSet[java.lang.Long]()
@@ -82,7 +88,8 @@ class BucketAggregationState(
   def aggregate(
     sampleTimestamp: Long,
     ingestionTime: Long,
-    columnValues: Array[Any]
+    columnValues: Array[Any],
+    offset: Long = Long.MaxValue
   ): Boolean = {
     if (!hasPrimaryConfig) return false
 
@@ -130,6 +137,14 @@ class BucketAggregationState(
       latestSampleTimestamp = sampleTimestamp
     }
 
+    // Track per-bucket min offset and last ingestion wall-clock time
+    if (offset != Long.MaxValue) {
+      val existing = bucketMinOffset.get(ts)
+      if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
+    }
+    val existingTime = bucketLastIngestTime.get(ts)
+    if (existingTime == null || ingestionTime > existingTime) bucketLastIngestTime.put(ts, ingestionTime)
+
     aggregated
   }
   // scalastyle:on method.length
@@ -140,10 +155,11 @@ class BucketAggregationState(
    * Requires columnTypes to be provided at construction.
    */
   // scalastyle:off method.length cyclomatic.complexity
-  def aggregate(
+  def aggregateRow(
     sampleTimestamp: Long,
     ingestionTime: Long,
-    row: RowReader
+    row: RowReader,
+    offset: Long = Long.MaxValue
   ): Boolean = {
     if (!hasPrimaryConfig) return false
 
@@ -217,6 +233,14 @@ class BucketAggregationState(
       latestSampleTimestamp = sampleTimestamp
     }
 
+    // Track per-bucket min offset and last ingestion wall-clock time
+    if (offset != Long.MaxValue) {
+      val existing = bucketMinOffset.get(ts)
+      if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
+    }
+    val existingTime2 = bucketLastIngestTime.get(ts)
+    if (existingTime2 == null || ingestionTime > existingTime2) bucketLastIngestTime.put(ts, ingestionTime)
+
     aggregated
   }
   // scalastyle:on method.length cyclomatic.complexity
@@ -246,6 +270,38 @@ class BucketAggregationState(
    */
   def earliestBucketTimestamp: Long =
     if (activeBuckets.isEmpty) Long.MaxValue else activeBuckets.firstKey()
+
+  /**
+   * Returns the smallest Kafka offset referenced by any active bucket.
+   * Long.MaxValue if no offsets have been tracked (no active buckets or no offsets supplied).
+   */
+  def earliestActiveOffset: Long = {
+    if (bucketMinOffset.isEmpty) return Long.MaxValue
+    var min = Long.MaxValue
+    val it = bucketMinOffset.values().iterator()
+    while (it.hasNext) {
+      val v = it.next().longValue()
+      if (v < min) min = v
+    }
+    min
+  }
+
+  /**
+   * Returns bucket timestamps whose last ingestion wall-clock time is older than
+   * (nowMs - toleranceMs). These are "stale" buckets that should be reaped so they
+   * don't hold back the Kafka commit watermark indefinitely.
+   */
+  def getStaleBuckets(nowMs: Long, toleranceMs: Long): Seq[Long] = {
+    if (bucketLastIngestTime.isEmpty) return Seq.empty
+    val cutoff = nowMs - toleranceMs
+    val result = scala.collection.mutable.ArrayBuffer.empty[Long]
+    val it = bucketLastIngestTime.entrySet().iterator()
+    while (it.hasNext) {
+      val entry = it.next()
+      if (entry.getValue < cutoff) result += entry.getKey.longValue()
+    }
+    result.toSeq
+  }
 
   /**
    * Gets the complete aggregated row for a bucket.
@@ -280,6 +336,8 @@ class BucketAggregationState(
     // scalastyle:off null
     if (state != null) releaseBucketState(state)
     // scalastyle:on null
+    bucketMinOffset.remove(bucketTs)
+    bucketLastIngestTime.remove(bucketTs)
     finalizedBuckets.add(bucketTs)
   }
 
@@ -370,6 +428,8 @@ class BucketAggregationState(
   def clear(): Unit = {
     activeBuckets.clear()
     finalizedBuckets.clear()
+    bucketMinOffset.clear()
+    bucketLastIngestTime.clear()
     latestSampleTimestamp = Long.MinValue
   }
 
