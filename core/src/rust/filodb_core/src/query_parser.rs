@@ -176,6 +176,29 @@ fn value_with_prefix(prefix: &str, value: &str) -> String {
     )
 }
 
+/// Resolve a field name to a (Field, prefix) pair, handling JSON map columns.
+///
+/// When the field name matches the JSON (map) column itself, we treat it as a
+/// subfield lookup within that JSON column rather than a direct field query.
+/// This handles the case where a label has the same name as the map column
+/// (e.g., a label "tags" inside a map column also named "tags").
+fn resolve_field_with_default<'a>(
+    schema: &'a Schema,
+    default_field: Option<Field>,
+    field_name: &'a str,
+) -> Option<(Field, &'a str)> {
+    let (field, prefix) = schema.find_field_with_default(field_name, default_field)?;
+
+    // If the resolved field is the default JSON field and the prefix is empty,
+    // it means the field name matched the JSON column name directly. Treat the
+    // field name as a subfield path within the JSON column instead.
+    if prefix.is_empty() && default_field == Some(field) {
+        Some((field, field_name))
+    } else {
+        Some((field, prefix))
+    }
+}
+
 /// Build a query using a specified field and value, handling JSON
 /// fields
 ///
@@ -194,7 +217,7 @@ fn query_with_field_and_value<T>(
 where
     T: FnOnce(Field, &str) -> Result<Box<dyn Query>, TantivyError>,
 {
-    let Some((field, prefix)) = schema.find_field_with_default(field, default_field) else {
+    let Some((field, prefix)) = resolve_field_with_default(schema, default_field, field) else {
         // If it's an invalid field then map to an empty query, which will emulate Lucene's behavior
         return Ok(Box::new(EmptyQuery));
     };
@@ -251,7 +274,7 @@ fn parse_term_in_query<'a>(
     for _ in 0..term_count {
         let (input, text) = parse_string(next_input)?;
 
-        if let Some((field, prefix)) = schema.find_field_with_default(&column, default_field) {
+        if let Some((field, prefix)) = resolve_field_with_default(schema, default_field, &column) {
             terms.push(Term::from_field_text(
                 field,
                 &value_with_prefix(prefix, &text),
@@ -311,12 +334,17 @@ fn parse_long_range_query<'a>(
 #[cfg(test)]
 mod tests {
     use bytes::BufMut;
-    use tantivy::{collector::DocSetCollector, query::Occur};
-    use tantivy_utils::field_constants::PART_ID;
+    use tantivy::{
+        collector::DocSetCollector,
+        query::Occur,
+        schema::{JsonObjectOptions, TextFieldIndexing, FAST, INDEXED, STORED, STRING},
+        Index, TantivyDocument,
+    };
+    use tantivy_utils::field_constants::{self, PART_ID};
 
     use tantivy_utils::test_utils::{
-        build_test_schema, COL1_NAME, COL2_NAME, JSON_ATTRIBUTE1_NAME, JSON_ATTRIBUTE2_NAME,
-        JSON_COL_NAME,
+        build_test_schema, TestIndex, COL1_NAME, COL2_NAME, JSON_ATTRIBUTE1_NAME,
+        JSON_ATTRIBUTE2_NAME, JSON_COL_NAME,
     };
 
     use super::*;
@@ -994,5 +1022,204 @@ mod tests {
         let err = parse_long_range_query(&buf, &index.schema, None).expect_err("Should fail");
 
         assert_eq!(format!("{err}"), "Parsing Error: Nom(Eof)");
+    }
+
+    /// Build a test index where the JSON column has an attribute with the same name
+    /// as the JSON column itself (e.g., json_col.json_col = "collision_value").
+    /// This reproduces the bug where a label "tags" inside a MapColumn also named "tags"
+    /// would fail to match when filtered.
+    #[allow(clippy::unwrap_used)]
+    fn build_map_column_collision_schema() -> TestIndex {
+        use tantivy::schema::SchemaBuilder;
+
+        let mut builder = SchemaBuilder::new();
+
+        builder.add_text_field(COL1_NAME, STRING | FAST);
+        builder.add_i64_field(field_constants::PART_ID, INDEXED | FAST);
+        builder.add_i64_field(field_constants::START_TIME, INDEXED | FAST);
+        builder.add_i64_field(field_constants::END_TIME, INDEXED | FAST);
+        builder.add_bytes_field(field_constants::PART_KEY, INDEXED | FAST | STORED);
+        builder.add_json_field(
+            JSON_COL_NAME,
+            JsonObjectOptions::default()
+                .set_indexing_options(TextFieldIndexing::default().set_tokenizer("raw"))
+                .set_fast(Some("raw")),
+        );
+
+        let schema = builder.build();
+        let index = Index::create_in_ram(schema.clone());
+
+        {
+            let mut writer = index.writer::<TantivyDocument>(50_000_000).unwrap();
+
+            // Document where JSON column has an attribute with the SAME name as the column
+            let doc = TantivyDocument::parse_json(
+                &schema,
+                &format!(
+                    r#"{{
+                    "col1": "ABC",
+                    "__partIdDv__": 1,
+                    "__startTime__": 1000,
+                    "__endTime__": 2000,
+                    "__partKey__": "QUE=",
+                    "{JSON_COL_NAME}": {{
+                        "{JSON_COL_NAME}": "collision_value",
+                        "other_attr": "other"
+                    }}
+                }}"#
+                ),
+            )
+            .unwrap();
+
+            writer.add_document(doc).unwrap();
+
+            // Document without the collision attribute
+            let doc = TantivyDocument::parse_json(
+                &schema,
+                &format!(
+                    r#"{{
+                    "col1": "DEF",
+                    "__partIdDv__": 2,
+                    "__startTime__": 1000,
+                    "__endTime__": 2000,
+                    "__partKey__": "QkI=",
+                    "{JSON_COL_NAME}": {{
+                        "other_attr": "something"
+                    }}
+                }}"#
+                ),
+            )
+            .unwrap();
+
+            writer.add_document(doc).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let reader = index.reader().unwrap();
+        let searcher = reader.searcher();
+        let json_field = schema.get_field(JSON_COL_NAME).unwrap();
+
+        TestIndex {
+            schema,
+            searcher,
+            json_field,
+        }
+    }
+
+    #[test]
+    fn test_parse_equals_map_column_name_collision() {
+        let index = build_map_column_collision_schema();
+
+        let mut buf = vec![];
+
+        // Filter on the JSON column name itself (e.g., tags="collision_value")
+        let filter = "collision_value";
+
+        buf.put_u16_le(JSON_COL_NAME.len() as u16);
+        buf.put_slice(JSON_COL_NAME.as_bytes());
+        buf.put_u16_le(filter.len() as u16);
+        buf.put_slice(filter.as_bytes());
+
+        let (_, query) = parse_equals_query(&buf, &index.schema, Some(index.json_field))
+            .expect("Should succeed");
+
+        let unboxed = query.downcast_ref::<TermQuery>().unwrap();
+
+        // Should resolve to the JSON field with the column name as prefix
+        assert_eq!(
+            unboxed.term().field(),
+            index.schema.get_field(JSON_COL_NAME).unwrap()
+        );
+        assert_eq!(
+            unboxed.term().value().as_str().unwrap(),
+            format!("{JSON_COL_NAME}\0s{filter}")
+        );
+
+        let collector = DocSetCollector;
+        let results = index
+            .searcher
+            .search(&query, &collector)
+            .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_regex_map_column_name_collision() {
+        let index = build_map_column_collision_schema();
+
+        let mut buf = vec![];
+
+        let filter = "collision.*";
+
+        buf.put_u16_le(JSON_COL_NAME.len() as u16);
+        buf.put_slice(JSON_COL_NAME.as_bytes());
+        buf.put_u16_le(filter.len() as u16);
+        buf.put_slice(filter.as_bytes());
+
+        let (_, query) =
+            parse_regex_query(&buf, &index.schema, Some(index.json_field)).expect("Should succeed");
+
+        let collector = DocSetCollector;
+        let results = index
+            .searcher
+            .search(&query, &collector)
+            .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_term_in_map_column_name_collision() {
+        let index = build_map_column_collision_schema();
+
+        let mut buf = vec![];
+
+        let filter1 = "collision_value";
+        let filter2 = "nonexistent";
+
+        buf.put_u16_le(JSON_COL_NAME.len() as u16);
+        buf.put_slice(JSON_COL_NAME.as_bytes());
+        buf.put_u16_le(2u16); // 2 terms
+        buf.put_u16_le(filter1.len() as u16);
+        buf.put_slice(filter1.as_bytes());
+        buf.put_u16_le(filter2.len() as u16);
+        buf.put_slice(filter2.as_bytes());
+
+        let (_, query) = parse_term_in_query(&buf, &index.schema, Some(index.json_field))
+            .expect("Should succeed");
+
+        let collector = DocSetCollector;
+        let results = index
+            .searcher
+            .search(&query, &collector)
+            .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_prefix_map_column_name_collision() {
+        let index = build_map_column_collision_schema();
+
+        let mut buf = vec![];
+
+        let filter = "collision";
+
+        buf.put_u16_le(JSON_COL_NAME.len() as u16);
+        buf.put_slice(JSON_COL_NAME.as_bytes());
+        buf.put_u16_le(filter.len() as u16);
+        buf.put_slice(filter.as_bytes());
+
+        let (_, query) = parse_prefix_query(&buf, &index.schema, Some(index.json_field))
+            .expect("Should succeed");
+
+        let collector = DocSetCollector;
+        let results = index
+            .searcher
+            .search(&query, &collector)
+            .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
     }
 }
