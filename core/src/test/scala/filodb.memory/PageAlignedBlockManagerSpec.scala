@@ -8,6 +8,8 @@ import org.scalatest.BeforeAndAfter
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.memory.format.UnsafeUtils
+
 object PageAlignedBlockManagerSpec {
   val testReclaimer = new ReclaimListener {
     var reclaimedBytes = 0
@@ -264,6 +266,21 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     // Should reclaim multiple blocks.
     blockManager.numFreeBlocks shouldEqual 5
 
+    blockManager.releaseBlocks()
+  }
+
+  /**
+   * This is more of a sanity-check than anything; the OS may not even return dirty,
+   *   non-zeroed memory when malloc() is called.
+   */
+  it should "zero block memory when clearAllocations is true" in {
+    val stats = new MemoryStats(Map("zeroTest" -> "zeroTest"))
+    val blockManager = new PageAlignedBlockManager(
+      2 * pageSize, stats, testReclaimer, 1, evictionLock, clearAllocations = true)
+    val block = blockManager.requestBlock(false).get
+    for (offset <- 0L until block.capacity) {
+      UnsafeUtils.unsafe.getByte(block.address + offset) shouldEqual 0.toByte
+    }
     blockManager.releaseBlocks()
   }
 }
