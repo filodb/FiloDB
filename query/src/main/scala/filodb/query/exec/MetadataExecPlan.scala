@@ -450,7 +450,8 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
             // GOTCHA: This approach will not catch cardinality of labels which are disabled for faceting
             // since their value lengths are > 1000. We expect the gateway to reject (or shorten) that data early on.
             memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
-              endMs, startMs, querySession, 1000000).foreach { labelValue =>
+              endMs, startMs, querySession,
+              queryContext.plannerParams.enforcedLimits.execPlanLeafSamples).foreach { labelValue =>
               sketchMap.getOrElseUpdate(label, new CpcSketch(logK)).update(labelValue.toString)
             }
           }
