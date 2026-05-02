@@ -16,6 +16,7 @@ import filodb.coordinator.flight.SingleClusterFlightPlanDispatcher
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{ComputedColumn, DataColumn}
+import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.grpc.GrpcMultiPartitionQueryService
@@ -33,6 +34,9 @@ import filodb.query.exec._
 object ProtoConverters extends StrictLogging {
 
   import filodb.query.ProtoConverters._
+
+  // Increments when a fully-qualified class name is sent as a proto field but not found via reflection.
+  val unexpectedProtoClassNameCounter = FilodbMetrics.counter("unexpected-proto-class-name")
 
   def execPlanToProto(execPlan: ExecPlan): RemoteExecPlan = {
     val plan = execPlan.toExecPlanContainerProto()
@@ -162,6 +166,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
@@ -173,6 +178,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
@@ -184,6 +190,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
@@ -198,6 +205,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
@@ -209,6 +217,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
@@ -220,6 +229,7 @@ object ProtoConverters extends StrictLogging {
           .filter { case (className, _) =>
             val parseTry = Try(Class.forName(className))
             if (!parseTry.isSuccess) {
+              unexpectedProtoClassNameCounter.increment()
               logger.error("Could not find class while deserializing SamplesScannedConfig: " +
                 className, parseTry.failed.get)
             }
