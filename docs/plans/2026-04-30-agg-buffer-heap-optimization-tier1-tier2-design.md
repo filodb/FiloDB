@@ -1,7 +1,7 @@
 # Aggregation Buffer Heap Optimization — Tier 1 & Tier 2
 
 **Date:** 2026-04-30
-**Status:** Approved, ready for implementation
+**Status:** Tier 1 shipped; Tier 2 rejected after benchmarking
 **Related:** Fix 1 (watermark-based Kafka offset hold) — commit 788af068d on branch `out-of-orderness`
 
 ## Background
@@ -12,6 +12,11 @@ After Fix 1 landed (watermark-based offset hold), the aggregating ingestion path
 - **Steady-state (Tier 2 target):** `BucketAggregationState` uses `java.util.TreeMap[java.lang.Long, _]` and `java.util.HashSet[java.lang.Long]`. Each bucket incurs ~100+ B of boxing and Entry overhead. Three active buckets per partition × hundreds of thousands of partitions = hundreds of MB resident + steady GC churn on insert/remove.
 
 Both optimizations leave the on/off-heap architecture unchanged. They're localized, individually shippable, and land as separate commits.
+
+## Status summary
+
+- **Tier 1:** ✅ Implemented and merged (commit `be7404cbb`). Keep.
+- **Tier 2:** ❌ Rejected after benchmarking (commit `43dc2b2e1` implemented, `228651020` reverted). The measured improvement did not justify the added complexity of sorted parallel-array bookkeeping + overflow/grow logic vs. the original TreeMap. Keeping the simpler `java.util.TreeMap` implementation.
 
 ## Tier 1 — Eliminate per-sample histogram allocation
 
@@ -165,6 +170,10 @@ New:
 3. `earliestActiveOffset` min across buckets
 4. Stale bucket detection
 5. JMH: zero allocation per insert/remove cycle; ≥2× speedup on lookup vs TreeMap
+
+### Outcome (rejected)
+
+Implemented and benchmarked on branch `agg-heap-opt-tier2` (commit `43dc2b2e1`). Post-benchmark review: the throughput/allocation delta over the TreeMap implementation was marginal and did not warrant the additional complexity (sorted-array invariant maintenance, grow-on-overflow path, new overflow stat). Reverted in commit `228651020`. The TreeMap-based `BucketAggregationState` remains in place; this section is preserved for historical context on what was tried and why it was set aside.
 
 ## Implementation order
 
