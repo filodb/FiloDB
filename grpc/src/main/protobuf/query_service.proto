@@ -412,6 +412,30 @@ message PlanDispatcherContainer {
 
 }
 
+message SamplesScannedConfig {
+  bool leafSamplesEnabled                               = 1;
+  bool execResultSamplesEnabled                         = 2;
+  bool execChildSamplesEnabled                          = 3;
+  bool rvtSamplesEnabled                                = 4;
+  bool rvtChildSamplesEnabled                           = 5;
+  bool srvSamplesEnabled                                = 6;
+  double defaultRowMultiplier                           = 7;
+  double histogramRowMultiplier                         = 8;
+  double exponentialHistogramRowMultiplier              = 9;
+  double defaultSamplesPerRow                           = 10;
+  double defaultSamplesPerSeries                        = 11;
+  double defaultSamplesPerPartKeyByte                   = 12;
+  map<string, double> classToSamplesPerRow              = 13;
+  map<string, double> classToSamplesPerSeries           = 14;
+  map<string, double> classToSamplesPerPartKeyByte      = 15;
+  double defaultSamplesPerChildRow                      = 16;
+  double defaultSamplesPerChildSeries                   = 17;
+  double defaultSamplesPerChildPartKeyByte              = 18;
+  map<string, double> classToSamplesPerChildRow         = 19;
+  map<string, double> classToSamplesPerChildSeries      = 20;
+  map<string, double> classToSamplesPerChildPartKeyByte = 21;
+}
+
 message QueryConfig {
   int64 askTimeoutSeconds                    = 1;
   int64 staleSampleAfterMs                   = 2;
@@ -421,7 +445,7 @@ message QueryConfig {
   bool translatePromToFilodbHistogram        = 6;
   bool fasterRateEnabled                     = 7;
   optional string partitionName              = 8;
-  optional int64 remoteHttpTimeoutMs          = 9;
+  optional int64 remoteHttpTimeoutMs         = 9;
   optional string remoteHttpEndpoint         = 10;
   optional string remoteGrpcEndpoint         = 11;
   int32 numRvsPerResultMessage               = 12;
@@ -431,6 +455,7 @@ message QueryConfig {
   repeated string grpcPartitionsDenyList     = 16;
   optional string plannerSelector            = 17;
   map<string,int32> recordContainerOverrides = 18;
+  SamplesScannedConfig samplesScannedConfig  = 19;
 }
 
 enum ChunkScanType {
