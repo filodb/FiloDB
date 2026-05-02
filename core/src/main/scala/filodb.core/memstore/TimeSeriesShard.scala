@@ -144,7 +144,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val memstoreEvictionStall = FilodbMetrics.timeCounter("memstore-eviction-stall", TimeUnit.NANOSECONDS, tags)
   val evictablePartKeysSize = FilodbMetrics.gauge("memstore-num-evictable-partkeys", tags)
   val missedEviction = FilodbMetrics.counter("memstore-missed-eviction", tags)
-  val aggBucketOverflow = FilodbMetrics.counter("memstore-agg-bucket-overflow", tags)
 
 }
 

@@ -1,5 +1,7 @@
 package filodb.core.memstore.aggregation
 
+import java.util.{TreeMap => JTreeMap}
+
 import filodb.core.metadata.Column
 import filodb.memory.format.RowReader
 import filodb.memory.format.vectors.MutableHistogram
@@ -14,11 +16,6 @@ import filodb.memory.format.vectors.MutableHistogram
  * - When finalized, complete rows with all columns are written at once
  * - This avoids issues with partial column writes and chunk lifecycle
  *
- * Active bucket count per partition is bounded by ceil(tolerance/interval)+1
- * (typically ~3 for default config). At this size, sorted parallel Long/Object
- * arrays beat java.util.TreeMap on every dimension: no boxing, no Entry allocation,
- * cache-friendly linear scan.
- *
  * @param columnConfigs array of optional aggregation configs per column
  * @param numColumns total number of data columns
  */
@@ -27,6 +24,26 @@ class BucketAggregationState(
   numColumns: Int,
   columnTypes: Array[Column.ColumnType] = Array.empty
 ) {
+  // Map from bucket timestamp -> aggregated values for all columns.
+  // Java TreeMap avoids Scala collection wrapper overhead while
+  // preserving sorted iteration needed by getBucketsToFinalize
+  // (headMap), bucketValuesIteratorInRange (subMap/tailMap),
+  // and earliestBucketTimestamp (firstKey).
+  private val activeBuckets = new JTreeMap[java.lang.Long, BucketState]()
+
+  // Per-bucket minimum Kafka offset (for watermark hold-back during flush)
+  private val bucketMinOffset = new JTreeMap[java.lang.Long, java.lang.Long]()
+
+  // Per-bucket last ingestion wall-clock time (for stale-bucket reaping)
+  private val bucketLastIngestTime = new JTreeMap[java.lang.Long, java.lang.Long]()
+
+  // Track finalized bucket timestamps to reject late samples.
+  // Java HashSet avoids Scala boxing overhead on Long keys.
+  private val finalizedBuckets = new java.util.HashSet[java.lang.Long]()
+
+  // Track the latest sample timestamp seen for OOO detection
+  private var latestSampleTimestamp: Long = Long.MinValue
+
   // Cached primary config values (computed once at construction to avoid per-sample collection ops)
   private val primaryIntervalMs: Long = columnConfigs.flatten.headOption.map(_.intervalMs).getOrElse(0L)
   private val primaryOooToleranceMs: Long = columnConfigs.flatten.headOption.map(_.oooToleranceMs).getOrElse(0L)
@@ -38,37 +55,11 @@ class BucketAggregationState(
   private val aggConfigsFlat: Array[AggregationConfig] = columnConfigs.map(_.orNull)
   // scalastyle:on null
 
-  // Capacity based on tolerance/interval + headroom
-  private val maxActive: Int = {
-    val theoretical =
-      if (primaryIntervalMs > 0)
-        ((primaryOooToleranceMs + primaryIntervalMs - 1) / primaryIntervalMs).toInt + 1
-      else 4
-    math.max(theoretical * 2, 4)
-  }
-
-  // Parallel arrays, kept sorted ascending by bucketTsArr(i).
-  // Invariant: bucketTsArr(0..numActive-1) is strictly increasing.
-  private var bucketTsArr        = new Array[Long](maxActive)
-  private var bucketStatesArr    = new Array[BucketState](maxActive)
-  private var bucketMinOffsetArr = new Array[Long](maxActive)
-  private var bucketLastIngest   = new Array[Long](maxActive)
-  private var numActive: Int = 0
-  private var currentCapacity: Int = maxActive
-
-  // Primitive set for finalized tracking (debox avoids boxing Long)
-  private val finalizedBuckets = debox.Set.empty[Long]
-
-  // Track the latest sample timestamp seen for OOO detection
-  private var latestSampleTimestamp: Long = Long.MinValue
-
-  // Overflow counter (incremented when growArrays is triggered)
-  private var overflowEvents: Int = 0
-
   // Small pool of BucketState objects to reduce allocation pressure.
+  // When a bucket is finalized, its BucketState is reset and returned to the pool.
+  // When a new bucket is needed, a pooled BucketState is reused if available.
   private val bucketPool = new java.util.ArrayDeque[BucketState](8)
 
-  // scalastyle:off null
   private def acquireBucketState(): BucketState = {
     val pooled = bucketPool.pollFirst()
     if (pooled != null) {
@@ -78,79 +69,11 @@ class BucketAggregationState(
       new BucketState(numColumns, aggConfigsFlat)
     }
   }
-  // scalastyle:on null
 
   private def releaseBucketState(state: BucketState): Unit = {
     if (bucketPool.size() < 8) {
       bucketPool.offerLast(state)
     }
-  }
-
-  /** Linear scan for the index of bucketTsArr == ts. Returns -1 if not found. */
-  private def findActiveIndex(ts: Long): Int = {
-    var i = 0
-    while (i < numActive) {
-      val cur = bucketTsArr(i)
-      if (cur == ts) return i
-      if (cur > ts) return -1
-      i += 1
-    }
-    -1
-  }
-
-  /** Insert at sorted position. Grows arrays if needed. Returns inserted index. */
-  private def insertActive(ts: Long, state: BucketState): Int = {
-    if (numActive >= currentCapacity) growArrays()
-    // Insertion sort: shift elements right to make room
-    var i = numActive
-    while (i > 0 && bucketTsArr(i - 1) > ts) {
-      bucketTsArr(i) = bucketTsArr(i - 1)
-      bucketStatesArr(i) = bucketStatesArr(i - 1)
-      bucketMinOffsetArr(i) = bucketMinOffsetArr(i - 1)
-      bucketLastIngest(i) = bucketLastIngest(i - 1)
-      i -= 1
-    }
-    bucketTsArr(i) = ts
-    bucketStatesArr(i) = state
-    bucketMinOffsetArr(i) = Long.MaxValue
-    bucketLastIngest(i) = Long.MinValue
-    numActive += 1
-    i
-  }
-
-  // scalastyle:off null
-  private def removeActive(idx: Int): Unit = {
-    val last = numActive - 1
-    // Shift elements left
-    var i = idx
-    while (i < last) {
-      bucketTsArr(i) = bucketTsArr(i + 1)
-      bucketStatesArr(i) = bucketStatesArr(i + 1)
-      bucketMinOffsetArr(i) = bucketMinOffsetArr(i + 1)
-      bucketLastIngest(i) = bucketLastIngest(i + 1)
-      i += 1
-    }
-    numActive = last
-    bucketStatesArr(numActive) = null
-  }
-  // scalastyle:on null
-
-  private def growArrays(): Unit = {
-    val newCap = currentCapacity * 2
-    val newTs = new Array[Long](newCap)
-    val newStates = new Array[BucketState](newCap)
-    val newOffsets = new Array[Long](newCap)
-    val newIngest = new Array[Long](newCap)
-    System.arraycopy(bucketTsArr, 0, newTs, 0, numActive)
-    System.arraycopy(bucketStatesArr, 0, newStates, 0, numActive)
-    System.arraycopy(bucketMinOffsetArr, 0, newOffsets, 0, numActive)
-    System.arraycopy(bucketLastIngest, 0, newIngest, 0, numActive)
-    bucketTsArr = newTs
-    bucketStatesArr = newStates
-    bucketMinOffsetArr = newOffsets
-    bucketLastIngest = newIngest
-    currentCapacity = newCap
-    overflowEvents += 1
   }
 
   /**
@@ -172,18 +95,26 @@ class BucketAggregationState(
 
     val ts = getBucketTimestamp(sampleTimestamp)
 
-    if (finalizedBuckets(ts)) return false
-    if (!isWithinTolerance(sampleTimestamp, ingestionTime)) return false
-
-    var idx = findActiveIndex(ts)
-    if (idx < 0) {
-      val bucketState = acquireBucketState()
-      idx = insertActive(ts, bucketState)
+    // Check if bucket is already finalized
+    if (finalizedBuckets.contains(ts)) {
+      return false
     }
-    val bucketState = bucketStatesArr(idx)
+
+    // Check if sample is within tolerance window
+    if (!isWithinTolerance(sampleTimestamp, ingestionTime)) {
+      return false
+    }
+
+    // Get or create bucket state (Java TreeMap has no getOrElseUpdate)
+    // scalastyle:off null
+    var bucketState = activeBuckets.get(ts)
+    if (bucketState == null) {
+      bucketState = acquireBucketState()
+      activeBuckets.put(ts, bucketState)
+    }
+    // scalastyle:on null
 
     // Aggregate each column
-    // scalastyle:off null
     var aggregated = false
     var i = 0
     while (i < numColumns) {
@@ -194,23 +125,25 @@ class BucketAggregationState(
           aggregated = true
         }
       } else {
+        // Non-aggregating column - keep first value
         if (!bucketState.hasValue(i) && columnValues(i) != null) {
           bucketState.setValue(i, columnValues(i))
         }
       }
       i += 1
     }
-    // scalastyle:on null
 
     if (sampleTimestamp > latestSampleTimestamp) {
       latestSampleTimestamp = sampleTimestamp
     }
 
-    // Update parallel-array metadata for this bucket
+    // Track per-bucket min offset and last ingestion wall-clock time
     if (offset != Long.MaxValue) {
-      if (offset < bucketMinOffsetArr(idx)) bucketMinOffsetArr(idx) = offset
+      val existing = bucketMinOffset.get(ts)
+      if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
     }
-    if (ingestionTime > bucketLastIngest(idx)) bucketLastIngest(idx) = ingestionTime
+    val existingTime = bucketLastIngestTime.get(ts)
+    if (existingTime == null || ingestionTime > existingTime) bucketLastIngestTime.put(ts, ingestionTime)
 
     aggregated
   }
@@ -232,15 +165,16 @@ class BucketAggregationState(
 
     val ts = getBucketTimestamp(sampleTimestamp)
 
-    if (finalizedBuckets(ts)) return false
+    if (finalizedBuckets.contains(ts)) return false
     if (!isWithinTolerance(sampleTimestamp, ingestionTime)) return false
 
-    var idx = findActiveIndex(ts)
-    if (idx < 0) {
-      val bucketState = acquireBucketState()
-      idx = insertActive(ts, bucketState)
+    // scalastyle:off null
+    var bucketState = activeBuckets.get(ts)
+    if (bucketState == null) {
+      bucketState = acquireBucketState()
+      activeBuckets.put(ts, bucketState)
     }
-    val bucketState = bucketStatesArr(idx)
+    // scalastyle:on null
 
     var aggregated = false
     var i = 0
@@ -275,6 +209,7 @@ class BucketAggregationState(
               // scalastyle:on null
           }
         } else {
+          // Fallback if columnTypes not provided
           val value = row.getAny(i)
           // scalastyle:off null
           if (value != null) {
@@ -298,11 +233,13 @@ class BucketAggregationState(
       latestSampleTimestamp = sampleTimestamp
     }
 
-    // Update parallel-array metadata for this bucket
+    // Track per-bucket min offset and last ingestion wall-clock time
     if (offset != Long.MaxValue) {
-      if (offset < bucketMinOffsetArr(idx)) bucketMinOffsetArr(idx) = offset
+      val existing = bucketMinOffset.get(ts)
+      if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
     }
-    if (ingestionTime > bucketLastIngest(idx)) bucketLastIngest(idx) = ingestionTime
+    val existingTime2 = bucketLastIngestTime.get(ts)
+    if (existingTime2 == null || ingestionTime > existingTime2) bucketLastIngestTime.put(ts, ingestionTime)
 
     aggregated
   }
@@ -310,36 +247,41 @@ class BucketAggregationState(
 
   /**
    * Gets buckets that should be finalized (older than threshold).
-   * Walks the sorted array from the beginning — O(k) where k is the number of
-   * buckets below threshold (typically 0 or 1).
+   * Uses Java TreeMap's headMap view for efficient range iteration with no intermediate allocations.
    */
   def getBucketsToFinalize(thresholdTs: Long): Seq[Long] = {
-    if (numActive == 0) return Seq.empty
-    var count = 0
-    while (count < numActive && bucketTsArr(count) < thresholdTs) count += 1
-    if (count == 0) return Seq.empty
-    val result = new Array[Long](count)
-    System.arraycopy(bucketTsArr, 0, result, 0, count)
+    if (activeBuckets.isEmpty) return Seq.empty
+    val headView = activeBuckets.headMap(thresholdTs) // exclusive upper bound, returns view
+    if (headView.isEmpty) return Seq.empty
+    // Copy keys to a Seq since headView is a live view and we may mutate activeBuckets during finalization
+    val result = new Array[Long](headView.size())
+    val it = headView.keySet().iterator()
+    var i = 0
+    while (it.hasNext) {
+      result(i) = it.next()
+      i += 1
+    }
     result.toSeq
   }
 
   /**
    * Returns the earliest active bucket timestamp, or Long.MaxValue if no active buckets.
+   * Used for fast guard checks before attempting finalization.
    */
   def earliestBucketTimestamp: Long =
-    if (numActive == 0) Long.MaxValue else bucketTsArr(0)
+    if (activeBuckets.isEmpty) Long.MaxValue else activeBuckets.firstKey()
 
   /**
    * Returns the smallest Kafka offset referenced by any active bucket.
    * Long.MaxValue if no offsets have been tracked (no active buckets or no offsets supplied).
    */
   def earliestActiveOffset: Long = {
-    if (numActive == 0) return Long.MaxValue
-    var min = bucketMinOffsetArr(0)
-    var i = 1
-    while (i < numActive) {
-      if (bucketMinOffsetArr(i) < min) min = bucketMinOffsetArr(i)
-      i += 1
+    if (bucketMinOffset.isEmpty) return Long.MaxValue
+    var min = Long.MaxValue
+    val it = bucketMinOffset.values().iterator()
+    while (it.hasNext) {
+      val v = it.next().longValue()
+      if (v < min) min = v
     }
     min
   }
@@ -350,21 +292,15 @@ class BucketAggregationState(
    * don't hold back the Kafka commit watermark indefinitely.
    */
   def getStaleBuckets(nowMs: Long, toleranceMs: Long): Seq[Long] = {
-    if (numActive == 0) return Seq.empty
+    if (bucketLastIngestTime.isEmpty) return Seq.empty
     val cutoff = nowMs - toleranceMs
-    val buf = new Array[Long](numActive)
-    var count = 0
-    var i = 0
-    while (i < numActive) {
-      if (bucketLastIngest(i) < cutoff) { buf(count) = bucketTsArr(i); count += 1 }
-      i += 1
+    val result = scala.collection.mutable.ArrayBuffer.empty[Long]
+    val it = bucketLastIngestTime.entrySet().iterator()
+    while (it.hasNext) {
+      val entry = it.next()
+      if (entry.getValue < cutoff) result += entry.getKey.longValue()
     }
-    if (count == 0) Seq.empty
-    else {
-      val result = new Array[Long](count)
-      System.arraycopy(buf, 0, result, 0, count)
-      result.toSeq
-    }
+    result.toSeq
   }
 
   /**
@@ -375,9 +311,10 @@ class BucketAggregationState(
    * @return Some(array of column values) if bucket exists, None otherwise
    */
   def getBucketValues(bucketTs: Long): Option[Array[Any]] = {
-    val idx = findActiveIndex(bucketTs)
-    if (idx < 0) return None
-    val state = bucketStatesArr(idx)
+    // scalastyle:off null
+    val state = activeBuckets.get(bucketTs)
+    if (state == null) return None
+    // scalastyle:on null
     val values = new Array[Any](numColumns)
     var i = 0
     while (i < numColumns) {
@@ -395,13 +332,13 @@ class BucketAggregationState(
    * Marks a bucket as finalized and removes it from active state.
    */
   def markFinalized(bucketTs: Long): Unit = {
-    val idx = findActiveIndex(bucketTs)
-    if (idx >= 0) {
-      val state = bucketStatesArr(idx)
-      releaseBucketState(state)
-      removeActive(idx)
-    }
-    finalizedBuckets += bucketTs
+    val state = activeBuckets.remove(bucketTs)
+    // scalastyle:off null
+    if (state != null) releaseBucketState(state)
+    // scalastyle:on null
+    bucketMinOffset.remove(bucketTs)
+    bucketLastIngestTime.remove(bucketTs)
+    finalizedBuckets.add(bucketTs)
   }
 
   /**
@@ -409,24 +346,22 @@ class BucketAggregationState(
    * Each entry is (bucketTimestamp, columnValues) where histogram columns return MutableHistogram
    * objects directly (not serialized DirectBuffers), suitable for the query path.
    *
-   * Safety: relies on single-ingestion-thread-per-partition guarantee. The iterator reads
-   * live array references; concurrent insertActive/removeActive would corrupt iteration.
+   * Uses Java TreeMap's subMap/tailMap views — no intermediate Set, Seq, or sort is allocated.
    */
   def bucketValuesIteratorInRange(startTime: Long, endTime: Long): Iterator[(Long, Array[Any])] = {
-    // Find starting index: first i where bucketTsArr(i) >= startTime
-    var start = 0
-    while (start < numActive && bucketTsArr(start) < startTime) start += 1
-
-    val capturedStart = start
-    val capturedNumActive = numActive
-
+    val rangeView = if (endTime == Long.MaxValue) {
+      activeBuckets.tailMap(startTime, true) // inclusive lower bound
+    } else {
+      activeBuckets.subMap(startTime, true, endTime, true) // inclusive both bounds
+    }
+    // Wrap Java iterator as Scala iterator
+    val javaIt = rangeView.entrySet().iterator()
     new Iterator[(Long, Array[Any])] {
-      private var pos = capturedStart
-      def hasNext: Boolean = pos < capturedNumActive && bucketTsArr(pos) <= endTime
+      def hasNext: Boolean = javaIt.hasNext
       def next(): (Long, Array[Any]) = {
-        val ts = bucketTsArr(pos)
-        val state = bucketStatesArr(pos)
-        pos += 1
+        val entry = javaIt.next()
+        val ts = entry.getKey.longValue()
+        val state = entry.getValue
         val values = new Array[Any](numColumns)
         var i = 0
         while (i < numColumns) {
@@ -446,22 +381,24 @@ class BucketAggregationState(
   /**
    * Returns true if there are any active (non-finalized) buckets.
    */
-  def hasActiveBuckets: Boolean = numActive > 0
+  def hasActiveBuckets: Boolean = !activeBuckets.isEmpty
 
   /**
    * Gets all active bucket timestamps.
    */
   def activeBucketTimestamps: Set[Long] = {
     val result = scala.collection.mutable.Set.empty[Long]
-    var i = 0
-    while (i < numActive) { result += bucketTsArr(i); i += 1 }
+    val it = activeBuckets.keySet().iterator()
+    while (it.hasNext) {
+      result += it.next()
+    }
     result.toSet
   }
 
   /**
    * Checks if a bucket is active (not finalized).
    */
-  def isActive(bucketTs: Long): Boolean = findActiveIndex(bucketTs) >= 0
+  def isActive(bucketTs: Long): Boolean = activeBuckets.containsKey(bucketTs)
 
   /**
    * Cleans up old finalized tracking to prevent unbounded growth.
@@ -469,14 +406,9 @@ class BucketAggregationState(
   def cleanupOldFinalizedTracking(thresholdTs: Long): Unit = {
     if (hasPrimaryConfig) {
       val cleanupThreshold = thresholdTs - (2 * primaryOooToleranceMs)
-      val toRemove = debox.Buffer.empty[Long]
-      finalizedBuckets.foreach { ts =>
-        if (ts < cleanupThreshold) toRemove += ts
-      }
-      var i = 0
-      while (i < toRemove.length) {
-        finalizedBuckets.remove(toRemove(i))
-        i += 1
+      val it = finalizedBuckets.iterator()
+      while (it.hasNext) {
+        if (it.next() < cleanupThreshold) it.remove()
       }
     }
   }
@@ -485,42 +417,39 @@ class BucketAggregationState(
    * Returns statistics about the current state.
    */
   def stats: BucketAggregationStats = BucketAggregationStats(
-    activeBucketCount = numActive,
-    finalizedBucketCount = finalizedBuckets.size,
-    latestSampleTimestamp = latestSampleTimestamp,
-    overflowCount = overflowEvents
+    activeBucketCount = activeBuckets.size(),
+    finalizedBucketCount = finalizedBuckets.size(),
+    latestSampleTimestamp = latestSampleTimestamp
   )
 
   /**
    * Clears all state. Used for testing or partition shutdown.
    */
-  // scalastyle:off null
   def clear(): Unit = {
-    var i = 0
-    while (i < numActive) {
-      bucketStatesArr(i) = null
-      i += 1
-    }
-    numActive = 0
+    activeBuckets.clear()
     finalizedBuckets.clear()
-    bucketPool.clear()
-    overflowEvents = 0
+    bucketMinOffset.clear()
+    bucketLastIngestTime.clear()
     latestSampleTimestamp = Long.MinValue
   }
-  // scalastyle:on null
 
+  // Helper to calculate bucket timestamp using cached primary interval
   private def getBucketTimestamp(sampleTs: Long): Long =
     TimeBucket.ceilToBucket(sampleTs, primaryIntervalMs)
 
+  // Helper to check if sample is within tolerance using cached tolerance
   private def isWithinTolerance(sampleTs: Long, ingestionTime: Long): Boolean =
     ingestionTime - sampleTs <= primaryOooToleranceMs
 
   /**
    * Gets the aggregated histogram for a specific column and bucket.
+   * Used for histogram queries.
    */
   def getAggregatedHistogram(colIdx: Int, bucketTs: Long): Option[MutableHistogram] = {
-    val idx = findActiveIndex(bucketTs)
-    if (idx < 0) None else bucketStatesArr(idx).getHistogram(colIdx)
+    // scalastyle:off null
+    val state = activeBuckets.get(bucketTs)
+    if (state == null) None else state.getHistogram(colIdx)
+    // scalastyle:on null
   }
 }
 
@@ -624,12 +553,10 @@ private class BucketState(numColumns: Int, aggConfigs: Array[AggregationConfig])
 case class BucketAggregationStats(
   activeBucketCount: Int,
   finalizedBucketCount: Int,
-  latestSampleTimestamp: Long,
-  overflowCount: Int = 0
+  latestSampleTimestamp: Long
 ) {
   override def toString: String = {
     s"BucketAggregationStats(active=$activeBucketCount, " +
-      s"finalized=$finalizedBucketCount, latestTs=$latestSampleTimestamp, " +
-      s"overflow=$overflowCount)"
+      s"finalized=$finalizedBucketCount, latestTs=$latestSampleTimestamp)"
   }
 }
