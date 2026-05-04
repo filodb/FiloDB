@@ -454,7 +454,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-    storeConfig.numPagesPerBlock, evictionLock)
+    storeConfig.numPagesPerBlock, evictionLock, storeConfig.clearAllocations)
   private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Requires blockStore.

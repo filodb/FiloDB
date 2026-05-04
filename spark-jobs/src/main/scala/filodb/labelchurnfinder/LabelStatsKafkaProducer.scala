@@ -24,7 +24,9 @@ import org.apache.spark.util.LongAccumulator
 class LabelStatsKafkaProducer(config: Config,
                                failuresAcc: LongAccumulator,
                                labelsAcc: LongAccumulator,
-                               workspacesAcc: LongAccumulator) extends StrictLogging {
+                               workspacesAcc: LongAccumulator,
+                               producerFactory: Map[String, String] => KafkaProducer[String, String]
+                               = LabelStatsKafkaProducer.createKafkaProducer) extends StrictLogging {
 
   import LabelChurnFinder._
 
@@ -101,15 +103,20 @@ class LabelStatsKafkaProducer(config: Config,
     broadcastPartition: org.apache.spark.broadcast.Broadcast[String],
     jobTimestamp: Instant
   ): Unit = {
+    val failuresAccLocal   = failuresAcc
+    val labelsAccLocal     = labelsAcc
+    val workspacesAccLocal = workspacesAcc
+    val localFactory       = producerFactory
+
     groupedData.foreachPartition { (partition: Iterator[Row]) =>
-      val localProducer = LabelStatsKafkaProducer.createKafkaProducer(broadcastKafkaProps.value)
+      val localProducer = localFactory(broadcastKafkaProps.value)
 
       try {
         partition.foreach { row =>
           LabelStatsKafkaProducer.publishRow(row, localProducer,
             broadcastTopic.value, broadcastPartition.value, jobTimestamp,
-            failuresAcc, labelsAcc)
-          workspacesAcc.add(1)
+            failuresAccLocal, labelsAccLocal)
+          workspacesAccLocal.add(1)
         }
         localProducer.flush()
       } finally {
@@ -231,7 +238,7 @@ object LabelStatsKafkaProducer {
   ): Unit = {
     val record = new ProducerRecord[String, String](topic, key, message.asJson.noSpaces)
 
-    producer.send(record, (metadata: RecordMetadata, exception: Exception) => {
+    producer.send(record, (_: RecordMetadata, exception: Exception) => {
       if (exception != null) {
         logger.error(s"Failed to publish for workspace=$key, partition=$partition: ${exception.getMessage}")
         failuresAcc.add(1)

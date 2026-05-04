@@ -122,7 +122,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
                               reclaimer: ReclaimListener,
                               numPagesPerBlock: Int,
-                              reclaimLock: EvictionLock)
+                              reclaimLock: EvictionLock,
+                              clearAllocations: Boolean = false)
   extends BlockManager with StrictLogging {
   import PageAlignedBlockManager._
 
@@ -282,7 +283,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     val numBlocks: Int = Math.floor(totalMemorySizeInBytes.toDouble / blockSizeInBytes).toInt
     val blocks = new util.ArrayDeque[Block]()
     logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
-    firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, false)
+    firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, clearAllocations)
     for (i <- 0 until numBlocks) {
       val address = firstPageAddress + (i * blockSizeInBytes)
       blocks.add(new Block(address, blockSizeInBytes, reclaimer))

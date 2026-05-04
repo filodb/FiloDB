@@ -25,7 +25,7 @@ class OffHeapMemory(schemas: Seq[Schema],
     reclaimer = new ReclaimListener {
       override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
     },
-    numPagesPerBlock = 50, evictionLock)
+    numPagesPerBlock = 50, evictionLock, storeConfig.clearAllocations)
 
   val blockMemFactory = new BlockMemFactory(blockStore, maxMetaSize, kamonTags, false)
 
