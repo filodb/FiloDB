@@ -194,7 +194,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // -----------------------------------------------------------------------
   // Tests
   // -----------------------------------------------------------------------
-  describe("FiloDBMultiPartitionFlightProducer — end-to-end via Flight") {
+  describe("FiloDBMultiPartitionFlightProducer - end-to-end via Flight") {
 
     it("should execute a range query and return 2 series via multi-partition Flight producer") {
       val allocBefore = testAllocator.getAllocatedMemory
@@ -252,7 +252,7 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     it("should execute a filtered query targeting a single series (label-value filtering)") {
       val allocBefore = testAllocator.getAllocatedMemory
 
-      // Filter to only host1 — should return exactly 1 series
+      // Filter to only host1 - should return exactly 1 series
       val qRes = executeViaMultiPartFlightServer("""cpu_usage{region="region1", host="host1", _ns_="timeseries"}""")
 
       qRes.result.length shouldEqual 1
