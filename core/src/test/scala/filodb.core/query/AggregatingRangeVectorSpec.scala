@@ -695,5 +695,234 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  // ======================== filterAndSnapshotBuckets ========================
+
+  describe("filterAndSnapshotBuckets") {
+
+    describe("Gap #5 - tolerance-based filtering") {
+      it("should hide buckets within tolerance window from query") {
+        val nowMs = System.currentTimeMillis()
+        val toleranceMs = 60000L
+
+        val oldBucketTs = nowMs - 70000L
+        val recentBucketTs = nowMs - 5000L
+
+        val rawIterator = Iterator(
+          (oldBucketTs, Array[Any](0L, 10.0)),
+          (recentBucketTs, Array[Any](0L, 20.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, toleranceMs, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        result.head.timestamp shouldEqual oldBucketTs
+      }
+
+      it("should show all buckets when they are past tolerance") {
+        val nowMs = System.currentTimeMillis()
+        val toleranceMs = 60000L
+
+        val ts1 = nowMs - 120000L
+        val ts2 = nowMs - 90000L
+        val ts3 = nowMs - 70000L
+
+        val rawIterator = Iterator(
+          (ts1, Array[Any](0L, 10.0)),
+          (ts2, Array[Any](0L, 20.0)),
+          (ts3, Array[Any](0L, 30.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, toleranceMs, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result should have length 3
+        result.map(_.timestamp) shouldEqual Seq(ts1, ts2, ts3)
+      }
+
+      it("should return empty iterator when all buckets are within tolerance") {
+        val nowMs = System.currentTimeMillis()
+        val toleranceMs = 60000L
+
+        val rawIterator = Iterator(
+          (nowMs - 10000L, Array[Any](0L, 10.0)),
+          (nowMs - 5000L, Array[Any](0L, 20.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, toleranceMs, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result shouldBe empty
+      }
+
+      it("should handle empty raw iterator gracefully") {
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          Iterator.empty, 60000L, tsValueColumnIDs, System.currentTimeMillis()
+        ).toSeq
+
+        result shouldBe empty
+      }
+
+      it("should pass all buckets through when tolerance is zero") {
+        val nowMs = System.currentTimeMillis()
+
+        val rawIterator = Iterator(
+          (nowMs - 1000L, Array[Any](0L, 10.0)),
+          (nowMs, Array[Any](0L, 20.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result should have length 2
+      }
+
+      it("should include bucket at exactly the tolerance boundary") {
+        val nowMs = System.currentTimeMillis()
+        val toleranceMs = 60000L
+
+        // nowMs - exactlyAtBoundary == toleranceMs, so >= holds → visible
+        val exactlyAtBoundary = nowMs - toleranceMs
+        // nowMs - justInside == toleranceMs - 1, so >= fails → hidden
+        val justInsideTolerance = nowMs - toleranceMs + 1
+
+        val rawIterator = Iterator(
+          (exactlyAtBoundary, Array[Any](0L, 10.0)),
+          (justInsideTolerance, Array[Any](0L, 20.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, toleranceMs, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        result.head.timestamp shouldEqual exactlyAtBoundary
+      }
+    }
+
+    describe("Gap #2 - histogram snapshot and monotonic correction") {
+      it("should apply makeMonotonic to non-monotonic histograms") {
+        val nowMs = System.currentTimeMillis()
+        val bucketTs = nowMs - 10000L
+
+        // Non-monotonic: values [10, 5, 15] — bucket 1 < bucket 0
+        val bucketBounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val nonMonotonicHist = MutableHistogram(bucketBounds, Array(10.0, 5.0, 15.0))
+
+        val columnIDs = Array(0, 1)
+        val rawIterator = Iterator(
+          (bucketTs, Array[Any](0L, nonMonotonicHist))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, columnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
+        // After makeMonotonic: [10, 10, 15]
+        outputHist.values shouldEqual Array(10.0, 10.0, 15.0)
+      }
+
+      it("should snapshot histogram to isolate from concurrent ingest mutation") {
+        val nowMs = System.currentTimeMillis()
+        val bucketTs = nowMs - 10000L
+
+        val bucketBounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val originalHist = MutableHistogram(bucketBounds, Array(5.0, 10.0, 15.0))
+
+        val columnIDs = Array(0, 1)
+        val rawIterator = Iterator(
+          (bucketTs, Array[Any](0L, originalHist))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, columnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        val snapshotHist = result.head.values(1).asInstanceOf[MutableHistogram]
+
+        // Must be a different instance (snapshot, not a live reference)
+        snapshotHist should not be theSameInstanceAs(originalHist)
+        snapshotHist.values should not be theSameInstanceAs(originalHist.values)
+
+        // Simulate concurrent ingest mutating the original
+        originalHist.values(0) = 999.0
+        originalHist.values(1) = 999.0
+        originalHist.values(2) = 999.0
+
+        // Snapshot must be unaffected
+        snapshotHist.values shouldEqual Array(5.0, 10.0, 15.0)
+      }
+
+      it("should not alter non-histogram scalar values") {
+        val nowMs = System.currentTimeMillis()
+        val bucketTs = nowMs - 10000L
+
+        val rawIterator = Iterator(
+          (bucketTs, Array[Any](0L, 42.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, tsValueColumnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        result.head.values(1) shouldEqual 42.0
+      }
+
+      it("should handle already-monotonic histograms without corruption") {
+        val nowMs = System.currentTimeMillis()
+        val bucketTs = nowMs - 10000L
+
+        val bucketBounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val monotonicHist = MutableHistogram(bucketBounds, Array(5.0, 10.0, 15.0))
+
+        val columnIDs = Array(0, 1)
+        val rawIterator = Iterator(
+          (bucketTs, Array[Any](0L, monotonicHist))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, columnIDs, nowMs
+        ).toSeq
+
+        val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
+        outputHist.values shouldEqual Array(5.0, 10.0, 15.0)
+      }
+
+      it("should snapshot histograms and pass through scalars in mixed-column layout") {
+        val nowMs = System.currentTimeMillis()
+        val bucketTs = nowMs - 10000L
+
+        val bucketBounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val hist = MutableHistogram(bucketBounds, Array(10.0, 5.0, 15.0))
+
+        // columnIDs: [0=timestamp, 1=histogram, 2=scalar]
+        val columnIDs = Array(0, 1, 2)
+        val rawIterator = Iterator(
+          (bucketTs, Array[Any](0L, hist, 42.0))
+        )
+
+        val result = AggregatingRangeVector.filterAndSnapshotBuckets(
+          rawIterator, 0L, columnIDs, nowMs
+        ).toSeq
+
+        result should have length 1
+        val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
+        // Histogram snapshotted and corrected: [10, 10, 15]
+        outputHist.values shouldEqual Array(10.0, 10.0, 15.0)
+        outputHist should not be theSameInstanceAs(hist)
+        // Scalar passed through unchanged
+        result.head.values(2) shouldEqual 42.0
+      }
+    }
+  }
+
   // scalastyle:on null
 }

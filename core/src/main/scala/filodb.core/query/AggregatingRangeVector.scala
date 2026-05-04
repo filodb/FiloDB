@@ -62,34 +62,59 @@ final case class AggregatingRangeVector(
    * Returns a lazy iterator of BucketRowData, sorted by timestamp (TreeMap order).
    * No intermediate collections (Set, Seq) are materialized; no redundant sort is performed.
    */
-  // scalastyle:off null
   private def getActiveBucketRows(startTime: Long, endTime: Long): Iterator[BucketRowData] = {
-    partition.bucketValuesIteratorInRange(startTime, endTime).map { case (bucketTs, allColumnValues) =>
-      // Map column values to the requested column IDs
-      val values = new Array[Any](columnIDs.length)
-      var i = 0
-      while (i < columnIDs.length) {
-        val colIdx = columnIDs(i)
-        if (colIdx == 0) {
-          // Timestamp column - use the bucket timestamp
-          values(i) = bucketTs
-        } else if (colIdx < allColumnValues.length) {
-          values(i) = allColumnValues(colIdx)
-        } else {
-          values(i) = null
-        }
-        i += 1
-      }
-      BucketRowData(bucketTs, values)
-    }
+    val toleranceMs = partition.aggregationConfig.map(_.oooToleranceMs).getOrElse(0L)
+    AggregatingRangeVector.filterAndSnapshotBuckets(
+      partition.bucketValuesIteratorInRange(startTime, endTime),
+      toleranceMs,
+      columnIDs,
+      System.currentTimeMillis()
+    )
   }
-  // scalastyle:on null
 
   def publishInterval: Option[Long] = partition.publishInterval
 
   override def outputRange: Option[RvRange] = None
 
   def minResolutionMs: Int = partition.minResolutionMs
+}
+
+object AggregatingRangeVector {
+  // scalastyle:off null
+  private[query] def filterAndSnapshotBuckets(
+    rawIterator: Iterator[(Long, Array[Any])],
+    toleranceMs: Long,
+    columnIDs: Array[Int],
+    nowMs: Long
+  ): Iterator[BucketRowData] = {
+    rawIterator
+      .filter { case (bucketTs, _) => nowMs - bucketTs >= toleranceMs }
+      .map { case (bucketTs, allColumnValues) =>
+        val values = new Array[Any](columnIDs.length)
+        var i = 0
+        while (i < columnIDs.length) {
+          val colIdx = columnIDs(i)
+          if (colIdx == 0) {
+            values(i) = bucketTs
+          } else if (colIdx < allColumnValues.length) {
+            allColumnValues(colIdx) match {
+              case hist: MutableHistogram =>
+                // buckets ref is safe to share: ingest replaces (not mutates) bucket objects
+                val snapshot = MutableHistogram(hist.buckets, hist.values.clone())
+                snapshot.makeMonotonic()
+                values(i) = snapshot
+              case other =>
+                values(i) = other
+            }
+          } else {
+            values(i) = null
+          }
+          i += 1
+        }
+        BucketRowData(bucketTs, values)
+      }
+  }
+  // scalastyle:on null
 }
 
 /**
