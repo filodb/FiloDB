@@ -17,7 +17,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
 
       // Test ts_of_max_over_time
-      val tsMaxChunkedIt = chunkedWindowIt(data, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+      val tsMaxChunkedIt = chunkedWindowIt(data, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
       val tsMaxAggregated = tsMaxChunkedIt.map(_.getDouble(1)).toBuffer
 
       // Expected: timestamp (in seconds) when max value occurred in each window
@@ -31,7 +31,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
       tsMaxAggregated shouldEqual expectedTsMax
 
       // Test ts_of_min_over_time
-      val tsMinChunkedIt = chunkedWindowIt(data, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+      val tsMinChunkedIt = chunkedWindowIt(data, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
       val tsMinAggregated = tsMinChunkedIt.map(_.getDouble(1)).toBuffer
 
       // Expected: timestamp (in seconds) when min value occurred in each window
@@ -55,7 +55,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 2
 
     // Test ts_of_max_over_time - should ignore NaN values
-    val tsMaxIt = chunkedWindowIt(dataWithNaN, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(dataWithNaN, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResults = tsMaxIt.map(_.getDouble(1)).toBuffer
 
     // Window 1: [1.0, 2.0, NaN, 4.0] -> max is 4.0 at index 3
@@ -66,7 +66,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     tsMaxResults.foreach { ts => ts.isNaN shouldBe false }
 
     // Test ts_of_min_over_time - should ignore NaN values
-    val tsMinIt = chunkedWindowIt(dataWithNaN, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(dataWithNaN, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResults = tsMinIt.map(_.getDouble(1)).toBuffer
 
     tsMinResults.size shouldEqual 3
@@ -82,12 +82,12 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_max_over_time
-    val tsMaxIt = chunkedWindowIt(allNaN, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(allNaN, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResult = tsMaxIt.next().getDouble(1)
     tsMaxResult.isNaN shouldEqual true
 
     // Test ts_of_min_over_time
-    val tsMinIt = chunkedWindowIt(allNaN, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(allNaN, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResult = tsMinIt.next().getDouble(1)
     tsMinResult.isNaN shouldEqual true
   }
@@ -101,13 +101,13 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_max_over_time - should return timestamp of FIRST max (5.0 at index 1)
-    val tsMaxIt = chunkedWindowIt(dataWithDuplicates, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(dataWithDuplicates, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResult = tsMaxIt.next().getDouble(1)
     val expectedMaxTs = (defaultStartTS + 1 * pubFreq).toDouble / 1000.0  // Index 1
     tsMaxResult shouldEqual expectedMaxTs
 
     // Test ts_of_min_over_time - should return timestamp of FIRST min (1.0 at index 0)
-    val tsMinIt = chunkedWindowIt(dataWithDuplicates, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(dataWithDuplicates, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResult = tsMinIt.next().getDouble(1)
     val expectedMinTs = (defaultStartTS + 0 * pubFreq).toDouble / 1000.0  // Index 0
     tsMinResult shouldEqual expectedMinTs
@@ -121,13 +121,13 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_max_over_time
-    val tsMaxIt = chunkedWindowIt(data, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(data, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResult = tsMaxIt.next().getDouble(1)
     val expectedTs = defaultStartTS.toDouble / 1000.0
     tsMaxResult shouldEqual expectedTs
 
     // Test ts_of_min_over_time
-    val tsMinIt = chunkedWindowIt(data, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(data, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResult = tsMinIt.next().getDouble(1)
     tsMinResult shouldEqual expectedTs
   }
@@ -140,13 +140,13 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_max_over_time - max is 3.0 at index 2
-    val tsMaxIt = chunkedWindowIt(dataWithNegatives, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(dataWithNegatives, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResult = tsMaxIt.next().getDouble(1)
     val expectedMaxTs = (defaultStartTS + 2 * pubFreq).toDouble / 1000.0
     tsMaxResult shouldEqual expectedMaxTs
 
     // Test ts_of_min_over_time - min is -8.0 at index 3
-    val tsMinIt = chunkedWindowIt(dataWithNegatives, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(dataWithNegatives, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResult = tsMinIt.next().getDouble(1)
     val expectedMinTs = (defaultStartTS + 3 * pubFreq).toDouble / 1000.0
     tsMinResult shouldEqual expectedMinTs
@@ -161,7 +161,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 25
 
     // Test ts_of_max_over_time
-    val tsMaxIt = chunkedWindowIt(data, rv, new TsOfMaxOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMaxIt = chunkedWindowIt(data, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResults = tsMaxIt.map(_.getDouble(1)).toBuffer
 
     // Verify we got results for all windows
@@ -172,7 +172,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     tsMaxResults.foreach { ts => ts.isNaN shouldBe false }
 
     // Test ts_of_min_over_time
-    val tsMinIt = chunkedWindowIt(data, rv, new TsOfMinOverTimeChunkedFunctionD(), windowSize, step)
+    val tsMinIt = chunkedWindowIt(data, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResults = tsMinIt.map(_.getDouble(1)).toBuffer
 
     tsMinResults.size shouldEqual expectedWindows
@@ -190,7 +190,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
       info(s"iteration $x windowSize=$windowSize step=$step")
 
       // Test ts_of_last_over_time
-      val tsLastChunkedIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+      val tsLastChunkedIt = chunkedWindowIt(data, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
       val tsLastAggregated = tsLastChunkedIt.map(_.getDouble(1)).toBuffer
 
       // Expected: timestamp (in seconds) when last (most recent) value occurred in each window
@@ -214,7 +214,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 2
 
     // Test ts_of_last_over_time - should ignore NaN values and find last non-NaN
-    val tsLastIt = chunkedWindowIt(dataWithNaN, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(dataWithNaN, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResults = tsLastIt.map(_.getDouble(1)).toBuffer
 
     // Window 1: [1.0, 2.0, NaN, 4.0] -> last non-NaN is 4.0 at index 3
@@ -225,7 +225,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     tsLastResults.foreach { ts => ts.isNaN shouldBe false }
   }
 
-  it("should return NaN timestamp when all values in window are NaN for ts_of_last_over_time") {
+  it("should return the timestamp of NaN when all values in window are NaN for ts_of_last_over_time") {
     // Test data with all NaN values
     val allNaN = Seq(Double.NaN, Double.NaN, Double.NaN, Double.NaN)
     val rv = timeValueRV(allNaN)
@@ -234,9 +234,9 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_last_over_time
-    val tsLastIt = chunkedWindowIt(allNaN, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(allNaN, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResult = tsLastIt.next().getDouble(1)
-    tsLastResult.isNaN shouldEqual true
+    tsLastResult.isNaN shouldEqual false
   }
 
   it("should correctly identify timestamp of last occurrence in ts_of_last_over_time") {
@@ -248,7 +248,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_last_over_time - should return timestamp of LAST value (1.0 at index 7)
-    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(data, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResult = tsLastIt.next().getDouble(1)
     val expectedLastTs = (defaultStartTS + 7 * pubFreq).toDouble / 1000.0  // Index 7 (last)
     tsLastResult shouldEqual expectedLastTs
@@ -262,7 +262,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_last_over_time
-    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(data, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResult = tsLastIt.next().getDouble(1)
     val expectedTs = defaultStartTS.toDouble / 1000.0
     tsLastResult shouldEqual expectedTs
@@ -276,7 +276,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 1
 
     // Test ts_of_last_over_time - last value is -1.0 at index 5
-    val tsLastIt = chunkedWindowIt(dataWithNegatives, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(dataWithNegatives, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResult = tsLastIt.next().getDouble(1)
     val expectedLastTs = (defaultStartTS + 5 * pubFreq).toDouble / 1000.0
     tsLastResult shouldEqual expectedLastTs
@@ -291,7 +291,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     val step = 25
 
     // Test ts_of_last_over_time
-    val tsLastIt = chunkedWindowIt(data, rv, new TsOfLastOverTimeChunkedFunctionD(), windowSize, step)
+    val tsLastIt = chunkedWindowIt(data, rv, new LastSampleChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsLastResults = tsLastIt.map(_.getDouble(1)).toBuffer
 
     // Verify we got results for all windows
