@@ -342,6 +342,63 @@ class BucketAggregationState(
   }
 
   /**
+   * Returns an iterator over active buckets in [startTime, endTime] whose
+   * lastIngestTime < stalenessThreshold. Buckets still receiving samples
+   * (lastIngestTime >= threshold) are excluded.
+   *
+   * Pass stalenessThreshold = Long.MaxValue to include all buckets (no filter).
+   */
+  def bucketValuesIteratorInRange(
+    startTime: Long,
+    endTime: Long,
+    stalenessThreshold: Long
+  ): Iterator[(Long, Array[Any])] = {
+    val rangeView = if (endTime == Long.MaxValue) {
+      activeBuckets.tailMap(startTime, true)
+    } else {
+      activeBuckets.subMap(startTime, true, endTime, true)
+    }
+    val javaIt = rangeView.entrySet().iterator()
+    new Iterator[(Long, Array[Any])] {
+      // scalastyle:off null
+      private var nextEntry: java.util.Map.Entry[java.lang.Long, BucketState] = advance()
+
+      private def advance(): java.util.Map.Entry[java.lang.Long, BucketState] = {
+        while (javaIt.hasNext) {
+          val entry = javaIt.next()
+          if (stalenessThreshold == Long.MaxValue) return entry
+          val ts = entry.getKey
+          val lastIngest = bucketLastIngestTime.get(ts)
+          if (lastIngest != null && lastIngest < stalenessThreshold) return entry
+          // null can't happen via aggregate()/aggregateRow() — include defensively for test injection
+          if (lastIngest == null) return entry
+        }
+        null
+      }
+
+      def hasNext: Boolean = nextEntry != null
+      def next(): (Long, Array[Any]) = {
+        if (nextEntry == null) throw new NoSuchElementException
+        val entry = nextEntry
+        nextEntry = advance()
+        val ts = entry.getKey.longValue()
+        val state = entry.getValue
+        val values = new Array[Any](numColumns)
+        var i = 0
+        while (i < numColumns) {
+          columnConfigs(i) match {
+            case Some(_) => values(i) = state.getValueForQuery(i)
+            case None => values(i) = state.getValue(i)
+          }
+          i += 1
+        }
+        (ts, values)
+      }
+      // scalastyle:on null
+    }
+  }
+
+  /**
    * Returns an iterator over active buckets in the given time range [startTime, endTime].
    * Each entry is (bucketTimestamp, columnValues) where histogram columns return MutableHistogram
    * objects directly (not serialized DirectBuffers), suitable for the query path.

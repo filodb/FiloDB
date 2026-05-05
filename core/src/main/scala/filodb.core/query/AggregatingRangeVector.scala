@@ -64,11 +64,11 @@ final case class AggregatingRangeVector(
    */
   private def getActiveBucketRows(startTime: Long, endTime: Long): Iterator[BucketRowData] = {
     val toleranceMs = partition.aggregationConfig.map(_.oooToleranceMs).getOrElse(0L)
-    AggregatingRangeVector.filterAndSnapshotBuckets(
-      partition.bucketValuesIteratorInRange(startTime, endTime),
-      toleranceMs,
-      columnIDs,
-      System.currentTimeMillis()
+    val now = System.currentTimeMillis()
+    val stalenessThreshold = now - toleranceMs
+    AggregatingRangeVector.snapshotBuckets(
+      partition.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold),
+      columnIDs
     )
   }
 
@@ -81,38 +81,55 @@ final case class AggregatingRangeVector(
 
 object AggregatingRangeVector {
   // scalastyle:off null
+
+  /**
+   * Snapshots bucket values: clones histogram values arrays and applies makeMonotonic.
+   * No tolerance filtering — that is handled upstream by BucketAggregationState.
+   */
+  private[query] def snapshotBuckets(
+    rawIterator: Iterator[(Long, Array[Any])],
+    columnIDs: Array[Int]
+  ): Iterator[BucketRowData] = {
+    rawIterator.map { case (bucketTs, allColumnValues) =>
+      val values = new Array[Any](columnIDs.length)
+      var i = 0
+      while (i < columnIDs.length) {
+        val colIdx = columnIDs(i)
+        if (colIdx == 0) {
+          values(i) = bucketTs
+        } else if (colIdx < allColumnValues.length) {
+          allColumnValues(colIdx) match {
+            case hist: MutableHistogram =>
+              val snapshot = MutableHistogram(hist.buckets, hist.values.clone())
+              snapshot.makeMonotonic()
+              values(i) = snapshot
+            case other =>
+              values(i) = other
+          }
+        } else {
+          values(i) = null
+        }
+        i += 1
+      }
+      BucketRowData(bucketTs, values)
+    }
+  }
+
+  /**
+   * Legacy entry point kept for test compatibility. The toleranceMs/nowMs filter has been
+   * moved to BucketAggregationState.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold).
+   */
+  @deprecated("Use snapshotBuckets with pre-filtered iterator from BucketAggregationState", "")
   private[query] def filterAndSnapshotBuckets(
     rawIterator: Iterator[(Long, Array[Any])],
     toleranceMs: Long,
     columnIDs: Array[Int],
     nowMs: Long
   ): Iterator[BucketRowData] = {
-    rawIterator
-      .filter { case (bucketTs, _) => nowMs - bucketTs >= toleranceMs }
-      .map { case (bucketTs, allColumnValues) =>
-        val values = new Array[Any](columnIDs.length)
-        var i = 0
-        while (i < columnIDs.length) {
-          val colIdx = columnIDs(i)
-          if (colIdx == 0) {
-            values(i) = bucketTs
-          } else if (colIdx < allColumnValues.length) {
-            allColumnValues(colIdx) match {
-              case hist: MutableHistogram =>
-                // buckets ref is safe to share: ingest replaces (not mutates) bucket objects
-                val snapshot = MutableHistogram(hist.buckets, hist.values.clone())
-                snapshot.makeMonotonic()
-                values(i) = snapshot
-              case other =>
-                values(i) = other
-            }
-          } else {
-            values(i) = null
-          }
-          i += 1
-        }
-        BucketRowData(bucketTs, values)
-      }
+    snapshotBuckets(
+      rawIterator.filter { case (bucketTs, _) => nowMs - bucketTs >= toleranceMs },
+      columnIDs
+    )
   }
   // scalastyle:on null
 }

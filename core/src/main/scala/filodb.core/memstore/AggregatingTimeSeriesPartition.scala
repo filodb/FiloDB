@@ -221,6 +221,16 @@ class AggregatingTimeSeriesPartition(
   def hasActiveBuckets: Boolean = bucketState.hasActiveBuckets
 
   /**
+   * Returns an iterator over active bucket values in [startTime, endTime] whose
+   * lastIngestTime < stalenessThreshold. Buckets still receiving samples are excluded.
+   */
+  def bucketValuesIteratorInRange(
+    startTime: Long, endTime: Long, stalenessThreshold: Long
+  ): Iterator[(Long, Array[Any])] = {
+    bucketState.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold)
+  }
+
+  /**
    * Returns an iterator over active bucket values in [startTime, endTime].
    * For histogram columns, returns MutableHistogram objects (not serialized).
    * Uses TreeMap range view — no intermediate collections are allocated.
