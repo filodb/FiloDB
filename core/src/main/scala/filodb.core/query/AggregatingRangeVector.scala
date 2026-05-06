@@ -63,11 +63,8 @@ final case class AggregatingRangeVector(
    * No intermediate collections (Set, Seq) are materialized; no redundant sort is performed.
    */
   private def getActiveBucketRows(startTime: Long, endTime: Long): Iterator[BucketRowData] = {
-    val toleranceMs = partition.aggregationConfig.map(_.oooToleranceMs).getOrElse(0L)
-    val now = System.currentTimeMillis()
-    val stalenessThreshold = now - toleranceMs
     AggregatingRangeVector.snapshotBuckets(
-      partition.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold),
+      partition.bucketValuesIteratorInRange(startTime, endTime),
       columnIDs
     )
   }

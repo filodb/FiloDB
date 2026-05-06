@@ -83,72 +83,84 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
   }
 
   describe("BucketAggregationState.aggregate - tolerance checking") {
-    it("should reject samples outside the tolerance window") {
+    it("should reject samples outside the event-time tolerance window") {
       val toleranceMs = 30000L
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
 
-      // ingestionTime - sampleTs > toleranceMs => rejected
-      // sampleTs=10000, ingestionTime=50000, diff=40000 > 30000 => rejected
-      val result = state.aggregate(10000L, 50000L, Array(10.0: Any))
+      // First sample sets watermark to 200000
+      state.aggregate(200000L, 200000L, Array(10.0: Any))
+
+      // Sample more than tolerance behind watermark: rejected
+      // sampleTs=169999, watermark=200000, diff=30001 > 30000 => rejected
+      val result = state.aggregate(169999L, 200000L, Array(10.0: Any))
       result shouldEqual false
-      state.activeBucketTimestamps shouldBe empty
     }
 
-    it("should accept samples within the tolerance window") {
+    it("should accept samples within the event-time tolerance window") {
       val toleranceMs = 30000L
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
 
-      // ingestionTime - sampleTs = 20000 <= 30000 => accepted
-      val result = state.aggregate(30000L, 50000L, Array(10.0: Any))
+      // First sample sets watermark to 200000
+      state.aggregate(200000L, 200000L, Array(10.0: Any))
+
+      // Sample within tolerance of watermark: 200000 - 170000 = 30000 <= 30000 => accepted
+      val result = state.aggregate(170000L, 200000L, Array(10.0: Any))
       result shouldEqual true
-      state.activeBucketTimestamps should not be empty
     }
 
     it("should accept samples at exactly the tolerance boundary") {
       val toleranceMs = 30000L
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
 
-      // ingestionTime - sampleTs = 30000 <= 30000 => accepted
-      val result = state.aggregate(20000L, 50000L, Array(10.0: Any))
+      // First sample sets watermark to 200000
+      state.aggregate(200000L, 200000L, Array(10.0: Any))
+
+      // sampleTs = watermark - tolerance = 170000 => accepted
+      val result = state.aggregate(170000L, 200000L, Array(10.0: Any))
       result shouldEqual true
     }
   }
 
   describe("BucketAggregationState.aggregate - tolerance boundary edge cases") {
-    it("should accept sample at exactly the tolerance boundary (ingestionTime - sampleTs == toleranceMs)") {
+    it("should accept sample at exactly the tolerance boundary (sampleTs == watermark - toleranceMs)") {
       val toleranceMs = 30000L
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
 
-      // ingestionTime=50000, sampleTs=20000, diff=30000 == toleranceMs => accepted
-      val result = state.aggregate(20000L, 50000L, Array(10.0: Any))
+      // First sample sets watermark
+      state.aggregate(200000L, 200000L, Array(10.0: Any))
+
+      // Exactly at boundary: sampleTs=170000, watermark=200000, diff=30000 == toleranceMs => accepted
+      val result = state.aggregate(170000L, 200000L, Array(10.0: Any))
       result shouldEqual true
       state.activeBucketTimestamps should not be empty
     }
 
-    it("should reject sample one ms past tolerance boundary (ingestionTime - sampleTs == toleranceMs + 1)") {
+    it("should reject sample one ms past tolerance boundary (sampleTs == watermark - toleranceMs - 1)") {
       val toleranceMs = 30000L
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
 
-      // ingestionTime=50001, sampleTs=20000, diff=30001 > toleranceMs => rejected
-      val result = state.aggregate(20000L, 50001L, Array(10.0: Any))
+      // First sample sets watermark
+      state.aggregate(200000L, 200000L, Array(10.0: Any))
+
+      // One ms past: sampleTs=169999, watermark=200000, diff=30001 > toleranceMs => rejected
+      val result = state.aggregate(169999L, 200000L, Array(10.0: Any))
       result shouldEqual false
-      state.activeBucketTimestamps shouldBe empty
     }
 
-    it("should drop all OOO samples with zero tolerance") {
+    it("should handle zero tolerance: only accept samples at or after the watermark") {
       val state = new BucketAggregationState(singleSumConfig(toleranceMs = 0L), 1)
 
-      // In-order sample (ingestionTime == sampleTs) should be accepted
+      // First sample sets watermark to 100000
       val inOrderResult = state.aggregate(100000L, 100000L, Array(10.0: Any))
       inOrderResult shouldEqual true
 
-      // Any OOO sample (ingestionTime > sampleTs by even 1ms) should be rejected
+      // Any sample behind watermark by even 1ms should be rejected
       val oooResult = state.aggregate(99999L, 100000L, Array(20.0: Any))
       oooResult shouldEqual false
 
-      // Only the in-order sample's bucket should exist
-      state.activeBucketTimestamps.size shouldEqual 1
-      state.getBucketValues(120000L).get(0).asInstanceOf[Double] shouldEqual 10.0
+      // Sample at exactly the watermark: accepted (>= watermark - 0)
+      val atWatermark = state.aggregate(100000L, 100000L, Array(30.0: Any))
+      atWatermark shouldEqual true
     }
   }
 
@@ -395,130 +407,4 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  describe("BucketAggregationState.bucketValuesIteratorInRange - staleness threshold filtering") {
-
-    it("should hide future-dated bucket until wall-clock tolerance elapses from ingestion") {
-      val intervalMs = 60000L
-      val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(intervalMs, toleranceMs), 1)
-
-      val ingestWallClock = 1000000L
-      // Future-dated sample: sample timestamp far in the future
-      val futureSampleTs = ingestWallClock + 600000L // +10 minutes
-      state.aggregate(futureSampleTs, ingestWallClock, Array(42.0: Any))
-
-      val bucketTs = TimeBucket.ceilToBucket(futureSampleTs, intervalMs)
-      state.activeBucketTimestamps should contain(bucketTs)
-
-      // Query immediately (5s after ingest): stalenessThreshold = wallClock - tolerance
-      // wallClock = ingestWallClock + 5000, threshold = ingestWallClock + 5000 - 30000 = ingestWallClock - 25000
-      // lastIngestTime = ingestWallClock, which is NOT < threshold → bucket hidden
-      val earlyThreshold = ingestWallClock + 5000L - toleranceMs
-      val earlyResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, earlyThreshold).toSeq
-      earlyResult shouldBe empty
-
-      // Query after tolerance elapses from ingestion: wallClock = ingestWallClock + 35000
-      // threshold = ingestWallClock + 35000 - 30000 = ingestWallClock + 5000
-      // lastIngestTime = ingestWallClock < ingestWallClock + 5000 → bucket visible
-      val lateThreshold = ingestWallClock + 35000L - toleranceMs
-      val lateResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, lateThreshold).toSeq
-      lateResult should have length 1
-      lateResult.head._1 shouldEqual bucketTs
-      lateResult.head._2(0).asInstanceOf[Double] shouldEqual 42.0
-    }
-
-    it("should show real-time (past-dated) samples after tolerance from ingestion - regression test") {
-      val intervalMs = 60000L
-      val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(intervalMs, toleranceMs), 1)
-
-      val wallClock = 1000000L
-      // Real-time sample: sampleTs ≈ wallClock
-      val sampleTs = wallClock - 1000L
-      state.aggregate(sampleTs, wallClock, Array(10.0: Any))
-
-      val bucketTs = TimeBucket.ceilToBucket(sampleTs, intervalMs)
-
-      // Query right after: threshold = wallClock + 1000 - 30000 → not past lastIngestTime
-      val earlyThreshold = wallClock + 1000L - toleranceMs
-      val earlyResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, earlyThreshold).toSeq
-      earlyResult shouldBe empty
-
-      // Query after tolerance elapses: threshold = wallClock + 35000 - 30000 = wallClock + 5000
-      // lastIngestTime = wallClock < wallClock + 5000 → visible
-      val lateThreshold = wallClock + 35000L - toleranceMs
-      val lateResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, lateThreshold).toSeq
-      lateResult should have length 1
-      lateResult.head._1 shouldEqual bucketTs
-    }
-
-    it("should re-hide bucket when late OOO arrival resets lastIngestTime") {
-      val intervalMs = 60000L
-      val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(intervalMs, toleranceMs), 1)
-
-      val t0 = 1000000L
-      // First sample at t0 for a bucket
-      val sampleTs = t0 + 10000L
-      state.aggregate(sampleTs, t0, Array(10.0: Any))
-
-      val bucketTs = TimeBucket.ceilToBucket(sampleTs, intervalMs)
-
-      // After tolerance: threshold = t0 + 35000 - 30000 = t0 + 5000
-      // lastIngestTime = t0 < t0 + 5000 → visible
-      val visibleThreshold = t0 + 35000L - toleranceMs
-      val visibleResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, visibleThreshold).toSeq
-      visibleResult should have length 1
-
-      // Late OOO arrival for same bucket at t0 + tolerance + 10ms
-      val lateIngestTime = t0 + toleranceMs + 10L
-      val lateSampleTs = sampleTs + 5000L // still maps to same bucket
-      state.aggregate(lateSampleTs, lateIngestTime, Array(5.0: Any))
-
-      // Query at same threshold as before: lastIngestTime now = lateIngestTime
-      // threshold = t0 + 5000, lastIngestTime = t0 + 30010 → NOT < threshold → hidden
-      val reHiddenResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, visibleThreshold).toSeq
-      reHiddenResult shouldBe empty
-
-      // Query much later: threshold = lateIngestTime + 5000 = t0 + 35010
-      // lastIngestTime = t0 + 30010 < t0 + 35010 → visible again
-      val laterThreshold = lateIngestTime + 5000L
-      val laterResult = state.bucketValuesIteratorInRange(0L, Long.MaxValue, laterThreshold).toSeq
-      laterResult should have length 1
-      laterResult.head._1 shouldEqual bucketTs
-      // Sum of both samples
-      laterResult.head._2(0).asInstanceOf[Double] shouldEqual 15.0
-    }
-
-    it("should include all buckets when stalenessThreshold is Long.MaxValue (no filter)") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
-
-      state.aggregate(100000L, 100000L, Array(10.0: Any))
-      state.aggregate(200000L, 200000L, Array(20.0: Any))
-
-      val result = state.bucketValuesIteratorInRange(0L, Long.MaxValue, Long.MaxValue).toSeq
-      result should have length 2
-    }
-
-    it("should respect time range AND staleness threshold together") {
-      val intervalMs = 60000L
-      val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(intervalMs, toleranceMs), 1)
-
-      val t0 = 1000000L
-      // Two buckets ingested at the same wall-clock
-      state.aggregate(t0 + 10000L, t0, Array(10.0: Any))   // bucket A
-      state.aggregate(t0 + 70000L, t0, Array(20.0: Any))   // bucket B
-
-      val bucketA = TimeBucket.ceilToBucket(t0 + 10000L, intervalMs)
-      val bucketB = TimeBucket.ceilToBucket(t0 + 70000L, intervalMs)
-
-      // threshold past tolerance → both visible
-      val threshold = t0 + 5000L
-      // But restrict time range to only include bucket A
-      val rangedResult = state.bucketValuesIteratorInRange(bucketA, bucketA, threshold).toSeq
-      rangedResult should have length 1
-      rangedResult.head._1 shouldEqual bucketA
-    }
-  }
 }

@@ -34,15 +34,15 @@ class BucketAggregationState(
   // Per-bucket minimum Kafka offset (for watermark hold-back during flush)
   private val bucketMinOffset = new JTreeMap[java.lang.Long, java.lang.Long]()
 
-  // Per-bucket last ingestion wall-clock time (for stale-bucket reaping)
-  private val bucketLastIngestTime = new JTreeMap[java.lang.Long, java.lang.Long]()
-
   // Track finalized bucket timestamps to reject late samples.
   // Java HashSet avoids Scala boxing overhead on Long keys.
   private val finalizedBuckets = new java.util.HashSet[java.lang.Long]()
 
-  // Track the latest sample timestamp seen for OOO detection
+  // Track the latest sample timestamp seen (high-water mark for event-time tolerance)
   private var latestSampleTimestamp: Long = Long.MinValue
+
+  /** The current event-time high-water mark. Used by finalization logic. */
+  def latestSampleTimestampSeen: Long = latestSampleTimestamp
 
   // Cached primary config values (computed once at construction to avoid per-sample collection ops)
   private val primaryIntervalMs: Long = columnConfigs.flatten.headOption.map(_.intervalMs).getOrElse(0L)
@@ -137,13 +137,11 @@ class BucketAggregationState(
       latestSampleTimestamp = sampleTimestamp
     }
 
-    // Track per-bucket min offset and last ingestion wall-clock time
+    // Track per-bucket min offset
     if (offset != Long.MaxValue) {
       val existing = bucketMinOffset.get(ts)
       if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
     }
-    val existingTime = bucketLastIngestTime.get(ts)
-    if (existingTime == null || ingestionTime > existingTime) bucketLastIngestTime.put(ts, ingestionTime)
 
     aggregated
   }
@@ -233,13 +231,11 @@ class BucketAggregationState(
       latestSampleTimestamp = sampleTimestamp
     }
 
-    // Track per-bucket min offset and last ingestion wall-clock time
+    // Track per-bucket min offset
     if (offset != Long.MaxValue) {
       val existing = bucketMinOffset.get(ts)
       if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
     }
-    val existingTime2 = bucketLastIngestTime.get(ts)
-    if (existingTime2 == null || ingestionTime > existingTime2) bucketLastIngestTime.put(ts, ingestionTime)
 
     aggregated
   }
@@ -287,23 +283,6 @@ class BucketAggregationState(
   }
 
   /**
-   * Returns bucket timestamps whose last ingestion wall-clock time is older than
-   * (nowMs - toleranceMs). These are "stale" buckets that should be reaped so they
-   * don't hold back the Kafka commit watermark indefinitely.
-   */
-  def getStaleBuckets(nowMs: Long, toleranceMs: Long): Seq[Long] = {
-    if (bucketLastIngestTime.isEmpty) return Seq.empty
-    val cutoff = nowMs - toleranceMs
-    val result = scala.collection.mutable.ArrayBuffer.empty[Long]
-    val it = bucketLastIngestTime.entrySet().iterator()
-    while (it.hasNext) {
-      val entry = it.next()
-      if (entry.getValue < cutoff) result += entry.getKey.longValue()
-    }
-    result.toSeq
-  }
-
-  /**
    * Gets the complete aggregated row for a bucket.
    * Returns column values array suitable for creating a RowReader.
    *
@@ -337,65 +316,7 @@ class BucketAggregationState(
     if (state != null) releaseBucketState(state)
     // scalastyle:on null
     bucketMinOffset.remove(bucketTs)
-    bucketLastIngestTime.remove(bucketTs)
     finalizedBuckets.add(bucketTs)
-  }
-
-  /**
-   * Returns an iterator over active buckets in [startTime, endTime] whose
-   * lastIngestTime < stalenessThreshold. Buckets still receiving samples
-   * (lastIngestTime >= threshold) are excluded.
-   *
-   * Pass stalenessThreshold = Long.MaxValue to include all buckets (no filter).
-   */
-  def bucketValuesIteratorInRange(
-    startTime: Long,
-    endTime: Long,
-    stalenessThreshold: Long
-  ): Iterator[(Long, Array[Any])] = {
-    val rangeView = if (endTime == Long.MaxValue) {
-      activeBuckets.tailMap(startTime, true)
-    } else {
-      activeBuckets.subMap(startTime, true, endTime, true)
-    }
-    val javaIt = rangeView.entrySet().iterator()
-    new Iterator[(Long, Array[Any])] {
-      // scalastyle:off null
-      private var nextEntry: java.util.Map.Entry[java.lang.Long, BucketState] = advance()
-
-      private def advance(): java.util.Map.Entry[java.lang.Long, BucketState] = {
-        while (javaIt.hasNext) {
-          val entry = javaIt.next()
-          if (stalenessThreshold == Long.MaxValue) return entry
-          val ts = entry.getKey
-          val lastIngest = bucketLastIngestTime.get(ts)
-          if (lastIngest != null && lastIngest < stalenessThreshold) return entry
-          // null can't happen via aggregate()/aggregateRow() — include defensively for test injection
-          if (lastIngest == null) return entry
-        }
-        null
-      }
-
-      def hasNext: Boolean = nextEntry != null
-      def next(): (Long, Array[Any]) = {
-        if (nextEntry == null) throw new NoSuchElementException
-        val entry = nextEntry
-        nextEntry = advance()
-        val ts = entry.getKey.longValue()
-        val state = entry.getValue
-        val values = new Array[Any](numColumns)
-        var i = 0
-        while (i < numColumns) {
-          columnConfigs(i) match {
-            case Some(_) => values(i) = state.getValueForQuery(i)
-            case None => values(i) = state.getValue(i)
-          }
-          i += 1
-        }
-        (ts, values)
-      }
-      // scalastyle:on null
-    }
   }
 
   /**
@@ -486,7 +407,6 @@ class BucketAggregationState(
     activeBuckets.clear()
     finalizedBuckets.clear()
     bucketMinOffset.clear()
-    bucketLastIngestTime.clear()
     latestSampleTimestamp = Long.MinValue
   }
 
@@ -494,9 +414,9 @@ class BucketAggregationState(
   private def getBucketTimestamp(sampleTs: Long): Long =
     TimeBucket.ceilToBucket(sampleTs, primaryIntervalMs)
 
-  // Helper to check if sample is within tolerance using cached tolerance
+  /** Event-time tolerance check: sample is within tolerance of the high-water mark. */
   private def isWithinTolerance(sampleTs: Long, ingestionTime: Long): Boolean =
-    ingestionTime - sampleTs <= primaryOooToleranceMs
+    latestSampleTimestamp == Long.MinValue || sampleTs >= latestSampleTimestamp - primaryOooToleranceMs
 
   /**
    * Gets the aggregated histogram for a specific column and bucket.

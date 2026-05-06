@@ -53,9 +53,6 @@ class AggregatingTimeSeriesPartition(
   // Check if any column has aggregation configured
   private val hasAnyAggregation: Boolean = aggConfigs.exists(_.isDefined)
 
-  // Guard to prevent re-entrant switchBuffers calls (flushAllBuckets -> super.ingest -> switchBuffers)
-  private var isSwitchingBuffers: Boolean = false
-
   // Determine which columns are histogram columns
   private val isHistogramColumn: Array[Boolean] = {
     schema.data.columns.map { col =>
@@ -144,7 +141,7 @@ class AggregatingTimeSeriesPartition(
   ): Unit = {
     primaryConfig.foreach { config =>
       val thresholdTs = TimeBucket.ceilToBucket(
-        ingestionTime - config.oooToleranceMs,
+        bucketState.latestSampleTimestampSeen - config.oooToleranceMs,
         config.intervalMs
       )
 
@@ -221,16 +218,6 @@ class AggregatingTimeSeriesPartition(
   def hasActiveBuckets: Boolean = bucketState.hasActiveBuckets
 
   /**
-   * Returns an iterator over active bucket values in [startTime, endTime] whose
-   * lastIngestTime < stalenessThreshold. Buckets still receiving samples are excluded.
-   */
-  def bucketValuesIteratorInRange(
-    startTime: Long, endTime: Long, stalenessThreshold: Long
-  ): Iterator[(Long, Array[Any])] = {
-    bucketState.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold)
-  }
-
-  /**
    * Returns an iterator over active bucket values in [startTime, endTime].
    * For histogram columns, returns MutableHistogram objects (not serialized).
    * Uses TreeMap range view — no intermediate collections are allocated.
@@ -288,36 +275,8 @@ class AggregatingTimeSeriesPartition(
     }
   }
 
-  /**
-   * Override switchBuffers to reap stale buckets instead of force-flushing all.
-   * Active buckets whose tolerance window hasn't expired remain in memory so that
-   * late OOO samples can still be aggregated into them. The Kafka commit watermark
-   * is held back accordingly (see TimeSeriesShard.prepareFlushGroup).
-   */
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    if (hasAnyAggregation && !isSwitchingBuffers) {
-      isSwitchingBuffers = true
-      try {
-        reapStaleBuckets(System.currentTimeMillis(), blockHolder)
-      } finally {
-        isSwitchingBuffers = false
-      }
-    }
-
     super.switchBuffers(blockHolder, encode)
-  }
-
-  private def reapStaleBuckets(nowMs: Long, blockHolder: BlockMemFactory): Unit = {
-    primaryConfig.foreach { cfg =>
-      val stale = bucketState.getStaleBuckets(nowMs, cfg.oooToleranceMs)
-      stale.foreach { bucketTs =>
-        bucketState.getBucketValues(bucketTs).foreach { columnValues =>
-          val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
-          super.ingest(nowMs, aggregatedRow, blockHolder, false, None, acceptDuplicateSamples = true)
-        }
-        bucketState.markFinalized(bucketTs)
-      }
-    }
   }
 
   /** Returns the smallest Kafka offset referenced by any active (unfinalized) bucket. */

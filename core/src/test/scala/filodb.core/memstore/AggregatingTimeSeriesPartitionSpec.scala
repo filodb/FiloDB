@@ -891,12 +891,16 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       val zeroTolBufferPool = new WriteBufferPool(memFactory, zeroToleranceDataset.schema.data, TestData.storeConf)
       part = makeAggregatingPart(0, zeroToleranceDataset, defaultPartKey, zeroTolBufferPool)
 
-      // In-order sample (ingestionTime == sampleTs)
+      // First sample sets watermark to 100000
       part.ingest(100000L, TupleRowReader((Some(100000L), Some(10.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
-      // OOO sample (sampleTs < ingestionTime by 1ms) - should be dropped
-      part.ingest(100001L, TupleRowReader((Some(100000L), Some(20.0))),
+      // Advance watermark: second sample at 110000
+      part.ingest(110000L, TupleRowReader((Some(110000L), Some(20.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // OOO sample behind watermark by 1ms — with zero tolerance, rejected
+      part.ingest(110000L, TupleRowReader((Some(109999L), Some(30.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
       // Force finalization
@@ -905,8 +909,9 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
 
       val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
       val values = iterator.map(_.getDouble(0)).toSeq
+      // Only the two in-order samples aggregated (both are in bucket 120000): sum = 30.0
       values.length shouldEqual 1
-      values.head shouldEqual 10.0 +- 0.01
+      values.head shouldEqual 30.0 +- 0.01
     }
   }
 
@@ -1019,35 +1024,27 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
   }
 
   describe("switchBuffers / chunk sealing") {
-    it("should NOT flush active in-tolerance buckets on switchBuffers (watermark hold)") {
-      // With the watermark-hold fix, switchBuffers no longer force-flushes all buckets.
-      // Only stale buckets (lastIngestTime older than tolerance) are reaped.
+    it("should NOT flush active buckets on switchBuffers (no wall-clock reaper)") {
       val bufferPool = makeWideToleranceBufferPool()
       part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
 
       val bucketInterval = 60000L
-      // Use wall-clock-proximate timestamps so buckets are NOT stale
-      val now = System.currentTimeMillis()
-      val base = (now / bucketInterval) * bucketInterval - 2 * bucketInterval
 
-      // Create multiple active buckets with recent ingestion times
-      // Bucket (base + bucketInterval)
-      part.ingest(base, TupleRowReader((Some(base), Some(1.0))),
+      // Create multiple active buckets
+      part.ingest(10000L, TupleRowReader((Some(10000L), Some(1.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
-      // Bucket (base + 2*bucketInterval)
-      part.ingest(base + bucketInterval, TupleRowReader((Some(base + bucketInterval), Some(10.0))),
+      part.ingest(70000L, TupleRowReader((Some(70000L), Some(10.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
-      // Bucket (base + 3*bucketInterval)
-      part.ingest(base + 2 * bucketInterval, TupleRowReader((Some(base + 2 * bucketInterval), Some(100.0))),
+      part.ingest(130000L, TupleRowReader((Some(130000L), Some(100.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
       // Verify 3 active buckets
       part.bucketAggregationStats.activeBucketCount shouldEqual 3
 
-      // switchBuffers — ingestion was recent, so buckets are NOT stale
+      // switchBuffers — no wall-clock reaper, all buckets stay active
       part.switchBuffers(ingestBlockHolder)
 
-      // Active buckets should still be there (not force-flushed)
+      // Active buckets should still be there
       part.bucketAggregationStats.activeBucketCount shouldEqual 3
     }
 
@@ -1063,7 +1060,6 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
     }
 
     it("should handle switchBuffers with histogram buckets") {
-      // Use wide tolerance histogram dataset to avoid stale-reap during switchBuffers
       val wideToleranceHistDataset = Dataset("wide_tol_hist", Seq("series:string"),
         Seq("timestamp:ts", "hist:hist:{counter=true}"),
         scalarDatasetOptions,
@@ -1076,11 +1072,8 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       val hist1 = createHistogram(Seq((1.0, 5L), (2.0, 10L)))
       val hist2 = createHistogram(Seq((1.0, 3L), (2.0, 7L)))
 
-      // Use timestamps near "now" so bucket is NOT stale (wide tolerance = 5min).
-      val now = System.currentTimeMillis()
-      val baseTs = now - 5000L
+      val baseTs = 100000L
 
-      // Both samples should land in same bucket
       part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(hist1))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
       part.ingest(baseTs + 2000, TupleRowReader((Some(baseTs + 2000), Some(hist2))),
@@ -1088,7 +1081,7 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
 
       part.bucketAggregationStats.activeBucketCount shouldEqual 1
 
-      // switchBuffers should NOT flush the in-tolerance bucket
+      // switchBuffers should NOT flush the bucket
       part.switchBuffers(ingestBlockHolder)
 
       part.bucketAggregationStats.activeBucketCount shouldEqual 1
@@ -1294,16 +1287,13 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
 
   describe("Watermark-based offset hold") {
     it("should aggregate late OOO sample within tolerance after switchBuffers") {
-      // Use wide tolerance dataset to avoid stale-reap during switchBuffers
       val bufferPool = makeWideToleranceBufferPool()
       part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
 
       val bucketInterval = 60000L
-      val oooTolerance = 300000L // 5 minutes — wide tolerance
+      val oooTolerance = 300000L
 
-      // Use timestamps near "now" so buckets are NOT stale.
-      val now = System.currentTimeMillis()
-      val baseTs = now - 5000L
+      val baseTs = 100000L
       val bucketTs = filodb.core.memstore.aggregation.TimeBucket.ceilToBucket(baseTs, bucketInterval)
 
       // Ingest 2 samples into the same bucket
@@ -1315,25 +1305,23 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       // Bucket should be active with sum=30.0
       part.getAggregatedValue(1, bucketTs).get.asInstanceOf[Double] shouldEqual 30.0 +- 0.01
 
-      // Call switchBuffers (simulates flush boundary) — bucket is NOT stale
+      // Call switchBuffers — bucket stays active (no wall-clock reaper)
       part.switchBuffers(ingestBlockHolder)
 
-      // Bucket should still be active (not force-flushed, not stale)
+      // Bucket should still be active
       part.bucketAggregationStats.activeBucketCount should be >= 1
       part.getAggregatedValue(1, bucketTs) shouldBe defined
 
-      // Ingest a late OOO sample for the same bucket, within tolerance
-      // sampleTs ≈ now - 3000, ingestionTime ≈ now + 5000, diff ≈ 8000 < 300000 tolerance
+      // Ingest a late OOO sample for the same bucket, within tolerance of watermark
       val lateTs = baseTs + 2000
-      val lateIngestionTime = now + 5000
-      part.ingest(lateIngestionTime, TupleRowReader((Some(lateTs), Some(15.0))),
+      part.ingest(lateTs, TupleRowReader((Some(lateTs), Some(15.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
       // Bucket should now have sum=45.0 (10+20+15)
       part.getAggregatedValue(1, bucketTs).get.asInstanceOf[Double] shouldEqual 45.0 +- 0.01
 
       // Trigger finalization by ingesting far in the future
-      val futureTs = now + 2 * bucketInterval + oooTolerance + 10000
+      val futureTs = baseTs + 2 * bucketInterval + oooTolerance + 10000
       part.ingest(futureTs, TupleRowReader((Some(futureTs), Some(999.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
@@ -1347,34 +1335,36 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
     }
 
     it("should still drop late OOO sample outside tolerance after switchBuffers") {
-      // Use wide tolerance dataset to avoid stale-reap during switchBuffers
       val bufferPool = makeWideToleranceBufferPool()
       part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
 
-      val oooTolerance = 300000L // 5 minutes — wide tolerance
+      val oooTolerance = 300000L
       val bucketInterval = 60000L
 
-      // Use timestamps near "now" so bucket is NOT stale during switchBuffers.
-      val now = System.currentTimeMillis()
-      val baseTs = now - 5000L
+      val baseTs = 100000L
       val bucketTs = filodb.core.memstore.aggregation.TimeBucket.ceilToBucket(baseTs, bucketInterval)
 
-      // Ingest a sample
+      // Ingest a sample — watermark set to baseTs
       part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(10.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
       part.switchBuffers(ingestBlockHolder)
 
-      // Bucket should still be active (not stale)
+      // Bucket should still be active (no wall-clock reaper)
       part.getAggregatedValue(1, bucketTs) shouldBe defined
 
-      // Try to ingest a late sample OUTSIDE tolerance
-      // sampleTs=baseTs, ingestionTime=baseTs+oooTolerance+10000, diff > tolerance => dropped
-      part.ingest(baseTs + oooTolerance + 10000, TupleRowReader((Some(baseTs), Some(99.0))),
+      // Advance watermark far enough that baseTs falls outside tolerance
+      val farFuture = baseTs + oooTolerance + bucketInterval + 1
+      part.ingest(farFuture, TupleRowReader((Some(farFuture), Some(50.0))),
         ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
 
-      // Bucket should still have sum=10.0 (late sample was dropped)
-      part.getAggregatedValue(1, bucketTs).get.asInstanceOf[Double] shouldEqual 10.0 +- 0.01
+      // Try to ingest old sample OUTSIDE tolerance of new watermark
+      // watermark = farFuture, baseTs: diff > tolerance => dropped
+      part.ingest(farFuture, TupleRowReader((Some(baseTs), Some(99.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Original bucket should have been finalized when watermark advanced
+      part.getAggregatedValue(1, bucketTs) shouldBe None
     }
 
     it("should return MaxValue for earliestActiveBucketOffset when no active buckets") {
@@ -1389,8 +1379,7 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       part = makeAggregatingPart(0, wideToleranceDataset, defaultPartKey, bufferPool)
 
       val bucketInterval = 60000L
-      val now = System.currentTimeMillis()
-      val base = (now / bucketInterval) * bucketInterval - 2 * bucketInterval
+      val base = 100000L
 
       // Ingest with explicit offsets via the side-channel
       part.currentIngestOffset = 100L
@@ -1409,7 +1398,7 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       part.earliestActiveBucketOffset shouldEqual 50L
     }
 
-    it("should reap stale buckets whose last ingestion time is older than tolerance") {
+    it("trailing buckets stay active when no new samples arrive (no wall-clock reaper)") {
       val bufferPool = makeScalarBufferPool()
       part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
 
@@ -1421,15 +1410,12 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       val bucketTs = 120000L
       part.getAggregatedValue(1, bucketTs) shouldBe defined
 
-      // switchBuffers called when wall clock is past t0 + tolerance (100000 + 30000 = 130000)
-      // The stale-bucket reaper checks System.currentTimeMillis(), but our bucket's lastIngestTime
-      // is 100000. Since System.currentTimeMillis() is much larger than 130001, the bucket IS stale.
+      // switchBuffers — bucket stays active (no wall-clock-based reaper)
       part.switchBuffers(ingestBlockHolder)
 
-      // Bucket should have been reaped (finalized) because lastIngestTime=100000
-      // is stale relative to the real wall clock
-      part.getAggregatedValue(1, bucketTs) shouldBe None
-      part.bucketAggregationStats.activeBucketCount shouldEqual 0
+      // Bucket should still be active
+      part.getAggregatedValue(1, bucketTs) shouldBe defined
+      part.bucketAggregationStats.activeBucketCount shouldEqual 1
     }
   }
 }
