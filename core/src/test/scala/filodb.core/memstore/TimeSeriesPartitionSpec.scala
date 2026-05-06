@@ -98,12 +98,13 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     iterator.map(_.getDouble(0)).toSeq shouldEqual minData
   }
 
-  it("timeRangeRows with CountChunkInfoIterator must return same data and update the referenced dataBytesScannedCtr") {
+  it("timeRangeRows with CountChunkInfoIterator must return same data and update QueryStats counters") {
     part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(5)
     var i = 0
     val dataBytesScannedCtr = new AtomicLong
     val samplesScannedCtr = new AtomicLong
+    val samplesScannedRowCountConsumer: Long => Unit = (rowCount: Long) => { samplesScannedCtr.addAndGet(rowCount) }
 
     // populating ReadablePartition `part`
     for (i <- 0 until 5) {
@@ -124,7 +125,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       WriteBufferChunkScan,
       Array(1),
       new CountingChunkInfoIterator(
-        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, samplesScannedCtr, Long.MaxValue, "query-id"
+        part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr, samplesScannedRowCountConsumer, Long.MaxValue, "query-id"
       )
     )
 
@@ -135,6 +136,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // UT assertions
     iterSum shouldEqual iterWithCountingChunkInfoSum
     dataBytesScannedCtr.get() shouldEqual 48
+    samplesScannedCtr.get() shouldEqual 5
   }
 
   it("should be able to ingest new rows while flush() executing concurrently") {

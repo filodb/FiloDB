@@ -27,20 +27,25 @@ final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: 
  * Describes column/field name and type.
  * isCumulative is not considered for equality/Hashcode.
  */
-final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulative: Boolean = true) {
+final case class ColumnInfo(name: String, colType: Column.ColumnType,
+                            isCumulative: Boolean = true,
+                            isExponential: Boolean = false) {
   override def equals(obj: Any): Boolean = obj match {
-    case ColumnInfo(n: String, ct: Column.ColumnType, _) => n == name && ct == colType
+    case ColumnInfo(n: String, ct: Column.ColumnType, _, _) => n == name && ct == colType
     case _ => false
   }
   override def hashCode(): Int = Objects.hash(name, colType)
 }
 
 object ColumnInfo {
-  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
+  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col), isExponential(col))
   private def isCumulative(col: Column): Boolean = {
     // only columns with param delta=true are treated as delta/period counters and rate/increase functions are applied
     // accordingly.
     !col.params.as[Option[Boolean]]("delta").getOrElse(false)
+  }
+  private def isExponential(col: Column): Boolean = {
+    col.params.as[Option[Boolean]]("exp").getOrElse(false)
   }
 }
 

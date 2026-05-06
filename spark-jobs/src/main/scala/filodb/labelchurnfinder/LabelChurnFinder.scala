@@ -15,6 +15,7 @@ import org.apache.spark.sql.{functions, DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.functions._
 
 import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
+import filodb.coordinator.KamonShutdownHook
 import filodb.core.DatasetRef
 import filodb.core.metadata.Schemas
 import filodb.core.metrics.FilodbMetrics
@@ -24,6 +25,7 @@ import filodb.memory.format.UnsafeUtils
 
 object LabelChurnFinderMain extends App {
   Kamon.init()
+  KamonShutdownHook.registerShutdownHook()
 
   private val jobStartMs = System.currentTimeMillis()
 

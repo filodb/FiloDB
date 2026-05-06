@@ -67,4 +67,58 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
     observedTs2 shouldEqual tuples.drop(400).map(_._1)
     observedVal2 shouldEqual tuples.drop(400).map(_._2)
   }
+
+  it("should estimate default row count when no sources are implemented") {
+    class TestRv extends RangeVector {
+      override def outputRange: Option[RvRange] = None
+      override def numRows: Option[Int] = None
+      override def key: RangeVectorKey = ???
+      override def rows(): RangeVectorCursor = ???
+    }
+
+    val rv = new TestRv
+    assert(rv.estimateNumRows() == 1)
+  }
+
+  it("should estimate row count with numRows when only numRows is implemented") {
+    class TestRv extends RangeVector {
+      override def outputRange: Option[RvRange] = None
+      override def numRows: Option[Int] = Some(123)
+      override def key: RangeVectorKey = ???
+      override def rows(): RangeVectorCursor = ???
+    }
+
+    val rv = new TestRv
+    assert(rv.estimateNumRows() == 123)
+  }
+
+  it("should estimate row count with outputRange when only outputRange is implemented") {
+    class TestRv(range: RvRange) extends RangeVector {
+      override def outputRange: Option[RvRange] = Some(range)
+      override def numRows: Option[Int] = None
+      override def key: RangeVectorKey = ???
+      override def rows(): RangeVectorCursor = ???
+    }
+
+    val instantRv = new TestRv(RvRange(1000, 10, 1000))
+    assert(instantRv.estimateNumRows() == 1)
+
+    val rangeRvNoSteps = new TestRv(RvRange(1000, 10, 1009))
+    assert(rangeRvNoSteps.estimateNumRows() == 1)
+
+    val rangeRvWithSteps = new TestRv(RvRange(1000, 10, 1100))
+    assert(rangeRvWithSteps.estimateNumRows() == 11)
+  }
+
+  it("should estimate row count with numRows when both numRows and outputRange are implemented") {
+    class TestRv extends RangeVector {
+      override def outputRange: Option[RvRange] = Some(RvRange(1000, 10, 1100))
+      override def numRows: Option[Int] = Some(123)
+      override def key: RangeVectorKey = ???
+      override def rows(): RangeVectorCursor = ???
+    }
+
+    val rv = new TestRv
+    assert(rv.estimateNumRows() == 123)
+  }
 }

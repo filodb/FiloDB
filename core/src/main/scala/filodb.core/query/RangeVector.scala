@@ -140,6 +140,24 @@ trait RangeVector {
   // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None
 
+  /**
+   * Estimates the count of rows in a [[RangeVector]].
+   * This may be wildly inaccurate; the implementation as of this writing
+   *   relies on either numRows() or outputRange()-- both of which often
+   *   do not have implementations.
+   */
+  def estimateNumRows(): Long = {
+    this.numRows
+      .map(_.asInstanceOf[Long])
+      .orElse(
+        this.outputRange
+          .filter(range => range.stepMs > 0)
+          .map(range => 1 + Math.floor((range.endMs - range.startMs).toDouble / range.stepMs).toLong)
+      )
+      // Worst-case: at least count the time-series.
+      .getOrElse(1)
+  }
+
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 
@@ -361,13 +379,17 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
   }
 }
 
-// First column of columnIDs should be the timestamp column
+/**
+ * @param columnIDs First column should be the timestamp column.
+ * @param samplesScannedRowCountConsumer accepts a total row count; tracks the samples scanned
+ *                                       (see {@link filodb.core.query.SamplesScannedConfig} for details).
+ */
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
                                     dataBytesScannedCtr: AtomicLong,
-                                    samplesScannedCtr: AtomicLong,
+                                    samplesScannedRowCountConsumer: Long => Unit,
                                     maxBytesScanned: Long,
                                     queryId: String) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
@@ -377,14 +399,16 @@ final case class RawDataRangeVector(key: RangeVectorKey,
     chunkMethod,
     columnIDs,
     new CountingChunkInfoIterator(
-      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId)
+      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr,
+      samplesScannedRowCountConsumer, maxBytesScanned, queryId)
   )
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
     new CountingChunkInfoIterator(
       partition.infos(
-        windowStart, windowEnd), columnIDs, dataBytesScannedCtr, samplesScannedCtr, maxBytesScanned, queryId
+        windowStart, windowEnd), columnIDs, dataBytesScannedCtr,
+        samplesScannedRowCountConsumer, maxBytesScanned, queryId
     )
   }
 
