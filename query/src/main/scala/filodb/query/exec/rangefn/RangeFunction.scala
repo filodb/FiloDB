@@ -733,10 +733,17 @@ class LastSampleChunkedFunctionD(val emitTimestamp: Boolean = false) extends Las
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
     val doubleVal = dblReader(valAcc, valVector, endRowNum)
-    // Respect Prometheus staleness: if the last value is NaN (stale marker),
-    // propagate it so the series is correctly reported as stale.
+
     timestamp = ts
-    value = if (emitTimestamp) timestamp.toDouble / 1000.0 else doubleVal
+    if (emitTimestamp) {
+      // For timestamp functions, use helper to handle NaN values properly
+      val (_, resultTimestamp) = QueryUtils.lastIgnoreNaN(value, timestamp, doubleVal, ts)
+      value = resultTimestamp.toDouble / 1000.0
+    } else {
+      // Respect Prometheus staleness: if the last value is NaN (stale marker),
+      // propagate it so the series is correctly reported as stale.
+      value = doubleVal
+    }
   }
 }
 

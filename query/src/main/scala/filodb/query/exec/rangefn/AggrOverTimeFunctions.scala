@@ -72,14 +72,10 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      if (!nextVal.isNaN) {
-        if (min.isNaN || nextVal < min) {
-          min = nextVal
-          if (emitTimestamp) {
-            minTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
-          }
-        }
-      }
+      val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+      val (resultValue, resultTimestamp) = QueryUtils.minIgnoreNaN(min, minTimestamp, nextVal, nextTimestamp)
+      min = resultValue
+      minTimestamp = resultTimestamp
       rowNum += 1
     }
   }
@@ -128,6 +124,7 @@ class MinOverTimeChunkedFunctionL(var min: Long = Long.MaxValue,
 class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN,
                                    var maxTimestamp: Long = -1L,
                                    val emitTimestamp: Boolean = false) extends ChunkedDoubleRangeFunction {
+
   override final def reset(): Unit = {
     max = Double.NaN
     maxTimestamp = -1L
@@ -154,14 +151,10 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN,
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      if (!nextVal.isNaN) {
-        if (max.isNaN || nextVal > max) {
-          max = nextVal
-          if (emitTimestamp) {
-            maxTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
-          }
-        }
-      }
+      val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+      val (resultValue, resultTimestamp) = QueryUtils.maxIgnoreNaN(max, maxTimestamp, nextVal, nextTimestamp)
+      max = resultValue
+      maxTimestamp = resultTimestamp
       rowNum += 1
     }
   }

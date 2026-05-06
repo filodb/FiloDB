@@ -312,4 +312,48 @@ object QueryUtils {
     else if (a < b) a
     else b
   }
+
+  /**
+   * Helper function to handle NaN values properly when comparing values for timestamp functions.
+   * Returns (value, timestamp) tuple with the maximum non-NaN value and its timestamp.
+   */
+  def maxIgnoreNaN(a: Double, aTs: Long, b: Double, bTs: Long): (Double, Long) = {
+    if (a != a) { // a is NaN
+      (b, bTs)
+    } else if (b != b) { // b is NaN
+      (a, aTs)
+    } else if (a >= b) {
+      (a, aTs)
+    } else {
+      (b, bTs)
+    }
+  }
+
+  /**
+   * Helper function to handle NaN values properly when comparing values for timestamp functions.
+   * Returns (value, timestamp) tuple with the minimum non-NaN value and its timestamp.
+   */
+  def minIgnoreNaN(a: Double, aTs: Long, b: Double, bTs: Long): (Double, Long) = {
+    if (a != a) { // a is NaN
+      (b, bTs)
+    } else if (b != b) { // b is NaN
+      (a, aTs)
+    } else if (a <= b) {
+      (a, aTs)
+    } else {
+      (b, bTs)
+    }
+  }
+
+  /**
+   * Helper function to handle NaN values properly when finding the last non-NaN value for timestamp functions.
+   * Returns (value, timestamp) tuple with the last non-NaN value and its timestamp.
+   */
+  def lastIgnoreNaN(a: Double, aTs: Long, b: Double, bTs: Long): (Double, Long) = {
+    if (b != b) { // b is NaN, keep a
+      (a, aTs)
+    } else { // b is not NaN, use b (last value)
+      (b, bTs)
+    }
+  }
 }

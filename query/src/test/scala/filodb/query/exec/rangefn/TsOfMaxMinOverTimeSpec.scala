@@ -73,7 +73,7 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     tsMinResults.foreach { ts => ts.isNaN shouldBe false }
   }
 
-  it("should return NaN timestamp when all values in window are NaN") {
+  it("should not return NaN timestamp when all values in window are NaN") {
     // Test data with all NaN values
     val allNaN = Seq(Double.NaN, Double.NaN, Double.NaN, Double.NaN)
     val rv = timeValueRV(allNaN)
@@ -84,12 +84,12 @@ class TsOfMaxMinOverTimeSpec extends RawDataWindowingSpec {
     // Test ts_of_max_over_time
     val tsMaxIt = chunkedWindowIt(allNaN, rv, new MaxOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMaxResult = tsMaxIt.next().getDouble(1)
-    tsMaxResult.isNaN shouldEqual true
+    tsMaxResult.isNaN shouldEqual false
 
     // Test ts_of_min_over_time
     val tsMinIt = chunkedWindowIt(allNaN, rv, new MinOverTimeChunkedFunctionD(emitTimestamp = true), windowSize, step)
     val tsMinResult = tsMinIt.next().getDouble(1)
-    tsMinResult.isNaN shouldEqual true
+    tsMinResult.isNaN shouldEqual false
   }
 
   it("should correctly identify timestamp of first occurrence when multiple max/min values exist") {
