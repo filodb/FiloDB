@@ -150,14 +150,12 @@ class PartKeyTantivyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAft
     // dataset2 has partition schema: Seq("series:string", "tags:map")
     // This reproduces the production schema where the MapColumn is named "tags"
     val ds = MachineMetricsData.dataset2
-    val tmpDir = new File(System.getProperty("java.io.tmpdir"), "part-key-tantivy-map-collision-test")
+    val tmpDir = java.nio.file.Files.createTempDirectory("part-key-tantivy-map-collision-test").toFile
     val mapIndex = new PartKeyTantivyIndex(ds.ref, ds.schema.partition, 0, 1.hour.toMillis, Some(tmpDir))
 
     try {
       mapIndex.reset()
       mapIndex.refreshReadersBlocking()
-
-      val partBuilder2 = new RecordBuilder(TestData.nativeMem)
 
       // Create a partition key where the map includes a "tags" entry (same name as the MapColumn)
       val tagsMap = Map("tags".utf8 -> "b1.metal".utf8,
@@ -165,8 +163,8 @@ class PartKeyTantivyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAft
                         "region".utf8 -> "us-central-2".utf8)
       val seriesName = "test_metric"
 
-      partBuilder2.partKeyFromObjects(ds.schema, seriesName, tagsMap)
-      val container = partBuilder2.allContainers.head
+      partBuilder.partKeyFromObjects(ds.schema, seriesName, tagsMap)
+      val container = partBuilder.allContainers.head
       val partKeyAddr = container.allOffsets(0)
       val partKeyBytes = ds.partKeySchema.asByteArray(container.base, partKeyAddr)
 
@@ -198,7 +196,8 @@ class PartKeyTantivyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     } finally {
       mapIndex.closeIndex()
-      partBuilder.removeAndFreeContainers(partBuilder.allContainers.length)
+      tmpDir.listFiles().foreach(_.delete())
+      tmpDir.delete()
     }
   }
 }
