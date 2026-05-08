@@ -182,6 +182,74 @@ fn value_with_prefix(prefix: &str, value: &str) -> String {
 /// subfield lookup within that JSON column rather than a direct field query.
 /// This handles the case where a label has the same name as the map column
 /// (e.g., a label "tags" inside a map column also named "tags").
+///
+/// # Why this is needed
+///
+/// ```text
+///   Indexed columns:
+///     ┌────────────┐  ┌────────────┐  ┌────────────┐
+///     │   _ws_     │  │   _ns_     │  │  __name__  │  ← real indexed columns
+///     └────────────┘  └────────────┘  └────────────┘
+///
+///   JSON map column (the "default field"):
+///     ┌─────────────────────────────────────────────┐
+///     │   tags  (JSON column)                       │
+///     │                                             │
+///     │   { "instance": "i-001",                    │
+///     │     "job": "node",                          │
+///     │     "tags": "some-value"  ← LABEL named     │
+///     │   }                          same as column │
+///     └─────────────────────────────────────────────┘
+///
+///   Query: tags="some-value"
+///
+///   Behavior WITHOUT this function
+///   ----------------------------------------
+///         schema.find_field_with_default("tags", Some(json_field))
+///                │
+///                │ "tags" IS an indexed field name (the JSON column itself!)
+///                │ So it returns the JSON column directly with empty prefix
+///                │
+///                ▼
+///         returns (json_field, "")         ← prefix = empty
+///                │
+///                ▼
+///         value_with_prefix("", "some-value") → "some-value"
+///                │
+///                ▼
+///         TermQuery: search json_field for literal value "some-value"
+///                │
+///                ▼
+///         ✗ WRONG — searches the entire JSON blob for literal "some-value"
+///            misses documents where "tags" subfield = "some-value"
+///
+///         Behavior WITH this function
+///       ----------------------------------------
+///         schema.find_field_with_default("tags", Some(json_field))
+///                │
+///                │ Returns (json_field, "")
+///                ▼
+///
+///         resolve_field_with_default checks:
+///            prefix.is_empty() && default_field == Some(field)
+///            ↑                    ↑
+///            "no prefix"          "and the field IS the default JSON field"
+///            │
+///            │ This means: the user's field name matches the JSON column name
+///            │             → they actually want a subfield lookup
+///            │
+///            ▼
+///         returns (json_field, "tags")     ← prefix = the field name itself
+///                │
+///                ▼
+///         value_with_prefix("tags", "some-value") → "tags\0ssome-value"
+///                │
+///                ▼
+///         TermQuery: search json_field for "tags\0ssome-value"
+///                │
+///                ▼
+///         ✓ CORRECT — finds documents where the "tags" subfield in JSON = "some-value"
+/// ```
 fn resolve_field_with_default<'a>(
     schema: &'a Schema,
     default_field: Option<Field>,
