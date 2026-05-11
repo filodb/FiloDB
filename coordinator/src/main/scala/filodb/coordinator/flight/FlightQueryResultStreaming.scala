@@ -22,8 +22,6 @@ import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationState
 import filodb.core.QueryTimeoutException
-import filodb.core.binaryrecord2.BinaryRecordRowReader
-import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
@@ -201,12 +199,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
           Task.eval {
             logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-            val respHeader = RespHeader(res.resultSchema)
-            // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-            // and hence not closed here
+            // ownership of metadata buf is now with flight listener and hence not closed here
             flightAllocator.checkAllocatorLimits(execPlan.queryContext)
             logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
-            listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, flightAllocator))
+            listener.putMetadata(FlightProtoSerDeser.serializeHeaderToArrowBuf(res.resultSchema, flightAllocator))
           }.flatMap { _ =>
             Task.eval {
               logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
@@ -221,7 +217,6 @@ trait FlightQueryResultStreaming extends StrictLogging {
             }.bracket { state =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               listener.start(state.flightVsr)
-              val rb = SerializedRangeVector.newBuilder()
               if (res.result.forall(rv => rv.isInstanceOf[ArrowSerializedRangeVector] ||
                                             (rv.isInstanceOf[SerializableRangeVector] &&
                                             rv.asInstanceOf[SerializableRangeVector].hasFormulatedRows))) {
@@ -248,7 +243,6 @@ trait FlightQueryResultStreaming extends StrictLogging {
                 }.completedL
               } else {
                 val recSchema = res.resultSchema.toRecordSchema
-                val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
                 Observable.fromIterable(res.result).mapEval { rv =>
                   if (rv.isInstanceOf[ArrowSerializedRangeVector]) {
                     // Mixed is unexpected but we should still be able to handle it - just log at
@@ -265,8 +259,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
                     flightAllocator.withRequestAllocator { allocator =>
                       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
-                        s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats,
-                        allocator, state, brIterator)
+                        s"${execPlan.queryContext.queryId}:${queryResult.id}", res.queryStats,
+                        allocator, state)
                     } {
                       throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
                     }
@@ -339,10 +333,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
-      val respFooter = RespFooter(s, t)
-      // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-      // and hence not closed here
-      listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))
+      // ownership of metadata buf is now with flight listener and hence not closed here
+      listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator))
       listener.completed()
     }
   }

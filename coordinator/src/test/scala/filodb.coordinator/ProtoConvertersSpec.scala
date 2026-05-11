@@ -5,20 +5,19 @@ import com.typesafe.config.ConfigFactory
 
 import filodb.core.{DatasetRef, GdeltTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
-import filodb.core.query.{ColumnFilter, ColumnInfo, CustomRangeVectorKey, NoCloseCursor, QueryConfig, QueryContext, QueryStats, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, SerializedRangeVector, TransientRow}
+import filodb.core.query.{ColumnFilter, ColumnInfo, CustomRangeVectorKey, NoCloseCursor, QueryConfig, QueryContext, QueryStats, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientRow}
 import filodb.core.store.AllChunkScan
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 import filodb.coordinator.ProtoConverters._
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
+import filodb.core.binaryrecord2.RecordBuilder
 import java.util.concurrent.TimeUnit
 
 import org.apache.arrow.memory.RootAllocator
 
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps
-import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.metadata.Column.ColumnType
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 import filodb.query.ProtoConverters.{SerializableRangeVectorFromProtoConverter, SerializableRangeVectorToProtoConverter}
@@ -99,7 +98,6 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
         ColumnInfo("value", ColumnType.DoubleColumn)
       ), 1)
       val recSchema = resSchema.toRecordSchema
-      val rb = SerializedRangeVector.newBuilder()
 
       val outputRange = Some(RvRange(1000, 1000, 5000))
       val rv = toRv(
@@ -110,11 +108,10 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       // Populate VSR
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       // Convert to ArrowSerializedRangeVector2 instances

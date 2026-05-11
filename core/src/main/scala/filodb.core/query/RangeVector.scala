@@ -231,7 +231,7 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
  * @param endMs the end timestamp in ms
  */
 final case class RepeatValueVector(rv: RangeVector,
-                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector with StrictLogging {
+                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector {
   override lazy val outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override lazy val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 
