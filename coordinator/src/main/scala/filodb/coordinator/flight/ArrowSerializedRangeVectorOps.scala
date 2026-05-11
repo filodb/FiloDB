@@ -149,12 +149,20 @@ object ArrowSerializedRangeVectorOps {
       if (state.rowNum >= maxNumRows) {
         addNewVsr()
       }
-      val dataAddress = state.currentRvkBrVec.getDataBufferAddress + state.currentWriteOffset()
-      srb.reset(UnsafeUtils.ZeroPointer, dataAddress, state.bytesRemaining)
+      val writeOffsetBefore = state.currentWriteOffset()
+      val bufAddrBefore     = state.currentRvkBrVec.getDataBufferAddress
+      srb.reset(UnsafeUtils.ZeroPointer, bufAddrBefore + writeOffsetBefore, state.bytesRemaining)
       srb.addFromReader(row, recordSchema, 0)
-      // Re-read after write: a spill inside srb may have switched to a new VSR and reset rowNum to 0.
-      val bytesWritten = (srb.nextRecordOffset -
-                          (state.currentRvkBrVec.getDataBufferAddress + state.currentWriteOffset())).toInt
+      // If srb ran out of space mid-record, its requireBytes callback called addNewVsr(), which
+      // switched state.currentRvkBrVec to a fresh buffer (new address) and reset state.rowNum to 0.
+      // Detect the spill via the address change so bytesWritten is always anchored to the buffer
+      // that srb actually wrote into, regardless of any future change to addNewVsr().
+      val writeBase =
+        if (state.currentRvkBrVec.getDataBufferAddress != bufAddrBefore)
+          state.currentRvkBrVec.getDataBufferAddress  // spilled: new buffer, write starts at offset 0
+        else
+          bufAddrBefore + writeOffsetBefore            // no spill: same buffer, original offset
+      val bytesWritten = (srb.nextRecordOffset - writeBase).toInt
       state.commitRow(bytesWritten, isRvk = 0)
     }
 
