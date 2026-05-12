@@ -167,6 +167,32 @@ object QueryUtils {
   }
 
   /**
+   * Adds a total sample count to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
+   */
+  private def updateSamplesScannedCounters(queryStats: QueryStats, totalSampleCount: Long): Unit = {
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is sometimes added to QueryStats as a default.
+    val hasSingleEmptyKey = queryStats.size == 1 && queryStats.containsNilKey()
+    if (hasSingleEmptyKey) {
+      queryStats.getSamplesScannedCounter(Nil).addAndGet(totalSampleCount)
+      return
+    }
+    val nonNilKeyCount = queryStats.size() - (if (queryStats.containsNilKey()) 1 else 0)
+    val samplesPerCounter = Math.ceil(
+      totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
+    ).asInstanceOf[Long]
+    queryStats.foreachKey{ k =>
+      if (k.nonEmpty) {
+        queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter)
+      }
+    }
+  }
+
+  /**
    * Given the arguments, determines the total count of samples scanned.
    * Adds the total to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
@@ -184,16 +210,9 @@ object QueryUtils {
                           schema: ResultSchema,
                           config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.stat.isEmpty) {
+    if (queryStats.size == 0) {
       return
     }
-
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is always added to QueryStats.
-    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
-    val statKeys = if (!hasSingleEmptyKey) {
-      queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Seq(Nil)
 
     val rowMultiplier = schema.columns
       .map(getSamplesScannedRowMultiplier(_, config))
@@ -214,11 +233,7 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / statKeys.size
-    ).asInstanceOf[Long]
-
-    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+    updateSamplesScannedCounters(queryStats, totalSamples)
   }
 
   /**
@@ -262,16 +277,9 @@ object QueryUtils {
                                schema: ResultSchema,
                                config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.stat.isEmpty) {
+    if (queryStats.size == 0) {
       return
     }
-
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is always added to QueryStats.
-    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
-    val statKeys = if (!hasSingleEmptyKey) {
-      queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Seq(Nil)
 
     val rowMultiplier = schema.columns
       .map(getSamplesScannedRowMultiplier(_, config))
@@ -292,11 +300,7 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / statKeys.size
-    ).asInstanceOf[Long]
-
-    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+    updateSamplesScannedCounters(queryStats, totalSamples)
   }
 
   def maxIgnoreNaN(a: Double, b: Double): Double = {

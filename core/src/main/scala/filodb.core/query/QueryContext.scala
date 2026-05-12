@@ -4,7 +4,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.SortedSet
+import scala.collection.mutable.{ArrayBuffer, SortedSet}
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -402,16 +402,162 @@ case class Stat() {
 
 case class QueryStats() {
 
-  val stat = TrieMap[Seq[String], Stat]()
+  private val stat = TrieMap[Seq[String], Stat]()
+
+  /**
+   * Stores all stats keys.
+   * Useful if e.g. keys need frequent iteration but Iterator
+   *   allocations should be prevented.
+   * Also useful for efficient size() calculation (as opposed to TrieMap.size(),
+   *   which allocates an Object on the heap and has some computation overhead).
+   */
+  private val keyBuffer = ArrayBuffer[Seq[String]]()
+
+  /**
+   * Set true if Nil is ever added as a key.
+   * Useful in cases where this needs to be known efficiently
+   *   (e.g. while samples-scanned counters are updated.)
+   */
+  @volatile private var containsNilKeyFlag = false
+
+  private val lock = new AnyRef
 
   override def toString: String = stat.toString()
 
-  def add(s: QueryStats): Unit = {
-    s.stat.foreach(kv => stat.getOrElseUpdate(kv._1, Stat()).add(kv._2))
+  /**
+   * Inserts a [[Stat]] into the [[QueryStats]].
+   * Overwrites existing value (if the argument key already exists).
+   * @param forceBufferAdd true to always add the key to the key buffer,
+   *   regardless of whether-or-not the trie already contains it.
+   *   "true" assumes the caller has already confirmed the key should be added.
+   */
+  private def putInternal(key: Seq[String],
+                          value: Stat,
+                          forceBufferAdd: Boolean = false): Unit = {
+    if (key.isEmpty) {
+      containsNilKeyFlag = true
+    }
+    lock.synchronized {
+      if (forceBufferAdd || !stat.contains(key)) {
+        keyBuffer.addOne(key)
+      }
+      stat.put(key, value)
+    }
   }
 
+  // scalastyle:off null
+  // NOTE: getOrElse(..., null) is used to avoid Option allocations.
+  /**
+   * Either returns the currently-stored [[Stat]] or returns a new,
+   *   empty one and adds it to the trie.
+   */
+  private def getOrAddEmptyStat(key: Seq[String]): Stat = {
+    // Two checks to avoid using `synchronized` for every call...
+    // First check: is the key already in the trie?
+    // If it is: just return its value.
+    val firstStat = stat.getOrElse(key, null)
+    if (firstStat == null) {
+      // Otherwise, grab the lock.
+      lock.synchronized {
+        // Second check: was it added just before we acquired the lock?
+        // If not, add it; else return its value.
+        val secondStat = stat.getOrElse(key, null)
+        if (secondStat == null) {
+          val newStat = Stat()
+          putInternal(key, newStat, forceBufferAdd = true)
+          newStat
+        } else secondStat
+      }
+    } else firstStat
+  }
+  // scalastyle:on null
+
+  /**
+   * Add the argument [[QueryStats]] counters to this [[QueryStats]]' counters.
+   */
+  def add(s: QueryStats): Unit = {
+    s.foreach(kv => getOrAddEmptyStat(kv._1).add(kv._2))
+  }
+
+  /**
+   * Returns all keys in the [[QueryStats]].
+   * NOTE: not intended to be performant.
+   */
+  def keys(): Seq[Seq[String]] = {
+    keyBuffer.clone().toSeq
+  }
+
+  /**
+   * Adds the (key, value) pair to the [[QueryStats]].
+   */
+  def put(key: Seq[String], value: Stat): Unit = {
+    putInternal(key, value)
+  }
+
+  /**
+   * Returns the value (if it exists).
+   */
+  def get(key: Seq[String]): Option[Stat] = {
+    stat.get(key)
+  }
+
+  /**
+   * Returns the count of elements in the [[QueryStats]].
+   */
+  def size(): Int = {
+    keyBuffer.size
+  }
+
+  /**
+   * Returns true iff the [[QueryStats]] contains Nil as a key.
+   * Useful in cases where this needs to be known efficiently
+   *   (e.g. while samples-scanned counters are updated.)
+   */
+  def containsNilKey(): Boolean = {
+    containsNilKeyFlag
+  }
+
+  /**
+   * Applies a mapper function to all entries of the [[QueryStats]].
+   */
+  def map[T](function: ((Seq[String], Stat)) => T): Iterable[T] = {
+    stat.map(function)
+  }
+
+  /**
+   * Zero-allocation foreach variant.
+   * Intended for high-performance scenarios where efficient
+   *   key processing is required.
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
+   */
+  def foreachKey(consumer: Seq[String] => Unit): Unit = {
+    // NOTE: `while` avoids a Range allocation.
+    var i = 0
+    while (i < keyBuffer.size) {
+      consumer.apply(keyBuffer(i))
+      i += 1
+    }
+  }
+
+  /**
+   * Standard-fare foreach that applies a consumer to
+   *   every entry of the [[QueryStats]].
+   */
+  def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
+    stat.foreach(consumer)
+  }
+
+  /**
+   * Clear all entries from the [[QueryStats]].
+   */
   def clear(): Unit = {
-    stat.clear()
+    lock.synchronized {
+      stat.clear()
+      keyBuffer.clear()
+      containsNilKeyFlag = false
+    }
   }
 
   /**
@@ -422,7 +568,7 @@ case class QueryStats() {
    */
   def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).timeSeriesScanned
+    getOrAddEmptyStat(theNs).timeSeriesScanned
   }
 
   /**
@@ -433,7 +579,7 @@ case class QueryStats() {
    */
   def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).dataBytesScanned
+    getOrAddEmptyStat(theNs).dataBytesScanned
   }
 
   /**
@@ -444,7 +590,7 @@ case class QueryStats() {
    */
   def getSamplesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).samplesScanned
+    getOrAddEmptyStat(theNs).samplesScanned
   }
 
   /**
@@ -455,7 +601,7 @@ case class QueryStats() {
    */
   def getResultBytesCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).resultBytes
+    getOrAddEmptyStat(theNs).resultBytes
   }
 
   /**
@@ -467,7 +613,7 @@ case class QueryStats() {
    */
   def getCpuNanosCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).cpuNanos
+    getOrAddEmptyStat(theNs).cpuNanos
   }
 
   def totalCpuNanos: Long = stat.valuesIterator.map(_.cpuNanos.get()).sum

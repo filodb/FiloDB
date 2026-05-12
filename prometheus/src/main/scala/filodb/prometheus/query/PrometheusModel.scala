@@ -237,7 +237,7 @@ object PrometheusModel {
     ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage, "error", Some(toQueryStatistics(qe.queryStats)))
   }
 
-  def toQueryStatistics(qs: QueryStats): Seq[QueryStatistics] = qs.stat.map(stat =>
+  def toQueryStatistics(qs: QueryStats): Seq[QueryStatistics] = qs.map(stat =>
     QueryStatistics(stat._1, stat._2.timeSeriesScanned.get(),
       stat._2.dataBytesScanned.get(), stat._2.samplesScanned.get(), stat._2.resultBytes.get(), stat._2.cpuNanos.get())
   ).toSeq
