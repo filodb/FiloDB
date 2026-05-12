@@ -361,6 +361,9 @@ class BucketAggregationState(
    */
   def hasActiveBuckets: Boolean = !activeBuckets.isEmpty
 
+  def hasActiveBucketsInRange(startTime: Long, endTime: Long): Boolean =
+    !activeBuckets.subMap(startTime: java.lang.Long, true, endTime: java.lang.Long, true).isEmpty
+
   /**
    * Gets all active bucket timestamps.
    */

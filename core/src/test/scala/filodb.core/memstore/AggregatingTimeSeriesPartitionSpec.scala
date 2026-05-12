@@ -1282,6 +1282,89 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
   }
 
   // =====================================================================
+  // hasChunks visibility: partitions with only active buckets must be queryable
+  // =====================================================================
+
+  describe("hasChunks with active buckets (query visibility)") {
+    it("should be included in query results when only active buckets exist (no finalized chunks)") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val baseTs = 100000L
+
+      // Ingest samples — keep watermark from advancing past bucketTs + tolerance
+      // so the bucket stays active and never finalizes into a chunk
+      part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+      part.ingest(baseTs + 5000, TupleRowReader((Some(baseTs + 5000), Some(20.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Confirm: no finalized chunks exist
+      part.numChunks shouldEqual 0
+
+      // Confirm: active buckets DO exist
+      part.hasActiveBuckets shouldEqual true
+
+      // Confirm: hasChunks returns true (this is the bug — currently returns false)
+      part.hasChunks(AllChunkScan) shouldEqual true
+    }
+
+    it("should NOT be considered to have chunks when empty") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      // No data ingested at all
+      part.hasChunks(AllChunkScan) shouldEqual false
+      part.hasActiveBuckets shouldEqual false
+    }
+
+    it("should return true for hasChunks when both chunks and active buckets exist") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val baseTs = 100000L
+      val oooTolerance = 30000L
+      val bucketInterval = 60000L
+
+      // Ingest old sample and finalize it into a chunk
+      part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      val futureTs = baseTs + bucketInterval + oooTolerance + 10000
+      part.ingest(futureTs, TupleRowReader((Some(futureTs), Some(50.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Should have both a finalized chunk and an active bucket
+      part.numChunks should be > 0
+      part.hasActiveBuckets shouldEqual true
+
+      // hasChunks should obviously be true
+      part.hasChunks(AllChunkScan) shouldEqual true
+    }
+
+    it("should return false for hasChunks when active buckets do not overlap TimeRangeChunkScan") {
+      val bufferPool = makeScalarBufferPool()
+      part = makeAggregatingPart(0, scalarDataset, defaultPartKey, bufferPool)
+
+      val baseTs = 100000L
+
+      // Ingest samples — bucket timestamp will be 120000 (ceiled from 100000 with 60000 interval)
+      part.ingest(baseTs, TupleRowReader((Some(baseTs), Some(10.0))),
+        ingestBlockHolder, timeAlignedChunksEnabled, flushIntervalMillis, acceptDuplicateSamples)
+
+      // Confirm active bucket exists at 120000
+      part.hasActiveBuckets shouldEqual true
+      part.numChunks shouldEqual 0
+
+      // Query a time range that does NOT overlap the active bucket (120000)
+      part.hasChunks(TimeRangeChunkScan(200000L, 300000L)) shouldEqual false
+
+      // Query a time range that DOES overlap
+      part.hasChunks(TimeRangeChunkScan(100000L, 150000L)) shouldEqual true
+    }
+  }
+
+  // =====================================================================
   // Watermark-hold tests: offset tracking, stale reaper, late OOO after switchBuffers
   // =====================================================================
 

@@ -4,6 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.memstore.aggregation._
 import filodb.core.metadata.{Column, Schema}
+import filodb.core.store.{ChunkScanMethod, TimeRangeChunkScan}
 import filodb.memory.BlockMemFactory
 import filodb.memory.format.RowReader
 import filodb.memory.format.vectors.MutableHistogram
@@ -216,6 +217,13 @@ class AggregatingTimeSeriesPartition(
    * Cheap O(1) check to short-circuit query path when no buckets exist.
    */
   def hasActiveBuckets: Boolean = bucketState.hasActiveBuckets
+
+  override def hasChunks(method: ChunkScanMethod): Boolean = {
+    super.hasChunks(method) || (method match {
+      case TimeRangeChunkScan(st, et) => bucketState.hasActiveBucketsInRange(st, et)
+      case _                          => hasActiveBuckets
+    })
+  }
 
   /**
    * Returns an iterator over active bucket values in [startTime, endTime].
