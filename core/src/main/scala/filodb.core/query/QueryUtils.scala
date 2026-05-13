@@ -214,9 +214,13 @@ object QueryUtils {
       return
     }
 
-    val rowMultiplier = schema.columns
-      .map(getSamplesScannedRowMultiplier(_, config))
-      .sum
+    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
+    var rowMultiplier = 0.0
+    var i = 0
+    while (i < schema.columns.size) {
+      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
+      i += 1
+    }
     val rowSamples = rowsScanned * rowMultiplier *
       config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
     rowSamplesScanned.increment(rowSamples.toLong)
@@ -281,9 +285,13 @@ object QueryUtils {
       return
     }
 
-    val rowMultiplier = schema.columns
-      .map(getSamplesScannedRowMultiplier(_, config))
-      .sum
+    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
+    var rowMultiplier = 0.0
+    var i = 0
+    while (i < schema.columns.size) {
+      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
+      i += 1
+    }
     val rowSamples = childRv.estimateNumRows() * rowMultiplier *
       config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
     childRowSamplesScanned.increment(rowSamples.toLong)
