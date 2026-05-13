@@ -167,32 +167,6 @@ object QueryUtils {
   }
 
   /**
-   * Adds a total sample count to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
-   */
-  private def updateSamplesScannedCounters(queryStats: QueryStats, totalSampleCount: Long): Unit = {
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is sometimes added to QueryStats as a default.
-    val hasSingleEmptyKey = queryStats.size == 1 && queryStats.containsNilKey()
-    if (hasSingleEmptyKey) {
-      queryStats.getSamplesScannedCounter(Nil).addAndGet(totalSampleCount)
-      return
-    }
-    val nonNilKeyCount = queryStats.size() - (if (queryStats.containsNilKey()) 1 else 0)
-    val samplesPerCounter = Math.ceil(
-      totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
-    ).asInstanceOf[Long]
-    queryStats.foreach{ entry =>
-      if (entry._1.nonEmpty) {
-        entry._2.samplesScanned.addAndGet(samplesPerCounter)
-      }
-    }
-  }
-
-  /**
    * Efficiently compute the appropriate per-row samples-scanned multiplier.
    */
   private def computeSamplesScannedRowMultiplier(schema: ResultSchema,
@@ -209,11 +183,7 @@ object QueryUtils {
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param clazz The class that produced these samples.
    */
@@ -254,17 +224,12 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    updateSamplesScannedCounters(queryStats, totalSamples)
+    queryStats.addSamplesScanned(totalSamples)
   }
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   *
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param class The class that produced these samples.
    */
@@ -282,12 +247,7 @@ object QueryUtils {
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   *
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param childRv The [[RangeVector]] that was scanned by the parent.
    * @param parentClass The class that scanned the child [[RangeVector]].
@@ -327,7 +287,7 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    updateSamplesScannedCounters(queryStats, totalSamples)
+    queryStats.addSamplesScanned(totalSamples)
   }
 
   def maxIgnoreNaN(a: Double, b: Double): Double = {

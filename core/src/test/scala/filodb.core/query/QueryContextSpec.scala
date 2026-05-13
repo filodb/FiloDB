@@ -52,7 +52,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.size() shouldEqual 0
     stats.keys() shouldEqual Nil
     stats.get(Seq("foo", "bar")) shouldEqual None
-    stats.containsNilKey() shouldEqual false
 
     // Test "getOrCreate" functionality.
     stats.getSamplesScannedCounter(Seq("foo", "bar"))
@@ -60,7 +59,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.keys().size shouldEqual 1
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"))
     stats.get(Seq("foo", "bar")).isDefined shouldEqual true
-    stats.containsNilKey() shouldEqual false
 
     // Test put.
     stats.put(Seq("abc", "123"), Stat())
@@ -69,7 +67,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"))
     stats.get(Seq("foo", "bar")).isDefined shouldEqual true
     stats.get(Seq("abc", "123")).isDefined shouldEqual true
-    stats.containsNilKey() shouldEqual false
 
     // Test Nil handling.
     stats.getSamplesScannedCounter(Nil)
@@ -77,7 +74,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.keys().size shouldEqual 3
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"), Nil)
     stats.get(Nil).isDefined shouldEqual true
-    stats.containsNilKey() shouldEqual true
 
     // Test add.
     val emptyStats = QueryStats()
@@ -86,14 +82,12 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.keys().size shouldEqual 3
     emptyStats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"), Nil)
     emptyStats.get(Nil).isDefined shouldEqual true
-    emptyStats.containsNilKey() shouldEqual true
 
     // Test clear.
     stats.clear()
     stats.size() shouldEqual 0
     stats.keys() shouldEqual Nil
     stats.get(Nil).isDefined shouldEqual false
-    stats.containsNilKey() shouldEqual false
   }
 
   it("should correctly support per-element QueryStats operations") {
@@ -120,5 +114,85 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.foreach(entry => keyBuffer.addOne(entry._1))
     keyBuffer.toSet shouldEqual Set(Nil, Seq("foo"), Seq("abc", "123"))
     keyBuffer.clear()
+  }
+
+  it("should correctly add samples-scanned to QueryStats") {
+    {
+      // Empty -- effectively a no-op; should not throw.
+      val stats = QueryStats()
+      stats.addSamplesScanned(100)
+      stats.size() shouldEqual 0
+    }
+
+    {
+      // One key; should account for all samples.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Seq("hello"))
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 100 }
+    }
+
+    {
+      // Two keys; each should account for half of all samples.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Seq("hello"))
+      stats.getSamplesScannedCounter(Seq("goodbye"))
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 50 }
+    }
+
+    {
+      // Nil key; should account for all samples.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Nil)
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 100 }
+    }
+
+    {
+      // Nil key with one other; non-nil should account for all samples.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Nil)
+      stats.getSamplesScannedCounter(Seq("hello"))
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) =>
+        if (key.isEmpty) {
+          stat.samplesScanned.get() shouldEqual 0
+        } else {
+          stat.samplesScanned.get() shouldEqual 100
+        }
+      }
+    }
+
+    {
+      // Nil key with two others; non-nils should each account for half of all samples.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Nil)
+      stats.getSamplesScannedCounter(Seq("hello"))
+      stats.getSamplesScannedCounter(Seq("goodbye"))
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) =>
+        if (key.isEmpty) {
+          stat.samplesScanned.get() shouldEqual 0
+        } else {
+          stat.samplesScanned.get() shouldEqual 50
+        }
+      }
+    }
+
+    {
+      // Only samples-scanned counters should be updated.
+      val stats = QueryStats()
+      stats.getSamplesScannedCounter(Nil)
+      stats.getSamplesScannedCounter(Seq("hello"))
+      stats.getSamplesScannedCounter(Seq("goodbye"))
+      stats.addSamplesScanned(100)
+      stats.foreach { case (key, stat) =>
+        stat.timeSeriesScanned.get() shouldEqual 0
+        stat.cpuNanos.get() shouldEqual 0
+        stat.dataBytesScanned.get() shouldEqual 0
+        stat.resultBytes.get() shouldEqual 0
+      }
+    }
   }
 }

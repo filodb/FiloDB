@@ -417,7 +417,7 @@ case class QueryStats() {
    * Useful in cases where this needs to be known efficiently
    *   (e.g. while samples-scanned counters are updated).
    **/
-  @volatile private var containsNilKeyFlag = false;
+  @volatile private var containsNilKey = false;
 
   private val lock = new AnyRef
 
@@ -465,7 +465,7 @@ case class QueryStats() {
                           value: Stat,
                           entryConfirmedNotPresent: Boolean = false): Unit = {
     if (key.isEmpty) {
-      containsNilKeyFlag = true
+      containsNilKey = true
     }
     lock.synchronized {
       if (entryConfirmedNotPresent || !keyToEntryIndex.contains(key)) {
@@ -507,20 +507,25 @@ case class QueryStats() {
 
   /**
    * Add the argument [[QueryStats]]' counters to this [[QueryStats]]' counters.
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification of *argument* [[QueryStats]] gives undefined behavior!
+   * This [[QueryStats]] may be concurrently modified.
    */
   def add(s: QueryStats): Unit = {
-    lock.synchronized {
-      // Lock is required to prevent concurrent modification while
-      //   iterating entries; foreach is not thread-safe.
-      s.foreach(kv => getOrAddEmptyStat(kv._1).add(kv._2))
+    var i = 0
+    while (i < s.entries.size) {
+      val (key, value) = s.entries(i)
+      getOrAddEmptyStat(key).add(value)
+      i += 1
     }
   }
 
   /**
    * Returns all keys in the [[QueryStats]].
-   * NOTE: not intended to be performant and only exists to support tests.
+   * NOTE: not intended to be highly performant.
    *
-   * * *** NOT THREAD-SAFE!!! ***
+   * *** NOT THREAD-SAFE!!! ***
    * Concurrent modification behavior is undefined!
    */
   def keys(): Seq[Seq[String]] = {
@@ -532,18 +537,6 @@ case class QueryStats() {
    */
   def put(key: Seq[String], value: Stat): Unit = {
     putInternal(key, value)
-  }
-
-  /**
-   * Returns true iff Nil is a key of the [[QueryStats]].
-   * Useful in cases where this needs to be known efficiently
-   *   (e.g. while samples-scanned counters are updated).
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
-   * */
-  def containsNilKey(): Boolean = {
-    containsNilKeyFlag
   }
 
   /**
@@ -564,24 +557,61 @@ case class QueryStats() {
   }
 
   /**
-   * Zero-allocation foreach variant.
-   * Intended for high-performance scenarios where efficient
-   *   key processing is required.
+   * Adds a total sample count to the argument [[QueryStats]]; the total is divided
+   *   evenly across all samples-scanned counters.
+   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
+   *   against it. If Nil exists with other keys, samples are divided
+   *   among the non-Nil keys only.
    *
    * *** NOT THREAD-SAFE!!! ***
    * Concurrent modification behavior is undefined!
    */
-  def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
+  def addSamplesScanned(totalSampleCount: Long): Unit = {
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is sometimes added to QueryStats as a default.
+    val hasSingleEmptyKey = size() == 1 && containsNilKey
+    if (hasSingleEmptyKey) {
+      getNullableStat(Nil, entryConfirmedExists = true)
+        .samplesScanned.addAndGet(totalSampleCount)
+      return
+    }
+
+    val nonNilKeyCount = size() - (if (containsNilKey) 1 else 0)
+    val samplesPerCounter = Math.ceil(
+      totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
+    ).asInstanceOf[Long]
+
     // NOTE: `while` avoids a Range allocation.
     var i = 0
     while (i < entries.size) {
-      consumer.apply(entries(i))
+      val (key, stat) = entries(i)
+      if (key.nonEmpty) {
+        stat.samplesScanned.addAndGet(samplesPerCounter)
+      }
       i += 1
     }
   }
 
+   /**
+    * Zero-allocation foreach variant.
+    * Intended for high-performance scenarios where efficient
+    *   key processing is required.
+    *
+    * *** NOT THREAD-SAFE!!! ***
+    * Concurrent modification behavior is undefined!
+    */
+   def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
+     // NOTE: `while` avoids a Range allocation.
+     var i = 0
+     while (i < entries.size) {
+       consumer.apply(entries(i))
+       i += 1
+     }
+   }
+
   /**
    * Applies a mapper function to all entries of the [[QueryStats]].
+   * NOTE: not intended to be highly performant.
    *
    * *** NOT THREAD-SAFE!!! ***
    * Concurrent modification behavior is undefined!
@@ -597,7 +627,7 @@ case class QueryStats() {
     lock.synchronized {
       entries.clear()
       keyToEntryIndex.clear()
-      containsNilKeyFlag = false
+      containsNilKey = false
     }
   }
 
