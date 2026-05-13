@@ -54,13 +54,6 @@ class AggregatingTimeSeriesPartition(
   // Check if any column has aggregation configured
   private val hasAnyAggregation: Boolean = aggConfigs.exists(_.isDefined)
 
-  // Determine which columns are histogram columns
-  private val isHistogramColumn: Array[Boolean] = {
-    schema.data.columns.map { col =>
-      col.columnType == Column.ColumnType.HistogramColumn
-    }.toArray
-  }
-
   // Pre-compute column types for type-specialized aggregation
   private val columnTypes: Array[Column.ColumnType] = schema.data.columns.map(_.columnType).toArray
 
@@ -115,7 +108,7 @@ class AggregatingTimeSeriesPartition(
     // Pass RowReader directly to avoid Array[Any] boxing.
     // Only propagate offset if it was set by the shard (>= 0); test code leaves it at -1.
     val effectiveOffset = if (currentIngestOffset >= 0) currentIngestOffset else Long.MaxValue
-    val aggregated = bucketState.aggregateRow(timestamp, ingestionTime, row, effectiveOffset)
+    val aggregated = bucketState.aggregateRow(timestamp, row, effectiveOffset)
 
     if (!aggregated) {
       // Sample was outside tolerance or bucket was finalized
@@ -156,7 +149,7 @@ class AggregatingTimeSeriesPartition(
           bucketsToFinalize.foreach { bucketTs =>
             bucketState.getBucketValues(bucketTs).foreach { columnValues =>
               // Create a complete row with all columns
-              val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
+              val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues)
 
               logger.trace(s"Writing finalized bucket $bucketTs to vectors for partition $partID")
 
@@ -271,7 +264,7 @@ class AggregatingTimeSeriesPartition(
 
       allBuckets.foreach { bucketTs =>
         bucketState.getBucketValues(bucketTs).foreach { columnValues =>
-          val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues, isHistogramColumn)
+          val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues)
 
           super.ingest(ingestionTime, aggregatedRow, overflowBlockHolder,
             createChunkAtFlushBoundary, flushIntervalMillis,
@@ -281,10 +274,6 @@ class AggregatingTimeSeriesPartition(
         bucketState.markFinalized(bucketTs)
       }
     }
-  }
-
-  override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    super.switchBuffers(blockHolder, encode)
   }
 
   /** Returns the smallest Kafka offset referenced by any active (unfinalized) bucket. */
@@ -299,8 +288,7 @@ object AggregatingTimeSeriesPartition {
    */
   private class CompleteAggregatedRow(
     timestamp: Long,
-    columnValues: Array[Any],
-    isHistogramColumn: Array[Boolean]
+    columnValues: Array[Any]
   ) extends RowReader {
 
     // scalastyle:off null

@@ -45,13 +45,6 @@ trait Aggregator {
    * Resets the aggregator state to initial condition.
    */
   def reset(): Unit
-
-  /**
-   * Creates a copy of this aggregator with clean state.
-   * Used for creating new buckets from templates.
-   * @return a new instance of the same aggregator type
-   */
-  def copy(): Aggregator
 }
 
 /**
@@ -82,8 +75,6 @@ class SumAggregator extends Aggregator {
     sum = 0.0
     count = 0
   }
-
-  def copy(): Aggregator = new SumAggregator
 }
 
 /**
@@ -123,8 +114,6 @@ class MinAggregator extends Aggregator {
     min = Double.MaxValue
     initialized = false
   }
-
-  def copy(): Aggregator = new MinAggregator
 }
 
 /**
@@ -164,8 +153,6 @@ class MaxAggregator extends Aggregator {
     max = Double.MinValue
     initialized = false
   }
-
-  def copy(): Aggregator = new MaxAggregator
 }
 
 /**
@@ -216,8 +203,6 @@ class LastAggregator extends Aggregator {
     lastTimestamp = Long.MinValue
     initialized = false
   }
-
-  def copy(): Aggregator = new LastAggregator
 }
 
 /**
@@ -272,8 +257,6 @@ class FirstAggregator extends Aggregator {
     firstTimestamp = Long.MaxValue
     initialized = false
   }
-
-  def copy(): Aggregator = new FirstAggregator
 }
 
 /**
@@ -298,8 +281,6 @@ class CountAggregator extends Aggregator {
   def reset(): Unit = {
     count = 0
   }
-
-  def copy(): Aggregator = new CountAggregator
 }
 
 /**
@@ -357,8 +338,6 @@ class HistogramAggregator extends Aggregator {
     accumulator = None
     needsMonotonicCorrection = false
   }
-
-  def copy(): Aggregator = new HistogramAggregator
 
   def getAccumulator: Option[MutableHistogram] = accumulator
 }
@@ -453,8 +432,6 @@ class HistogramLastAggregator extends Aggregator {
     currentTimestamp = Long.MinValue
     initialized = false
   }
-
-  def copy(): Aggregator = new HistogramLastAggregator
 
   /**
    * Gets the current histogram.

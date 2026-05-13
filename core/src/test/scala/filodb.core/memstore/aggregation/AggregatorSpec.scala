@@ -107,15 +107,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       agg.reset()
       agg.result().asInstanceOf[Double].isNaN shouldEqual true
     }
-
-    it("should create independent copies") {
-      val agg1 = new SumAggregator
-      agg1.add(10.0)
-      val agg2 = agg1.copy()
-      agg2.add(20.0)
-      agg1.result() shouldEqual 10.0
-      agg2.result() shouldEqual 20.0
-    }
   }
 
   describe("MinAggregator") {
@@ -355,13 +346,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       agg.reset()
 
       agg.asInstanceOf[HistogramAggregator].getAccumulator shouldEqual None
-    }
-
-    it("should create independent copies") {
-      val agg = new HistogramAggregator
-      val copy = agg.copy()
-      copy shouldBe a[HistogramAggregator]
-      copy should not be theSameInstanceAs(agg)
     }
 
     it("should ignore non-histogram values") {
@@ -684,13 +668,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       agg.reset()
 
       agg.asInstanceOf[HistogramLastAggregator].getCurrentHistogram shouldEqual None
-    }
-
-    it("should create independent copies") {
-      val agg = new HistogramLastAggregator
-      val copy = agg.copy()
-      copy shouldBe a[HistogramLastAggregator]
-      copy should not be theSameInstanceAs(agg)
     }
 
     it("should ignore non-histogram values") {

@@ -80,14 +80,12 @@ class BucketAggregationState(
    * Aggregates a sample into the appropriate bucket for each aggregating column.
    *
    * @param sampleTimestamp the original sample timestamp
-   * @param ingestionTime the current ingestion time (for tolerance checking)
    * @param columnValues array of column values from the row (indexed by column)
    * @return true if sample was aggregated, false if it was dropped (outside tolerance or finalized)
    */
   // scalastyle:off method.length
   def aggregate(
     sampleTimestamp: Long,
-    ingestionTime: Long,
     columnValues: Array[Any],
     offset: Long = Long.MaxValue
   ): Boolean = {
@@ -101,7 +99,7 @@ class BucketAggregationState(
     }
 
     // Check if sample is within tolerance window
-    if (!isWithinTolerance(sampleTimestamp, ingestionTime)) {
+    if (!isWithinTolerance(sampleTimestamp)) {
       return false
     }
 
@@ -155,7 +153,6 @@ class BucketAggregationState(
   // scalastyle:off method.length cyclomatic.complexity
   def aggregateRow(
     sampleTimestamp: Long,
-    ingestionTime: Long,
     row: RowReader,
     offset: Long = Long.MaxValue
   ): Boolean = {
@@ -164,7 +161,7 @@ class BucketAggregationState(
     val ts = getBucketTimestamp(sampleTimestamp)
 
     if (finalizedBuckets.contains(ts)) return false
-    if (!isWithinTolerance(sampleTimestamp, ingestionTime)) return false
+    if (!isWithinTolerance(sampleTimestamp)) return false
 
     // scalastyle:off null
     var bucketState = activeBuckets.get(ts)
@@ -418,7 +415,7 @@ class BucketAggregationState(
     TimeBucket.ceilToBucket(sampleTs, primaryIntervalMs)
 
   /** Event-time tolerance check: sample is within tolerance of the high-water mark. */
-  private def isWithinTolerance(sampleTs: Long, ingestionTime: Long): Boolean =
+  private def isWithinTolerance(sampleTs: Long): Boolean =
     latestSampleTimestamp == Long.MinValue || sampleTs >= latestSampleTimestamp - primaryOooToleranceMs
 
   /**

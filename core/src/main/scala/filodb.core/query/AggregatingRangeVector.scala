@@ -111,23 +111,6 @@ object AggregatingRangeVector {
       BucketRowData(bucketTs, values)
     }
   }
-
-  /**
-   * Legacy entry point kept for test compatibility. The toleranceMs/nowMs filter has been
-   * moved to BucketAggregationState.bucketValuesIteratorInRange(startTime, endTime, stalenessThreshold).
-   */
-  @deprecated("Use snapshotBuckets with pre-filtered iterator from BucketAggregationState", "")
-  private[query] def filterAndSnapshotBuckets(
-    rawIterator: Iterator[(Long, Array[Any])],
-    toleranceMs: Long,
-    columnIDs: Array[Int],
-    nowMs: Long
-  ): Iterator[BucketRowData] = {
-    snapshotBuckets(
-      rawIterator.filter { case (bucketTs, _) => nowMs - bucketTs >= toleranceMs },
-      columnIDs
-    )
-  }
   // scalastyle:on null
 }
 
