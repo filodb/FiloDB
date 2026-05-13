@@ -13,11 +13,6 @@ object AggregationType {
   case object Sum extends AggregationType
 
   /**
-   * Average aggregation - computes mean of all values in the bucket
-   */
-  case object Avg extends AggregationType
-
-  /**
    * Minimum aggregation - finds smallest value in the bucket
    */
   case object Min extends AggregationType
@@ -63,7 +58,6 @@ object AggregationType {
    */
   def parse(s: String): Option[AggregationType] = s.toLowerCase match {
     case "sum"             => Some(Sum)
-    case "avg" | "average" => Some(Avg)
     case "min"             => Some(Min)
     case "max"             => Some(Max)
     case "last"            => Some(Last)
@@ -77,7 +71,7 @@ object AggregationType {
   /**
    * Returns all supported aggregation types as a string for error messages.
    */
-  def supportedTypes: String = "sum, avg, min, max, last, first, count, histogram_sum, histogram_last"
+  def supportedTypes: String = "sum, min, max, last, first, count, histogram_sum, histogram_last"
 }
 
 /**

@@ -77,7 +77,7 @@ object AggregatingTimeSeriesPartitionSpec {
 
   val mixedDataset = Dataset("mixed_metrics", Seq("series:string"), mixedColumns,
     scalarDatasetOptions,
-    aggregatorNames = Seq("dAvg(1)", "hSum(2)"),
+    aggregatorNames = Seq("dSum(1)", "hSum(2)"),
     aggregationIntervalMs = 60000L,
     aggregationOooToleranceMs = 30000L)
   val mixedSchema = mixedDataset.schema
@@ -513,11 +513,11 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
           flushIntervalMillis, acceptDuplicateSamples)
       }
 
-      // Check in-memory scalar aggregation (avg = 15.0)
+      // Check in-memory scalar aggregation (sum = 30.0)
       val bucketTs = 120000L
       val scalarValue = part.getAggregatedValue(1, bucketTs)
       scalarValue shouldBe defined
-      scalarValue.get.asInstanceOf[Double] shouldEqual 15.0 +- 0.01
+      scalarValue.get.asInstanceOf[Double] shouldEqual 30.0 +- 0.01
 
       // Check in-memory histogram aggregation
       val aggregatedHist = part.getAggregatedHistogram(2, bucketTs)
@@ -531,7 +531,7 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
       val scalarIter = part.timeRangeRows(WriteBufferChunkScan, Array(1))
       val scalarValues = scalarIter.map(_.getDouble(0)).toSeq
       scalarValues.length shouldEqual 1
-      scalarValues.head shouldEqual 15.0 +- 0.01
+      scalarValues.head shouldEqual 30.0 +- 0.01
     }
   }
 

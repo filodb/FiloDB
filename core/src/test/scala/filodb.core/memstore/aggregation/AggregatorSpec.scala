@@ -118,35 +118,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  describe("AvgAggregator") {
-    it("should compute average correctly") {
-      val agg = new AvgAggregator
-      agg.add(10.0)
-      agg.add(20.0)
-      agg.add(30.0)
-      agg.result() shouldEqual 20.0
-    }
-
-    it("should handle single value") {
-      val agg = new AvgAggregator
-      agg.add(42.0)
-      agg.result() shouldEqual 42.0
-    }
-
-    it("should return NaN for empty aggregator") {
-      val agg = new AvgAggregator
-      agg.result().asInstanceOf[Double].isNaN shouldEqual true
-    }
-
-    it("should ignore NaN values") {
-      val agg = new AvgAggregator
-      agg.add(10.0)
-      agg.add(Double.NaN)
-      agg.add(20.0)
-      agg.result() shouldEqual 15.0
-    }
-  }
-
   describe("MinAggregator") {
     it("should find minimum value") {
       val agg = new MinAggregator
@@ -296,7 +267,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
   describe("Aggregator factory") {
     it("should create correct aggregator types") {
       Aggregator.create(AggregationType.Sum) shouldBe a[SumAggregator]
-      Aggregator.create(AggregationType.Avg) shouldBe a[AvgAggregator]
       Aggregator.create(AggregationType.Min) shouldBe a[MinAggregator]
       Aggregator.create(AggregationType.Max) shouldBe a[MaxAggregator]
       Aggregator.create(AggregationType.Last) shouldBe a[LastAggregator]
@@ -310,8 +280,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
   describe("AggregationType") {
     it("should parse aggregation types correctly") {
       AggregationType.parse("sum") shouldEqual Some(AggregationType.Sum)
-      AggregationType.parse("avg") shouldEqual Some(AggregationType.Avg)
-      AggregationType.parse("average") shouldEqual Some(AggregationType.Avg)
       AggregationType.parse("min") shouldEqual Some(AggregationType.Min)
       AggregationType.parse("max") shouldEqual Some(AggregationType.Max)
       AggregationType.parse("last") shouldEqual Some(AggregationType.Last)
@@ -324,7 +292,6 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
 
     it("should be case-insensitive") {
       AggregationType.parse("SUM") shouldEqual Some(AggregationType.Sum)
-      AggregationType.parse("Avg") shouldEqual Some(AggregationType.Avg)
       AggregationType.parse("MAX") shouldEqual Some(AggregationType.Max)
     }
 

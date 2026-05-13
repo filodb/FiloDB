@@ -31,7 +31,6 @@ object ColumnAggregator {
     "dMax"   -> AggregationType.Max,
     "dLast"  -> AggregationType.Last,
     "dFirst" -> AggregationType.First,
-    "dAvg"   -> AggregationType.Avg,
     "dCount" -> AggregationType.Count,
     "hSum"   -> AggregationType.HistogramSum,
     "hLast"  -> AggregationType.HistogramLast

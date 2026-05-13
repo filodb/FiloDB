@@ -1,5 +1,7 @@
 package filodb.core.metadata
 
+import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
@@ -148,10 +150,8 @@ object DataSchema {
    */
   def fromConfig(schemaName: String, conf: Config): DataSchema Or BadSchema = {
     val aggregatorNames = conf.as[Option[Seq[String]]]("aggregators").getOrElse(Seq.empty)
-    val intervalMs = conf.as[Option[String]]("aggregation-interval")
-                         .map(Column.parseTimeString).getOrElse(0L)
-    val toleranceMs = conf.as[Option[String]]("aggregation-ooo-tolerance")
-                          .map(Column.parseTimeString).getOrElse(0L)
+    val intervalMs = conf.as[Option[FiniteDuration]]("aggregation-interval").map(_.toMillis).getOrElse(0L)
+    val toleranceMs = conf.as[Option[FiniteDuration]]("aggregation-ooo-tolerance").map(_.toMillis).getOrElse(0L)
     val aggConfig = try {
       SchemaAggregationConfig(ColumnAggregator.parseAll(aggregatorNames), intervalMs, toleranceMs)
     } catch {

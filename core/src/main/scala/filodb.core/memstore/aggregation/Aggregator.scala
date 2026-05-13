@@ -87,38 +87,6 @@ class SumAggregator extends Aggregator {
 }
 
 /**
- * Average aggregator - computes mean of all numeric values.
- */
-class AvgAggregator extends Aggregator {
-  private var sum: Double = 0.0
-  private var count: Int = 0
-
-  def add(value: Any): Unit = {
-    value match {
-      case d: Double if !d.isNaN && !d.isInfinity => sum += d; count += 1
-      case l: Long                                 => sum += l.toDouble; count += 1
-      case i: Int                                  => sum += i.toDouble; count += 1
-      case f: Float if !f.isNaN && !f.isInfinity   => sum += f.toDouble; count += 1
-      case _                                       => // ignore
-    }
-  }
-
-  override def addDouble(value: Double): Unit =
-    if (!value.isNaN && !value.isInfinity) { sum += value; count += 1 }
-
-  override def addLong(value: Long): Unit = { sum += value.toDouble; count += 1 }
-
-  def result(): Any = if (count > 0) sum / count else Double.NaN
-
-  def reset(): Unit = {
-    sum = 0.0
-    count = 0
-  }
-
-  def copy(): Aggregator = new AvgAggregator
-}
-
-/**
  * Minimum aggregator - finds the smallest numeric value.
  */
 class MinAggregator extends Aggregator {
@@ -506,7 +474,6 @@ object Aggregator {
    */
   def create(aggType: AggregationType): Aggregator = aggType match {
     case AggregationType.Sum          => new SumAggregator
-    case AggregationType.Avg          => new AvgAggregator
     case AggregationType.Min          => new MinAggregator
     case AggregationType.Max          => new MaxAggregator
     case AggregationType.Last         => new LastAggregator

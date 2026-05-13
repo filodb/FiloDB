@@ -42,12 +42,6 @@ class ColumnAggregatorSpec extends AnyFunSpec with Matchers {
       agg.aggType shouldEqual AggregationType.First
     }
 
-    it("should parse dAvg(1)") {
-      val agg = ColumnAggregator.parse("dAvg(1)")
-      agg.columnId shouldEqual 1
-      agg.aggType shouldEqual AggregationType.Avg
-    }
-
     it("should parse dCount(1)") {
       val agg = ColumnAggregator.parse("dCount(1)")
       agg.columnId shouldEqual 1

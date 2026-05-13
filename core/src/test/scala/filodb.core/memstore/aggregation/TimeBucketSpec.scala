@@ -220,7 +220,7 @@ class TimeBucketSpec extends AnyFunSpec with Matchers {
     it("should create bucket from templates") {
       val templates = Array(
         Aggregator.create(AggregationType.Sum),
-        Aggregator.create(AggregationType.Avg)
+        Aggregator.create(AggregationType.Min)
       )
 
       val bucket = TimeBucket.create(30000L, templates)
@@ -229,7 +229,7 @@ class TimeBucketSpec extends AnyFunSpec with Matchers {
       bucket.sampleCount shouldEqual 0
       bucket.aggregators.length shouldEqual 2
       bucket.aggregators(0) shouldBe a[SumAggregator]
-      bucket.aggregators(1) shouldBe a[AvgAggregator]
+      bucket.aggregators(1) shouldBe a[MinAggregator]
     }
 
     it("should create independent buckets from same templates") {
