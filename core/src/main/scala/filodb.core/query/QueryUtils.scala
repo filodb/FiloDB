@@ -221,16 +221,25 @@ object QueryUtils {
       rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
       i += 1
     }
-    val rowSamples = rowsScanned * rowMultiplier *
-      config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
+
+    // NOTE: avoiding getOrElse below to avoid lambda allocations.
+
+    val rowSamples = rowsScanned * rowMultiplier * (
+        if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
+        else config.defaultSamplesPerRow
+      )
     rowSamplesScanned.increment(rowSamples.toLong)
 
-    val seriesSamples = seriesScanned *
-      config.classToSamplesPerSeries.getOrElse(clazz, config.defaultSamplesPerSeries)
+    val seriesSamples = seriesScanned * (
+        if (config.classToSamplesPerSeries.contains(clazz)) config.classToSamplesPerSeries(clazz)
+        else config.defaultSamplesPerSeries
+      )
     seriesSamplesScanned.increment(seriesSamples.toLong)
 
-    val partKeySamples = partKeyBytes *
-      config.classToSamplesPerPartKeyByte.getOrElse(clazz, config.defaultSamplesPerPartKeyByte)
+    val partKeySamples = partKeyBytes * (
+        if (config.classToSamplesPerPartKeyByte.contains(clazz)) config.classToSamplesPerPartKeyByte(clazz)
+        else config.defaultSamplesPerPartKeyByte
+      )
     partKeyBytesSamplesScanned.increment(partKeySamples.toLong)
 
     val totalSamples = Math.ceil(
@@ -292,16 +301,25 @@ object QueryUtils {
       rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
       i += 1
     }
-    val rowSamples = childRv.estimateNumRows() * rowMultiplier *
-      config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
+
+    // NOTE: avoiding getOrElse below to avoid lambda allocations.
+
+    val rowSamples = childRv.estimateNumRows() * rowMultiplier * (
+        if (config.classToSamplesPerChildRow.contains(parentClass)) config.classToSamplesPerChildRow(parentClass)
+        else config.defaultSamplesPerChildRow
+      )
     childRowSamplesScanned.increment(rowSamples.toLong)
 
-    val seriesSamples = config.classToSamplesPerChildSeries.getOrElse(
-      parentClass, config.defaultSamplesPerChildSeries)
+    val seriesSamples =
+      if (config.classToSamplesPerChildSeries.contains(parentClass)) config.classToSamplesPerChildSeries(parentClass)
+      else config.defaultSamplesPerChildSeries
     childSeriesSamplesScanned.increment(seriesSamples.toLong)
 
-    val partKeySamples = childRv.key.keySize *
-      config.classToSamplesPerChildPartKeyByte.getOrElse(parentClass, config.defaultSamplesPerChildPartKeyByte)
+    val partKeySamples = childRv.key.keySize * (
+        if (config.classToSamplesPerChildPartKeyByte.contains(parentClass))
+          config.classToSamplesPerChildPartKeyByte(parentClass)
+        else config.defaultSamplesPerChildPartKeyByte
+      )
     childPartKeyBytesSamplesScanned.increment(partKeySamples.toLong)
 
     val totalSamples = Math.ceil(
