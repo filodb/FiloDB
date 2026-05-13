@@ -109,9 +109,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.foreach(entry => keyBuffer.addOne(entry._1))
     keyBuffer.toSeq shouldEqual Nil
 
-    stats.foreachKey(key => keyBuffer.addOne(key))
-    keyBuffer.toSeq shouldEqual Nil
-
     // Test nonempty stats. #################################
 
     stats.getSamplesScannedCounter(Nil)
@@ -121,10 +118,6 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     stats.map(entry => entry._1).toSet shouldEqual Set(Nil, Seq("foo"), Seq("abc", "123"))
 
     stats.foreach(entry => keyBuffer.addOne(entry._1))
-    keyBuffer.toSet shouldEqual Set(Nil, Seq("foo"), Seq("abc", "123"))
-    keyBuffer.clear()
-
-    stats.foreachKey(key => keyBuffer.addOne(key))
     keyBuffer.toSet shouldEqual Set(Nil, Seq("foo"), Seq("abc", "123"))
     keyBuffer.clear()
   }

@@ -185,11 +185,26 @@ object QueryUtils {
     val samplesPerCounter = Math.ceil(
       totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
     ).asInstanceOf[Long]
-    queryStats.foreachKey{ k =>
-      if (k.nonEmpty) {
-        queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter)
+    queryStats.foreach{ entry =>
+      if (entry._1.nonEmpty) {
+        entry._2.samplesScanned.addAndGet(samplesPerCounter)
       }
     }
+  }
+
+  /**
+   * Efficiently compute the appropriate per-row samples-scanned multiplier.
+   */
+  private def computeSamplesScannedRowMultiplier(schema: ResultSchema,
+                                                 config: SamplesScannedConfig): Double = {
+    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
+    var rowMultiplier = 0.0
+    var i = 0
+    while (i < schema.columns.size) {
+      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
+      i += 1
+    }
+    rowMultiplier
   }
 
   /**
@@ -214,16 +229,9 @@ object QueryUtils {
       return
     }
 
-    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
-    var rowMultiplier = 0.0
-    var i = 0
-    while (i < schema.columns.size) {
-      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
-      i += 1
-    }
-
     // NOTE: avoiding getOrElse below to avoid lambda allocations.
 
+    val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
     val rowSamples = rowsScanned * rowMultiplier * (
         if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
         else config.defaultSamplesPerRow
@@ -294,16 +302,9 @@ object QueryUtils {
       return
     }
 
-    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
-    var rowMultiplier = 0.0
-    var i = 0
-    while (i < schema.columns.size) {
-      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
-      i += 1
-    }
-
     // NOTE: avoiding getOrElse below to avoid lambda allocations.
 
+    val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
     val rowSamples = childRv.estimateNumRows() * rowMultiplier * (
         if (config.classToSamplesPerChildRow.contains(parentClass)) config.classToSamplesPerChildRow(parentClass)
         else config.defaultSamplesPerChildRow

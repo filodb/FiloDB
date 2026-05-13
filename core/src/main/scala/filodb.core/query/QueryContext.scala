@@ -402,89 +402,129 @@ case class Stat() {
 
 case class QueryStats() {
 
-  private val stat = TrieMap[Seq[String], Stat]()
-
   /**
-   * Stores all stats keys.
-   * Useful if e.g. keys need frequent iteration but Iterator
-   *   allocations should be prevented.
+   * Stores all stats entries.
+   * Helpful in scenarios where e.g. entries need frequent iteration but
+   *   Iterator allocations should be prevented.
    * Also useful for efficient size() calculation (as opposed to TrieMap.size(),
    *   which allocates an Object on the heap and has some computation overhead).
    */
-  private val keyBuffer = ArrayBuffer[Seq[String]]()
+  private val entries = ArrayBuffer[(Seq[String], Stat)]()
+  private val keyToEntryIndex = new TrieMap[Seq[String], Integer]()
 
   /**
    * Set true if Nil is ever added as a key.
    * Useful in cases where this needs to be known efficiently
-   *   (e.g. while samples-scanned counters are updated.)
-   */
-  @volatile private var containsNilKeyFlag = false
+   *   (e.g. while samples-scanned counters are updated).
+   **/
+  @volatile private var containsNilKeyFlag = false;
 
   private val lock = new AnyRef
 
-  override def toString: String = stat.toString()
+  override def toString: String = entries.toString()
+
+  // scalastyle:off null
+  // NOTE: null is used to avoid Option allocations.
+  /**
+   * Returns the index of the key's entry if it exists. Else returns null.
+   * @param entryConfirmedExists as an optimization, "true" skips "contains" checks;
+   *   an error will be thrown if this is "true" but the entry does not exist.
+   */
+  private def getNullableIndex(key: Seq[String],
+                               entryConfirmedExists: Boolean = false): Integer = {
+    if (entryConfirmedExists || keyToEntryIndex.contains(key)) keyToEntryIndex(key) else null
+  }
+  // scalastyle:on null
+
+  // scalastyle:off null
+  // NOTE: null is used to avoid Option allocations.
+  /**
+   * Returns the index of the key's entry if it exists. Else returns null.
+   * More efficient than public [[get]] because [[Option]] allocations are avoided.
+   * @param entryConfirmedExists as an optimization, "true" skips "contains" checks;
+   *   an error will be thrown if this is "true" but the entry does not exist.
+   */
+  private def getNullableStat(key: Seq[String],
+                              entryConfirmedExists: Boolean = false): Stat = {
+    val index = getNullableIndex(key, entryConfirmedExists)
+    if (index == null) {
+      return null
+    }
+    entries(index)._2
+  }
+  // scalastyle:on null
 
   /**
    * Inserts a [[Stat]] into the [[QueryStats]].
-   * Overwrites existing value (if the argument key already exists).
-   * @param forceBufferAdd true to always add the key to the key buffer,
-   *   regardless of whether-or-not the trie already contains it.
-   *   "true" assumes the caller has already confirmed the key should be added.
+   * If the argument key's entry already exists, the existing [[Stat]] is overwritten.
+   *
+   * @param entryConfirmedNotPresent as an optimization, "true" skips "contains" checks;
+   *   undefined behavior if this is "true" but the entry already exists.
    */
   private def putInternal(key: Seq[String],
                           value: Stat,
-                          forceBufferAdd: Boolean = false): Unit = {
+                          entryConfirmedNotPresent: Boolean = false): Unit = {
     if (key.isEmpty) {
       containsNilKeyFlag = true
     }
     lock.synchronized {
-      if (forceBufferAdd || !stat.contains(key)) {
-        keyBuffer.addOne(key)
+      if (entryConfirmedNotPresent || !keyToEntryIndex.contains(key)) {
+        entries.addOne((key, value))
+        keyToEntryIndex.put(key, entries.size - 1)
+      } else {
+        // The key's entry must exist if we've entered this block.
+        val index = getNullableIndex(key, entryConfirmedExists = true)
+        entries(index) = (key, value)
       }
-      stat.put(key, value)
     }
   }
 
-  // scalastyle:off null
-  // NOTE: getOrElse(..., null) is used to avoid Option allocations.
   /**
    * Either returns the currently-stored [[Stat]] or returns a new,
-   *   empty one and adds it to the trie.
+   *   empty one that is stored against the argument key.
    */
   private def getOrAddEmptyStat(key: Seq[String]): Stat = {
     // Two checks to avoid using `synchronized` for every call...
     // First check: is the key already in the trie?
     // If it is: just return its value.
-    val firstStat = stat.getOrElse(key, null)
-    if (firstStat == null) {
+    val hasKeyAtFirstCheck = keyToEntryIndex.contains(key)
+    if (!hasKeyAtFirstCheck) {
       // Otherwise, grab the lock.
       lock.synchronized {
         // Second check: was it added just before we acquired the lock?
         // If not, add it; else return its value.
-        val secondStat = stat.getOrElse(key, null)
-        if (secondStat == null) {
+        val hasKeyAtSecondCheck = keyToEntryIndex.contains(key)
+        if (!hasKeyAtSecondCheck) {
           val newStat = Stat()
-          putInternal(key, newStat, forceBufferAdd = true)
-          newStat
-        } else secondStat
+          putInternal(key, newStat, entryConfirmedNotPresent = true)
+          return newStat
+        }
       }
-    } else firstStat
+    }
+    // If we reach here, we've confirmed the entry already exists; return the value.
+    getNullableStat(key, entryConfirmedExists = true)
   }
-  // scalastyle:on null
 
   /**
-   * Add the argument [[QueryStats]] counters to this [[QueryStats]]' counters.
+   * Add the argument [[QueryStats]]' counters to this [[QueryStats]]' counters.
    */
   def add(s: QueryStats): Unit = {
-    s.foreach(kv => getOrAddEmptyStat(kv._1).add(kv._2))
+    lock.synchronized {
+      // Lock is required to prevent concurrent modification while
+      //   iterating entries; foreach is not thread-safe.
+      s.foreach(kv => getOrAddEmptyStat(kv._1).add(kv._2))
+    }
   }
 
   /**
    * Returns all keys in the [[QueryStats]].
-   * NOTE: not intended to be performant.
+   * NOTE: not intended to be performant and only exists to support tests.
+   *
+   * * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
    */
   def keys(): Seq[Seq[String]] = {
-    keyBuffer.clone().toSeq
+    entries.map(_._1).toSeq
   }
 
   /**
@@ -495,33 +535,32 @@ case class QueryStats() {
   }
 
   /**
-   * Returns the value (if it exists).
-   */
-  def get(key: Seq[String]): Option[Stat] = {
-    stat.get(key)
-  }
-
-  /**
-   * Returns the count of elements in the [[QueryStats]].
-   */
-  def size(): Int = {
-    keyBuffer.size
-  }
-
-  /**
-   * Returns true iff the [[QueryStats]] contains Nil as a key.
+   * Returns true iff Nil is a key of the [[QueryStats]].
    * Useful in cases where this needs to be known efficiently
-   *   (e.g. while samples-scanned counters are updated.)
-   */
+   *   (e.g. while samples-scanned counters are updated).
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
+   * */
   def containsNilKey(): Boolean = {
     containsNilKeyFlag
   }
 
   /**
-   * Applies a mapper function to all entries of the [[QueryStats]].
+   * Returns the entry's value (if it exists).
    */
-  def map[T](function: ((Seq[String], Stat)) => T): Iterable[T] = {
-    stat.map(function)
+  def get(key: Seq[String]): Option[Stat] = {
+    Option(getNullableStat(key))
+  }
+
+  /**
+   * Returns the count of elements in the [[QueryStats]].
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
+   */
+  def size(): Int = {
+    entries.size
   }
 
   /**
@@ -532,21 +571,23 @@ case class QueryStats() {
    * *** NOT THREAD-SAFE!!! ***
    * Concurrent modification behavior is undefined!
    */
-  def foreachKey(consumer: Seq[String] => Unit): Unit = {
+  def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
     // NOTE: `while` avoids a Range allocation.
     var i = 0
-    while (i < keyBuffer.size) {
-      consumer.apply(keyBuffer(i))
+    while (i < entries.size) {
+      consumer.apply(entries(i))
       i += 1
     }
   }
 
   /**
-   * Standard-fare foreach that applies a consumer to
-   *   every entry of the [[QueryStats]].
+   * Applies a mapper function to all entries of the [[QueryStats]].
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
    */
-  def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
-    stat.foreach(consumer)
+  def map[T](function: ((Seq[String], Stat)) => T): Iterable[T] = {
+    entries.map(function)
   }
 
   /**
@@ -554,8 +595,8 @@ case class QueryStats() {
    */
   def clear(): Unit = {
     lock.synchronized {
-      stat.clear()
-      keyBuffer.clear()
+      entries.clear()
+      keyToEntryIndex.clear()
       containsNilKeyFlag = false
     }
   }
@@ -567,7 +608,7 @@ case class QueryStats() {
    *              then head group is used if it exists.
    */
   def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
-    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrAddEmptyStat(theNs).timeSeriesScanned
   }
 
@@ -578,7 +619,7 @@ case class QueryStats() {
    *              then head group is used if it exists.
    */
   def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
-    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrAddEmptyStat(theNs).dataBytesScanned
   }
 
@@ -589,7 +630,7 @@ case class QueryStats() {
    *              then head group is used if it exists.
    */
   def getSamplesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
-    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrAddEmptyStat(theNs).samplesScanned
   }
 
@@ -600,7 +641,7 @@ case class QueryStats() {
    *              then head group is used if it exists.
    */
   def getResultBytesCounter(group: Seq[String] = Nil): AtomicLong = {
-    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrAddEmptyStat(theNs).resultBytes
   }
 
@@ -612,11 +653,17 @@ case class QueryStats() {
    *              then head group is used if it exists.
    */
   def getCpuNanosCounter(group: Seq[String] = Nil): AtomicLong = {
-    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrAddEmptyStat(theNs).cpuNanos
   }
 
-  def totalCpuNanos: Long = stat.valuesIterator.map(_.cpuNanos.get()).sum
+  /**
+   * Returns the sum of CPU nanos for all entries.
+   *
+   * *** NOT THREAD-SAFE!!! ***
+   * Concurrent modification behavior is undefined!
+   */
+  def totalCpuNanos: Long = entries.map(_._2).map(_.cpuNanos.get()).sum
 
 }
 
