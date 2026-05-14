@@ -2,6 +2,7 @@ package filodb.core.query
 
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.{ArrayBuffer, SortedSet}
@@ -419,7 +420,9 @@ case class QueryStats() {
    **/
   @volatile private var containsNilKey = false;
 
-  private val lock = new AnyRef
+  private val lock = new ReentrantReadWriteLock()
+  private val readLock = lock.readLock()
+  private val writeLock = lock.writeLock()
 
   override def toString: String = entries.toString()
 
@@ -432,6 +435,7 @@ case class QueryStats() {
    */
   private def getNullableIndex(key: Seq[String],
                                entryConfirmedExists: Boolean = false): Integer = {
+    // No locks required; keyToEntryIndex is a thread-safe data structure.
     if (entryConfirmedExists || keyToEntryIndex.contains(key)) keyToEntryIndex(key) else null
   }
   // scalastyle:on null
@@ -446,11 +450,19 @@ case class QueryStats() {
    */
   private def getNullableStat(key: Seq[String],
                               entryConfirmedExists: Boolean = false): Stat = {
-    val index = getNullableIndex(key, entryConfirmedExists)
-    if (index == null) {
-      return null
+    // NOTE: cannot acquire the lock after the first "return null"
+    //   short-circuit; if clear() is called just after we get the
+    //   index, we will access an index that does not exist!
+    readLock.lock()
+    try {
+      val index = getNullableIndex(key, entryConfirmedExists)
+      if (index == null) {
+        return null
+      }
+      entries(index)._2
+    } finally {
+      readLock.unlock()
     }
-    entries(index)._2
   }
   // scalastyle:on null
 
@@ -464,10 +476,12 @@ case class QueryStats() {
   private def putInternal(key: Seq[String],
                           value: Stat,
                           entryConfirmedNotPresent: Boolean = false): Unit = {
-    if (key.isEmpty) {
-      containsNilKey = true
-    }
-    lock.synchronized {
+
+    writeLock.lock()
+    try {
+      if (key.isEmpty) {
+        containsNilKey = true
+      }
       if (entryConfirmedNotPresent || !keyToEntryIndex.contains(key)) {
         entries.addOne((key, value))
         keyToEntryIndex.put(key, entries.size - 1)
@@ -476,6 +490,8 @@ case class QueryStats() {
         val index = getNullableIndex(key, entryConfirmedExists = true)
         entries(index) = (key, value)
       }
+    } finally {
+      writeLock.unlock()
     }
   }
 
@@ -483,53 +499,51 @@ case class QueryStats() {
    * Either returns the currently-stored [[Stat]] or returns a new,
    *   empty one that is stored against the argument key.
    */
-  private def getOrAddEmptyStat(key: Seq[String]): Stat = {
-    // Two checks to avoid using `synchronized` for every call...
+  private def getOrPutEmptyStat(key: Seq[String]): Stat = {
+    // Two checks to avoid acquiring a lock for every call...
     // First check: is the key already in the trie?
     // If it is: just return its value.
     val hasKeyAtFirstCheck = keyToEntryIndex.contains(key)
-    if (!hasKeyAtFirstCheck) {
-      // Otherwise, grab the lock.
-      lock.synchronized {
-        // Second check: was it added just before we acquired the lock?
-        // If not, add it; else return its value.
-        val hasKeyAtSecondCheck = keyToEntryIndex.contains(key)
-        if (!hasKeyAtSecondCheck) {
-          val newStat = Stat()
-          putInternal(key, newStat, entryConfirmedNotPresent = true)
-          return newStat
-        }
-      }
+    if (hasKeyAtFirstCheck) {
+      return getNullableStat(key, entryConfirmedExists = true)
     }
-    // If we reach here, we've confirmed the entry already exists; return the value.
-    getNullableStat(key, entryConfirmedExists = true)
+    // Otherwise, grab the lock.
+    writeLock.lock()
+    try {
+      // Second check: was it added just before we acquired the lock?
+      // If not, add it; else return its value.
+      val hasKeyAtSecondCheck = keyToEntryIndex.contains(key)
+      if (!hasKeyAtSecondCheck) {
+        val newStat = Stat()
+        putInternal(key, newStat, entryConfirmedNotPresent = true)
+        newStat
+      } else {
+        // NOTE: calling this outside the lock might race with clear().
+        getNullableStat(key, entryConfirmedExists = true)
+      }
+    } finally {
+      writeLock.unlock()
+    }
   }
 
   /**
    * Add the argument [[QueryStats]]' counters to this [[QueryStats]]' counters.
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification of *argument* [[QueryStats]] gives undefined behavior!
-   * This [[QueryStats]] may be concurrently modified.
    */
   def add(s: QueryStats): Unit = {
-    var i = 0
-    while (i < s.entries.size) {
-      val (key, value) = s.entries(i)
-      getOrAddEmptyStat(key).add(value)
-      i += 1
-    }
+    s.foreach { case (key, stat) => getOrPutEmptyStat(key).add(stat) }
   }
 
   /**
    * Returns all keys in the [[QueryStats]].
    * NOTE: not intended to be highly performant.
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
    */
   def keys(): Seq[Seq[String]] = {
-    entries.map(_._1).toSeq
+    readLock.lock()
+    try {
+      entries.map { case (key, stat) => key }.toSeq
+    } finally {
+      readLock.unlock()
+    }
   }
 
   /**
@@ -548,12 +562,14 @@ case class QueryStats() {
 
   /**
    * Returns the count of elements in the [[QueryStats]].
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
    */
   def size(): Int = {
-    entries.size
+    readLock.lock()
+    try {
+      entries.size
+    } finally {
+      readLock.unlock()
+    }
   }
 
   /**
@@ -562,72 +578,75 @@ case class QueryStats() {
    * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
    *   against it. If Nil exists with other keys, samples are divided
    *   among the non-Nil keys only.
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
    */
   def addSamplesScanned(totalSampleCount: Long): Unit = {
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is sometimes added to QueryStats as a default.
-    val hasSingleEmptyKey = size() == 1 && containsNilKey
-    if (hasSingleEmptyKey) {
-      getNullableStat(Nil, entryConfirmedExists = true)
-        .samplesScanned.addAndGet(totalSampleCount)
-      return
-    }
-
-    val nonNilKeyCount = size() - (if (containsNilKey) 1 else 0)
-    val samplesPerCounter = Math.ceil(
-      totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
-    ).asInstanceOf[Long]
-
-    // NOTE: `while` avoids a Range allocation.
-    var i = 0
-    while (i < entries.size) {
-      val (key, stat) = entries(i)
-      if (key.nonEmpty) {
-        stat.samplesScanned.addAndGet(samplesPerCounter)
+    readLock.lock()
+    try {
+      // QueryStats keys are updated for all except Nil *unless* Nil
+      //   is the only entry. Nil is sometimes added to QueryStats as a default.
+      val hasSingleEmptyKey = size() == 1 && containsNilKey
+      if (hasSingleEmptyKey) {
+        getNullableStat(Nil, entryConfirmedExists = true)
+          .samplesScanned.addAndGet(totalSampleCount)
+        return
       }
-      i += 1
+
+      val nonNilKeyCount = size() - (if (containsNilKey) 1 else 0)
+      val samplesPerCounter = Math.ceil(
+        totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
+      ).asInstanceOf[Long]
+
+      // NOTE: `while` avoids a Range allocation.
+      var i = 0
+      while (i < entries.size) {
+        val (key, stat) = entries(i)
+        if (key.nonEmpty) {
+          stat.samplesScanned.addAndGet(samplesPerCounter)
+        }
+        i += 1
+      }
+    } finally {
+      readLock.unlock()
     }
   }
 
    /**
-    * Zero-allocation foreach variant.
-    * Intended for high-performance scenarios where efficient
-    *   key processing is required.
-    *
-    * *** NOT THREAD-SAFE!!! ***
-    * Concurrent modification behavior is undefined!
+    * Applies a consumer to each entry.
+    * NOTE: not intended to be highly performant.
     */
    def foreach(consumer: ((Seq[String], Stat)) => Unit): Unit = {
-     // NOTE: `while` avoids a Range allocation.
-     var i = 0
-     while (i < entries.size) {
-       consumer.apply(entries(i))
-       i += 1
+     readLock.lock()
+     try {
+       entries.foreach(consumer)
+     } finally {
+       readLock.unlock()
      }
    }
 
   /**
    * Applies a mapper function to all entries of the [[QueryStats]].
    * NOTE: not intended to be highly performant.
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
    */
   def map[T](function: ((Seq[String], Stat)) => T): Iterable[T] = {
-    entries.map(function)
+    readLock.lock()
+    try {
+      entries.map(function)
+    } finally {
+      readLock.unlock()
+    }
   }
 
   /**
    * Clear all entries from the [[QueryStats]].
    */
   def clear(): Unit = {
-    lock.synchronized {
+    writeLock.lock()
+    try {
       entries.clear()
       keyToEntryIndex.clear()
       containsNilKey = false
+    } finally {
+      writeLock.unlock()
     }
   }
 
@@ -639,7 +658,7 @@ case class QueryStats() {
    */
   def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
-    getOrAddEmptyStat(theNs).timeSeriesScanned
+    getOrPutEmptyStat(theNs).timeSeriesScanned
   }
 
   /**
@@ -650,7 +669,7 @@ case class QueryStats() {
    */
   def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
-    getOrAddEmptyStat(theNs).dataBytesScanned
+    getOrPutEmptyStat(theNs).dataBytesScanned
   }
 
   /**
@@ -661,7 +680,7 @@ case class QueryStats() {
    */
   def getSamplesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
-    getOrAddEmptyStat(theNs).samplesScanned
+    getOrPutEmptyStat(theNs).samplesScanned
   }
 
   /**
@@ -672,7 +691,7 @@ case class QueryStats() {
    */
   def getResultBytesCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
-    getOrAddEmptyStat(theNs).resultBytes
+    getOrPutEmptyStat(theNs).resultBytes
   }
 
   /**
@@ -684,17 +703,20 @@ case class QueryStats() {
    */
   def getCpuNanosCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
-    getOrAddEmptyStat(theNs).cpuNanos
+    getOrPutEmptyStat(theNs).cpuNanos
   }
 
   /**
    * Returns the sum of CPU nanos for all entries.
-   *
-   * *** NOT THREAD-SAFE!!! ***
-   * Concurrent modification behavior is undefined!
    */
-  def totalCpuNanos: Long = entries.map(_._2).map(_.cpuNanos.get()).sum
-
+  def totalCpuNanos: Long = {
+    readLock.lock()
+    try {
+      entries.map { case (key, stat) => stat }.map(_.cpuNanos.get()).sum
+    } finally {
+      readLock.unlock()
+    }
+  }
 }
 
 object QuerySession {
