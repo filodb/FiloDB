@@ -16,14 +16,22 @@ import filodb.memory.format.vectors.MutableHistogram
  * - When finalized, complete rows with all columns are written at once
  * - This avoids issues with partial column writes and chunk lifecycle
  *
- * @param columnConfigs array of optional aggregation configs per column
+ * @param columnAggTypes array of optional aggregation types per column (None = not aggregating)
+ * @param intervalMs the time bucket interval in milliseconds (schema-wide)
+ * @param oooToleranceMs the out-of-order tolerance window in milliseconds (schema-wide)
  * @param numColumns total number of data columns
+ * @param columnTypes per-column column types for type-specialized aggregation paths
  */
 class BucketAggregationState(
-  columnConfigs: Array[Option[AggregationConfig]],
+  columnAggTypes: Array[Option[AggregationType]],
+  intervalMs: Long,
+  oooToleranceMs: Long,
   numColumns: Int,
   columnTypes: Array[Column.ColumnType] = Array.empty
 ) {
+  require(intervalMs > 0, s"Aggregation interval must be positive, got $intervalMs")
+  require(oooToleranceMs >= 0, s"Out-of-order tolerance must be non-negative, got $oooToleranceMs")
+
   // Map from bucket timestamp -> aggregated values for all columns.
   // Java TreeMap avoids Scala collection wrapper overhead while
   // preserving sorted iteration needed by getBucketsToFinalize
@@ -44,15 +52,12 @@ class BucketAggregationState(
   /** The current event-time high-water mark. Used by finalization logic. */
   def latestSampleTimestampSeen: Long = latestSampleTimestamp
 
-  // Cached primary config values (computed once at construction to avoid per-sample collection ops)
-  private val primaryIntervalMs: Long = columnConfigs.flatten.headOption.map(_.intervalMs).getOrElse(0L)
-  private val primaryOooToleranceMs: Long = columnConfigs.flatten.headOption.map(_.oooToleranceMs).getOrElse(0L)
-  private val hasPrimaryConfig: Boolean = columnConfigs.flatten.nonEmpty
+  private val hasPrimaryConfig: Boolean = columnAggTypes.exists(_.isDefined)
 
   // Pre-computed arrays for fast inner-loop access (avoids Option matching per column per sample)
-  private val isAggregating: Array[Boolean] = columnConfigs.map(_.isDefined)
+  private val isAggregating: Array[Boolean] = columnAggTypes.map(_.isDefined)
   // scalastyle:off null
-  private val aggConfigsFlat: Array[AggregationConfig] = columnConfigs.map(_.orNull)
+  private val aggTypesFlat: Array[AggregationType] = columnAggTypes.map(_.orNull)
   // scalastyle:on null
 
   // Small pool of BucketState objects to reduce allocation pressure.
@@ -66,7 +71,7 @@ class BucketAggregationState(
       pooled.reset()
       pooled
     } else {
-      new BucketState(numColumns, aggConfigsFlat)
+      new BucketState(numColumns, aggTypesFlat)
     }
   }
 
@@ -119,7 +124,7 @@ class BucketAggregationState(
       if (isAggregating(i)) {
         val value = columnValues(i)
         if (value != null) {
-          bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+          bucketState.aggregate(i, value, sampleTimestamp)
           aggregated = true
         }
       } else {
@@ -180,17 +185,17 @@ class BucketAggregationState(
             case Column.ColumnType.DoubleColumn =>
               val value = row.getDouble(i)
               if (!value.isNaN) {
-                bucketState.aggregateDoubleWithTimestamp(i, aggConfigsFlat(i), value, sampleTimestamp)
+                bucketState.aggregateDoubleWithTimestamp(i, value, sampleTimestamp)
                 aggregated = true
               }
             case Column.ColumnType.LongColumn | Column.ColumnType.TimestampColumn =>
-              bucketState.aggregateLongWithTimestamp(i, aggConfigsFlat(i), row.getLong(i), sampleTimestamp)
+              bucketState.aggregateLongWithTimestamp(i, row.getLong(i), sampleTimestamp)
               aggregated = true
             case Column.ColumnType.HistogramColumn =>
               val value = row.getAny(i)
               // scalastyle:off null
               if (value != null) {
-                bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+                bucketState.aggregate(i, value, sampleTimestamp)
                 aggregated = true
               }
               // scalastyle:on null
@@ -198,7 +203,7 @@ class BucketAggregationState(
               val value = row.getAny(i)
               // scalastyle:off null
               if (value != null) {
-                bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+                bucketState.aggregate(i, value, sampleTimestamp)
                 aggregated = true
               }
               // scalastyle:on null
@@ -208,7 +213,7 @@ class BucketAggregationState(
           val value = row.getAny(i)
           // scalastyle:off null
           if (value != null) {
-            bucketState.aggregate(i, aggConfigsFlat(i), value, sampleTimestamp)
+            bucketState.aggregate(i, value, sampleTimestamp)
             aggregated = true
           }
           // scalastyle:on null
@@ -295,7 +300,7 @@ class BucketAggregationState(
     var i = 0
     while (i < numColumns) {
       if (isAggregating(i)) {
-        values(i) = state.getAggregatedValue(i, aggConfigsFlat(i))
+        values(i) = state.getAggregatedValue(i)
       } else {
         values(i) = state.getValue(i)
       }
@@ -340,11 +345,10 @@ class BucketAggregationState(
         val values = new Array[Any](numColumns)
         var i = 0
         while (i < numColumns) {
-          columnConfigs(i) match {
-            case Some(_) =>
-              values(i) = state.getValueForQuery(i)
-            case None =>
-              values(i) = state.getValue(i)
+          if (isAggregating(i)) {
+            values(i) = state.getValueForQuery(i)
+          } else {
+            values(i) = state.getValue(i)
           }
           i += 1
         }
@@ -383,7 +387,7 @@ class BucketAggregationState(
    */
   def cleanupOldFinalizedTracking(thresholdTs: Long): Unit = {
     if (hasPrimaryConfig) {
-      val cleanupThreshold = thresholdTs - (2 * primaryOooToleranceMs)
+      val cleanupThreshold = thresholdTs - (2 * oooToleranceMs)
       val it = finalizedBuckets.iterator()
       while (it.hasNext) {
         if (it.next() < cleanupThreshold) it.remove()
@@ -410,13 +414,13 @@ class BucketAggregationState(
     latestSampleTimestamp = Long.MinValue
   }
 
-  // Helper to calculate bucket timestamp using cached primary interval
+  // Helper to calculate bucket timestamp using the schema-level interval
   private def getBucketTimestamp(sampleTs: Long): Long =
-    TimeBucket.ceilToBucket(sampleTs, primaryIntervalMs)
+    TimeBucket.ceilToBucket(sampleTs, intervalMs)
 
   /** Event-time tolerance check: sample is within tolerance of the high-water mark. */
   private def isWithinTolerance(sampleTs: Long): Boolean =
-    latestSampleTimestamp == Long.MinValue || sampleTs >= latestSampleTimestamp - primaryOooToleranceMs
+    latestSampleTimestamp == Long.MinValue || sampleTs >= latestSampleTimestamp - oooToleranceMs
 
   /**
    * Gets the aggregated histogram for a specific column and bucket.
@@ -440,17 +444,17 @@ class BucketAggregationState(
  * and lazy creation overhead.
  *
  * @param numColumns total number of data columns
- * @param aggConfigs flat array of aggregation configs (null for non-aggregating columns)
+ * @param aggTypes flat array of aggregation types (null for non-aggregating columns)
  */
 // scalastyle:off null
-private class BucketState(numColumns: Int, aggConfigs: Array[AggregationConfig]) {
+private class BucketState(numColumns: Int, aggTypes: Array[AggregationType]) {
   // Aggregators for all aggregating columns — pre-allocated at construction
   private val aggregators: Array[Aggregator] = {
     val arr = new Array[Aggregator](numColumns)
     var i = 0
     while (i < numColumns) {
-      if (aggConfigs(i) != null) {
-        arr(i) = Aggregator.create(aggConfigs(i).aggType)
+      if (aggTypes(i) != null) {
+        arr(i) = Aggregator.create(aggTypes(i))
       }
       i += 1
     }
@@ -472,21 +476,19 @@ private class BucketState(numColumns: Int, aggConfigs: Array[AggregationConfig])
     }
   }
 
-  def aggregate(colIdx: Int, config: AggregationConfig, value: Any, sampleTimestamp: Long): Unit = {
+  def aggregate(colIdx: Int, value: Any, sampleTimestamp: Long): Unit = {
     aggregators(colIdx).addWithTimestamp(value, sampleTimestamp)
   }
 
-  def aggregateDoubleWithTimestamp(colIdx: Int, config: AggregationConfig,
-                                   value: Double, sampleTimestamp: Long): Unit = {
+  def aggregateDoubleWithTimestamp(colIdx: Int, value: Double, sampleTimestamp: Long): Unit = {
     aggregators(colIdx).addDoubleWithTimestamp(value, sampleTimestamp)
   }
 
-  def aggregateLongWithTimestamp(colIdx: Int, config: AggregationConfig,
-                                 value: Long, sampleTimestamp: Long): Unit = {
+  def aggregateLongWithTimestamp(colIdx: Int, value: Long, sampleTimestamp: Long): Unit = {
     aggregators(colIdx).addLongWithTimestamp(value, sampleTimestamp)
   }
 
-  def getAggregatedValue(colIdx: Int, config: AggregationConfig): Any = {
+  def getAggregatedValue(colIdx: Int): Any = {
     val agg = aggregators(colIdx)
     if (agg != null) agg.result() else null
   }

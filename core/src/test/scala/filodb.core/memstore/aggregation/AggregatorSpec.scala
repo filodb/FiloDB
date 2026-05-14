@@ -678,32 +678,4 @@ class AggregatorSpec extends AnyFunSpec with Matchers {
       agg.asInstanceOf[HistogramLastAggregator].getCurrentHistogram shouldEqual None
     }
   }
-
-  describe("AggregationConfig") {
-    it("should create valid config") {
-      val config = AggregationConfig(1, AggregationType.Sum, 30000L, 60000L)
-      config.columnIndex shouldEqual 1
-      config.aggType shouldEqual AggregationType.Sum
-      config.intervalMs shouldEqual 30000L
-      config.oooToleranceMs shouldEqual 60000L
-    }
-
-    it("should validate interval > 0") {
-      intercept[IllegalArgumentException] {
-        AggregationConfig(1, AggregationType.Sum, 0L, 60000L)
-      }
-    }
-
-    it("should validate tolerance >= 0") {
-      intercept[IllegalArgumentException] {
-        AggregationConfig(1, AggregationType.Sum, 30000L, -1L)
-      }
-    }
-
-    it("should validate column index >= 0") {
-      intercept[IllegalArgumentException] {
-        AggregationConfig(-1, AggregationType.Sum, 30000L, 60000L)
-      }
-    }
-  }
 }

@@ -7,32 +7,36 @@ import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
-  // Helper: create a config array with a single Sum column at index 0
-  def singleSumConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(Some(AggregationConfig(0, AggregationType.Sum, intervalMs, toleranceMs)))
+  // Helper: create a state with a single Sum column at index 0
+  def singleSumState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](Some(AggregationType.Sum)),
+      intervalMs, toleranceMs, 1)
 
-  // Helper: multi-column config
-  def multiColumnConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(
-      Some(AggregationConfig(0, AggregationType.Sum, intervalMs, toleranceMs)),
-      Some(AggregationConfig(1, AggregationType.Min, intervalMs, toleranceMs)),
-      Some(AggregationConfig(2, AggregationType.Max, intervalMs, toleranceMs))
-    )
+  // Helper: multi-column state (Sum, Min, Max)
+  def multiColumnState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](
+        Some(AggregationType.Sum), Some(AggregationType.Min), Some(AggregationType.Max)),
+      intervalMs, toleranceMs, 3)
 
-  // Helper: config with one aggregating and one non-aggregating column
-  def mixedConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(
-      Some(AggregationConfig(0, AggregationType.Sum, intervalMs, toleranceMs)),
-      None // non-aggregating column
-    )
+  // Helper: state with one aggregating and one non-aggregating column
+  def mixedState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](Some(AggregationType.Sum), None),
+      intervalMs, toleranceMs, 2)
 
-  // Helper: histogram sum config
-  def histogramSumConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(Some(AggregationConfig(0, AggregationType.HistogramSum, intervalMs, toleranceMs)))
+  // Helper: histogram sum state
+  def histogramSumState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](Some(AggregationType.HistogramSum)),
+      intervalMs, toleranceMs, 1)
 
-  // Helper: histogram last config
-  def histogramLastConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(Some(AggregationConfig(0, AggregationType.HistogramLast, intervalMs, toleranceMs)))
+  // Helper: histogram last state
+  def histogramLastState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](Some(AggregationType.HistogramLast)),
+      intervalMs, toleranceMs, 1)
 
   // Helper: create a serialized histogram as DirectBuffer
   // Serialize into a fresh buffer each call to avoid shared BinaryHistogram.histBuf being overwritten
@@ -63,7 +67,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.aggregate - basic scalar") {
     it("should aggregate a sample into the correct bucket") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       // sampleTs=100000 -> ceilToBucket(100000, 60000) = 120000
       val result = state.aggregate(100000L, Array(10.0: Any))
@@ -76,7 +80,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should aggregate multiple samples into the same bucket") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(10.0: Any))
       state.aggregate(110000L, Array(20.0: Any))
@@ -89,7 +93,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should put samples in different buckets based on timestamp") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(10.0: Any))  // bucket 120000
       state.aggregate(160000L, Array(20.0: Any))  // bucket 180000
@@ -103,7 +107,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
   describe("BucketAggregationState.aggregate - tolerance checking") {
     it("should reject samples outside the event-time tolerance window") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
       state.aggregate(200000L, Array(10.0: Any))
@@ -116,7 +120,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
     it("should accept samples within the event-time tolerance window") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
       state.aggregate(200000L, Array(10.0: Any))
@@ -128,7 +132,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
     it("should accept samples at exactly the tolerance boundary") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
       state.aggregate(200000L, Array(10.0: Any))
@@ -142,7 +146,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
   describe("BucketAggregationState.aggregate - tolerance boundary edge cases") {
     it("should accept sample at exactly the tolerance boundary (sampleTs == watermark - toleranceMs)") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark
       state.aggregate(200000L, Array(10.0: Any))
@@ -155,7 +159,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
     it("should reject sample one ms past tolerance boundary (sampleTs == watermark - toleranceMs - 1)") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark
       state.aggregate(200000L, Array(10.0: Any))
@@ -166,7 +170,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should handle zero tolerance: only accept samples at or after the watermark") {
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = 0L), 1)
+      val state = singleSumState(toleranceMs = 0L)
 
       // First sample sets watermark to 100000
       val inOrderResult = state.aggregate(100000L, Array(10.0: Any))
@@ -184,7 +188,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.aggregate - finalized buckets") {
     it("should reject samples for finalized buckets") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       // Aggregate and then finalize a bucket
       state.aggregate(100000L, Array(10.0: Any))
@@ -198,7 +202,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.aggregate - no aggregation configured") {
     it("should return false when no aggregation configs exist") {
-      val state = new BucketAggregationState(Array(None), 1)
+      val state = new BucketAggregationState(Array[Option[AggregationType]](None), 60000L, 30000L, 1)
 
       val result = state.aggregate(100000L, Array(10.0: Any))
       result shouldEqual false
@@ -207,7 +211,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.aggregate - multi-column") {
     it("should aggregate different types across columns") {
-      val state = new BucketAggregationState(multiColumnConfig(), 3)
+      val state = multiColumnState()
 
       state.aggregate(100000L, Array(10.0: Any, 50.0: Any, 20.0: Any))
       state.aggregate(110000L, Array(20.0: Any, 30.0: Any, 40.0: Any))
@@ -222,7 +226,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.aggregate - mixed agg and non-agg columns") {
     it("should aggregate configured columns and keep first value for non-configured columns") {
-      val state = new BucketAggregationState(mixedConfig(), 2)
+      val state = mixedState()
 
       state.aggregate(100000L, Array(10.0: Any, "label-1": Any))
       state.aggregate(110000L, Array(20.0: Any, "label-2": Any))
@@ -235,7 +239,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.getBucketsToFinalize") {
     it("should return buckets older than the threshold in sorted order") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(50000L, Array(1.0: Any))    // bucket 60000
       state.aggregate(110000L, Array(2.0: Any))   // bucket 120000
@@ -246,7 +250,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should return empty when no buckets are older than threshold") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(1.0: Any))
 
@@ -255,7 +259,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should not include buckets at exactly the threshold") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(1.0: Any)) // bucket 120000
 
@@ -266,7 +270,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.markFinalized") {
     it("should remove bucket from active and add to finalized tracking") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(10.0: Any))
       state.isActive(120000L) shouldEqual true
@@ -281,7 +285,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
   describe("BucketAggregationState.cleanupOldFinalizedTracking") {
     it("should remove very old finalized bucket tracking") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // Finalize some buckets
       state.aggregate(50000L, Array(1.0: Any))  // bucket 60000
@@ -302,7 +306,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
     it("should retain recent finalized buckets") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       state.aggregate(100000L, Array(1.0: Any)) // bucket 120000
       state.markFinalized(120000L)
@@ -316,7 +320,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.stats") {
     it("should report correct stats") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.stats.activeBucketCount shouldEqual 0
       state.stats.finalizedBucketCount shouldEqual 0
@@ -336,7 +340,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState.clear") {
     it("should reset all state") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(1.0: Any))
       state.markFinalized(120000L)
@@ -353,7 +357,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
 
   describe("BucketAggregationState - histogram aggregation") {
     it("should aggregate histograms using HistogramSum") {
-      val state = new BucketAggregationState(histogramSumConfig(), 1)
+      val state = histogramSumState()
 
       val hist1 = createHistogramBuffer(Seq((1.0, 5L), (2.0, 10L)))
       val hist2 = createHistogramBuffer(Seq((1.0, 3L), (2.0, 7L)))
@@ -371,7 +375,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should keep last histogram using HistogramLast") {
-      val state = new BucketAggregationState(histogramLastConfig(), 1)
+      val state = histogramLastState()
 
       val hist1 = createHistogramBuffer(Seq((1.0, 5L), (2.0, 10L)))
       val hist2 = createHistogramBuffer(Seq((1.0, 99L), (2.0, 99L)))
@@ -388,7 +392,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should not replace histogram with earlier timestamp for HistogramLast") {
-      val state = new BucketAggregationState(histogramLastConfig(), 1)
+      val state = histogramLastState()
 
       val hist1 = createHistogramBuffer(Seq((1.0, 99L), (2.0, 99L)))
       val hist2 = createHistogramBuffer(Seq((1.0, 1L), (2.0, 1L)))
@@ -404,14 +408,14 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     }
 
     it("should return None for non-existent histogram bucket") {
-      val state = new BucketAggregationState(histogramSumConfig(), 1)
+      val state = histogramSumState()
       state.getAggregatedHistogram(0, 999999L) shouldEqual None
     }
   }
 
   describe("BucketAggregationState - latestSampleTimestamp tracking") {
     it("should track latest sample timestamp correctly with out-of-order samples") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       state.aggregate(100000L, Array(1.0: Any))
       state.stats.latestSampleTimestamp shouldEqual 100000L

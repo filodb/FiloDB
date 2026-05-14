@@ -11,15 +11,17 @@ import org.scalatest.matchers.should.Matchers
  */
 class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
 
-  def singleSumConfig(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): Array[Option[AggregationConfig]] =
-    Array(Some(AggregationConfig(0, AggregationType.Sum, intervalMs, toleranceMs)))
+  def singleSumState(intervalMs: Long = 60000L, toleranceMs: Long = 30000L): BucketAggregationState =
+    new BucketAggregationState(
+      Array[Option[AggregationType]](Some(AggregationType.Sum)),
+      intervalMs, toleranceMs, 1)
 
   // ======================== Ingest tolerance tests ========================
 
   describe("Event-time ingest tolerance") {
 
     it("first sample is always accepted regardless of timestamp") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       // Far-past timestamp — first sample, no watermark yet
       val result1 = state.aggregate(1L, Array(10.0: Any))
@@ -27,7 +29,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
       state.hasActiveBuckets shouldEqual true
 
       // Fresh state, far-future timestamp
-      val state2 = new BucketAggregationState(singleSumConfig(), 1)
+      val state2 = singleSumState()
       val result2 = state2.aggregate(Long.MaxValue - 100000L, Array(20.0: Any))
       result2 shouldEqual true
       state2.hasActiveBuckets shouldEqual true
@@ -35,7 +37,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
 
     it("subsequent sample within event-time tolerance is accepted") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to T1
       val t1 = 200000L
@@ -49,7 +51,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
 
     it("sample outside event-time tolerance is rejected") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to T1
       val t1 = 200000L
@@ -63,7 +65,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
 
     it("future-dated sample advances watermark and expands window") {
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(toleranceMs = toleranceMs), 1)
+      val state = singleSumState(toleranceMs = toleranceMs)
 
       val t1 = 100000L
       state.aggregate(t1, Array(1.0: Any))
@@ -91,7 +93,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
   describe("Event-time query visibility") {
 
     it("all active buckets are visible immediately after ingest (no wall-clock gate)") {
-      val state = new BucketAggregationState(singleSumConfig(intervalMs = 60000L, toleranceMs = 30000L), 1)
+      val state = singleSumState(intervalMs = 60000L, toleranceMs = 30000L)
 
       // Ingest future-dated samples
       val futureTs = System.currentTimeMillis() + 3600000L // 1 hour in the future
@@ -108,7 +110,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
     }
 
     it("query determinism: same state produces same result regardless of wall-clock") {
-      val state = new BucketAggregationState(singleSumConfig(intervalMs = 60000L, toleranceMs = 30000L), 1)
+      val state = singleSumState(intervalMs = 60000L, toleranceMs = 30000L)
 
       state.aggregate(100000L, Array(10.0: Any))
       state.aggregate(200000L, Array(20.0: Any))
@@ -129,7 +131,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
     it("bucket finalizes when watermark advances past bucketTs + tolerance") {
       val intervalMs = 60000L
       val toleranceMs = 30000L
-      val state = new BucketAggregationState(singleSumConfig(intervalMs, toleranceMs), 1)
+      val state = singleSumState(intervalMs, toleranceMs)
 
       // Sample at 100000 → bucket 120000
       state.aggregate(100000L, Array(10.0: Any))
@@ -149,7 +151,7 @@ class EventTimeWatermarkSpec extends AnyFunSpec with Matchers {
     }
 
     it("trailing buckets stay active when no new samples arrive (no wall-clock reaper)") {
-      val state = new BucketAggregationState(singleSumConfig(), 1)
+      val state = singleSumState()
 
       // Ingest one sample and stop
       state.aggregate(100000L, Array(10.0: Any))

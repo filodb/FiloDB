@@ -73,25 +73,3 @@ object AggregationType {
    */
   def supportedTypes: String = "sum, min, max, last, first, count, histogram_sum, histogram_last"
 }
-
-/**
- * Configuration for aggregation on a specific column.
- *
- * @param columnIndex the index of the column in the schema
- * @param aggType the type of aggregation to perform
- * @param intervalMs the time bucket interval in milliseconds
- * @param oooToleranceMs the out-of-order tolerance window in milliseconds
- */
-case class AggregationConfig(
-  columnIndex: Int,
-  aggType: AggregationType,
-  intervalMs: Long,
-  oooToleranceMs: Long
-) {
-  require(intervalMs > 0, s"Aggregation interval must be positive, got $intervalMs")
-  require(oooToleranceMs >= 0, s"Out-of-order tolerance must be non-negative, got $oooToleranceMs")
-  require(columnIndex >= 0, s"Column index must be non-negative, got $columnIndex")
-
-  override def toString: String =
-    s"AggregationConfig(col=$columnIndex, type=$aggType, interval=${intervalMs}ms, tolerance=${oooToleranceMs}ms)"
-}

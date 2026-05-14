@@ -40,19 +40,18 @@ class AggregatingTimeSeriesPartition(
 
   import AggregatingTimeSeriesPartition._
 
-  // Build aggregation configs from schema-level aggregators
-  private val aggConfigs: Array[Option[AggregationConfig]] = {
-    val configMap = schema.data.aggregators.map(a => a.columnId -> a.aggType).toMap
-    schema.data.columns.indices.map { idx =>
-      configMap.get(idx).map(aggType =>
-        AggregationConfig(idx, aggType,
-          schema.data.aggregationIntervalMs,
-          schema.data.aggregationOooToleranceMs))
-    }.toArray
+  // Build per-column aggregation types from schema-level aggregators.
+  // None means the column is not aggregated.
+  private val aggTypes: Array[Option[AggregationType]] = {
+    val typeByCol = schema.data.aggregators.map(a => a.columnId -> a.aggType).toMap
+    schema.data.columns.indices.map(idx => typeByCol.get(idx)).toArray
   }
 
+  private val intervalMs: Long = schema.data.aggregationIntervalMs
+  private val oooToleranceMs: Long = schema.data.aggregationOooToleranceMs
+
   // Check if any column has aggregation configured
-  private val hasAnyAggregation: Boolean = aggConfigs.exists(_.isDefined)
+  private val hasAnyAggregation: Boolean = aggTypes.exists(_.isDefined)
 
   // Pre-compute column types for type-specialized aggregation
   private val columnTypes: Array[Column.ColumnType] = schema.data.columns.map(_.columnType).toArray
@@ -68,11 +67,8 @@ class AggregatingTimeSeriesPartition(
 
   // Central bucket aggregation state managing ALL columns
   private lazy val bucketState: BucketAggregationState = {
-    new BucketAggregationState(aggConfigs, schema.numDataColumns, columnTypes)
+    new BucketAggregationState(aggTypes, intervalMs, oooToleranceMs, schema.numDataColumns, columnTypes)
   }
-
-  // Get the primary aggregation config (used for interval/tolerance calculations)
-  private lazy val primaryConfig: Option[AggregationConfig] = aggConfigs.flatten.headOption
 
   /**
    * Overrides the standard ingest method to add aggregation support.
@@ -133,39 +129,39 @@ class AggregatingTimeSeriesPartition(
     acceptDuplicateSamples: Boolean,
     maxChunkTime: Long
   ): Unit = {
-    primaryConfig.foreach { config =>
-      val thresholdTs = TimeBucket.ceilToBucket(
-        bucketState.latestSampleTimestampSeen - config.oooToleranceMs,
-        config.intervalMs
-      )
+    if (!hasAnyAggregation) return
 
-      // Fast guard: skip if no active buckets are old enough
-      if (bucketState.earliestBucketTimestamp < thresholdTs) {
-        val bucketsToFinalize = bucketState.getBucketsToFinalize(thresholdTs)
+    val thresholdTs = TimeBucket.ceilToBucket(
+      bucketState.latestSampleTimestampSeen - oooToleranceMs,
+      intervalMs
+    )
 
-        if (bucketsToFinalize.nonEmpty) {
-          logger.debug(s"Finalizing ${bucketsToFinalize.size} buckets for partition $partID")
+    // Fast guard: skip if no active buckets are old enough
+    if (bucketState.earliestBucketTimestamp < thresholdTs) {
+      val bucketsToFinalize = bucketState.getBucketsToFinalize(thresholdTs)
 
-          bucketsToFinalize.foreach { bucketTs =>
-            bucketState.getBucketValues(bucketTs).foreach { columnValues =>
-              // Create a complete row with all columns
-              val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues)
+      if (bucketsToFinalize.nonEmpty) {
+        logger.debug(s"Finalizing ${bucketsToFinalize.size} buckets for partition $partID")
 
-              logger.trace(s"Writing finalized bucket $bucketTs to vectors for partition $partID")
+        bucketsToFinalize.foreach { bucketTs =>
+          bucketState.getBucketValues(bucketTs).foreach { columnValues =>
+            // Create a complete row with all columns
+            val aggregatedRow = new CompleteAggregatedRow(bucketTs, columnValues)
 
-              // Write the complete row using super.ingest
-              // Use acceptDuplicateSamples=true since buckets are written in order
-              super.ingest(ingestionTime, aggregatedRow, overflowBlockHolder,
-                createChunkAtFlushBoundary, flushIntervalMillis,
-                acceptDuplicateSamples = true, maxChunkTime)
-            }
+            logger.trace(s"Writing finalized bucket $bucketTs to vectors for partition $partID")
 
-            bucketState.markFinalized(bucketTs)
+            // Write the complete row using super.ingest
+            // Use acceptDuplicateSamples=true since buckets are written in order
+            super.ingest(ingestionTime, aggregatedRow, overflowBlockHolder,
+              createChunkAtFlushBoundary, flushIntervalMillis,
+              acceptDuplicateSamples = true, maxChunkTime)
           }
 
-          // Periodically clean up old finalized tracking
-          bucketState.cleanupOldFinalizedTracking(thresholdTs)
+          bucketState.markFinalized(bucketTs)
         }
+
+        // Periodically clean up old finalized tracking
+        bucketState.cleanupOldFinalizedTracking(thresholdTs)
       }
     }
   }
@@ -237,12 +233,6 @@ class AggregatingTimeSeriesPartition(
   def getBucketColumnValues(bucketTs: Long): Option[Array[Any]] = {
     bucketState.getBucketValues(bucketTs)
   }
-
-  /**
-   * Returns the primary aggregation config (used for interval/tolerance calculations).
-   * Returns None if no aggregation is configured.
-   */
-  def aggregationConfig: Option[AggregationConfig] = primaryConfig
 
   /**
    * Forces emission of all active buckets.
