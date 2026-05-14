@@ -424,7 +424,14 @@ case class QueryStats() {
   private val readLock = lock.readLock()
   private val writeLock = lock.writeLock()
 
-  override def toString: String = entries.toString()
+  override def toString: String = {
+    readLock.lock()
+    try {
+      entries.toString()
+    } finally {
+      readLock.unlock()
+    }
+  }
 
   // scalastyle:off null
   // NOTE: null is used to avoid Option allocations.
