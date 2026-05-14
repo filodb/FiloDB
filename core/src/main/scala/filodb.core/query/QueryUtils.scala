@@ -195,7 +195,7 @@ object QueryUtils {
                           schema: ResultSchema,
                           config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.size == 0) {
+    if (queryStats.unsafeSize() == 0) {
       return
     }
 
@@ -235,7 +235,7 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    queryStats.addSamplesScanned(totalSamples)
+    queryStats.unsafeAddSamplesScanned(totalSamples)
   }
 
   /**
@@ -269,7 +269,7 @@ object QueryUtils {
                                schema: ResultSchema,
                                config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.size == 0) {
+    if (queryStats.unsafeSize() == 0) {
       return
     }
 
@@ -298,7 +298,7 @@ object QueryUtils {
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    queryStats.addSamplesScanned(totalSamples)
+    queryStats.unsafeAddSamplesScanned(totalSamples)
   }
 
   def maxIgnoreNaN(a: Double, b: Double): Double = {

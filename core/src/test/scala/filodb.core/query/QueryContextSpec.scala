@@ -49,20 +49,20 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
   it("should maintain QueryStats state correctly") {
     val stats = QueryStats()
 
-    stats.size() shouldEqual 0
+    stats.unsafeSize() shouldEqual 0
     stats.keys() shouldEqual Nil
     stats.get(Seq("foo", "bar")) shouldEqual None
 
     // Test "getOrCreate" functionality.
     stats.getSamplesScannedCounter(Seq("foo", "bar"))
-    stats.size() shouldEqual 1
+    stats.unsafeSize() shouldEqual 1
     stats.keys().size shouldEqual 1
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"))
     stats.get(Seq("foo", "bar")).isDefined shouldEqual true
 
     // Test put.
     stats.put(Seq("abc", "123"), Stat())
-    stats.size() shouldEqual 2
+    stats.unsafeSize() shouldEqual 2
     stats.keys().size shouldEqual 2
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"))
     stats.get(Seq("foo", "bar")).isDefined shouldEqual true
@@ -70,7 +70,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
 
     // Test Nil handling.
     stats.getSamplesScannedCounter(Nil)
-    stats.size() shouldEqual 3
+    stats.unsafeSize() shouldEqual 3
     stats.keys().size shouldEqual 3
     stats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"), Nil)
     stats.get(Nil).isDefined shouldEqual true
@@ -78,14 +78,14 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     // Test add.
     val emptyStats = QueryStats()
     emptyStats.add(stats)
-    emptyStats.size() shouldEqual 3
+    emptyStats.unsafeSize() shouldEqual 3
     stats.keys().size shouldEqual 3
     emptyStats.keys().toSet shouldEqual Set(Seq("foo", "bar"), Seq("abc", "123"), Nil)
     emptyStats.get(Nil).isDefined shouldEqual true
 
     // Test clear.
     stats.clear()
-    stats.size() shouldEqual 0
+    stats.unsafeSize() shouldEqual 0
     stats.keys() shouldEqual Nil
     stats.get(Nil).isDefined shouldEqual false
   }
@@ -120,15 +120,15 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     {
       // Empty -- effectively a no-op; should not throw.
       val stats = QueryStats()
-      stats.addSamplesScanned(100)
-      stats.size() shouldEqual 0
+      stats.unsafeAddSamplesScanned(100)
+      stats.unsafeSize() shouldEqual 0
     }
 
     {
       // One key; should account for all samples.
       val stats = QueryStats()
       stats.getSamplesScannedCounter(Seq("hello"))
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 100 }
     }
 
@@ -137,7 +137,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
       val stats = QueryStats()
       stats.getSamplesScannedCounter(Seq("hello"))
       stats.getSamplesScannedCounter(Seq("goodbye"))
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 50 }
     }
 
@@ -145,7 +145,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
       // Nil key; should account for all samples.
       val stats = QueryStats()
       stats.getSamplesScannedCounter(Nil)
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) => stat.samplesScanned.get() shouldEqual 100 }
     }
 
@@ -154,7 +154,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
       val stats = QueryStats()
       stats.getSamplesScannedCounter(Nil)
       stats.getSamplesScannedCounter(Seq("hello"))
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) =>
         if (key.isEmpty) {
           stat.samplesScanned.get() shouldEqual 0
@@ -170,7 +170,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
       stats.getSamplesScannedCounter(Nil)
       stats.getSamplesScannedCounter(Seq("hello"))
       stats.getSamplesScannedCounter(Seq("goodbye"))
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) =>
         if (key.isEmpty) {
           stat.samplesScanned.get() shouldEqual 0
@@ -186,7 +186,7 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
       stats.getSamplesScannedCounter(Nil)
       stats.getSamplesScannedCounter(Seq("hello"))
       stats.getSamplesScannedCounter(Seq("goodbye"))
-      stats.addSamplesScanned(100)
+      stats.unsafeAddSamplesScanned(100)
       stats.foreach { case (key, stat) =>
         stat.timeSeriesScanned.get() shouldEqual 0
         stat.cpuNanos.get() shouldEqual 0

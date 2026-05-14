@@ -328,12 +328,12 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       val nilInActual = queryStats.get(Nil).isDefined
       if (!nilInExpected && nilInActual) {
         // Make sure we've already asserted the values of all other keys.
-        assert(queryStats.size() == 1 + expectedCounts.size)
+        assert(queryStats.unsafeSize() == 1 + expectedCounts.size)
         // Make sure no samples-scanned have been counted against Nil.
         assert(queryStats.getSamplesScannedCounter(Nil).get() == 0)
       } else {
         // Make sure we've already asserted the values of all keys.
-        assert(queryStats.size() == expectedCounts.size)
+        assert(queryStats.unsafeSize() == expectedCounts.size)
       }
     }
 

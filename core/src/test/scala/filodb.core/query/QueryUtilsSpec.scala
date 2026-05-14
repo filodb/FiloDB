@@ -48,12 +48,12 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
       val nilInActual = queryStats.get(Nil).isDefined
       if (!nilInExpected && nilInActual) {
         // Make sure we've already asserted the values of all other keys.
-        assert(queryStats.size == 1 + expectedCounts.size)
+        assert(queryStats.unsafeSize == 1 + expectedCounts.size)
         // Make sure no samples-scanned have been counted against Nil.
         assert(queryStats.get(Nil).get.samplesScanned.get() == 0)
       } else {
         // Make sure we've already asserted the values of all keys.
-        assert(queryStats.size == expectedCounts.size)
+        assert(queryStats.unsafeSize == expectedCounts.size)
       }
     }
 
@@ -62,7 +62,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         val stats = QueryStats()
         QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 10, partKeyBytes = 100,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
-        assert(stats.size == 0)
+        assert(stats.unsafeSize == 0)
       }
 
       it("should count only row samples with default config") {
@@ -227,7 +227,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         val rv = makeRV(Some(10), None, 50)
         QueryUtils.trackChildSamplesScanned(
           rv, classOf[String], stats, doubleSchema, SamplesScannedConfig())
-        assert(stats.size == 0)
+        assert(stats.unsafeSize == 0)
       }
 
       it("should count zero child samples with default config") {

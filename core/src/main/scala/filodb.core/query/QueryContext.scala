@@ -449,11 +449,12 @@ case class QueryStats() {
    *   an error will be thrown if this is "true" but the entry does not exist.
    */
   private def getNullableStat(key: Seq[String],
-                              entryConfirmedExists: Boolean = false): Stat = {
+                              entryConfirmedExists: Boolean = false,
+                              acquireReadLock: Boolean = true): Stat = {
     // NOTE: cannot acquire the lock after the first "return null"
     //   short-circuit; if clear() is called just after we get the
     //   index, we will access an index that does not exist!
-    readLock.lock()
+    if (acquireReadLock) readLock.lock()
     try {
       val index = getNullableIndex(key, entryConfirmedExists)
       if (index == null) {
@@ -461,7 +462,7 @@ case class QueryStats() {
       }
       entries(index)._2
     } finally {
-      readLock.unlock()
+      if (acquireReadLock) readLock.unlock()
     }
   }
   // scalastyle:on null
@@ -560,53 +561,64 @@ case class QueryStats() {
     Option(getNullableStat(key))
   }
 
+  // NOTE: Safe to be called from samples-scanned infrastructure;
+  //   all QueryStats entries are added by the time any samples-scanned-
+  //   tracking method is called.
   /**
    * Returns the count of elements in the [[QueryStats]].
+   *
+   * *** THREAD-SAFETY NOTE ***
+   * This method *can* be called concurrently with any other that
+   *   does not add/remove [[QueryStats]] entries.
+   * It *cannot* be called concurrently with any method that
+   *   adds/removes [[QueryStats]] entries.
    */
-  def size(): Int = {
-    readLock.lock()
-    try {
-      entries.size
-    } finally {
-      readLock.unlock()
-    }
+  def unsafeSize(): Int = {
+    entries.size
   }
 
+  // NOTE: Safe to be called from samples-scanned infrastructure;
+  //   all QueryStats entries are added by the time any samples-scanned-
+  //   tracking method is called.
   /**
    * Adds a total sample count to the argument [[QueryStats]]; the total is divided
    *   evenly across all samples-scanned counters.
    * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
    *   against it. If Nil exists with other keys, samples are divided
    *   among the non-Nil keys only.
+   *
+   * *** THREAD-SAFETY NOTE ***
+   * This method *can* be called concurrently with itself or any other method
+   *   that does not add/remove [[QueryStats]] entries.
+   * It *cannot* be called concurrently with any method
+   *   that adds/removes [[QueryStats]] entries.
    */
-  def addSamplesScanned(totalSampleCount: Long): Unit = {
-    readLock.lock()
-    try {
-      // QueryStats keys are updated for all except Nil *unless* Nil
-      //   is the only entry. Nil is sometimes added to QueryStats as a default.
-      val hasSingleEmptyKey = size() == 1 && containsNilKey
-      if (hasSingleEmptyKey) {
-        getNullableStat(Nil, entryConfirmedExists = true)
-          .samplesScanned.addAndGet(totalSampleCount)
-        return
-      }
+  def unsafeAddSamplesScanned(totalSampleCount: Long): Unit = {
+    // NOTE: this method is called O(num_series) times; it must be super efficient.
+    //   No locks are acquired below, and allocations are skipped wherever possible.
 
-      val nonNilKeyCount = size() - (if (containsNilKey) 1 else 0)
-      val samplesPerCounter = Math.ceil(
-        totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
-      ).asInstanceOf[Long]
+    // QueryStats keys are updated for all except Nil *unless* Nil
+    //   is the only entry. Nil is sometimes added to QueryStats as a default.
+    val hasSingleEmptyKey = unsafeSize() == 1 && containsNilKey
+    if (hasSingleEmptyKey) {
+      getNullableStat(Nil, entryConfirmedExists = true, acquireReadLock = false)
+        .samplesScanned.addAndGet(totalSampleCount)
+      return
+    }
 
-      // NOTE: `while` avoids a Range allocation.
-      var i = 0
-      while (i < entries.size) {
-        val (key, stat) = entries(i)
-        if (key.nonEmpty) {
-          stat.samplesScanned.addAndGet(samplesPerCounter)
-        }
-        i += 1
+    val nonNilKeyCount = unsafeSize() - (if (containsNilKey) 1 else 0)
+    val samplesPerCounter = Math.ceil(
+      totalSampleCount.asInstanceOf[Double] / nonNilKeyCount
+    ).asInstanceOf[Long]
+
+    // NOTE: `while` avoids a Range allocation.
+    var i = 0
+    while (i < unsafeSize()) {
+      val (key, stat) = entries(i)
+      if (key.nonEmpty) {
+        stat.samplesScanned.addAndGet(samplesPerCounter)
       }
-    } finally {
-      readLock.unlock()
+      i += 1
     }
   }
 

@@ -644,7 +644,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val value = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, filters),
       querySession = session)
       .toListL.runToFuture.futureValue
-    session.queryStats.size shouldEqual 1
+    session.queryStats.unsafeSize shouldEqual 1
     session.queryStats.keys().head.size shouldEqual 5
     session.queryStats.keys().head(2) shouldEqual "test_ws"
     session.queryStats.keys().head(3) shouldEqual "App-0|App-1"
