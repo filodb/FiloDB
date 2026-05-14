@@ -348,13 +348,18 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
     val reader = base.nextInfoReader
     var bytesRead = 0
     var bucketsFactor = 1
-    columnIDs.foreach { c =>
-      bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(c), reader.vectorAddress(c))
-      if (BinaryVector.majorVectorType(reader.vectorAccessor(c), reader.vectorAddress(c))
+
+    // Avoiding `foreach` and `for` to prevent Range allocations.
+    var iCol = 0
+    while (iCol < columnIDs.size) {
+      val colId = columnIDs(iCol)
+      bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(colId), reader.vectorAddress(colId))
+      if (BinaryVector.majorVectorType(reader.vectorAccessor(colId), reader.vectorAddress(colId))
                     == WireFormat.VECTORTYPE_HISTOGRAM) {
         // since histogram has several buckets, include a factor when counting samples
         bucketsFactor = 20 // TODO fixed to avoid performance issues in opening hist vector here. Make it better later.
       }
+      iCol += 1
     }
 
     // Why two counters ?

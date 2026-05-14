@@ -204,13 +204,13 @@ object QueryUtils {
     //   specifically to account for rows, and sometimes invoked specifically to account for series.
     val rowSamples = if (rowsScanned > 0) {
       val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
-      val rowSamples = rowsScanned * rowMultiplier * (
+      val sampleCount = rowsScanned * rowMultiplier * (
           // NOTE: avoiding getOrElse to avoid lambda allocations.
           if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
           else config.defaultSamplesPerRow
         )
-      rowSamplesScanned.increment(rowSamples.toLong)
-      rowSamples
+      rowSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
     } else 0
 
     val seriesSamples = if (seriesScanned > 0) {
