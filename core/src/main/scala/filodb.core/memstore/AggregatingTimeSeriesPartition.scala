@@ -104,7 +104,7 @@ class AggregatingTimeSeriesPartition(
     // Pass RowReader directly to avoid Array[Any] boxing.
     // Only propagate offset if it was set by the shard (>= 0); test code leaves it at -1.
     val effectiveOffset = if (currentIngestOffset >= 0) currentIngestOffset else Long.MaxValue
-    val aggregated = bucketState.aggregateRow(timestamp, row, effectiveOffset)
+    val aggregated = bucketState.aggregate(timestamp, row, effectiveOffset)
 
     if (!aggregated) {
       // Sample was outside tolerance or bucket was finalized

@@ -82,81 +82,17 @@ class BucketAggregationState(
   }
 
   /**
-   * Aggregates a sample into the appropriate bucket for each aggregating column.
+   * Aggregates a sample from a RowReader into the appropriate bucket for each aggregating column.
+   * Uses type-specialized paths to avoid boxing for Double and Long columns when `columnTypes`
+   * is provided at construction; otherwise falls back to `row.getAny`.
    *
    * @param sampleTimestamp the original sample timestamp
-   * @param columnValues array of column values from the row (indexed by column)
+   * @param row the sample row
+   * @param offset optional Kafka-style offset; Long.MaxValue disables offset tracking
    * @return true if sample was aggregated, false if it was dropped (outside tolerance or finalized)
    */
-  // scalastyle:off method.length
-  def aggregate(
-    sampleTimestamp: Long,
-    columnValues: Array[Any],
-    offset: Long = Long.MaxValue
-  ): Boolean = {
-    if (!hasPrimaryConfig) return false
-
-    val ts = getBucketTimestamp(sampleTimestamp)
-
-    // Check if bucket is already finalized
-    if (finalizedBuckets.contains(ts)) {
-      return false
-    }
-
-    // Check if sample is within tolerance window
-    if (!isWithinTolerance(sampleTimestamp)) {
-      return false
-    }
-
-    // Get or create bucket state (Java TreeMap has no getOrElseUpdate)
-    // scalastyle:off null
-    var bucketState = activeBuckets.get(ts)
-    if (bucketState == null) {
-      bucketState = acquireBucketState()
-      activeBuckets.put(ts, bucketState)
-    }
-    // scalastyle:on null
-
-    // Aggregate each column
-    var aggregated = false
-    var i = 0
-    while (i < numColumns) {
-      if (isAggregating(i)) {
-        val value = columnValues(i)
-        if (value != null) {
-          bucketState.aggregate(i, value, sampleTimestamp)
-          aggregated = true
-        }
-      } else {
-        // Non-aggregating column - keep first value
-        if (!bucketState.hasValue(i) && columnValues(i) != null) {
-          bucketState.setValue(i, columnValues(i))
-        }
-      }
-      i += 1
-    }
-
-    if (sampleTimestamp > latestSampleTimestamp) {
-      latestSampleTimestamp = sampleTimestamp
-    }
-
-    // Track per-bucket min offset
-    if (offset != Long.MaxValue) {
-      val existing = bucketMinOffset.get(ts)
-      if (existing == null || offset < existing) bucketMinOffset.put(ts, offset)
-    }
-
-    aggregated
-  }
-  // scalastyle:on method.length
-
-  /**
-   * Aggregates a sample from a RowReader directly, using type-specialized paths
-   * to avoid boxing for Double and Long columns.
-   * Requires columnTypes to be provided at construction.
-   */
   // scalastyle:off method.length cyclomatic.complexity
-  def aggregateRow(
+  def aggregate(
     sampleTimestamp: Long,
     row: RowReader,
     offset: Long = Long.MaxValue

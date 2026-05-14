@@ -3,6 +3,7 @@ package filodb.core.memstore.aggregation
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.memory.format.SeqRowReader
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
@@ -70,7 +71,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState()
 
       // sampleTs=100000 -> ceilToBucket(100000, 60000) = 120000
-      val result = state.aggregate(100000L, Array(10.0: Any))
+      val result = state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual true
 
       state.activeBucketTimestamps shouldEqual Set(120000L)
@@ -82,9 +83,9 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should aggregate multiple samples into the same bucket") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(10.0: Any))
-      state.aggregate(110000L, Array(20.0: Any))
-      state.aggregate(115000L, Array(30.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
+      state.aggregate(110000L, SeqRowReader(Seq(20.0: Any)))
+      state.aggregate(115000L, SeqRowReader(Seq(30.0: Any)))
 
       // All ceil to bucket 120000
       state.activeBucketTimestamps shouldEqual Set(120000L)
@@ -95,8 +96,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should put samples in different buckets based on timestamp") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(10.0: Any))  // bucket 120000
-      state.aggregate(160000L, Array(20.0: Any))  // bucket 180000
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))  // bucket 120000
+      state.aggregate(160000L, SeqRowReader(Seq(20.0: Any)))  // bucket 180000
 
       state.activeBucketTimestamps shouldEqual Set(120000L, 180000L)
       state.getBucketValues(120000L).get(0).asInstanceOf[Double] shouldEqual 10.0
@@ -110,11 +111,11 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
-      state.aggregate(200000L, Array(10.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(10.0: Any)))
 
       // Sample more than tolerance behind watermark: rejected
       // sampleTs=169999, watermark=200000, diff=30001 > 30000 => rejected
-      val result = state.aggregate(169999L, Array(10.0: Any))
+      val result = state.aggregate(169999L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual false
     }
 
@@ -123,10 +124,10 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
-      state.aggregate(200000L, Array(10.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(10.0: Any)))
 
       // Sample within tolerance of watermark: 200000 - 170000 = 30000 <= 30000 => accepted
-      val result = state.aggregate(170000L, Array(10.0: Any))
+      val result = state.aggregate(170000L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual true
     }
 
@@ -135,10 +136,10 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark to 200000
-      state.aggregate(200000L, Array(10.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(10.0: Any)))
 
       // sampleTs = watermark - tolerance = 170000 => accepted
-      val result = state.aggregate(170000L, Array(10.0: Any))
+      val result = state.aggregate(170000L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual true
     }
   }
@@ -149,10 +150,10 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark
-      state.aggregate(200000L, Array(10.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(10.0: Any)))
 
       // Exactly at boundary: sampleTs=170000, watermark=200000, diff=30000 == toleranceMs => accepted
-      val result = state.aggregate(170000L, Array(10.0: Any))
+      val result = state.aggregate(170000L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual true
       state.activeBucketTimestamps should not be empty
     }
@@ -162,10 +163,10 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // First sample sets watermark
-      state.aggregate(200000L, Array(10.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(10.0: Any)))
 
       // One ms past: sampleTs=169999, watermark=200000, diff=30001 > toleranceMs => rejected
-      val result = state.aggregate(169999L, Array(10.0: Any))
+      val result = state.aggregate(169999L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual false
     }
 
@@ -173,15 +174,15 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = 0L)
 
       // First sample sets watermark to 100000
-      val inOrderResult = state.aggregate(100000L, Array(10.0: Any))
+      val inOrderResult = state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
       inOrderResult shouldEqual true
 
       // Any sample behind watermark by even 1ms should be rejected
-      val oooResult = state.aggregate(99999L, Array(20.0: Any))
+      val oooResult = state.aggregate(99999L, SeqRowReader(Seq(20.0: Any)))
       oooResult shouldEqual false
 
       // Sample at exactly the watermark: accepted (>= watermark - 0)
-      val atWatermark = state.aggregate(100000L, Array(30.0: Any))
+      val atWatermark = state.aggregate(100000L, SeqRowReader(Seq(30.0: Any)))
       atWatermark shouldEqual true
     }
   }
@@ -191,11 +192,11 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState()
 
       // Aggregate and then finalize a bucket
-      state.aggregate(100000L, Array(10.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
       state.markFinalized(120000L)
 
       // Try to aggregate into the same bucket -> should be rejected
-      val result = state.aggregate(110000L, Array(20.0: Any))
+      val result = state.aggregate(110000L, SeqRowReader(Seq(20.0: Any)))
       result shouldEqual false
     }
   }
@@ -204,7 +205,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should return false when no aggregation configs exist") {
       val state = new BucketAggregationState(Array[Option[AggregationType]](None), 60000L, 30000L, 1)
 
-      val result = state.aggregate(100000L, Array(10.0: Any))
+      val result = state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
       result shouldEqual false
     }
   }
@@ -213,9 +214,9 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should aggregate different types across columns") {
       val state = multiColumnState()
 
-      state.aggregate(100000L, Array(10.0: Any, 50.0: Any, 20.0: Any))
-      state.aggregate(110000L, Array(20.0: Any, 30.0: Any, 40.0: Any))
-      state.aggregate(115000L, Array(30.0: Any, 70.0: Any, 10.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any, 50.0: Any, 20.0: Any)))
+      state.aggregate(110000L, SeqRowReader(Seq(20.0: Any, 30.0: Any, 40.0: Any)))
+      state.aggregate(115000L, SeqRowReader(Seq(30.0: Any, 70.0: Any, 10.0: Any)))
 
       val values = state.getBucketValues(120000L).get
       values(0).asInstanceOf[Double] shouldEqual 60.0  // Sum
@@ -228,8 +229,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should aggregate configured columns and keep first value for non-configured columns") {
       val state = mixedState()
 
-      state.aggregate(100000L, Array(10.0: Any, "label-1": Any))
-      state.aggregate(110000L, Array(20.0: Any, "label-2": Any))
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any, "label-1": Any)))
+      state.aggregate(110000L, SeqRowReader(Seq(20.0: Any, "label-2": Any)))
 
       val values = state.getBucketValues(120000L).get
       values(0).asInstanceOf[Double] shouldEqual 30.0    // Sum of 10+20
@@ -241,9 +242,9 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should return buckets older than the threshold in sorted order") {
       val state = singleSumState()
 
-      state.aggregate(50000L, Array(1.0: Any))    // bucket 60000
-      state.aggregate(110000L, Array(2.0: Any))   // bucket 120000
-      state.aggregate(170000L, Array(3.0: Any))   // bucket 180000
+      state.aggregate(50000L, SeqRowReader(Seq(1.0: Any)))    // bucket 60000
+      state.aggregate(110000L, SeqRowReader(Seq(2.0: Any)))   // bucket 120000
+      state.aggregate(170000L, SeqRowReader(Seq(3.0: Any)))   // bucket 180000
 
       val toFinalize = state.getBucketsToFinalize(150000L)
       toFinalize shouldEqual Seq(60000L, 120000L)
@@ -252,7 +253,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should return empty when no buckets are older than threshold") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(1.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any)))
 
       val toFinalize = state.getBucketsToFinalize(60000L)
       toFinalize shouldBe empty
@@ -261,7 +262,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should not include buckets at exactly the threshold") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(1.0: Any)) // bucket 120000
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any))) // bucket 120000
 
       val toFinalize = state.getBucketsToFinalize(120000L)
       toFinalize shouldBe empty
@@ -272,7 +273,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should remove bucket from active and add to finalized tracking") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(10.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(10.0: Any)))
       state.isActive(120000L) shouldEqual true
 
       state.markFinalized(120000L)
@@ -288,10 +289,10 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val state = singleSumState(toleranceMs = toleranceMs)
 
       // Finalize some buckets
-      state.aggregate(50000L, Array(1.0: Any))  // bucket 60000
+      state.aggregate(50000L, SeqRowReader(Seq(1.0: Any)))  // bucket 60000
       state.markFinalized(60000L)
 
-      state.aggregate(110000L, Array(2.0: Any)) // bucket 120000
+      state.aggregate(110000L, SeqRowReader(Seq(2.0: Any))) // bucket 120000
       state.markFinalized(120000L)
 
       // Stats should show 2 finalized
@@ -308,7 +309,7 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val toleranceMs = 30000L
       val state = singleSumState(toleranceMs = toleranceMs)
 
-      state.aggregate(100000L, Array(1.0: Any)) // bucket 120000
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any))) // bucket 120000
       state.markFinalized(120000L)
 
       // threshold = 130000, cleanupThreshold = 130000 - 60000 = 70000
@@ -326,8 +327,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       state.stats.finalizedBucketCount shouldEqual 0
       state.stats.latestSampleTimestamp shouldEqual Long.MinValue
 
-      state.aggregate(100000L, Array(1.0: Any))
-      state.aggregate(200000L, Array(2.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any)))
+      state.aggregate(200000L, SeqRowReader(Seq(2.0: Any)))
 
       state.stats.activeBucketCount shouldEqual 2
       state.stats.latestSampleTimestamp shouldEqual 200000L
@@ -342,9 +343,9 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should reset all state") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(1.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any)))
       state.markFinalized(120000L)
-      state.aggregate(200000L, Array(2.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(2.0: Any)))
 
       state.clear()
 
@@ -362,8 +363,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val hist1 = createHistogramBuffer(Seq((1.0, 5L), (2.0, 10L)))
       val hist2 = createHistogramBuffer(Seq((1.0, 3L), (2.0, 7L)))
 
-      state.aggregate(100000L, Array(hist1: Any))
-      state.aggregate(110000L, Array(hist2: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(hist1: Any)))
+      state.aggregate(110000L, SeqRowReader(Seq(hist2: Any)))
 
       val aggregatedHist = state.getAggregatedHistogram(0, 120000L)
       aggregatedHist shouldBe defined
@@ -381,8 +382,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val hist2 = createHistogramBuffer(Seq((1.0, 99L), (2.0, 99L)))
 
       // hist1 at ts=100000, hist2 at ts=120000 (later)
-      state.aggregate(100000L, Array(hist1: Any))
-      state.aggregate(110000L, Array(hist2: Any)) // later ts -> should replace
+      state.aggregate(100000L, SeqRowReader(Seq(hist1: Any)))
+      state.aggregate(110000L, SeqRowReader(Seq(hist2: Any))) // later ts -> should replace
 
       val aggregatedHist = state.getAggregatedHistogram(0, 120000L)
       aggregatedHist shouldBe defined
@@ -398,8 +399,8 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
       val hist2 = createHistogramBuffer(Seq((1.0, 1L), (2.0, 1L)))
 
       // hist1 at ts=110000 (later), hist2 at ts=100000 (earlier)
-      state.aggregate(110000L, Array(hist1: Any))
-      state.aggregate(100000L, Array(hist2: Any)) // earlier ts -> should not replace
+      state.aggregate(110000L, SeqRowReader(Seq(hist1: Any)))
+      state.aggregate(100000L, SeqRowReader(Seq(hist2: Any))) // earlier ts -> should not replace
 
       val aggregatedHist = state.getAggregatedHistogram(0, 120000L)
       aggregatedHist shouldBe defined
@@ -417,14 +418,14 @@ class BucketAggregationStateSpec extends AnyFunSpec with Matchers {
     it("should track latest sample timestamp correctly with out-of-order samples") {
       val state = singleSumState()
 
-      state.aggregate(100000L, Array(1.0: Any))
+      state.aggregate(100000L, SeqRowReader(Seq(1.0: Any)))
       state.stats.latestSampleTimestamp shouldEqual 100000L
 
-      state.aggregate(200000L, Array(2.0: Any))
+      state.aggregate(200000L, SeqRowReader(Seq(2.0: Any)))
       state.stats.latestSampleTimestamp shouldEqual 200000L
 
       // Out-of-order sample - should not decrease latest timestamp
-      state.aggregate(150000L, Array(3.0: Any))
+      state.aggregate(150000L, SeqRowReader(Seq(3.0: Any)))
       state.stats.latestSampleTimestamp shouldEqual 200000L
     }
   }
