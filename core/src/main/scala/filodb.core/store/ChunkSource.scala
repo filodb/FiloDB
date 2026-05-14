@@ -192,6 +192,22 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       }
     }
 
+    val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+    val resultSchema = {
+      val numRowKeyCols = 1
+      ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
+    }
+
+    // Create a row-count consumer to account for row-based samples-scanned as chunks are iterated.
+    // Series/part-key-based samples are accounted for below while looping through partitions.
+    def samplesScannedRowCountConsumer(rowsScanned: Long): Unit = {
+      if (samplesScannedConfig.leafSamplesEnabled) {
+        QueryUtils.trackSamplesScanned(
+          seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
+          querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+      }
+    }
+
     filteredParts.map { partition =>
       stats.incrReadPartitions(1)
       val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
@@ -200,29 +216,12 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
 
-      val resultSchema = {
-        val numRowKeyCols = 1
-        ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
-      }
-
-      // Add leaf-level samples-scanned into the QueryStats.
-      val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
-      val isSeriesCounted = AtomicBoolean(false)
-      def samplesScannedRowCountConsumer(rowsScanned: Long): Unit = {
-        if (!samplesScannedConfig.leafSamplesEnabled) {
-          return
-        }
-        // Only count the series/pk-bytes once; all other calls will exclusively count rows.
-        if (!isSeriesCounted.get()) {
-          QueryUtils.trackSamplesScanned(
-            seriesScanned = 1, rowsScanned, partKeyBytes = key.keySize, this.getClass,
-            querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
-          isSeriesCounted.set(true)
-        } else {
-          QueryUtils.trackSamplesScanned(
-            seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
-            querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
-        }
+      // Account for series- & part-key-based samples-scanned up-front;
+      //   row-based samples-scanned are accounted for by the consumer created above.
+      if (samplesScannedConfig.leafSamplesEnabled) {
+        QueryUtils.trackSamplesScanned(
+          seriesScanned = 1, 0, partKeyBytes = key.keySize, this.getClass,
+          querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
       }
 
       RawDataRangeVector(

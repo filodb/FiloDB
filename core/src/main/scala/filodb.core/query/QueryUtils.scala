@@ -199,26 +199,37 @@ object QueryUtils {
       return
     }
 
-    // NOTE: avoiding getOrElse below to avoid lambda allocations.
+    // Each computation below has an if() short-circuit.
+    // This is helpful for leaf samples-scanned counters, where this method is sometimes invoked
+    //   specifically to account for rows, and sometimes invoked specifically to account for series.
+    val rowSamples = if (rowsScanned > 0) {
+      val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
+      val rowSamples = rowsScanned * rowMultiplier * (
+          // NOTE: avoiding getOrElse to avoid lambda allocations.
+          if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
+          else config.defaultSamplesPerRow
+        )
+      rowSamplesScanned.increment(rowSamples.toLong)
+      rowSamples
+    } else 0
 
-    val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
-    val rowSamples = rowsScanned * rowMultiplier * (
-        if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
-        else config.defaultSamplesPerRow
-      )
-    rowSamplesScanned.increment(rowSamples.toLong)
+    val seriesSamples = if (seriesScanned > 0) {
+      val sampleCount = seriesScanned * (
+          if (config.classToSamplesPerSeries.contains(clazz)) config.classToSamplesPerSeries(clazz)
+          else config.defaultSamplesPerSeries
+        )
+      seriesSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
+    } else 0
 
-    val seriesSamples = seriesScanned * (
-        if (config.classToSamplesPerSeries.contains(clazz)) config.classToSamplesPerSeries(clazz)
-        else config.defaultSamplesPerSeries
-      )
-    seriesSamplesScanned.increment(seriesSamples.toLong)
-
-    val partKeySamples = partKeyBytes * (
-        if (config.classToSamplesPerPartKeyByte.contains(clazz)) config.classToSamplesPerPartKeyByte(clazz)
-        else config.defaultSamplesPerPartKeyByte
-      )
-    partKeyBytesSamplesScanned.increment(partKeySamples.toLong)
+    val partKeySamples = if (partKeyBytes > 0) {
+      val sampleCount = partKeyBytes * (
+          if (config.classToSamplesPerPartKeyByte.contains(clazz)) config.classToSamplesPerPartKeyByte(clazz)
+          else config.defaultSamplesPerPartKeyByte
+        )
+      partKeyBytesSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
+    } else 0
 
     val totalSamples = Math.ceil(
       rowSamples + seriesSamples + partKeySamples
