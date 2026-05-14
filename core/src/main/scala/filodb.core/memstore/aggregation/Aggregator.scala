@@ -42,6 +42,13 @@ trait Aggregator {
   def result(): Any
 
   /**
+   * Returns the aggregated value for the query path. For scalar aggregators, this is
+   * the same as result(). For histogram aggregators, returns the raw MutableHistogram
+   * accumulator (not serialized) for in-memory query access.
+   */
+  def queryValue(): Any = result()
+
+  /**
    * Resets the aggregator state to initial condition.
    */
   def reset(): Unit
@@ -334,6 +341,11 @@ class HistogramAggregator extends Aggregator {
       filodb.memory.format.vectors.Histogram.empty.serialize()
   }
 
+  // Monotonic correction is intentionally NOT applied here — it is deferred to result()
+  // at finalization. Pool reuse calls reset() between buckets, so a query-path read of an
+  // accumulator never observes corrections from a previous bucket.
+  override def queryValue(): Any = accumulator.orNull
+
   def reset(): Unit = {
     accumulator = None
     needsMonotonicCorrection = false
@@ -426,6 +438,8 @@ class HistogramLastAggregator extends Aggregator {
       // Return empty histogram buffer - Histogram.empty.serialize() already returns the buffer
       filodb.memory.format.vectors.Histogram.empty.serialize()
   }
+
+  override def queryValue(): Any = currentHistogram.orNull
 
   def reset(): Unit = {
     currentHistogram = None

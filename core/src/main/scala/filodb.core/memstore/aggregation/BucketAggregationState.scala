@@ -436,12 +436,7 @@ private class BucketState(numColumns: Int, aggTypes: Array[AggregationType]) {
    */
   def getValueForQuery(colIdx: Int): Any = {
     val agg = aggregators(colIdx)
-    if (agg == null) return null
-    agg match {
-      case ha: HistogramAggregator => ha.getAccumulator.orNull
-      case hla: HistogramLastAggregator => hla.getCurrentHistogram.orNull
-      case _ => agg.result()
-    }
+    if (agg == null) null else agg.queryValue()
   }
 
   def getHistogram(colIdx: Int): Option[MutableHistogram] = {
