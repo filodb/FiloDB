@@ -167,12 +167,23 @@ object QueryUtils {
   }
 
   /**
+   * Efficiently compute the appropriate per-row samples-scanned multiplier.
+   */
+  private def computeSamplesScannedRowMultiplier(schema: ResultSchema,
+                                                 config: SamplesScannedConfig): Double = {
+    // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
+    var rowMultiplier = 0.0
+    var i = 0
+    while (i < schema.columns.size) {
+      rowMultiplier += getSamplesScannedRowMultiplier(schema.columns(i), config)
+      i += 1
+    }
+    rowMultiplier
+  }
+
+  /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param clazz The class that produced these samples.
    */
@@ -184,51 +195,52 @@ object QueryUtils {
                           schema: ResultSchema,
                           config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.stat.isEmpty) {
+    if (queryStats.unsafeSize() == 0) {
       return
     }
 
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is always added to QueryStats.
-    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
-    val statKeys = if (!hasSingleEmptyKey) {
-      queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Seq(Nil)
+    // Each computation below has an if() short-circuit.
+    // This is helpful for leaf samples-scanned counters, where this method is sometimes invoked
+    //   specifically to account for rows, and sometimes invoked specifically to account for series.
+    val rowSamples = if (rowsScanned > 0) {
+      val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
+      val sampleCount = rowsScanned * rowMultiplier * (
+          // NOTE: avoiding getOrElse to avoid lambda allocations.
+          if (config.classToSamplesPerRow.contains(clazz)) config.classToSamplesPerRow(clazz)
+          else config.defaultSamplesPerRow
+        )
+      rowSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
+    } else 0
 
-    val rowMultiplier = schema.columns
-      .map(getSamplesScannedRowMultiplier(_, config))
-      .sum
-    val rowSamples = rowsScanned * rowMultiplier *
-      config.classToSamplesPerRow.getOrElse(clazz, config.defaultSamplesPerRow)
-    rowSamplesScanned.increment(rowSamples.toLong)
+    val seriesSamples = if (seriesScanned > 0) {
+      val sampleCount = seriesScanned * (
+          if (config.classToSamplesPerSeries.contains(clazz)) config.classToSamplesPerSeries(clazz)
+          else config.defaultSamplesPerSeries
+        )
+      seriesSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
+    } else 0
 
-    val seriesSamples = seriesScanned *
-      config.classToSamplesPerSeries.getOrElse(clazz, config.defaultSamplesPerSeries)
-    seriesSamplesScanned.increment(seriesSamples.toLong)
-
-    val partKeySamples = partKeyBytes *
-      config.classToSamplesPerPartKeyByte.getOrElse(clazz, config.defaultSamplesPerPartKeyByte)
-    partKeyBytesSamplesScanned.increment(partKeySamples.toLong)
+    val partKeySamples = if (partKeyBytes > 0) {
+      val sampleCount = partKeyBytes * (
+          if (config.classToSamplesPerPartKeyByte.contains(clazz)) config.classToSamplesPerPartKeyByte(clazz)
+          else config.defaultSamplesPerPartKeyByte
+        )
+      partKeyBytesSamplesScanned.increment(sampleCount.toLong)
+      sampleCount
+    } else 0
 
     val totalSamples = Math.ceil(
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / statKeys.size
-    ).asInstanceOf[Long]
-
-    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+    queryStats.unsafeAddSamplesScanned(totalSamples)
   }
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   *
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param class The class that produced these samples.
    */
@@ -246,12 +258,7 @@ object QueryUtils {
 
   /**
    * Given the arguments, determines the total count of samples scanned.
-   * Adds the total to the argument [[QueryStats]]; the total is divided
-   *   evenly across all samples-scanned counters.
-   *
-   * NOTE: if Nil is the only [[QueryStats]] key, all samples are counted
-   *   against it. If Nil exists with other keys, samples are divided
-   *   among the non-Nil keys only.
+   * Adds the total to the argument [[QueryStats]].
    *
    * @param childRv The [[RangeVector]] that was scanned by the parent.
    * @param parentClass The class that scanned the child [[RangeVector]].
@@ -262,41 +269,36 @@ object QueryUtils {
                                schema: ResultSchema,
                                config: SamplesScannedConfig): Unit = {
     // Exit early if there are no stats to update.
-    if (queryStats.stat.isEmpty) {
+    if (queryStats.unsafeSize() == 0) {
       return
     }
 
-    // QueryStats keys are updated for all except Nil *unless* Nil
-    //   is the only entry. Nil is always added to QueryStats.
-    val hasSingleEmptyKey = queryStats.stat.size == 1 && queryStats.stat.keys.head.isEmpty
-    val statKeys = if (!hasSingleEmptyKey) {
-      queryStats.stat.keys.filter(_.nonEmpty).toSeq
-    } else Seq(Nil)
+    // NOTE: avoiding getOrElse below to avoid lambda allocations.
 
-    val rowMultiplier = schema.columns
-      .map(getSamplesScannedRowMultiplier(_, config))
-      .sum
-    val rowSamples = childRv.estimateNumRows() * rowMultiplier *
-      config.classToSamplesPerChildRow.getOrElse(parentClass, config.defaultSamplesPerChildRow)
+    val rowMultiplier = computeSamplesScannedRowMultiplier(schema, config)
+    val rowSamples = childRv.estimateNumRows() * rowMultiplier * (
+        if (config.classToSamplesPerChildRow.contains(parentClass)) config.classToSamplesPerChildRow(parentClass)
+        else config.defaultSamplesPerChildRow
+      )
     childRowSamplesScanned.increment(rowSamples.toLong)
 
-    val seriesSamples = config.classToSamplesPerChildSeries.getOrElse(
-      parentClass, config.defaultSamplesPerChildSeries)
+    val seriesSamples =
+      if (config.classToSamplesPerChildSeries.contains(parentClass)) config.classToSamplesPerChildSeries(parentClass)
+      else config.defaultSamplesPerChildSeries
     childSeriesSamplesScanned.increment(seriesSamples.toLong)
 
-    val partKeySamples = childRv.key.keySize *
-      config.classToSamplesPerChildPartKeyByte.getOrElse(parentClass, config.defaultSamplesPerChildPartKeyByte)
+    val partKeySamples = childRv.key.keySize * (
+        if (config.classToSamplesPerChildPartKeyByte.contains(parentClass))
+          config.classToSamplesPerChildPartKeyByte(parentClass)
+        else config.defaultSamplesPerChildPartKeyByte
+      )
     childPartKeyBytesSamplesScanned.increment(partKeySamples.toLong)
 
     val totalSamples = Math.ceil(
       rowSamples + seriesSamples + partKeySamples
     ).asInstanceOf[Long]
 
-    val samplesPerCounter = Math.ceil(
-      totalSamples.asInstanceOf[Double] / statKeys.size
-    ).asInstanceOf[Long]
-
-    statKeys.foreach(k => queryStats.getSamplesScannedCounter(k).addAndGet(samplesPerCounter))
+    queryStats.unsafeAddSamplesScanned(totalSamples)
   }
 
   def maxIgnoreNaN(a: Double, b: Double): Double = {

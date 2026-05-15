@@ -447,7 +447,7 @@ object ProtoConverters {
   implicit class QueryStatsToProtoConverter(stats: QueryStats) {
     def toProto: GrpcMultiPartitionQueryService.QueryResultStats = {
       val builder = GrpcMultiPartitionQueryService.QueryResultStats.newBuilder()
-      stats.stat.foreach {
+      stats.foreach {
         case (key, stat)  =>
           builder.putStats( key.mkString("##@##"), stat.toProto)
       }
@@ -459,7 +459,7 @@ object ProtoConverters {
     def fromProto: QueryStats = {
       val qs = QueryStats()
       statGrpc.getStatsMap.forEach {
-        case (key, stat)  =>  qs.stat.put(key.split("##@##").toList, stat.fromProto)
+        case (key, stat)  =>  qs.put(key.split("##@##").toList, stat.fromProto)
       }
       qs
     }

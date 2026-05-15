@@ -40,20 +40,20 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
     def assertSamplesScanned(queryStats: QueryStats, expectedCounts: Map[Seq[String], Long]): Unit = {
       for ((key, value) <- expectedCounts) {
-        assert(value == queryStats.stat(key).samplesScanned.get())
+        assert(value == queryStats.get(key).get.samplesScanned.get())
       }
 
       // Have to awkwardly account for the Nil key; Nil is always added for some plans.
       val nilInExpected = expectedCounts.exists(_._1.isEmpty)
-      val nilInActual = queryStats.stat.contains(Nil)
+      val nilInActual = queryStats.get(Nil).isDefined
       if (!nilInExpected && nilInActual) {
         // Make sure we've already asserted the values of all other keys.
-        assert(queryStats.stat.size == 1 + expectedCounts.size)
+        assert(queryStats.unsafeSize == 1 + expectedCounts.size)
         // Make sure no samples-scanned have been counted against Nil.
-        assert(queryStats.stat(Nil).samplesScanned.get() == 0)
+        assert(queryStats.get(Nil).get.samplesScanned.get() == 0)
       } else {
         // Make sure we've already asserted the values of all keys.
-        assert(queryStats.stat.size == expectedCounts.size)
+        assert(queryStats.unsafeSize == expectedCounts.size)
       }
     }
 
@@ -62,12 +62,12 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         val stats = QueryStats()
         QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 10, partKeyBytes = 100,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
-        assert(stats.stat.isEmpty)
+        assert(stats.unsafeSize == 0)
       }
 
       it("should count only row samples with default config") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 10, partKeyBytes = 100,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
@@ -79,9 +79,9 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should split samples evenly across QueryStats entries") {
         val stats = QueryStats()
-        stats.stat.put(Seq("hello"), Stat())
-        stats.stat.put(Seq("goodbye"), Stat())
-        stats.stat.put(Seq("applesauce"), Stat())
+        stats.put(Seq("hello"), Stat())
+        stats.put(Seq("goodbye"), Stat())
+        stats.put(Seq("applesauce"), Stat())
 
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 6, partKeyBytes = 0,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
@@ -95,7 +95,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply correct row multiplier for non-exponential HistogramColumn") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val expHistSchema = ResultSchema(
           Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
@@ -110,7 +110,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply correct row multiplier for exponential HistogramColumn") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 5, partKeyBytes = 0,
           classOf[String], stats, histSchema, SamplesScannedConfig())
@@ -121,7 +121,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerRow") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(defaultSamplesPerRow = 3.0)
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 4, partKeyBytes = 0,
@@ -132,7 +132,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerSeries") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(defaultSamplesPerSeries =  2.0)
         QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 0, partKeyBytes = 0,
@@ -143,7 +143,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerPartKeyByte") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(defaultSamplesPerPartKeyByte = 0.5)
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 0, partKeyBytes = 20,
@@ -154,7 +154,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerRow") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(classToSamplesPerRow = Map(classOf[String] -> 3.0))
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 4, partKeyBytes = 0,
@@ -165,7 +165,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerSeries") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(classToSamplesPerSeries = Map(classOf[String] -> 2.0))
         QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 0, partKeyBytes = 0,
@@ -176,7 +176,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerPartKeyByte") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val config = SamplesScannedConfig(classToSamplesPerPartKeyByte = Map(classOf[String] -> 0.5))
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 0, partKeyBytes = 20,
@@ -187,7 +187,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should increment Nil counter when only Nil key exists") {
         val stats = QueryStats()
-        stats.stat.put(Nil, Stat())
+        stats.put(Nil, Stat())
 
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 6, partKeyBytes = 0,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
@@ -197,8 +197,8 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should not increment Nil counter when non-Nil keys exist") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
-        stats.stat.put(Nil, Stat())
+        stats.put(Seq("key"), Stat())
+        stats.put(Nil, Stat())
 
         QueryUtils.trackSamplesScanned(seriesScanned = 0, rowsScanned = 6, partKeyBytes = 0,
           classOf[String], stats, doubleSchema, SamplesScannedConfig())
@@ -208,7 +208,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should count samples for 1 series, all rows, and correct part-key bytes during RV overload") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(3), None, 5)
         QueryUtils.trackSamplesScanned(
@@ -227,12 +227,12 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         val rv = makeRV(Some(10), None, 50)
         QueryUtils.trackChildSamplesScanned(
           rv, classOf[String], stats, doubleSchema, SamplesScannedConfig())
-        assert(stats.stat.isEmpty)
+        assert(stats.unsafeSize == 0)
       }
 
       it("should count zero child samples with default config") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(10), None, 50)
         QueryUtils.trackChildSamplesScanned(
@@ -243,7 +243,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerChildRow") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(10), None, 0)
         val config = SamplesScannedConfig(defaultSamplesPerChildRow = 2)
@@ -255,7 +255,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerChildSeries") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(0), None, 0)
         val config = SamplesScannedConfig(defaultSamplesPerChildSeries = 7.0)
@@ -267,7 +267,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply default samplesPerChildPartKeyByte") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(None, None, 10)
         val config = SamplesScannedConfig(defaultSamplesPerChildPartKeyByte = 3.0)
@@ -279,7 +279,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerChildRow") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(10), None, 0)
         val config = SamplesScannedConfig(classToSamplesPerChildRow = Map(classOf[String] -> 2.0))
@@ -291,7 +291,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerChildSeries") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(0), None, 0)
         val config = SamplesScannedConfig(classToSamplesPerChildSeries = Map(classOf[String] -> 7.0))
@@ -303,7 +303,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply class-specific samplesPerChildPartKeyByte") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(None, None, 10)
         val config = SamplesScannedConfig(classToSamplesPerChildPartKeyByte = Map(classOf[String] -> 3.0))
@@ -315,7 +315,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should apply child row multiplier for HistogramColumn") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
+        stats.put(Seq("key"), Stat())
 
         val rv = makeRV(Some(5), None, 0)
         val config = SamplesScannedConfig(classToSamplesPerChildRow = Map(classOf[String] -> 1.0))
@@ -328,7 +328,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should increment Nil counter when only Nil key exists") {
         val stats = QueryStats()
-        stats.stat.put(Nil, Stat())
+        stats.put(Nil, Stat())
 
         val rv = makeRV(Some(10), None, 0)
         val config = SamplesScannedConfig(classToSamplesPerChildRow = Map(classOf[String] -> 1.0))
@@ -340,8 +340,8 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
 
       it("should not increment Nil counter when non-Nil keys exist") {
         val stats = QueryStats()
-        stats.stat.put(Seq("key"), Stat())
-        stats.stat.put(Nil, Stat())
+        stats.put(Seq("key"), Stat())
+        stats.put(Nil, Stat())
 
         val rv = makeRV(Some(10), None, 0)
         val config = SamplesScannedConfig(classToSamplesPerChildRow = Map(classOf[String] -> 1.0))

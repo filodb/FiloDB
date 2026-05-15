@@ -644,11 +644,11 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val value = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, filters),
       querySession = session)
       .toListL.runToFuture.futureValue
-    session.queryStats.stat.size shouldEqual 1
-    session.queryStats.stat.head._1.size shouldEqual 5
-    session.queryStats.stat.head._1(2) shouldEqual "test_ws"
-    session.queryStats.stat.head._1(3) shouldEqual "App-0|App-1"
-    session.queryStats.stat.head._1(4) shouldEqual "http_latency"
+    session.queryStats.unsafeSize shouldEqual 1
+    session.queryStats.keys().head.size shouldEqual 5
+    session.queryStats.keys().head(2) shouldEqual "test_ws"
+    session.queryStats.keys().head(3) shouldEqual "App-0|App-1"
+    session.queryStats.keys().head(4) shouldEqual "http_latency"
   }
 
   it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {

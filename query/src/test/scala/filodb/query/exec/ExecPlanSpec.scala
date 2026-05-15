@@ -320,20 +320,20 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     def assertSamplesScanned(queryStats: QueryStats, expectedCounts: Map[Seq[String], Long]): Unit = {
       for ((key, value) <- expectedCounts) {
-        assert(value == queryStats.stat(key).samplesScanned.get())
+        assert(value == queryStats.getSamplesScannedCounter(key).get())
       }
 
       // Have to awkwardly account for the Nil key; Nil is always added for some plans.
       val nilInExpected = expectedCounts.exists(_._1.isEmpty)
-      val nilInActual = queryStats.stat.contains(Nil)
+      val nilInActual = queryStats.get(Nil).isDefined
       if (!nilInExpected && nilInActual) {
         // Make sure we've already asserted the values of all other keys.
-        assert(queryStats.stat.size == 1 + expectedCounts.size)
+        assert(queryStats.unsafeSize() == 1 + expectedCounts.size)
         // Make sure no samples-scanned have been counted against Nil.
-        assert(queryStats.stat(Nil).samplesScanned.get() == 0)
+        assert(queryStats.getSamplesScannedCounter(Nil).get() == 0)
       } else {
         // Make sure we've already asserted the values of all keys.
-        assert(queryStats.stat.size == expectedCounts.size)
+        assert(queryStats.unsafeSize() == expectedCounts.size)
       }
     }
 
