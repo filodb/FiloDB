@@ -267,14 +267,27 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      // we choose 52425 because next RVK is written at row 52426, and new VSR is created for 52427
-      // (proto RvMetadata bytes = 36, data row bytes = 20;
-      //  floor((1048576 - 2*36) / 20) = 52425 data rows fill the first VSR leaving < 20 bytes free after RVK)
+      // we choose 52424 because next RVK is written at row 52425, and new VSR is created for 52426
+      // Here is the math:
+      // For key Map("metric" -> "counter"):
+      //  - BinaryRecord = 4B header + 4B fixed field + 2B map len + 7B key (1+6) + 9B value (2+7) = 26 bytes
+      //  - Proto bytes rvKey = 1 field: 1B tag + 1B varint(26) + 26B = 28 bytes
+      //  - Proto RvRange (fields 3×int64): 3+5+3 = 11 bytes, wrapped as field 2: 1+1+11 = 13 bytes
+      //  - RvKey total = 28+13 = 41 bytes, wrapped in RvMetadata oneof field 2: 1+1+41 = 43 bytes
+      //
+      // maxVectorLen = 1048576 (1 MB)
+      // proto RvMetadata bytes = 43, data row bytes = 20
+      // Since we are trying to spill over the second RV key, we subtract 2*43 before dividing it by data record size.
+      // Flooring that gives us number of records we can fit in the first VSR before we have to spill over to second VSR
+      // for the next RVK.
+      // NumRecords N = floor((1048576 - 2×43) / 20) = floor(52424.5) = 52424
+      //
+      // 52424 data rows fill the first VSR leaving < 20 bytes free after RVK)
       // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
       // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR.
       // Do by adding temporary print statements in ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs to
       // find the row number when RVK is written and when new VSR is created.
-      val largeDataset = (1 to 52425).map { i =>
+      val largeDataset = (1 to 52424).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 

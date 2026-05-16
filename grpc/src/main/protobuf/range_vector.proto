@@ -142,7 +142,7 @@ message RvRange {
 
 // RvKey holds the range-vector key and output range for a data-row block in an Arrow Flight VSR stream.
 message RvKey {
-  RangeVectorKey key       = 1;
+  bytes rvKey              = 1;
   optional RvRange rvRange = 2;
 }
 

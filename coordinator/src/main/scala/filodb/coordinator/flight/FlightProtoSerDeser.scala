@@ -3,11 +3,26 @@ package filodb.coordinator.flight
 import org.apache.arrow.memory.ArrowBuf
 
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.{maxNumRows, VsrPopulationState}
+import filodb.core.binaryrecord2.SingleRecordBuilder
 import filodb.core.query.{FlightAllocator, QueryStats, RangeVectorKey, ResultSchema, RvRange, SerializableRangeVector}
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
+import filodb.memory.format.UnsafeUtils
 import filodb.query.ProtoConverters._
 
 object FlightProtoSerDeser {
+
+  // 8 KB covers any realistic partition-key label set.
+  // One (buf, builder) pair per thread; reset before each key write — no per-call heap allocation.
+  private val KeySerBufSize = 8192
+  private val threadLocalKeyBuf = new ThreadLocal[(Array[Byte], SingleRecordBuilder)] {
+    override def initialValue(): (Array[Byte], SingleRecordBuilder) = {
+      val buf = new Array[Byte](KeySerBufSize)
+      val srb = new SingleRecordBuilder(buf, UnsafeUtils.arayOffset, KeySerBufSize)({
+        throw new IllegalStateException(s"RV key binary record exceeds $KeySerBufSize bytes")
+      })
+      (buf, srb)
+    }
+  }
 
   def serializeSrvToArrowVsr(srv: SerializableRangeVector, state: VsrPopulationState)
                              (needNewVec: () => Unit): Unit =
@@ -15,7 +30,16 @@ object FlightProtoSerDeser {
 
   def serializeRvKeyToArrowVsr(key: RangeVectorKey, outputRange: Option[RvRange],
                                 state: VsrPopulationState)(needNewVec: () => Unit): Unit = {
-    val rkBuilder = ProtoRangeVector.RvKey.newBuilder().setKey(key.toProto)
+    val (buf, srb) = threadLocalKeyBuf.get()
+    srb.reset(buf, UnsafeUtils.arayOffset, KeySerBufSize)
+    key.writeToMapBr(srb)
+    val contentBytes = UnsafeUtils.getInt(buf, UnsafeUtils.arayOffset)
+    // unsafeWrap avoids copying buf into a new ByteString. The ByteString wraps the thread-local
+    // array directly, so it must not outlive this call. Safety: writeProto serialises the message
+    // synchronously into the Arrow buffer, consuming the bytes before returning. buf is only reused
+    // on the next call to this method, by which point the ByteString is no longer referenced.
+    val rkBuilder = ProtoRangeVector.RvKey.newBuilder()
+      .setRvKey(com.google.protobuf.UnsafeByteOperations.unsafeWrap(buf, 0, contentBytes + 4))
     outputRange.foreach(r => rkBuilder.setRvRange(r.toProto))
     writeProto(ProtoRangeVector.RvMetadata.newBuilder().setRvKey(rkBuilder.build()).build(), state, needNewVec)
   }
@@ -66,12 +90,6 @@ object FlightProtoSerDeser {
     } {
       throw new IllegalStateException("FlightAllocator is already closed, cannot serialize to ArrowBuf")
     }
-
-  private[flight] def rvKeyToProtoBytes(key: RangeVectorKey, outputRange: Option[RvRange]): Array[Byte] = {
-    val rkBuilder = ProtoRangeVector.RvKey.newBuilder().setKey(key.toProto)
-    outputRange.foreach(r => rkBuilder.setRvRange(r.toProto))
-    ProtoRangeVector.RvMetadata.newBuilder().setRvKey(rkBuilder.build()).build().toByteArray
-  }
 
   private[flight] def srvToProtoBytes(srv: SerializableRangeVector): Array[Byte] =
     ProtoRangeVector.RvMetadata.newBuilder().setSrv(srv.toProto).build().toByteArray

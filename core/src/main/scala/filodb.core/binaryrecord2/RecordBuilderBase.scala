@@ -249,6 +249,23 @@ abstract class RecordBuilderBase extends StrictLogging {
   }
 
   /**
+   * Adds an entire record from a BinaryRecord, with no boxing or allocations. The record must have the same
+   * schema as the current one.
+   */
+  final def addFromBr(base: Any, offset: Long): Long = {
+    checkPointers()
+    val numBytes = UnsafeUtils.getInt(base, offset)
+    requireBytes(numBytes + 4)
+    val recordOffset = curRecordOffset
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset, numBytes + 4)
+    curRecEndOffset = align(curRecEndOffset + numBytes + 4)
+    curRecordOffset = curRecEndOffset
+    fieldNo = -1
+    postEndRecord()
+    recordOffset
+  }
+
+  /**
    * Adds an entire record from a RowReader, with no boxing, using builderAdders
    *
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
@@ -342,6 +359,66 @@ abstract class RecordBuilderBase extends StrictLogging {
     setShort(curBase, mapOffset, 0)
     updateFieldPointerAndLens(2)
     // Don't update fieldNo, we'll be working on map for a while
+  }
+
+  /**
+   * Use key which is a UTF8StringShort, and value which is a UTF8StringMedium, to add a
+   * key-value pair to the map field started by startMap().
+   * This method is used to serialize RangeVectorKeys in arrow flight RPC path
+   *
+   * IMPORTANT: The encoding does not use pre-defined keys since this can
+   * travel across partitions which can potentially have different pre-defined
+   * keys during deployment roll outs.
+   *
+   * Hash is also not computed
+   */
+  final def addMapKeyValue(keyBase: Any, keyOffset: Long,
+                           valueBase: Any, valueOffset: Long): Unit = {
+    require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
+    val keyLen = UTF8StringShort.numBytes(keyBase, keyOffset)
+    val valLen = UTF8StringMedium.numBytes(valueBase, valueOffset)
+    require(keyLen < 192, s"key is too large: $keyLen bytes")
+    require(valLen < 64 * 1024, s"value is too large: $valLen bytes")
+    requireBytes(keyLen + valLen + 3)
+    UnsafeUtils.unsafe.copyMemory(keyBase, keyOffset, curBase, curRecEndOffset, keyLen + 1)
+    curRecEndOffset += keyLen + 1
+    UnsafeUtils.unsafe.copyMemory(valueBase, valueOffset, curBase, curRecEndOffset, valLen + 2)
+    curRecEndOffset += valLen + 2
+    val newMapLen = curRecEndOffset - mapOffset - 2
+    require(newMapLen < 65536, s"Map entries cannot total more than 64KB, but is now $newMapLen")
+    setShort(curBase, mapOffset, newMapLen.toShort)
+    setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
+  }
+
+  /**
+   * Use key which is a ZCUTF8, and value which is a UTF8StringMedium, to add a
+   * key-value pair to the map field started by startMap().
+   * This method is used to serialize RangeVectorKeys in arrow flight RPC path
+   *
+   * IMPORTANT: The encoding does not use pre-defined keys since this can
+   * travel across partitions which can potentially have different pre-defined
+   * keys during deployment roll outs.
+   *
+   * Hash is also not computed
+   */
+  final def addMapKeyValue(key: ZCUTF8,
+                           valueBase: Any, valueOffset: Long): Unit = {
+    require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
+    val keyLen = key.numBytes
+    val valLen = UTF8StringMedium.numBytes(valueBase, valueOffset)
+    require(keyLen < 192, s"key is too large: $keyLen bytes")
+    require(valLen < 64 * 1024, s"value is too large: $valLen bytes")
+    requireBytes(keyLen + valLen + 3)
+    UnsafeUtils.setByte(curBase, curRecEndOffset, keyLen.toByte) // write key length as 1 byte for UTF8StringShort
+    curRecEndOffset += 1
+    UnsafeUtils.unsafe.copyMemory(key.base, key.offset, curBase, curRecEndOffset, keyLen)
+    curRecEndOffset += keyLen
+    UnsafeUtils.unsafe.copyMemory(valueBase, valueOffset, curBase, curRecEndOffset, valLen + 2)
+    curRecEndOffset += valLen + 2
+    val newMapLen = curRecEndOffset - mapOffset - 2
+    require(newMapLen < 65536, s"Map entries cannot total more than 64KB, but is now $newMapLen")
+    setShort(curBase, mapOffset, newMapLen.toShort)
+    setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
   }
 
   /**

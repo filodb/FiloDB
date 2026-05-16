@@ -14,7 +14,6 @@ import filodb.core.Utils
 import filodb.core.binaryrecord2.{RecordSchema, SingleRecordBuilder}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.query._
-import filodb.grpc.ProtoRangeVector
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils}
 import filodb.query.ProtoConverters._
@@ -215,7 +214,8 @@ object ArrowSerializedRangeVectorOps {
                                schema: ResultSchema): Seq[SerializableRangeVector] = {
     val result = ArrayBuffer[SerializableRangeVector]()
 
-    var currentRvKey: ProtoRangeVector.RvKey = null
+    var currentKey: RangeVectorKey = null
+    var currentRvRange: Option[RvRange] = None
     var currentStartVsrIndex = 0
     var currentStartRowIndex = 0
     var currentNumDataRows = 0
@@ -229,19 +229,22 @@ object ArrowSerializedRangeVectorOps {
       for (rowIndex <- 0 until vsr.getRowCount) {
         if (isRvkVec.get(rowIndex) == 1) {
           // Found a new RV key row — flush the previous RV if any
-          if (currentRvKey != null) {
+          if (currentKey != null) {
             result += new ArrowSerializedRangeVector(
-              currentRvKey.getKey.fromProto, vsrs, schema.toRecordSchema, currentStartVsrIndex,
-              currentStartRowIndex, currentNumDataRows,
-              if (currentRvKey.hasRvRange) Some(currentRvKey.getRvRange.fromProto) else None)
+              currentKey, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+              currentStartRowIndex, currentNumDataRows, currentRvRange)
           }
 
           val proto = FlightProtoSerDeser.deserializeFromBytes(rvkBrVec.get(rowIndex))
           if (proto.hasSrv) {
-            currentRvKey = null
+            currentKey = null
+            currentRvRange = None
             result += proto.getSrv.fromProto
           } else if (proto.hasRvKey) {
-            currentRvKey = proto.getRvKey
+            val rvKeyProto = proto.getRvKey
+            val (base, offset, _) = UnsafeUtils.BOLfromBuffer(rvKeyProto.getRvKey.asReadOnlyByteBuffer())
+            currentKey = BrMapRangeVectorKey(base, offset)
+            currentRvRange = if (rvKeyProto.hasRvRange) Some(rvKeyProto.getRvRange.fromProto) else None
             currentStartVsrIndex = vsrIndex
             currentStartRowIndex = rowIndex
             currentNumDataRows = 0
@@ -255,11 +258,10 @@ object ArrowSerializedRangeVectorOps {
     }
 
     // Flush the last RV
-    if (currentRvKey != null) {
+    if (currentKey != null) {
       result += new ArrowSerializedRangeVector(
-        currentRvKey.getKey.fromProto, vsrs, schema.toRecordSchema, currentStartVsrIndex,
-        currentStartRowIndex, currentNumDataRows,
-        if (currentRvKey.hasRvRange) Some(currentRvKey.getRvRange.fromProto) else None)
+        currentKey, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+        currentStartRowIndex, currentNumDataRows, currentRvRange)
     }
 
     result.toSeq

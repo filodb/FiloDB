@@ -184,7 +184,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
+        List("/shard:/Map(host -> host1, region -> region1)", "/shard:/Map(host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
