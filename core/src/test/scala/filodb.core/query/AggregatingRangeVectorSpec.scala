@@ -695,9 +695,14 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
     }
   }
 
-  // ======================== snapshotBuckets ========================
+  // ======================== snapshotBucketsPooled (formerly snapshotBuckets) ========================
 
-  describe("snapshotBuckets") {
+  describe("snapshotBucketsPooled (basic correctness)") {
+
+    // Helper to allocate fresh per-cursor scratch — mirrors what `getActiveBucketRows` does
+    def freshScratch(columnIDs: Array[Int])
+      : (Array[Array[Double]], Array[MutableHistogram]) =
+      (new Array[Array[Double]](columnIDs.length), new Array[MutableHistogram](columnIDs.length))
 
     describe("histogram snapshot and monotonic correction") {
       it("should apply makeMonotonic to non-monotonic histograms") {
@@ -712,7 +717,8 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
           (bucketTs, Array[Any](0L, nonMonotonicHist))
         )
 
-        val result = AggregatingRangeVector.snapshotBuckets(rawIterator, columnIDs).toSeq
+        val (sv, ss) = freshScratch(columnIDs)
+        val result = AggregatingRangeVector.snapshotBucketsPooled(rawIterator, columnIDs, sv, ss).toSeq
 
         result should have length 1
         val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
@@ -731,12 +737,13 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
           (bucketTs, Array[Any](0L, originalHist))
         )
 
-        val result = AggregatingRangeVector.snapshotBuckets(rawIterator, columnIDs).toSeq
+        val (sv, ss) = freshScratch(columnIDs)
+        val result = AggregatingRangeVector.snapshotBucketsPooled(rawIterator, columnIDs, sv, ss).toSeq
 
         result should have length 1
         val snapshotHist = result.head.values(1).asInstanceOf[MutableHistogram]
 
-        // Must be a different instance (snapshot, not a live reference)
+        // Must be a different instance (snapshot, not a live reference to the source)
         snapshotHist should not be theSameInstanceAs(originalHist)
         snapshotHist.values should not be theSameInstanceAs(originalHist.values)
 
@@ -756,7 +763,9 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
           (bucketTs, Array[Any](0L, 42.0))
         )
 
-        val result = AggregatingRangeVector.snapshotBuckets(rawIterator, tsValueColumnIDs).toSeq
+        val (sv, ss) = freshScratch(tsValueColumnIDs)
+        val result = AggregatingRangeVector
+          .snapshotBucketsPooled(rawIterator, tsValueColumnIDs, sv, ss).toSeq
 
         result should have length 1
         result.head.values(1) shouldEqual 42.0
@@ -773,7 +782,8 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
           (bucketTs, Array[Any](0L, monotonicHist))
         )
 
-        val result = AggregatingRangeVector.snapshotBuckets(rawIterator, columnIDs).toSeq
+        val (sv, ss) = freshScratch(columnIDs)
+        val result = AggregatingRangeVector.snapshotBucketsPooled(rawIterator, columnIDs, sv, ss).toSeq
 
         val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
         outputHist.values shouldEqual Array(5.0, 10.0, 15.0)
@@ -791,7 +801,8 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
           (bucketTs, Array[Any](0L, hist, 42.0))
         )
 
-        val result = AggregatingRangeVector.snapshotBuckets(rawIterator, columnIDs).toSeq
+        val (sv, ss) = freshScratch(columnIDs)
+        val result = AggregatingRangeVector.snapshotBucketsPooled(rawIterator, columnIDs, sv, ss).toSeq
 
         result should have length 1
         val outputHist = result.head.values(1).asInstanceOf[MutableHistogram]
@@ -803,8 +814,204 @@ class AggregatingRangeVectorSpec extends AnyFunSpec with Matchers {
       }
 
       it("should handle empty raw iterator gracefully") {
-        val result = AggregatingRangeVector.snapshotBuckets(Iterator.empty, tsValueColumnIDs).toSeq
+        val (sv, ss) = freshScratch(tsValueColumnIDs)
+        val result = AggregatingRangeVector
+          .snapshotBucketsPooled(Iterator.empty, tsValueColumnIDs, sv, ss).toSeq
         result shouldBe empty
+      }
+    }
+  }
+
+  // ======================== snapshotBucketsPooled ========================
+
+  describe("snapshotBucketsPooled") {
+
+    describe("pooling correctness") {
+      it("should produce correct histogram values within each next() call across many buckets") {
+        // Build 5 buckets with progressively larger values
+        val bounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val raw = (0 until 5).iterator.map { i =>
+          val h = MutableHistogram(bounds, Array(i * 1.0, i * 2.0, i * 3.0))
+          ((1000L + i * 100).toLong, Array[Any](0L, h))
+        }
+
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          raw, columnIDs, scratchValues, scratchShells
+        )
+
+        // Read each row's histogram values IMMEDIATELY after next() (live-ref contract)
+        val snapshotted = scala.collection.mutable.ArrayBuffer.empty[Array[Double]]
+        while (iter.hasNext) {
+          val row = iter.next()
+          val h = row.values(1).asInstanceOf[MutableHistogram]
+          snapshotted += h.values.clone()
+        }
+
+        snapshotted should have length 5
+        snapshotted(0) shouldEqual Array(0.0, 0.0, 0.0)
+        snapshotted(1) shouldEqual Array(1.0, 2.0, 3.0)
+        snapshotted(2) shouldEqual Array(2.0, 4.0, 6.0)
+        snapshotted(3) shouldEqual Array(3.0, 6.0, 9.0)
+        snapshotted(4) shouldEqual Array(4.0, 8.0, 12.0)
+      }
+
+      it("should return the same MutableHistogram shell instance across iterations (intentional pooling)") {
+        val bounds = CustomBuckets(Array(1.0, Double.PositiveInfinity))
+        val h1 = MutableHistogram(bounds, Array(1.0, 2.0))
+        val h2 = MutableHistogram(bounds, Array(3.0, 4.0))
+
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, h1)), (200L, Array[Any](0L, h2))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val row1 = iter.next()
+        val ref1 = row1.values(1)
+        val row2 = iter.next()
+        val ref2 = row2.values(1)
+
+        // The pool reuses one shell per column — same identity across rows is the contract
+        ref1.asInstanceOf[AnyRef] should be theSameInstanceAs ref2.asInstanceOf[AnyRef]
+      }
+
+      it("should isolate the snapshot from concurrent mutation of the source histogram within one row") {
+        val bounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val source = MutableHistogram(bounds, Array(5.0, 10.0, 15.0))
+
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, source))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val row = iter.next()
+        val snap = row.values(1).asInstanceOf[MutableHistogram]
+        // Different shell from the source
+        snap should not be theSameInstanceAs(source)
+        snap.values should not be theSameInstanceAs(source.values)
+
+        // Mutate source — snapshot must be unaffected
+        source.values(0) = 999.0
+        source.values(1) = 999.0
+        source.values(2) = 999.0
+
+        snap.values shouldEqual Array(5.0, 10.0, 15.0)
+      }
+    }
+
+    describe("monotonicity") {
+      it("should apply makeMonotonic per bucket independently") {
+        val bounds = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+        val h1 = MutableHistogram(bounds, Array(10.0, 5.0, 15.0))  // non-monotonic
+        val h2 = MutableHistogram(bounds, Array(3.0, 1.0, 4.0))    // non-monotonic
+
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, h1)), (200L, Array[Any](0L, h2))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val snap1 = iter.next().values(1).asInstanceOf[MutableHistogram].values.clone()
+        val snap2 = iter.next().values(1).asInstanceOf[MutableHistogram].values.clone()
+
+        // makeMonotonic carries forward the running max
+        snap1 shouldEqual Array(10.0, 10.0, 15.0)
+        snap2 shouldEqual Array(3.0, 3.0, 4.0)
+      }
+    }
+
+    describe("multiple histogram columns") {
+      it("should use separate scratch shells per histogram column") {
+        val bounds = CustomBuckets(Array(1.0, Double.PositiveInfinity))
+        val h1 = MutableHistogram(bounds, Array(1.0, 2.0))
+        val h2 = MutableHistogram(bounds, Array(3.0, 4.0))
+
+        val columnIDs = Array(0, 1, 2)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, h1, h2))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val row = iter.next()
+        val v1 = row.values(1).asInstanceOf[MutableHistogram]
+        val v2 = row.values(2).asInstanceOf[MutableHistogram]
+
+        // Per-column scratches must not alias
+        v1.asInstanceOf[AnyRef] should not be theSameInstanceAs(v2.asInstanceOf[AnyRef])
+        v1.values.asInstanceOf[AnyRef] should not be theSameInstanceAs(v2.values.asInstanceOf[AnyRef])
+        v1.values shouldEqual Array(1.0, 2.0)
+        v2.values shouldEqual Array(3.0, 4.0)
+      }
+    }
+
+    describe("schema changes") {
+      it("should reallocate scratch when bucket count changes between rows") {
+        val bounds16 = CustomBuckets((1 to 15).map(_.toDouble).toArray :+ Double.PositiveInfinity)
+        val bounds64 = CustomBuckets((1 to 63).map(_.toDouble).toArray :+ Double.PositiveInfinity)
+
+        val small = MutableHistogram(bounds16, (0 until 16).map(_.toDouble).toArray)
+        val large = MutableHistogram(bounds64, (0 until 64).map(_.toDouble).toArray)
+
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, small)), (200L, Array[Any](0L, large))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val snap1 = iter.next().values(1).asInstanceOf[MutableHistogram].values.clone()
+        val snap2 = iter.next().values(1).asInstanceOf[MutableHistogram].values.clone()
+
+        snap1.length shouldEqual 16
+        snap2.length shouldEqual 64
+        snap1 shouldEqual (0 until 16).map(_.toDouble).toArray
+        snap2 shouldEqual (0 until 64).map(_.toDouble).toArray
+      }
+    }
+
+    describe("non-histogram passthrough") {
+      it("should pass through scalar values without modification") {
+        val columnIDs = Array(0, 1)
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator((100L, Array[Any](0L, 42.0))),
+          columnIDs, scratchValues, scratchShells
+        )
+
+        val row = iter.next()
+        row.values(1) shouldEqual 42.0
+      }
+
+      it("should handle empty raw iterator gracefully") {
+        val columnIDs = tsValueColumnIDs
+        val scratchValues = new Array[Array[Double]](columnIDs.length)
+        val scratchShells = new Array[MutableHistogram](columnIDs.length)
+
+        val iter = AggregatingRangeVector.snapshotBucketsPooled(
+          Iterator.empty, columnIDs, scratchValues, scratchShells
+        )
+        iter.hasNext shouldBe false
       }
     }
   }

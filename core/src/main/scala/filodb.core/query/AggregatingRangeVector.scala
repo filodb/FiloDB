@@ -61,11 +61,19 @@ final case class AggregatingRangeVector(
    * Gets rows from active buckets that fall within the query time range.
    * Returns a lazy iterator of BucketRowData, sorted by timestamp (TreeMap order).
    * No intermediate collections (Set, Seq) are materialized; no redundant sort is performed.
+   *
+   * Per-cursor scratch arrays back the histogram snapshot pool — one Array[Double] and one
+   * MutableHistogram shell per (potential) histogram column, lazily allocated on first
+   * encounter and reused across every bucket emitted by this cursor.
    */
   private def getActiveBucketRows(startTime: Long, endTime: Long): Iterator[BucketRowData] = {
-    AggregatingRangeVector.snapshotBuckets(
+    val histScratchValues = new Array[Array[Double]](columnIDs.length)
+    val histScratchShells = new Array[MutableHistogram](columnIDs.length)
+    AggregatingRangeVector.snapshotBucketsPooled(
       partition.bucketValuesIteratorInRange(startTime, endTime),
-      columnIDs
+      columnIDs,
+      histScratchValues,
+      histScratchShells
     )
   }
 
@@ -80,12 +88,28 @@ object AggregatingRangeVector {
   // scalastyle:off null
 
   /**
-   * Snapshots bucket values: clones histogram values arrays and applies makeMonotonic.
-   * No tolerance filtering — that is handled upstream by BucketAggregationState.
+   * Snapshots bucket values into per-cursor scratch storage and applies `makeMonotonic`.
+   *
+   * IMPORTANT — LIVE-REFERENCE CONTRACT:
+   * The returned `MutableHistogram` instances are LIVE references to per-cursor scratch
+   * storage that is MUTATED when the iterator advances. Callers MUST fully consume each
+   * row's histogram values (read all fields, or serialize them) before calling
+   * `iterator.next()` again. This is safe under the existing
+   * `MergingRangeVectorCursor` → `BucketDataRowReader` → range-function consumption model
+   * where rows are processed sequentially: the merging cursor stages a single bucket row,
+   * the row reader exposes it to the range function, and only then is `next()` called
+   * again on the underlying iterator.
+   *
+   * The scratch arrays (`histScratchValues`, `histScratchShells`) are sized to the number
+   * of columns; entries are lazily allocated on first encounter of a histogram per column
+   * and reused thereafter. Schema changes (different bucket count) trigger reallocation.
+   * No tolerance filtering — that is handled upstream by `BucketAggregationState`.
    */
-  private[query] def snapshotBuckets(
+  private[query] def snapshotBucketsPooled(
     rawIterator: Iterator[(Long, Array[Any])],
-    columnIDs: Array[Int]
+    columnIDs: Array[Int],
+    histScratchValues: Array[Array[Double]],
+    histScratchShells: Array[MutableHistogram]
   ): Iterator[BucketRowData] = {
     rawIterator.map { case (bucketTs, allColumnValues) =>
       val values = new Array[Any](columnIDs.length)
@@ -97,9 +121,25 @@ object AggregatingRangeVector {
         } else if (colIdx < allColumnValues.length) {
           allColumnValues(colIdx) match {
             case hist: MutableHistogram =>
-              val snapshot = MutableHistogram(hist.buckets, hist.values.clone())
-              snapshot.makeMonotonic()
-              values(i) = snapshot
+              val srcLen = hist.values.length
+              // Lazily allocate scratch on first encounter; reallocate when the source
+              // bucket count differs (defensive — single-cursor schema shifts are rare).
+              // Assumes the source MutableHistogram upholds `values.length == buckets.numBuckets`
+              // (enforced by its constructor and preserved by HistogramAggregator's add path,
+              // which always reassigns `values` and `buckets` together).
+              if (histScratchValues(i) == null || histScratchValues(i).length != srcLen) {
+                histScratchValues(i) = new Array[Double](srcLen)
+                histScratchShells(i) = MutableHistogram(hist.buckets, histScratchValues(i))
+              } else {
+                // Bucket count matched, but the schema instance may differ (e.g., different
+                // CustomBuckets `le` boundaries). Update the shell's bucket ref so downstream
+                // serialize()/bucketTop() see the correct schema. Bypasses the case-class
+                // `require(numBuckets == values.size)` — safe because srcLen matched.
+                histScratchShells(i).buckets = hist.buckets
+              }
+              System.arraycopy(hist.values, 0, histScratchValues(i), 0, srcLen)
+              histScratchShells(i).makeMonotonic()
+              values(i) = histScratchShells(i)
             case other =>
               values(i) = other
           }
