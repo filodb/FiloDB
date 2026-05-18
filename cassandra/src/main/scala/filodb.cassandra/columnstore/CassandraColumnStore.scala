@@ -271,7 +271,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val partKeys = splits.flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
-        logger.debug(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
+        logger.info(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
           s"ingestionTimeEnd=$ingestionTimeEnd")
         indexTable.scanPartKeysByIngestionTimeNoAsync(split.tokens, ingestionTimeStart, ingestionTimeEnd, cassFetchSize)
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
@@ -279,7 +279,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.sliding(batchSize, batchSize).map { parts =>
-      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
+      logger.info(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
         s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
       // This could be more parallel, but decision was made to control parallelism at one place: In spark (via its
       // parallelism configuration. Revisit if needed later.
