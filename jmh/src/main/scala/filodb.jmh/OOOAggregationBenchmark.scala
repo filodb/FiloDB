@@ -15,6 +15,7 @@ import filodb.core.query._
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.TupleRowReader
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 //scalastyle:off regex
 /**
@@ -68,16 +69,26 @@ class OOOAggregationBenchmark {
     aggregationIntervalMs = 60000L,
     aggregationOooToleranceMs = 30000L)
 
+  // Aggregating histogram dataset — exercises the AggregatingRangeVector.snapshotBuckets
+  // histogram clone + makeMonotonic path (dead code under scalar dSum benchmarks).
+  val histAggregatingDataset = Dataset("agg_histogram_metrics", Seq("series:string"),
+    Seq("timestamp:ts", "h:hist:{counter=false,delta=true}"), scalarDatasetOptions,
+    aggregatorNames = Seq("hSum(1)"),
+    aggregationIntervalMs = 60000L,
+    aggregationOooToleranceMs = 30000L)
+
   // --- Partition infrastructure ---
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(regularDataset.schema, "series0")
 
   val regularBufferPool = new WriteBufferPool(memFactory, regularDataset.schema.data, TestData.storeConf)
   val aggBufferPool = new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf)
+  val histAggBufferPool = new WriteBufferPool(memFactory, histAggregatingDataset.schema.data, TestData.storeConf)
 
   // --- Partitions ---
   var regularPart: TimeSeriesPartition = _
   var aggPart: AggregatingTimeSeriesPartition = _
+  var histAggPart: AggregatingTimeSeriesPartition = _
   var ingestBlockHolder: BlockMemFactory = _
 
   // --- Pre-generated sample data ---
@@ -110,11 +121,36 @@ class OOOAggregationBenchmark {
     }
   }
 
+  // Pre-generated histogram samples. Each sample owns its own UnsafeBuffer to avoid
+  // shared-buffer overwrites during ingestion (mirrors createHistogram() in
+  // AggregatingTimeSeriesPartitionSpec). 16 buckets at fixed boundaries; counts vary
+  // per sample to keep the values non-trivial.
+  val histBucketBoundaries: Array[Double] =
+    Array(1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0,
+      1024.0, 2048.0, 4096.0, 8192.0, 16384.0) :+ Double.PositiveInfinity
+  val histBuckets = CustomBuckets(histBucketBoundaries)
+
+  private def makeHistSample(i: Int): TupleRowReader = {
+    val counts = new Array[Long](histBucketBoundaries.length)
+    var b = 0
+    while (b < counts.length) {
+      counts(b) = ((i + 1) * (b + 1)).toLong
+      b += 1
+    }
+    val hist = LongHistogram(histBuckets, counts)
+    val buf = hist.serialize(Some(new org.agrona.concurrent.UnsafeBuffer(new Array[Byte](4096))))
+    TupleRowReader((Some(baseTs + i * sampleStep), Some(buf)))
+  }
+
+  val histInOrderSamples: Array[TupleRowReader] = (0 until numSamples).map(makeHistSample).toArray
+
   // For query benchmarks: pre-populated partitions with data already ingested
   var queryRegularPart: TimeSeriesPartition = _
   var queryAggPart: AggregatingTimeSeriesPartition = _
+  var queryHistAggPart: AggregatingTimeSeriesPartition = _
   var queryBlockHolder: BlockMemFactory = _
   var queryAggRangeVector: AggregatingRangeVector = _
+  var queryHistAggRangeVector: AggregatingRangeVector = _
 
   // For finalize benchmark
   var finalizePart: AggregatingTimeSeriesPartition = _
@@ -123,6 +159,7 @@ class OOOAggregationBenchmark {
   // Current sample index for ingestion benchmarks
   var regularIdx = 0
   var aggIdx = 0
+  var histAggIdx = 0
 
   private def makePartition(dataset: Dataset, bufPool: WriteBufferPool): TimeSeriesPartition = {
     val bufPools = debox.Map(dataset.schema.schemaHash -> bufPool)
@@ -147,6 +184,8 @@ class OOOAggregationBenchmark {
       new WriteBufferPool(memFactory, regularDataset.schema.data, TestData.storeConf))
     queryAggPart = makeAggPartition(aggregatingDataset,
       new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf))
+    queryHistAggPart = makeAggPartition(histAggregatingDataset,
+      new WriteBufferPool(memFactory, histAggregatingDataset.schema.data, TestData.storeConf))
 
     ingestQueryData()
     buildQueryRangeVector()
@@ -161,6 +200,7 @@ class OOOAggregationBenchmark {
       val row = TupleRowReader((Some(ts), Some(i.toDouble)))
       queryRegularPart.ingest(ts, row, queryBlockHolder, ta, fim, false)
       queryAggPart.ingest(ts, row, queryBlockHolder, ta, fim, false)
+      queryHistAggPart.ingest(ts, histInOrderSamples(i), queryBlockHolder, ta, fim, false)
     }
   }
 
@@ -183,6 +223,22 @@ class OOOAggregationBenchmark {
       Long.MaxValue,
       "benchmark-query"
     )
+    queryHistAggRangeVector = AggregatingRangeVector(
+      PartitionRangeVectorKey(
+        Left(queryHistAggPart),
+        histAggregatingDataset.schema.partKeySchema,
+        histAggregatingDataset.schema.infosFromIDs(
+          histAggregatingDataset.schema.partition.columns.map(_.id)),
+        0, 0, queryHistAggPart.partID, histAggregatingDataset.schema.name
+      ),
+      queryHistAggPart,
+      TimeRangeChunkScan(baseTs, endTs),
+      columnIDs,
+      new AtomicLong(0),
+      new AtomicLong(0),
+      Long.MaxValue,
+      "benchmark-query-hist"
+    )
   }
 
   @Setup(JMHLevel.Iteration)
@@ -192,6 +248,7 @@ class OOOAggregationBenchmark {
 
     regularPart = makePartition(regularDataset, regularBufferPool)
     aggPart = makeAggPartition(aggregatingDataset, aggBufferPool)
+    histAggPart = makeAggPartition(histAggregatingDataset, histAggBufferPool)
 
     val finBufPool = new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf)
     finalizePart = makeAggPartition(aggregatingDataset, finBufPool)
@@ -200,6 +257,7 @@ class OOOAggregationBenchmark {
 
     regularIdx = 0
     aggIdx = 0
+    histAggIdx = 0
   }
 
   private val flushIntervalMillis = Option(TestData.storeConf.flushInterval.toMillis)
@@ -247,6 +305,19 @@ class OOOAggregationBenchmark {
     bh.consume(aggPart)
   }
 
+  /**
+   * Ingestion throughput for histogram-typed AggregatingTimeSeriesPartition with in-order samples.
+   * Counterpart to ingestAggregatingInOrder for the histogram aggregation path (hSum).
+   */
+  @Benchmark
+  def ingestAggregatingHistogramInOrder(bh: Blackhole): Unit = {
+    val row = histInOrderSamples(histAggIdx % numSamples)
+    val ts = baseTs + histAggIdx * sampleStep
+    histAggPart.ingest(ts, row, ingestBlockHolder, timeAligned, flushIntervalMillis, false)
+    histAggIdx += 1
+    bh.consume(histAggPart)
+  }
+
   // ==========================================================================
   // Query Benchmarks
   // ==========================================================================
@@ -273,6 +344,26 @@ class OOOAggregationBenchmark {
   @Benchmark
   def queryAggregating(bh: Blackhole): Unit = {
     val cursor = queryAggRangeVector.rows()
+    try {
+      var count = 0
+      while (cursor.hasNext) {
+        bh.consume(cursor.next())
+        count += 1
+      }
+      bh.consume(count)
+    } finally {
+      cursor.close()
+    }
+  }
+
+  /**
+   * Query throughput for a histogram-typed AggregatingRangeVector. Exercises
+   * AggregatingRangeVector.snapshotBuckets' MutableHistogram clone + makeMonotonic
+   * branch on every active bucket — dead code under the scalar dSum benchmark.
+   */
+  @Benchmark
+  def queryAggregatingHistogram(bh: Blackhole): Unit = {
+    val cursor = queryHistAggRangeVector.rows()
     try {
       var count = 0
       while (cursor.hasNext) {
