@@ -47,7 +47,11 @@ object QueryConfig {
         stitchDisabledTenantColumn
     )
 
-    val samplesScannedConfig = SamplesScannedConfig(queryConfig.getConfig("samples-scanned"))
+    val samplesScannedConfig = if (queryConfig.hasPath("samples-scanned")) {
+      SamplesScannedConfig(queryConfig.getConfig("samples-scanned"))
+    } else {
+      SamplesScannedConfig()
+    }
 
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
     val scCacheSize = queryConfig.as[Int]("single.cluster.cache.cache-size")
