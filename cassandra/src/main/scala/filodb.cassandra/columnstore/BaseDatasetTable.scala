@@ -12,8 +12,7 @@ trait BaseDatasetTable extends StrictLogging {
   def dataset: DatasetRef
   def suffix: String
   lazy val keyspace = connector.keyspace
-  lazy val tableName = s"${dataset.dataset + s"_$suffix"}"
-  lazy val tableString = s"${keyspace}.${tableName}"
+  lazy val tableString = s"${keyspace}.${dataset.dataset + s"_$suffix"}"
   lazy val session = connector.session
 
   // A Cassandra CQL string to create the table.  Should have IF NOT EXISTS.
