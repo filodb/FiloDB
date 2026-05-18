@@ -15,7 +15,7 @@ import filodb.core.query._
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.TupleRowReader
-import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+import filodb.memory.format.vectors.{GeometricBuckets, LongHistogram}
 
 //scalastyle:off regex
 /**
@@ -71,11 +71,14 @@ class OOOAggregationBenchmark {
 
   // Aggregating histogram dataset — exercises the AggregatingRangeVector.snapshotBuckets
   // histogram clone + makeMonotonic path (dead code under scalar dSum benchmarks).
+  // Interval/tolerance shortened (10s/120s) so ~12 buckets stay active during query and
+  // the snapshot path's per-bucket clone allocation is fully stressed (vs ~1 bucket at
+  // the 60s/30s default).
   val histAggregatingDataset = Dataset("agg_histogram_metrics", Seq("series:string"),
     Seq("timestamp:ts", "h:hist:{counter=false,delta=true}"), scalarDatasetOptions,
     aggregatorNames = Seq("hSum(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+    aggregationIntervalMs = 10000L,
+    aggregationOooToleranceMs = 120000L)
 
   // --- Partition infrastructure ---
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
@@ -123,15 +126,13 @@ class OOOAggregationBenchmark {
 
   // Pre-generated histogram samples. Each sample owns its own UnsafeBuffer to avoid
   // shared-buffer overwrites during ingestion (mirrors createHistogram() in
-  // AggregatingTimeSeriesPartitionSpec). 16 buckets at fixed boundaries; counts vary
-  // per sample to keep the values non-trivial.
-  val histBucketBoundaries: Array[Double] =
-    Array(1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0,
-      1024.0, 2048.0, 4096.0, 8192.0, 16384.0) :+ Double.PositiveInfinity
-  val histBuckets = CustomBuckets(histBucketBoundaries)
+  // AggregatingTimeSeriesPartitionSpec). 64 geometric buckets — production-realistic
+  // width vs the 16-bucket prior measurement; counts vary per sample to keep the
+  // values non-trivial.
+  val histBuckets = GeometricBuckets(1.0, 2.0, 64)
 
   private def makeHistSample(i: Int): TupleRowReader = {
-    val counts = new Array[Long](histBucketBoundaries.length)
+    val counts = new Array[Long](histBuckets.numBuckets)
     var b = 0
     while (b < counts.length) {
       counts(b) = ((i + 1) * (b + 1)).toLong
