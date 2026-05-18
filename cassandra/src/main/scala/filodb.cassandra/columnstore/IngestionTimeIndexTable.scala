@@ -38,7 +38,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                      |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val writeIndexCql = session.prepare(
+  private lazy val writeIndexCql = session.prepare(
     s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
