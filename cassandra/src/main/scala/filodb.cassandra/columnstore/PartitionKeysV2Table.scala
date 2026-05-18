@@ -106,8 +106,7 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
 
     val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(0 until numBuckets)
       .mapParallelUnordered(scanParallelism) { bucket =>
-        val cql = scanCql.bind(shard: JInt, bucket: JInt)
-        val fut = session.executeAsync(cql)
+        val fut = session.executeAsync(scanCql.bind(shard: JInt, bucket: JInt))
                          .toIterator.handleErrors
                          .map { rowIt => rowIt.map(PartitionKeysV2Table.rowToPartKeyRecord(_)) }
         Task.fromFuture(fut)
