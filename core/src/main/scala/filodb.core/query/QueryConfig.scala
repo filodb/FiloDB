@@ -108,6 +108,8 @@ object SamplesScannedConfig {
       config.as[Option[Boolean]]("srv-samples-enabled")
         .getOrElse(defaults.srvSamplesEnabled),
 
+      config.as[Option[Double]]("fixed-row-multiplier")
+        .orElse(defaults.fixedRowMultiplier),
       config.as[Option[Double]]("default-row-multiplier")
         .getOrElse(defaults.defaultRowMultiplier),
       config.as[Option[Double]]("histogram-row-multiplier")
@@ -188,6 +190,8 @@ case class CachingConfig(
  * @param rvtSamplesEnabled toggle whether-or-not RangeVectorTransformer samples are counted.
  * @param rvtChildSamplesEnabled toggle whether-or-not RangeVectorTransformer child samples are counted.
  * @param srvSamplesEnabled toggle whether-or-not SerializedRangeVector samples are counted.
+ * @param fixedRowMultiplier if present, overrides other row-multiplier configs. This single multiplier is applied
+ *                           regardless of how many schema columns are present; the usual sum is skipped.
  * @param defaultRowMultiplier multiplier applied to row count for all non-histogram columns value types.
  * @param histogramRowMultiplier multiplier applied to row count for all non-
  *                               exponential histogram columns value types.
@@ -223,6 +227,7 @@ case class SamplesScannedConfig(
                                  rvtChildSamplesEnabled: Boolean = false,
                                  srvSamplesEnabled: Boolean = false,
 
+                                 fixedRowMultiplier: Option[Double] = None,
                                  defaultRowMultiplier: Double = 1.0,
                                  histogramRowMultiplier: Double = 25.0,
                                  exponentialHistogramRowMultiplier: Double = 50.0,

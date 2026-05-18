@@ -77,6 +77,18 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
         assertSamplesScanned(stats, Map(Seq("key") -> 20))
       }
 
+      it("should correctly use fixedRowMultiplier when configured") {
+        val stats = QueryStats()
+        stats.put(Seq("key"), Stat())
+
+        QueryUtils.trackSamplesScanned(seriesScanned = 5, rowsScanned = 10, partKeyBytes = 100,
+          classOf[String], stats, doubleSchema, SamplesScannedConfig(fixedRowMultiplier = Some(1.0)))
+        // rowMultiplier = 1.0 (fixed)
+        // rowSamples = 10 * 1.0 * 1.0 (defaultSamplesPerRow) = 10
+        // seriesSamples = 5 * 0.0 = 0; partKeySamples = 100 * 0.0 = 0
+        assertSamplesScanned(stats, Map(Seq("key") -> 10))
+      }
+
       it("should split samples evenly across QueryStats entries") {
         val stats = QueryStats()
         stats.put(Seq("hello"), Stat())

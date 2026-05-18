@@ -117,6 +117,9 @@ object ProtoConverters extends StrictLogging {
       builder.setRvtSamplesEnabled(config.rvtSamplesEnabled)
       builder.setRvtChildSamplesEnabled(config.rvtChildSamplesEnabled)
       builder.setSrvSamplesEnabled(config.srvSamplesEnabled)
+      if (config.fixedRowMultiplier.isDefined) {
+        builder.setFixedRowMultiplier(config.fixedRowMultiplier.get)
+      }
       builder.setDefaultRowMultiplier(config.defaultRowMultiplier)
       builder.setHistogramRowMultiplier(config.histogramRowMultiplier)
       builder.setExponentialHistogramRowMultiplier(config.exponentialHistogramRowMultiplier)
@@ -158,6 +161,7 @@ object ProtoConverters extends StrictLogging {
         config.getRvtSamplesEnabled,
         config.getRvtChildSamplesEnabled,
         config.getSrvSamplesEnabled,
+        if (config.hasFixedRowMultiplier) Some(config.getFixedRowMultiplier) else None,
         config.getDefaultRowMultiplier,
         config.getHistogramRowMultiplier,
         config.getExponentialHistogramRowMultiplier,

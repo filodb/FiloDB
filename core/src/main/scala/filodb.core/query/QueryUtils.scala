@@ -171,6 +171,10 @@ object QueryUtils {
    */
   private def computeSamplesScannedRowMultiplier(schema: ResultSchema,
                                                  config: SamplesScannedConfig): Double = {
+    if (config.fixedRowMultiplier.isDefined) {
+      return config.fixedRowMultiplier.get
+    }
+
     // NOTE: avoiding .sum, .map, and `for` to prevent the allocation overhead.
     var rowMultiplier = 0.0
     var i = 0
