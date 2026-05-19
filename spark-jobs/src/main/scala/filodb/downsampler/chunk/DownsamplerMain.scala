@@ -270,6 +270,12 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
         val result = rawPartsBatch.map { rawPart =>
+          val partSizeBytes = rawPart.chunks.map(_.capacity).sum
+          val numChunks = rawPart.chunks.length
+
+          DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Partition $partitionId processing part with " +
+            s"${numChunks} chunks, ${partSizeBytes} bytes")
+
           val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)

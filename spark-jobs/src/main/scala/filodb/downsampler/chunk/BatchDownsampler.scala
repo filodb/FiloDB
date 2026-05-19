@@ -136,8 +136,14 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     }
     val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
+
+    val offHeapMemStart = System.currentTimeMillis()
     val offHeapMem = new OffHeapMemory(rawSchemas.flatMap(_.downsample),
       kamonTags, maxMetaSize, settings.downsampleStoreConfig)
+    val offHeapMemEnd = System.currentTimeMillis()
+
+    DownsamplerContext.dsLogger.info(s"PERF_DETAIL: OffHeap memory allocation took ${offHeapMemEnd - offHeapMemStart}ms")
+
     var numDsChunks = 0
     var chunksToPersist = ListBuffer.empty[Row]
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
@@ -273,11 +279,21 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     require(downsamplers.size > 1, s"Number of downsamplers for ${rawPartToDownsample.stringPartition} should be > 1")
 
     // for each chunk
-    Utils.getChunkRangeIter(rawPartToDownsample, userTimeStart, userTimeEndExclusive).foreach{ chunkRange =>
+    val chunkIterStart = System.currentTimeMillis()
+    val chunkRanges = Utils.getChunkRangeIter(rawPartToDownsample, userTimeStart, userTimeEndExclusive).toSeq
+    val chunkIterEnd = System.currentTimeMillis()
 
+    DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Partition chunk iteration took ${chunkIterEnd - chunkIterStart}ms " +
+      s"for ${chunkRanges.size} chunks, partition=${rawPartToDownsample.stringPartition}")
+
+    chunkRanges.foreach{ chunkRange =>
+      val chunkProcessStart = System.currentTimeMillis()
       val chunkset = chunkRange.chunkSetInfoReader
       val startRow = chunkRange.istartRow
       val endRow = chunkRange.iendRow
+
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Processing chunk with ${chunkset.numRows} rows, " +
+        s"timeRange=${chunkset.startTime}-${chunkset.endTime}, startRow=$startRow, endRow=$endRow")
 
       if (shouldTrace) {
         downsamplers.zipWithIndex.foreach { case (d, i) =>
@@ -291,11 +307,17 @@ class BatchDownsampler(val settings: DownsamplerSettings,
 
       // for each downsample resolution
       downsampleResToPart.foreach { case (resolution, part) =>
+        val resolutionStart = System.currentTimeMillis()
         val resMillis = resolution.toMillis
 
+        val periodCalcStart = System.currentTimeMillis()
         val downsamplePeriods =
           periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
         java.util.Arrays.sort(downsamplePeriods)
+        val periodCalcEnd = System.currentTimeMillis()
+
+        DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Resolution $resolution period calculation " +
+          s"took ${periodCalcEnd - periodCalcStart}ms for ${downsamplePeriods.length} periods")
 
         if (shouldTrace)
           DownsamplerContext.dsLogger.info(s"Downsample Periods for ${part.stringPartition} " +
@@ -349,7 +371,16 @@ class BatchDownsampler(val settings: DownsamplerSettings,
             throw e
         }
         dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
+
+        val resolutionEnd = System.currentTimeMillis()
+        DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Resolution $resolution processing completed " +
+          s"in ${resolutionEnd - resolutionStart}ms")
       }
+
+      val chunkProcessEnd = System.currentTimeMillis()
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Chunk processing completed in ${chunkProcessEnd - chunkProcessStart}ms " +
+        s"for chunk with ${chunkset.numRows} rows")
+
       numRawChunksDownsampled.increment()
     }
   }
@@ -420,7 +451,11 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     }
 
     writeFut.foreach { fut =>
+      val writeStart = System.currentTimeMillis()
       val response = Await.result(fut, settings.cassWriteTimeout)
+      val writeEnd = System.currentTimeMillis()
+
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Cassandra write took ${writeEnd - writeStart}ms")
       DownsamplerContext.dsLogger.debug(s"Got message $response for cassandra write call")
       if (response.isInstanceOf[ErrorResponse])
         DownsamplerContext.dsLogger.error(s"Got response $response when writing to Cassandra")
