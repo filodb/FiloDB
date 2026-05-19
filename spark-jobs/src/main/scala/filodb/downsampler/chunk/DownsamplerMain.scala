@@ -66,24 +66,35 @@ class DefaultDSPartitionReader extends DSPartitionReader {
     val settings = batchDownsampler.settings
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
+
+    // Add diagnostic logging for RDD creation
+    DownsamplerContext.dsLogger.info(s"DOWNSAMPLER_TRACE: About to create RDD with ${splits.size} splits")
+
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter: Iterator[ScanSplit] =>
-        Kamon.init()
-        KamonShutdownHook.registerShutdownHook()
-        val rawDataSource = batchDownsampler.rawCassandraColStore
-        rawDataSource.initialize(
-          batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources
-        )
-        val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
-          datasetRef = batchDownsampler.rawDatasetRef,
-          splits = splitIter, ingestionTimeStart = ingestionTimeStart,
-          ingestionTimeEnd = ingestionTimeEnd,
-          userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
-          maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = settings.batchSize,
-          cassFetchSize = settings.cassFetchSize)
-        batchIter
+        try {
+          Kamon.init()
+          KamonShutdownHook.registerShutdownHook()
+
+          val rawDataSource = batchDownsampler.rawCassandraColStore
+          // Note: Cassandra initialization is done at driver level to prevent connection storms
+
+          val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
+            datasetRef = batchDownsampler.rawDatasetRef,
+            splits = splitIter, ingestionTimeStart = ingestionTimeStart,
+            ingestionTimeEnd = ingestionTimeEnd,
+            userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
+            maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+            batchSize = settings.batchSize,
+            cassFetchSize = settings.cassFetchSize)
+
+          batchIter
+        } catch {
+          case e: Exception =>
+            DownsamplerContext.dsLogger.error(s"Error in partition processing: ${e.getMessage}", e)
+            throw e
+        }
       }
   }
 }
@@ -212,6 +223,13 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     val batchDownsampler = new BatchDownsampler(settings, userTimeStart, userTimeEndExclusive)
     val batchExporter = new BatchExporter(settings, userTimeStart, userTimeEndExclusive)
 
+    // Initialize Cassandra connection at driver level to prevent executor-side SSL handshake failures
+    DownsamplerContext.dsLogger.info(s"Initializing Cassandra connection at driver level")
+    batchDownsampler.rawCassandraColStore.initialize(
+      batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources
+    )
+    DownsamplerContext.dsLogger.info(s"Cassandra connection initialized successfully at driver level")
+
     DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeInPeriod=${java.time.Instant.ofEpochMilli(userTimeInPeriod)} " +
@@ -227,27 +245,47 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
-    DownsamplerContext.dsLogger.info(s"Downsample Index Reader: ${settings.dsIndexReader}")
     val dsIndexReader = Class.forName(settings.dsIndexReader)
       .getDeclaredConstructor()
       .newInstance()
       .asInstanceOf[DSPartitionReader]
 
+    DownsamplerContext.dsLogger.info(s"PERF_TIMING: Starting data reading phase")
+    val dataReadStart = System.currentTimeMillis()
     val sourceRdd: RDD[Seq[RawPartData]] = dsIndexReader.read(
       spark, batchDownsampler,
       ingestionTimeStart, ingestionTimeEnd, userTimeStart, userTimeEndExclusive
     )
+    val dataReadEnd = System.currentTimeMillis()
+    DownsamplerContext.dsLogger.info(s"PERF_TIMING: Data reading completed in ${dataReadEnd - dataReadStart}ms")
 
+    DownsamplerContext.dsLogger.info(s"PERF_TIMING: Starting data conversion phase")
+    val conversionStart = System.currentTimeMillis()
     val pagedReadablePartitionsRdd: RDD[Seq[PagedReadablePartition]] =
       sourceRdd.map { rawPartsBatch: Seq[RawPartData] =>
+        val partitionStart = System.currentTimeMillis()
+        val partitionId = org.apache.spark.TaskContext.getPartitionId()
+
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
-        rawPartsBatch.map { rawPart =>
+        val result = rawPartsBatch.map { rawPart =>
+          val partSizeBytes = rawPart.chunkSetsTimeOrdered.flatMap(_.vectors).map(_.capacity).sum
+          val numChunkSets = rawPart.chunkSetsTimeOrdered.length
+          val totalVectors = rawPart.chunkSetsTimeOrdered.map(_.vectors.length).sum
+
+          DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Partition $partitionId processing part with " +
+            s"${numChunkSets} chunkSets, ${totalVectors} vectors, ${partSizeBytes} bytes")
+
           val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
+
+        val partitionEnd = System.currentTimeMillis()
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Partition $partitionId conversion completed in" +
+          s" ${partitionEnd - partitionStart}ms for ${rawPartsBatch.size} parts")
+        result
       }
 
     // exportIsEnabled - this controls whether we dump the downsampled rows to some storage which is NOT FiloDB
@@ -278,25 +316,37 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     // seemingly does not make sense (why would you run a downsample job if you do not downsample anything?) but
     // you can run the job to export the data, not to downsample anything at all (deprecated functionality).
     if (settings.chunkDownsamplerIsEnabled) {
+      DownsamplerContext.dsLogger.info(s"PERF_TIMING: Starting downsampling phase")
+      val downsamplingStart = System.currentTimeMillis()
       val downsampledRowsRdd: RDD[ListBuffer[Row]] = {
         // Downsample the data.
         pagedReadablePartitionsRdd.map { part =>
+          val partitionStart = System.currentTimeMillis()
+          val partitionId = org.apache.spark.TaskContext.getPartitionId()
+
           // Here we do NOT save any data to C* if settings.shouldUseChunksPersistor == true, we will get
           // a list of downsampled rows that we can persist LATER
           // If, however, shouldUseChunksPersistor == false we will not only downsample but also persist the data
           // to C* using C* driver and get back ListBuffer.empty[Row]
           val rows: ListBuffer[Row] = batchDownsampler.downsampleBatch(part)
+
+          val partitionEnd = System.currentTimeMillis()
+          DownsamplerContext.dsLogger.info(s"PERF_TIMING: Partition $partitionId downsampling completed in ${partitionEnd - partitionStart}ms, processed ${part.size} partitions, generated ${rows.size} rows")
           rows
         }
       }
+      val downsamplingEnd = System.currentTimeMillis()
+      DownsamplerContext.dsLogger.info(s"PERF_TIMING: Downsampling phase setup completed in ${downsamplingEnd - downsamplingStart}ms")
 
       // instead of saving downsampled data using BatchDownsampler, we will make a dataframe and pass it to
       // the chunk persistor that can persist the dataframe, ie BatchDownsampler does not perform both functions
       // (1) downsampleing and (2) persisting. The function of persisiting the data is delegated to ChunkPersitor
       if (settings.shouldUseChunksPersistor) {
-        DownsamplerContext.dsLogger.info(s"Using Chunk Persistor ${settings.chunksPersistor}")
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Using Chunk Persistor ${settings.chunksPersistor}")
         val persistor = chunkPersistor.get
 
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Creating DataFrame from downsampled rows")
+        val dataFrameStart = System.currentTimeMillis()
         val chunkRows: RDD[Row] = downsampledRowsRdd.flatMap(x => x)
         val schema = StructType(Seq(
           StructField("res", StringType, true),
@@ -310,12 +360,23 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         ))
         val downsampledDf = spark.createDataFrame(chunkRows, schema)
         val cachedDownsampledDf = downsampledDf.cache()
-        val rows = cachedDownsampledDf.count()
-        DownsamplerContext.dsLogger.info(s"Downsampled rows/time series: $rows")
 
+        val countStart = System.currentTimeMillis()
+        val rows = cachedDownsampledDf.count()
+        val countEnd = System.currentTimeMillis()
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: DataFrame creation and count completed in ${countEnd - dataFrameStart}ms (count: ${countEnd - countStart}ms), rows: $rows")
+
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Starting persistence phase")
+        val persistStart = System.currentTimeMillis()
         persistor.persist(cachedDownsampledDf, batchDownsampler)
+        val persistEnd = System.currentTimeMillis()
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Persistence completed in ${persistEnd - persistStart}ms")
       } else {
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Triggering downsampling execution (direct persistence mode)")
+        val directPersistStart = System.currentTimeMillis()
         downsampledRowsRdd.foreach(_ => {})
+        val directPersistEnd = System.currentTimeMillis()
+        DownsamplerContext.dsLogger.info(s"PERF_TIMING: Direct persistence completed in ${directPersistEnd - directPersistStart}ms")
       }
     }
 
