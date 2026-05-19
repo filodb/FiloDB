@@ -13,12 +13,13 @@ object FlightProtoSerDeser {
 
   // 8 KB covers any realistic partition-key label set.
   // One (buf, builder) pair per thread; reset before each key write — no per-call heap allocation.
-  private val KeySerBufSize = 8192
+  // Watch out when changing to use virtual threads, this thread-local memory can explode
+  private val RvKeySerBufSize = 8192 // TODO make configurable
   private val threadLocalKeyBuf = new ThreadLocal[(Array[Byte], SingleRecordBuilder)] {
     override def initialValue(): (Array[Byte], SingleRecordBuilder) = {
-      val buf = new Array[Byte](KeySerBufSize)
-      val srb = new SingleRecordBuilder(buf, UnsafeUtils.arayOffset, KeySerBufSize)({
-        throw new IllegalStateException(s"RV key binary record exceeds $KeySerBufSize bytes")
+      val buf = new Array[Byte](RvKeySerBufSize)
+      val srb = new SingleRecordBuilder(buf, UnsafeUtils.arayOffset, RvKeySerBufSize)({
+        throw new IllegalStateException(s"RV key binary record exceeds $RvKeySerBufSize bytes")
       })
       (buf, srb)
     }
@@ -31,7 +32,7 @@ object FlightProtoSerDeser {
   def serializeRvKeyToArrowVsr(key: RangeVectorKey, outputRange: Option[RvRange],
                                 state: VsrPopulationState)(needNewVec: () => Unit): Unit = {
     val (buf, srb) = threadLocalKeyBuf.get()
-    srb.reset(buf, UnsafeUtils.arayOffset, KeySerBufSize)
+    srb.reset(buf, UnsafeUtils.arayOffset, RvKeySerBufSize)
     key.writeToMapBr(srb)
     val contentBytes = UnsafeUtils.getInt(buf, UnsafeUtils.arayOffset)
     // unsafeWrap avoids copying buf into a new ByteString. The ByteString wraps the thread-local
@@ -53,6 +54,8 @@ object FlightProtoSerDeser {
   private def writeProto(msg: com.google.protobuf.MessageLite, state: VsrPopulationState,
                          needNewVec: () => Unit): Unit = {
     val size = msg.getSerializedSize
+    require(size <= ArrowSerializedRangeVectorOps.maxVecLen,
+      s"Serialized proto size $size exceeds Arrow buffer capacity ${ArrowSerializedRangeVectorOps.maxVecLen}")
     if (state.bytesRemaining < size || state.rowNum >= maxNumRows) needNewVec()
     // IMPROVE we are allocating a new buffer and output stream for every proto?
     // Ok for now since it is once per RVK and not once per data point, and not in hot path.

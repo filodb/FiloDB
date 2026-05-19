@@ -40,9 +40,8 @@ object FlightQueryResultStreaming {
  */
 trait FlightQueryResultStreaming extends StrictLogging {
 
-  // FIXME enable debugging for now until we stabilize and productionize. Then remove.
-  //  It has performance overhead.
-  System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
+  // Enable if debugging. Then certainly remove - It has performance overhead.
+  // System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
 
   def serverAllocator: BufferAllocator
   def sysConfig: com.typesafe.config.Config

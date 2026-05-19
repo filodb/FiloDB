@@ -114,6 +114,8 @@ case class FlightPlanDispatcher(location: Location,
               footerThrowable = if (footer.hasThrowable) Some(footer.getThrowable.fromProto) else None
               qLogger.debug(s"FlightPlanDispatcher received footer for queryPlanId=${plan.planId} with stats: " +
                 s"${footerStats.get}, throwable: $footerThrowable")
+            } else {
+              qLogger.warn(s"FlightPlanDispatcher received metadata with unknown type for queryPlanId=${plan.planId}")
             }
           }
           // Error on stream is thrown as exception and will be handled at onErrorHandle below
