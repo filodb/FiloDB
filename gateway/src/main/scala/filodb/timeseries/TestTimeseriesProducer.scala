@@ -15,7 +15,7 @@ import monix.reactive.Observable
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
 import filodb.core.metadata.{Dataset, Schema, Schemas}
-import filodb.core.metadata.Schemas.gauge
+import filodb.core.metadata.Schemas.{aggregatingDeltaHistogramV2, gauge}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{DeltaCounterRecord, InputRecord, MetricTagInputRecord, PrometheusCounterRecord,
                                   PrometheusGaugeRecord}
@@ -285,6 +285,91 @@ object TestTimeseriesProducer extends StrictLogging {
         new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)
       }
     }
+  }
+
+  /**
+   * Generate a stream of out-of-order delta-histogram-v2 data for testing the aggregating schema.
+   * Produces samples in batches, shuffling a configurable percentage out of chronological order.
+   * The generated data uses the aggregating-delta-histogram-v2 schema which has 7 data columns:
+   *   (timestamp:ts, sum:double, count:double, h:hist, min:double, max:double, sumLast:double)
+   * plus partition key columns (metric:string, tags:map).
+   *
+   * @param startTime      starting timestamp in millis
+   * @param numTimeSeries  number of distinct time series / partitions
+   * @param numBuckets     number of histogram buckets
+   * @param oooPercent     percentage of samples (0-100) to send out of chronological order
+   * @param maxSkewSecs    maximum time skew in seconds for OOO samples (should be within OOO tolerance)
+   * @param publishIntervalSec interval in seconds between samples per time series
+   * @param namespace      _ns_ tag value
+   * @param workspace      _ws_ tag value
+   */
+  def genOooHistogramData(startTime: Long, numTimeSeries: Int = 16,
+                          numBuckets: Int = 20,
+                          oooPercent: Int = 30,
+                          maxSkewSecs: Int = 90,
+                          publishIntervalSec: Int = 10,
+                          namespace: String = "App-0",
+                          workspace: String = "demo"): Stream[InputRecord] = {
+    val metricName = "http_req_latency_ooo_delta"
+    val histBucketScheme = {
+      val finiteBuckets = (0 until numBuckets - 1).map { i =>
+        2.0 * Math.pow(3.0, i)
+      }.toArray
+      val allBuckets = finiteBuckets :+ Double.PositiveInfinity
+      bv.CustomBuckets(allBuckets)
+    }
+
+    val batchSize = numTimeSeries * 10 // 10 timestamps worth of samples per batch
+    val instanceBase = System.currentTimeMillis
+
+    // Generate samples in batches and shuffle OOO samples within each batch
+    Stream.from(0).grouped(batchSize).flatMap { indices =>
+      val batch = indices.map { n =>
+        val instance = n % numTimeSeries + instanceBase
+        val dc = instance & oneBitMask
+        val partition = (instance >> 1) & twoBitMask
+        val host = (instance >> 4) & twoBitMask
+        val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
+
+        // Generate histogram data for this sample
+        val buckets = new Array[Long](histBucketScheme.numBuckets)
+        val bucketNo = n % histBucketScheme.numBuckets
+        for (b <- bucketNo until histBucketScheme.numBuckets) { buckets(b) = (n / numTimeSeries + 1).toLong }
+        val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
+        val count = rand.nextInt(100).toDouble
+        val sum = buckets.sum.toDouble
+        val minVal = buckets.min.toDouble
+        val maxVal = buckets.max.toDouble
+        val sumLast = sum * 0.8 + rand.nextGaussian() * 0.1
+
+        val tags = Map(dcUTF8   -> s"DC$dc".utf8,
+                       wsUTF8   -> workspace.utf8,
+                       nsUTF8   -> namespace.utf8,
+                       partUTF8 -> s"partition-$partition".utf8,
+                       hostUTF8 -> s"H$host".utf8,
+                       instUTF8 -> s"Instance-$instance".utf8)
+
+        (timestamp, sum, count, hist, minVal, maxVal, sumLast, metricName, tags)
+      }
+
+      // Shuffle OOO samples: for ~oooPercent% of samples, skew their timestamp backward
+      val shuffled = batch.map { case (ts, sum, count, hist, minVal, maxVal, sumLast, metric, tags) =>
+        val isOoo = rand.nextInt(100) < oooPercent
+        val actualTs = if (isOoo) {
+          // Push timestamp back by a random amount up to maxSkewSecs
+          val skewMs = (rand.nextInt(maxSkewSecs) + 1) * 1000L
+          ts - skewMs
+        } else {
+          ts
+        }
+        new MetricTagInputRecord(
+          Seq(actualTs, sum, count, hist, minVal, maxVal, sumLast),
+          metric, tags, aggregatingDeltaHistogramV2)
+      }
+
+      // Shuffle the batch order so OOO samples are interspersed rather than grouped
+      rand.shuffle(shuffled).toStream
+    }.toStream
   }
 }
 
