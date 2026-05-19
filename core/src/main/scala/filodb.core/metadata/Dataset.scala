@@ -11,6 +11,7 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
+import filodb.core.memstore.aggregation.SchemaAggregationConfig
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
@@ -173,6 +174,24 @@ object Dataset {
             dataColumns: Seq[String],
             options: DatasetOptions): Dataset =
     apply(name, partitionColumns, dataColumns, Nil, None, options)
+
+  def apply(name: String,
+            partitionColumns: Seq[String],
+            dataColumns: Seq[String],
+            options: DatasetOptions,
+            aggregatorNames: Seq[String],
+            aggregationIntervalMs: Long,
+            aggregationOooToleranceMs: Long): Dataset = {
+    val aggConfig = SchemaAggregationConfig(
+      filodb.core.memstore.aggregation.ColumnAggregator.parseAll(aggregatorNames),
+      aggregationIntervalMs, aggregationOooToleranceMs)
+    val valueCol = dataColumns.last.split(":").head
+    val result = for {
+      partSchema <- PartitionSchema.make(partitionColumns, options)
+      dataSchema <- DataSchema.make(name, dataColumns, valueColumn = valueCol, aggConfig = aggConfig)
+    } yield Dataset(name, Schema(partSchema, dataSchema, None))
+    result.badMap(BadSchemaError).toTry.get
+  }
 
   def apply(name: String,
             partitionColumns: Seq[String],

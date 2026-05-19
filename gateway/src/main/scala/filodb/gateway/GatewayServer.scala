@@ -31,7 +31,7 @@ import org.rogach.scallop.ValueConverter
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram,
+import filodb.core.metadata.Schemas.{aggregatingDeltaHistogramV2, deltaCounter, deltaHistogram,
   gauge, otelCumulativeHistogram, otelDeltaHistogram, otelExpDeltaHistogram, promCounter, promHistogram}
 import filodb.core.metrics.FilodbMetrics
 import filodb.gateway.conversion._
@@ -112,6 +112,12 @@ object GatewayServer extends StrictLogging {
     val genCounterData = toggle(name = "gen-counter-data",
       descrYes = "Generate Prometheus counter-schema test data and exit")
     val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
+    val genOooData = toggle(noshort = true, name = "gen-ooo-data",
+      descrYes = "Generate out-of-order delta-histogram-v2 test data for aggregating schema and exit")
+    val oooPercent = opt[Int](noshort = true, name = "ooo-percent", default = Some(30),
+      descr = "Percentage of samples to send out of chronological order (0-100)")
+    val maxSkewSecs = opt[Int](noshort = true, name = "max-skew-secs", default = Some(90),
+      descr = "Maximum time skew in seconds for out-of-order samples")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
     val nameSpace = opt[String](name = "ns", default = Some("App-0"), descr = "FiloDB ingestion namespace")
@@ -173,6 +179,7 @@ object GatewayServer extends StrictLogging {
     val genOtelCumulativeHistData = userOpts.genOtelCumulativeHistData.getOrElse(false)
     val genOtelDeltaHistData = userOpts.genOtelDeltaHistData.getOrElse(false)
     val genOtelExpDeltaHistData = userOpts.genOtelExpDeltaHistData.getOrElse(false)
+    val genOooData = userOpts.genOooData.getOrElse(false)
 
     val startTime = System.currentTimeMillis
     logger.info(s"Generating $numSamples samples starting at $startTime....")
@@ -208,7 +215,12 @@ object GatewayServer extends StrictLogging {
           metricNameOverride = None)),
       GeneratorConfig(genDeltaCounterData, deltaCounter.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
-          userOpts.publishIntervalSecs(), deltaCounter))
+          userOpts.publishIntervalSecs(), deltaCounter)),
+      GeneratorConfig(genOooData, aggregatingDeltaHistogramV2.name,
+        () => TestTimeseriesProducer.genOooHistogramData(startTime, numSeries,
+          oooPercent = userOpts.oooPercent(), maxSkewSecs = userOpts.maxSkewSecs(),
+          publishIntervalSec = userOpts.publishIntervalSecs(),
+          namespace = userOpts.nameSpace(), workspace = userOpts.workSpace()))
     )
 
     val streamsToGen = allGenerators.flatMap { config =>
