@@ -437,17 +437,30 @@ class BatchDownsampler(val settings: DownsamplerSettings,
     @volatile var numChunks = 0
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
+      val initStart = System.currentTimeMillis()
       downsampleCassandraColStore.initialize(downsampleRefsByRes(res), -1,
         settings.rawDatasetIngestionConfig.resources)
+      val initEnd = System.currentTimeMillis()
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Cassandra initialization for" +
+        s" resolution $res took ${initEnd - initStart}ms")
+
       // FIXME if listener in chunkset below is not copied + overridden to no-op, we get a SEGV because
       // of a bug in either monix's mapAsync or cassandra driver where the future is completed prematurely.
       // This causes a race condition between free memory and chunkInfo.id access in updateFlushedId.
+      val chunksPrepStart = System.currentTimeMillis()
       val chunksToPersist = chunks.map { c =>
         numChunks += 1
         c.copy(listener = _ => {})
       }
-      downsampleCassandraColStore.write(downsampleRefsByRes(res),
+      val chunksPrepEnd = System.currentTimeMillis()
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Chunk preparation for resolution" +
+        s" $res took ${chunksPrepEnd - chunksPrepStart}ms for $numChunks chunks")
+
+      val writeStart = System.currentTimeMillis()
+      val writeFuture = downsampleCassandraColStore.write(downsampleRefsByRes(res),
         Observable.fromIteratorUnsafe(chunksToPersist), settings.ttlByResolution(res))
+      DownsamplerContext.dsLogger.info(s"PERF_DETAIL: Cassandra write initiated for resolution $res at ${writeStart}ms")
+      writeFuture
     }
 
     writeFut.foreach { fut =>
