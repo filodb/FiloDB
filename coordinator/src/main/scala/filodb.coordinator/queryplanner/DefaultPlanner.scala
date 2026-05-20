@@ -156,12 +156,6 @@ trait  DefaultPlanner {
     } else series
   }
 
-  private[queryplanner] def parsePromLeValue(le: String): Option[Double] = le match {
-    case "+Inf" | "Inf" => Some(Double.PositiveInfinity)
-    case "-Inf"         => Some(Double.NegativeInfinity)
-    case other          => scala.util.Try(other.toDouble).toOption
-  }
-
   private[queryplanner] def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]):
               (Option[String], Option[String], Either[PeriodicSeries, PeriodicSeriesWithWindowing])= {
     val rawSeries = lp match {
@@ -174,8 +168,7 @@ trait  DefaultPlanner {
 
         val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
           map(_.filter.valuesStrings.head.toString)
-        val leEqualsFilter = rawSeriesLp.filters.find(f => f.column == "le" && f.filter.isInstanceOf[Equals])
-        val leFilter = leEqualsFilter.map(_.filter.valuesStrings.head.toString)
+        val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
 
         if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
         else {
@@ -183,9 +176,9 @@ trait  DefaultPlanner {
           if (!nameFilter.get.endsWith("_bucket")) {
             (nameFilter, leFilter, lp)
           }
-          else if (leFilter.isDefined && parsePromLeValue(leFilter.get).isDefined) {
+          else {
             val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-              filterNot(f => f.column == "le" && f.filter.isInstanceOf[Equals]) :+ ColumnFilter(PromMetricLabel,
+              filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
               Equals(PlannerUtil.replaceLastBucketOccurenceStringFromMetricName(nameFilter.get)))
             val newLp =
               if (lp.isLeft)
@@ -193,9 +186,6 @@ trait  DefaultPlanner {
               else
                 Right(lp.toOption.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
             (nameFilter, leFilter, newLp)
-          }
-          else {
-            (nameFilter, None, lp)
           }
         }
       case _ => (None, None, lp)
@@ -227,12 +217,10 @@ trait  DefaultPlanner {
       lp.offsetMs, rawSource = rawSource)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      parsePromLeValue(leFilter.head).foreach { doubleVal =>
-        val paramsExec = StaticFuncArgs(doubleVal, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
-          lp.endMs / 1000))
-        rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-          Seq(paramsExec))))
-      }
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs / 1000, lp.stepMs / 1000,
+        lp.endMs / 1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
     }
     rawSeries
   }
