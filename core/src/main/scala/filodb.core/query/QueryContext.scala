@@ -420,9 +420,9 @@ case class QueryStats() {
    **/
   @volatile private var containsNilKey = false;
 
-  private val lock = new ReentrantReadWriteLock()
-  private val readLock = lock.readLock()
-  private val writeLock = lock.writeLock()
+  @transient private val lock = new ReentrantReadWriteLock()
+  @transient private val readLock = lock.readLock()
+  @transient private val writeLock = lock.writeLock()
 
   override def toString: String = {
     readLock.lock()
