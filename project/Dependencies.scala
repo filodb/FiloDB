@@ -55,7 +55,7 @@ object Dependencies {
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.agrona"           %  "agrona"           % "0.9.35",
-    "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
+    "org.jctools"          % "jctools-core"      % "4.0.3" withJavadoc(),
     "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
     scalaLoggingDep
   )
@@ -73,8 +73,8 @@ object Dependencies {
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
     "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
-    "org.apache.lucene"            % "lucene-core"        % "9.7.0" withJavadoc(),
-    "org.apache.lucene"            % "lucene-facet"       % "9.7.0" withJavadoc(),
+    "org.apache.lucene"            % "lucene-core"        % "8.8.2" withJavadoc(),
+    "org.apache.lucene"            % "lucene-facet"       % "8.8.2" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),

@@ -21,7 +21,7 @@ object StitchRvsExec {
     private val weight = math.pow(10, toleranceNumDecimal)
     private val bVectors = vectors.map(_.buffered)
     val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
-    val nanResult = new TransientRow(0, Double.NaN)
+    val nanResult = new NaNRowReader(0)
     val tsIter: BufferedIterator[Long] = outputRange match {
       case Some(RvRange(startMs, 0, endMs)) =>
         if (startMs == endMs)

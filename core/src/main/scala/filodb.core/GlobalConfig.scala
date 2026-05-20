@@ -49,4 +49,7 @@ object GlobalConfig extends StrictLogging {
       case true => Some(systemConfig.getStringList("filodb.query.workspaces-disabled-max-min").asScala.toSet)
   }
 
+  // Column filter used to check the enabling/disabling the use of max-min columns
+  val maxMinTenantColumnFilter = systemConfig.getString("filodb.query.max-min-tenant-column-filter")
+
 }

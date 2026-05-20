@@ -279,7 +279,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
                                 result ++= consumer.stringPairs
       case (BinaryRecordColumn, i) => result ++= brSchema(i).toStringPairs(blobBase(base, offset, i),
                                                                            blobOffset(base, offset, i))
-                                result += (Schemas.TypeLabel ->
+                                result += ("_type_" ->
                                               Schemas.global.schemaName(
                                                 RecordSchema.schemaID(blobBase(base, offset, i),
                                                                       blobOffset(base, offset, i))))

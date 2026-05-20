@@ -7,6 +7,7 @@ import scala.jdk.CollectionConverters._
 
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
+import kamon.Kamon
 
 import filodb.coordinator.GrpcPlanDispatcher
 import filodb.coordinator.ShardMapper
@@ -17,6 +18,9 @@ import filodb.grpc.GrpcCommonUtils
 import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
+object HighAvailabilityPlanner {
+  final val FailoverCounterName = "single-cluster-failovers-materialized"
+}
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
   * to come up with a plan that orchestrates query execution between multiple
@@ -47,6 +51,24 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
   import LogicalPlan._
+
+  // legacy failover counter captures failovers when we send a PromQL to the buddy
+  // cluster
+  val legacyFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
+    .withTag("cluster", clusterName)
+    .withTag("type", "legacy")
+
+  // full failover counter captures failovers when we materialize a plan locally and
+  // send an entire plan to the buddy cluster for execution
+  val fullFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
+    .withTag("cluster", clusterName)
+    .withTag("type", "full")
+
+  // partial failover counter captures failovers when we materialize a plan locally and
+  // send some parts of it for execution to the buddy cluster
+  val partialFailoverCounter = Kamon.counter(HighAvailabilityPlanner.FailoverCounterName)
+    .withTag("cluster", clusterName)
+    .withTag("type", "partial")
 
   // HTTP endpoint is still mandatory as metadata queries still use it.
   val remoteHttpEndpoint: String = queryConfig.remoteHttpEndpoint
@@ -110,6 +132,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             qContext)
         }
         case route: RemoteRoute =>
+          legacyFailoverCounter.increment()
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           // rootLogicalPlan can be different from queryParams.promQl
@@ -341,6 +364,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     localActiveShardMapper: ActiveShardMapper,
     remoteActiveShardMapper: ActiveShardMapper
   ): ExecPlan = {
+    partialFailoverCounter.increment()
     // it makes sense to do local planning if we have at least 50% of shards running
     // as the query might overload the few shards we have while doing second level aggregation
     // Generally, it would be better to ship the entire query to the cluster that has more shards up
@@ -360,6 +384,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       buddyGrpcEndpoint = Some(remoteGrpcEndpoint.get)
     )
     val context = qContext.copy(plannerParams = haPlannerParams)
+    logger.info(context.getQueryLogLine("Using shard level failover"))
     val plan = localPlanner.materialize(logicalPlan, context);
     plan
   }
@@ -419,6 +444,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     qContext: QueryContext,
     localActiveShardMapper: ActiveShardMapper, remoteActiveShardMapper: ActiveShardMapper
   ): GenericRemoteExec = {
+    fullFailoverCounter.increment()
     val timeout: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
     val plannerParams = qContext.plannerParams.copy(
       failoverMode = filodb.core.query.ShardLevelFailoverMode,

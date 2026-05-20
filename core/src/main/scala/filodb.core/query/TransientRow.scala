@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.vectors.Histogram
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -9,6 +10,20 @@ trait MutableRowReader extends RowReader {
   def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
 }
 
+final class NaNRowReader(var timestamp: Long) extends RowReader {
+  override def notNull(columnNo: Int): Boolean = columnNo == 0
+  override def getBoolean(columnNo: Int): Boolean = false
+  override def getInt(columnNo: Int): Int = 0
+  override def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else 0
+  override def getDouble(columnNo: Int): Double = Double.NaN
+  override def getFloat(columnNo: Int): Float = Float.NaN
+  override def getString(columnNo: Int): String = ""
+  override def getAny(columnNo: Int): Any = Double.NaN
+  override def getBlobBase(columnNo: Int): Any = Double.NaN
+  override def getBlobOffset(columnNo: Int): Long = 0
+  override def getBlobNumBytes(columnNo: Int): Int = 0
+  override def getHistogram(columnNo: Int): Histogram = bv.Histogram.empty
+}
 /**
   * Represents intermediate sample which will be part of a transformed RangeVector.
   * IMPORTANT: It is mutable for memory efficiency purposes. Consumers from

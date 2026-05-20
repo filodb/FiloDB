@@ -372,8 +372,6 @@ object Schemas extends StrictLogging {
   import Accumulation._
   import Dataset._
 
-  val TypeLabel = "_type_"
-
   val _log = logger
 
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
