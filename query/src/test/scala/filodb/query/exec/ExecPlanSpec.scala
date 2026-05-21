@@ -337,6 +337,12 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       }
     }
 
+    def makeQuerySession(config: SamplesScannedConfig): QuerySession = {
+      val plannerParams = querySession.qContext.plannerParams.copy(samplesScannedConfig = config)
+      val queryContext = querySession.qContext.copy(plannerParams = plannerParams)
+      querySession.copy(qContext = queryContext)
+    }
+
     it("should correctly count single-plan samples") {
       val numRvRows = 10
       val range = Some(RvRange(0, 1, numRvRows - 1))
@@ -385,11 +391,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         classToSamplesPerChildPartKeyByte = Map(classOf[TestLeafPlan] -> 999),
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val plan = makeFixedLeafExecPlan(Seq(rv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val plan = makeFixedLeafExecPlan(Seq(rv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
@@ -474,23 +480,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         classToSamplesPerChildPartKeyByte = Map(classOf[SetOperatorExec] -> 14),
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
           assertSamplesScanned(res.queryStats, Map(Seq("key") -> 2351))
@@ -575,23 +583,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 1,
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
         case res: QueryResult =>
           assertSamplesScanned(res.queryStats, Map(Seq("key") -> 2148))
@@ -668,23 +678,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte =7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("lhsKey"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("rhsKey"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -753,23 +765,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -843,23 +857,26 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
 
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -927,23 +944,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -1011,23 +1030,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -1095,23 +1116,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        planDispatcher = dispatcher,
+        qContext = samplesScannedQuerySession.qContext,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {
@@ -1181,23 +1204,25 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
         defaultSamplesPerChildPartKeyByte = 7
       )
 
-      val samplesScannedQueryConfig = queryConfig.copy(samplesScannedConfig = samplesScannedConfig)
-      val samplesScannedQuerySession = querySession.copy(queryConfig = samplesScannedQueryConfig)
-
-      val dispatcher = Some(InProcessPlanDispatcher(samplesScannedQueryConfig))
-      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema, planDispatcher = dispatcher,
+      val samplesScannedQuerySession = makeQuerySession(samplesScannedConfig)
+      val dispatcher = Some(InProcessPlanDispatcher(queryConfig))
+      val lhs = makeFixedLeafExecPlan(Seq(lhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema, planDispatcher = dispatcher,
+      val rhs = makeFixedLeafExecPlan(Seq(rhsRv), schema,
+        qContext = samplesScannedQuerySession.qContext,
+        planDispatcher = dispatcher,
         doExecuteParamAssertion = (_, qs) => {
           // Similar to TimeSeriesShard.lookupPartitions: leaf adds the QueryStats entry.
           qs.queryStats.getSamplesScannedCounter(Seq("key"))
           !qs.preventRangeVectorSerialization
         }) :: Nil
-      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range, qConfig = samplesScannedQueryConfig)
+      val plan = makeSetOperatorExecPlan(lhs, rhs, BinaryOperator.LOR, range)
       plan.addRangeVectorTransformer(new SortFunctionMapper(SortFunctionId.Sort))
 
       plan.execute(memStore, samplesScannedQuerySession).runToFuture.futureValue match {

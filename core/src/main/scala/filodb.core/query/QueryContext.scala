@@ -180,6 +180,85 @@ object DownCluster {
   }
 }
 
+/**
+ * Defines how counts of "samples scanned" are computed.
+ *
+ * A "scanned sample" is a unit that should correlate well with partition saturation.
+ *   In other words: if any partition is saturated with a samples-scanned rate R, all other partitions--
+ *   regardless of their distinct ingestion/query loads-- should also become saturated at
+ *   that same samples-scanned rate.
+ *
+ * Scanned samples are counted for various dimensions of a query: rows, series, partition-key bytes, etc.
+ *   These parameters should be tuned so partition samples-scanned rates correlate well with partition saturation.
+ *
+ * *** NOTE!!! *******************************************************************************
+ * All Class values are serialized as their .getName() strings.
+ * Deserialization will fail if class names and packages are not consistent across partitions.
+ * *******************************************************************************************
+ *
+ * @param leafSamplesEnabled toggle whether-or-not leaf samples are counted.
+ * @param execResultSamplesEnabled toggle whether-or-not immediate doExecute samples are counted.
+ * @param execChildSamplesEnabled toggle whether-or-not ExecPlan child samples are counted.
+ * @param rvtSamplesEnabled toggle whether-or-not RangeVectorTransformer samples are counted.
+ * @param rvtChildSamplesEnabled toggle whether-or-not RangeVectorTransformer child samples are counted.
+ * @param srvSamplesEnabled toggle whether-or-not SerializedRangeVector samples are counted.
+ * @param fixedRowMultiplier if present, overrides other row-multiplier configs. This single multiplier is applied
+ *                           regardless of how many schema columns are present; the usual sum is skipped.
+ * @param defaultRowMultiplier multiplier applied to row count for all non-histogram columns value types.
+ * @param histogramRowMultiplier multiplier applied to row count for all non-
+ *                               exponential histogram columns value types.
+ * @param exponentialHistogramRowMultiplier multiplier applied to row count for all
+ *                                          exponential histogram columns value types.
+ * @param defaultSamplesPerRow the default count of samples added per row; overridden by classToSamplesPerRow.
+ * @param defaultSamplesPerSeries the count of samples added per time-series; overridden by classToSamplesPerSeries.
+ * @param defaultSamplesPerPartKeyByte the count of samples added per partition key byte;
+ *                                     overridden by classToSamplesPerPartKeyByte.
+ * @param classToSamplesPerRow maps classes to the count of samples added per row; overrides defaultSamplesPerRow.
+ * @param classToSamplesPerSeries maps classes to the count of samples added per time-series;
+ *                                overrides defaultSamplesPerSeries.
+ * @param classToSamplesPerPartKeyByte maps classes to the count of samples added per partition-key byte;
+ *                                     overrides defaultSamplesPerPartKeyByte.
+ * @param defaultSamplesPerChildRow the default count of samples added per child row;
+ *                                  overridden by classToSamplesPerChildRow.
+ * @param defaultSamplesPerChildSeries the default count of samples added per child time-series;
+ *                                     overridden by classToSamplesPerChildSeries.
+ * @param defaultSamplesPerChildPartKeyByte the default count of samples added per child partition key byte;
+ *                                          overridden by classToSamplesPerChildPartKeyByte.
+ * @param classToSamplesPerChildRow maps classes to the count of samples added per child row;
+ *                                  overrides defaultSamplesPerChildRow.
+ * @param classToSamplesPerChildSeries maps classes to the count of samples added per child time-series;
+ *                                     overrides defaultSamplesPerChildSeries.
+ * @param classToSamplesPerChildPartKeyByte maps classes to the count of samples added per child partition-key byte;
+ *                                          overrides defaultSamplesPerChildPartKeyByte.
+ */
+case class SamplesScannedConfig(
+                                 leafSamplesEnabled: Boolean = true,
+                                 execResultSamplesEnabled: Boolean = false,
+                                 execChildSamplesEnabled: Boolean = false,
+                                 rvtSamplesEnabled: Boolean = false,
+                                 rvtChildSamplesEnabled: Boolean = false,
+                                 srvSamplesEnabled: Boolean = false,
+
+                                 fixedRowMultiplier: Option[Double] = None,
+                                 defaultRowMultiplier: Double = 1.0,
+                                 histogramRowMultiplier: Double = 25.0,
+                                 exponentialHistogramRowMultiplier: Double = 50.0,
+
+                                 defaultSamplesPerRow: Double = 1.0,
+                                 defaultSamplesPerSeries: Double = 0.0,
+                                 defaultSamplesPerPartKeyByte: Double = 0.0,
+                                 classToSamplesPerRow: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerSeries: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerPartKeyByte: Map[Class[_], Double] = Map(),
+
+                                 defaultSamplesPerChildRow: Double = 0.0,
+                                 defaultSamplesPerChildSeries: Double = 0.0,
+                                 defaultSamplesPerChildPartKeyByte: Double = 0.0,
+                                 classToSamplesPerChildRow: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerChildSeries: Map[Class[_], Double] = Map(),
+                                 classToSamplesPerChildPartKeyByte: Map[Class[_], Double] = Map()
+                               )
+
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
@@ -207,7 +286,8 @@ case class PlannerParams(applicationId: String = "filodb",
                          buddyGrpcEndpoint: Option[String] = None,
                          buddyGrpcTimeoutMs: Option[Long] = None,
                          localShardMapper: Option[ActiveShardMapper] = None,
-                         buddyShardMapper: Option[ActiveShardMapper] = None
+                         buddyShardMapper: Option[ActiveShardMapper] = None,
+                         samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig()
                         )
 
 object PlannerParams {

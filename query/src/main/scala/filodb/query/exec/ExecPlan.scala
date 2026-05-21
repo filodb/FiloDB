@@ -186,7 +186,7 @@ trait ExecPlan extends QueryCommand {
     // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Observable[StreamQueryResponse] = {
       val task = res.schema.map { resSchema =>
-        val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+        val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
         // avoid any work when plan has waited in executor queue for long
         queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
         FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
@@ -279,7 +279,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
-              val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig;
+              val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig;
 
               // We count scanned samples here for two reasons:
               //   1) Serialization is not free.
@@ -289,7 +289,7 @@ trait ExecPlan extends QueryCommand {
               if (samplesScannedConfig.srvSamplesEnabled) {
                 QueryUtils.trackSamplesScanned(
                   srv, this.getClass, querySession.queryStats, resultSchema,
-                  querySession.queryConfig.samplesScannedConfig)
+                  querySession.qContext.plannerParams.samplesScannedConfig)
               }
               srv
           }
@@ -437,7 +437,7 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.flatMap { resSchema =>
-      val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+      val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
       // avoid any work when plan has waited in executor queue for long
       queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
       FilodbMetrics.timeHistogram("query-execute-time-elapsed-step2-start", TimeUnit.MILLISECONDS,
@@ -533,7 +533,7 @@ trait ExecPlan extends QueryCommand {
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
-              val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig;
+              val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig;
 
               // We count scanned samples here for two reasons:
               //   1) Serialization is not free.
@@ -543,7 +543,7 @@ trait ExecPlan extends QueryCommand {
               if (samplesScannedConfig.srvSamplesEnabled) {
                 QueryUtils.trackSamplesScanned(
                   srv, this.getClass, querySession.queryStats, resultSchema,
-                  querySession.queryConfig.samplesScannedConfig)
+                  querySession.qContext.plannerParams.samplesScannedConfig)
               }
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
@@ -857,7 +857,7 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
     // The first valid schema is returned as the Task.  If all results are empty, then return
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
-    val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+    val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
     val processedTasks = childTasks
       .doOnStart(_ => Task.eval(span.mark("first-child-result-received")))
       .guarantee(Task.eval(span.mark("last-child-result-received")))
@@ -874,7 +874,7 @@ abstract class NonLeafExecPlan extends ExecPlan with StrictLogging {
           if (samplesScannedConfig.execChildSamplesEnabled) {
             res.result.foreach { rv =>
               QueryUtils.trackChildSamplesScanned(rv, this.getClass, res.queryStats,
-                res.resultSchema, querySession.queryConfig.samplesScannedConfig)
+                res.resultSchema, querySession.qContext.plannerParams.samplesScannedConfig)
             }
           }
           querySession.queryStats.add(res.queryStats)

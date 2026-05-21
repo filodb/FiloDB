@@ -192,7 +192,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       }
     }
 
-    val samplesScannedConfig = querySession.queryConfig.samplesScannedConfig
+    val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
     val resultSchema = {
       val numRowKeyCols = 1
       ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
@@ -204,7 +204,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       if (samplesScannedConfig.leafSamplesEnabled) {
         QueryUtils.trackSamplesScanned(
           seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
-          querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+          querySession.queryStats, resultSchema, samplesScannedConfig)
       }
     }
 
@@ -221,7 +221,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       if (samplesScannedConfig.leafSamplesEnabled) {
         QueryUtils.trackSamplesScanned(
           seriesScanned = 1, 0, partKeyBytes = key.keySize, this.getClass,
-          querySession.queryStats, resultSchema, querySession.queryConfig.samplesScannedConfig)
+          querySession.queryStats, resultSchema, samplesScannedConfig)
       }
 
       RawDataRangeVector(
