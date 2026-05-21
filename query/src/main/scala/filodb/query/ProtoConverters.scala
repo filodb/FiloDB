@@ -1,12 +1,15 @@
 package filodb.query
 
-
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+
 import scala.jdk.CollectionConverters._
+import scala.util.Try
+
 import akka.pattern.AskTimeoutException
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.metadata.Column.ColumnType._
@@ -14,10 +17,6 @@ import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
-
-
-import scala.util.Try
-
 
 // scalastyle:off number.of.methods
 // scalastyle:off number.of.types

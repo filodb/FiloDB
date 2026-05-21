@@ -1,3 +1,5 @@
+// scalastyle:off file.size.limit
+
 package filodb.core.query
 
 import java.util.UUID
@@ -8,7 +10,9 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.{ArrayBuffer, SortedSet}
 import scala.concurrent.duration._
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
@@ -258,6 +262,69 @@ case class SamplesScannedConfig(
                                  classToSamplesPerChildSeries: Map[Class[_], Double] = Map(),
                                  classToSamplesPerChildPartKeyByte: Map[Class[_], Double] = Map()
                                )
+
+object SamplesScannedConfig {
+  // scalastyle:off method.length
+  def apply(config: Config): SamplesScannedConfig = {
+    val defaults = SamplesScannedConfig()
+    SamplesScannedConfig(
+      config.as[Option[Boolean]]("leaf-samples-enabled")
+        .getOrElse(defaults.leafSamplesEnabled),
+      config.as[Option[Boolean]]("exec-result-samples-enabled")
+        .getOrElse(defaults.execResultSamplesEnabled),
+      config.as[Option[Boolean]]("exec-child-samples-enabled")
+        .getOrElse(defaults.execChildSamplesEnabled),
+      config.as[Option[Boolean]]("rvt-samples-enabled")
+        .getOrElse(defaults.rvtSamplesEnabled),
+      config.as[Option[Boolean]]("rvt-child-samples-enabled")
+        .getOrElse(defaults.rvtChildSamplesEnabled),
+      config.as[Option[Boolean]]("srv-samples-enabled")
+        .getOrElse(defaults.srvSamplesEnabled),
+
+      config.as[Option[Double]]("fixed-row-multiplier")
+        .orElse(defaults.fixedRowMultiplier),
+      config.as[Option[Double]]("default-row-multiplier")
+        .getOrElse(defaults.defaultRowMultiplier),
+      config.as[Option[Double]]("histogram-row-multiplier")
+        .getOrElse(defaults.histogramRowMultiplier),
+      config.as[Option[Double]]("exponential-histogram-row-multiplier")
+        .getOrElse(defaults.exponentialHistogramRowMultiplier),
+
+      config.as[Option[Double]]("default-samples-per-row")
+        .getOrElse(defaults.defaultSamplesPerRow),
+      config.as[Option[Double]]("default-samples-per-series")
+        .getOrElse(defaults.defaultSamplesPerSeries),
+      config.as[Option[Double]]("default-samples-per-part-key-byte")
+        .getOrElse(defaults.defaultSamplesPerPartKeyByte),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-row")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value }}
+        .getOrElse(defaults.classToSamplesPerRow),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-series")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value } }
+        .getOrElse(defaults.classToSamplesPerSeries),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-part-key-byte")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value } }
+        .getOrElse(defaults.classToSamplesPerPartKeyByte),
+
+      config.as[Option[Double]]("default-samples-per-child-row")
+        .getOrElse(defaults.defaultSamplesPerChildRow),
+      config.as[Option[Double]]("default-samples-per-child-series")
+        .getOrElse(defaults.defaultSamplesPerChildSeries),
+      config.as[Option[Double]]("default-samples-per-child-part-key-byte")
+        .getOrElse(defaults.defaultSamplesPerPartKeyByte),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-child-row")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value } }
+        .getOrElse(defaults.classToSamplesPerChildRow),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-child-series")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value } }
+        .getOrElse(defaults.classToSamplesPerChildSeries),
+      config.as[Option[Map[String, Double]]]("class-to-samples-per-child-part-key-byte")
+        .map { classNameToVal => classNameToVal.map { case (name, value) => Class.forName(name) -> value } }
+        .getOrElse(defaults.classToSamplesPerChildPartKeyByte)
+    )
+  }
+  //scalastyle:on method.length
+}
 
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
@@ -822,3 +889,5 @@ object QuerySession {
   def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(),
     QueryConfig.unitTestingQueryConfig, streamingDispatch = false)
 }
+
+// scalastyle:on file.size.limit
