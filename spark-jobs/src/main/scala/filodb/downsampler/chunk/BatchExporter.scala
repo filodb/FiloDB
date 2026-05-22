@@ -59,8 +59,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy val numRowExportPrepErrors = Kamon.counter("num-row-export-prep-errors").withoutTags()
 
-  val keyToRules = downsamplerSettings.exportKeyToRules
-
   /**
    * Returns the index of a column in the export schema.
    * E.g. "foo" will return `3` if "foo" is the name of the fourth column (zero-indexed)
@@ -111,7 +109,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   /**
    * Returns the Spark Rows to be exported.
    */
-  def getExportRows(readablePartitions: Seq[ReadablePartition], exportTableConfig: ExportTableConfig): Iterator[Row] = {
+  def getExportRows(readablePartitions: Seq[ReadablePartition],
+                    keyFilters: Seq[ColumnFilter],
+                    exportTableConfig: ExportTableConfig): Iterator[Row] = {
     readablePartitions
       .iterator
       .map { part =>
@@ -127,7 +127,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           pairMap.remove(LABEL_METRIC)
           pairMap
         }
-        val rule = getRuleIfShouldExport(partKeyMap)
+        val rule = getRuleIfShouldExport(partKeyMap, keyFilters, exportTableConfig)
         (part, partKeyMap, rule)
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
@@ -232,23 +232,21 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
        |""".stripMargin
   }
 
-  def getRuleIfShouldExport(partKeyMap: collection.Map[String, String]): Option[ExportRule] = {
-    keyToRules.find { case (key, exportTableConfig) =>
-      // find the group with a key that matches these label-values
-      downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
-        partKeyMap.get(label).contains(key(i))
+  def getRuleIfShouldExport(partKeyMap: collection.Map[String, String],
+                            keyFilters: Seq[ColumnFilter],
+                            exportTableConfig: ExportTableConfig): Option[ExportRule] = {
+    if (!matchAllFilters(keyFilters, partKeyMap)) {
+      return None
+    }
+    exportTableConfig.exportRules.takeWhile { rule =>
+      // step through rules while we still haven't matched a "block" filter
+      !rule.blockFilterGroups.exists { filterGroup =>
+        matchAllFilters(filterGroup, partKeyMap)
       }
-    }.flatMap { case (key, exportTableConfig) =>
-      exportTableConfig.exportRules.takeWhile { rule =>
-        // step through rules while we still haven't matched a "block" filter
-        !rule.blockFilterGroups.exists { filterGroup =>
-          matchAllFilters(filterGroup, partKeyMap)
-        }
-      }.find { rule =>
-        // stop at a rule if its "allow" filters are either empty or match the partKey
-        rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
-          matchAllFilters(filterGroup, partKeyMap)
-        }
+    }.find { rule =>
+      // stop at a rule if its "allow" filters are either empty or match the partKey
+      rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
+        matchAllFilters(filterGroup, partKeyMap)
       }
     }
   }
