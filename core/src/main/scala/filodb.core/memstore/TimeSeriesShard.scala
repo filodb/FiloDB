@@ -1290,6 +1290,12 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     if (ingestionTime != lastIngestionTime) {
       lastIngestionTime = ingestionTime
+
+      // fixed threshold to enable logging - 5mins
+      if (currentTime - ingestionTime > 300000) {
+        logger.warn(s"createFlushTasks reporting ingestion delay for shardNum=$shardNum" +
+          s" containerTimestamp=${container.timestamp} numRecords=${container.numRecords} offset = ${this._offset}")
+      }
       shardStats.ingestionClockDelay.update(currentTime - ingestionTime)
     }
 
