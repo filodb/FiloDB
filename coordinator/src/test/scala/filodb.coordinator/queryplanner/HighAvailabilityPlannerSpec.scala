@@ -601,7 +601,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers with PlanVali
 
     // Validate the complete plan tree
     val expected =
-      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,true), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
     validatePlan(execPlan, expected)
   }
 
@@ -710,7 +710,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers with PlanVali
 
     // Validate the complete plan tree
     val expected =
-      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,false), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
+      """E~MetadataRemoteExec(PromQlQueryParams(sum(heap_usage0),100,1,1000,None,true), PlannerParams(filodb,None,None,None,None,60000,PerQueryLimits(1000000,1000000,18000000,100000,100000,300000000,1000000,200000000),PerQueryLimits(50000,1000000,15000000,50000,50000,150000000,500000,100000000),None,None,None,false,86400000,86400000,false,false,false,false,true,10,false,true,TreeSet(),LegacyFailoverMode,None,None,None,None), queryEndpoint=localhost, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(p1),Some(10000),Some(localhost),None,25,true,false,true,Set(),Some(plannerSelector),Map(filodb-query-exec-metadataexec -> 65536, filodb-query-exec-aggregate-large-container -> 65536),RoutingConfig(false,1800000 milliseconds,true,0,Set(),_ws_),CachingConfig(true,2048),false))""".stripMargin
     validatePlan(execPlan, expected)
   }
 
@@ -753,7 +753,33 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers with PlanVali
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+    val remoteExec0 = execPlan.asInstanceOf[MetadataRemoteExec]
+    remoteExec0.urlParams("numGroupByFields") shouldEqual "1"
+  }
+
+  it("should force verbose=true on TsCardinalities MetadataRemoteExec so buddy emits _type") {
+    // Without verbose=true, the buddy's V2 cardinality response omits the `_type` field
+    // and the local decoder fails.
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, queryTimeRange, false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, mapperRef, failureProvider, queryConfig,
+      workUnit = null, buddyWorkUnit = null, clusterName = null, useShardLevelFailover = false)
+
+    // Caller sets verbose=false; HA planner must override to true on the remote hop
+    val callerParams = promQlQueryParams.copy(verbose = false)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = callerParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
     val remoteExec = execPlan.asInstanceOf[MetadataRemoteExec]
-    remoteExec.urlParams("numGroupByFields") shouldEqual "1"
+    val params = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    params.verbose shouldEqual true
+    // Ensure the URL the buddy receives carries verbose=true too
+    remoteExec.getUrlParams()("verbose") shouldEqual "true"
   }
 }

@@ -140,8 +140,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // TsCardinalities cannot be converted to PromQL — handle before convertToQuery
           rootLogicalPlan match {
             case lp: TsCardinalities =>
-              val newQueryContext = qContext.copy(plannerParams = qContext.plannerParams.
-                copy(processFailure = false, processMultiPartition = false))
+              // Force verbose=true so the buddy cluster's V2 cardinality response includes
+              // the `_type` field, which the local decoder requires.
+              val newQueryContext = qContext.copy(
+                origQueryParams = queryParams.copy(verbose = true),
+                plannerParams = qContext.plannerParams.
+                  copy(processFailure = false, processMultiPartition = false))
               MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                 lp.queryParams(), newQueryContext,
                 inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
