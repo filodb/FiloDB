@@ -98,12 +98,13 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
                            batchExporter: BatchExporter,
                            sparkSession: SparkSession): Unit = {
     val exportStartMs = System.currentTimeMillis()
-    val filteredRowRdd = rdd
-      .flatMap(batchExporter.getExportRows(_, exportKeyFilters, exportTableConfig))
-      .map { row =>
-        numRowsExported.increment()
-        row
-      }
+    val filteredRowRdd = {
+      val allTableRows = rdd.flatMap(batchExporter.getExportRows(_, exportTableConfig))
+      batchExporter.filterRdd(allTableRows, exportKeyFilters, exportTableConfig)
+    }.map { row =>
+      numRowsExported.increment()
+      row
+    }
 
     // write filteredRowRdd to iceberg table
     batchExporter.writeDataToIcebergTable(sparkSession, settings, exportTableConfig, filteredRowRdd)
