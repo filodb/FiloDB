@@ -9,6 +9,7 @@ import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{BitVector, BitVectorHelper, VarBinaryVector, VectorSchemaRoot}
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.jctools.queues.MpscArrayQueue
+import spire.syntax.cfor.cforRange
 
 import filodb.core.Utils
 import filodb.core.binaryrecord2.{RecordSchema, SingleRecordBuilder}
@@ -219,19 +220,20 @@ object ArrowSerializedRangeVectorOps {
     var currentStartVsrIndex = 0
     var currentStartRowIndex = 0
     var currentNumDataRows = 0
+    lazy val rs = schema.toRecordSchema
 
     // Iterate through all VSRs and rows to find RV boundaries
-    for (vsrIndex <- vsrs.indices) {
+    cforRange ( 0 until vsrs.size) { vsrIndex =>
       val vsr = vsrs(vsrIndex)
       val isRvkVec = vsr.getVector(0).asInstanceOf[BitVector]
       val rvkBrVec = vsr.getVector(1).asInstanceOf[VarBinaryVector]
 
-      for (rowIndex <- 0 until vsr.getRowCount) {
+      cforRange (0 until vsr.getRowCount) { rowIndex =>
         if (isRvkVec.get(rowIndex) == 1) {
           // Found a new RV key row — flush the previous RV if any
           if (currentKey != null) {
             result += new ArrowSerializedRangeVector(
-              currentKey, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+              currentKey, vsrs, rs, currentStartVsrIndex,
               currentStartRowIndex, currentNumDataRows, currentRvRange)
           }
 
@@ -260,7 +262,7 @@ object ArrowSerializedRangeVectorOps {
     // Flush the last RV
     if (currentKey != null) {
       result += new ArrowSerializedRangeVector(
-        currentKey, vsrs, schema.toRecordSchema, currentStartVsrIndex,
+        currentKey, vsrs, rs, currentStartVsrIndex,
         currentStartRowIndex, currentNumDataRows, currentRvRange)
     }
 

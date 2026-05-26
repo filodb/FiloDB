@@ -362,6 +362,8 @@ case class QuerySession(qContext: QueryContext,
                         preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
 
   val queryStats: QueryStats = QueryStats()
+  // used to track number of times timeout is checked during query execution, to gate and control excessive checks
+  val timeoutCheckCountDuringScan = new AtomicInteger(0)
   val warnings: QueryWarnings = QueryWarnings()
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false

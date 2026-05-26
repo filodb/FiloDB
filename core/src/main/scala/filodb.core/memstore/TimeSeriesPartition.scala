@@ -348,7 +348,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
                                        new ElementChunkInfoIterator(chunkmapDoGetLastIterator())
                                  } else {
                                     allInfos.filter { ic =>
-                                      ic.intersection(r.startTime, r.endTime).isDefined
+                                      ic.intersects(r.startTime, r.endTime)
                                     }
                                 }
     case WriteBufferChunkScan => if (currentInfo == nullInfo) ChunkInfoIterator.empty
@@ -363,7 +363,7 @@ extends ChunkMap(initMapSize) with ReadablePartition {
   }
 
   def infos(startTime: Long, endTime: Long): ChunkInfoIterator =
-    allInfos.filter(_.intersection(startTime, endTime).isDefined)
+    allInfos.filter(_.intersects(startTime, endTime))
 
   def hasChunks(method: ChunkScanMethod): Boolean = {
     val chunkIter = infos(method)

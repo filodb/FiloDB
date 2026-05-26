@@ -249,6 +249,11 @@ object FiloQueryConfig {
   val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive-range")
 }
 
+object ChunkedWindowIterator {
+  // Needs to be a power of 2 minus 1 for bitwise AND to work correctly below. With 255, we check every 256 windows
+  val timeoutCheckFrequencyMask = 255
+}
+
 /**
  * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
  * to compute each window as fast as possible on multiple rows at a time.
@@ -297,6 +302,10 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
     // the compiler. Copy to a local variable to reduce some overhead.
     val wit = windowIt
 
+    import ChunkedWindowIterator.timeoutCheckFrequencyMask
+    if ((querySession.timeoutCheckCountDuringScan.incrementAndGet() & timeoutCheckFrequencyMask) == 0) {
+      querySession.qContext.checkQueryTimeout(this.getClass.getName)
+    }
     wit.nextWindow()
     while (wit.hasNext) {
       val nextInfo = wit.next()
