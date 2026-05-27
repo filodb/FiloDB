@@ -174,7 +174,7 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
     metadata.toSeq.size shouldEqual 1
     session.resultCouldBePartial shouldEqual true
     session.partialResultsReason shouldEqual
-      Some("Result may be partial since some shards exceeded the query limit")
+      Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
   }
 
   it("should not set resultCouldBePartial when partKeysWithFilters (fetchFirstLastSampleTimes=false) does not hit limit") {

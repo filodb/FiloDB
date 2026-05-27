@@ -594,7 +594,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     (resp: @unchecked) match {
       case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
         mayBePartial shouldEqual true
-        partialResultReason shouldEqual Some("Result may be partial since some shards exceeded the query limit")
+        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
     }
   }
 
@@ -625,7 +625,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     (resp: @unchecked) match {
       case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
         mayBePartial shouldEqual true
-        partialResultReason shouldEqual Some("Result may be partial since some shards exceeded the query limit")
+        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
     }
   }
 
@@ -635,6 +635,107 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = 10))),
       executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 1, Seq.empty, Seq("instance"), now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, _) =>
+        mayBePartial shouldEqual false
+    }
+  }
+
+  it("should set mayBePartial in QueryResult when LabelValuesExec single-label filter path hits execPlanSamples limit") {
+    // shard 1 has 2 distinct instance values for job=myCoolService. Limit=1 → results == limit → partial.
+    val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = LabelValuesExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = 1))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("instance"), now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
+        mayBePartial shouldEqual true
+        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+    }
+  }
+
+  it("should not set mayBePartial in QueryResult when LabelValuesExec single-label filter path does not hit limit") {
+    // shard 1 has 2 distinct instance values for job=myCoolService. Limit=10 → results < limit → not partial.
+    val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = LabelValuesExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = 10))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("instance"), now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, _) =>
+        mayBePartial shouldEqual false
+    }
+  }
+
+  it("should set mayBePartial in QueryResult when LabelValuesExec multi-label filter path hits execPlanSamples limit") {
+    // shard 1 has series for job=myCoolService. Limit=1 → results == limit → partial.
+    val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = LabelValuesExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = 1))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("job", "unicode_tag"), now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
+        mayBePartial shouldEqual true
+        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+    }
+  }
+
+  it("should not set mayBePartial in QueryResult when LabelValuesExec multi-label filter path does not hit limit") {
+    // shard 1 has series for job=myCoolService. Limit=10 → results < limit → not partial.
+    val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = LabelValuesExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = 10))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("job", "unicode_tag"), now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, _) =>
+        mayBePartial shouldEqual false
+    }
+  }
+
+  it("should set mayBePartial in QueryResult when LabelCardinalityExec hits execPlanLeafSamples limit") {
+    // shard 0 has 2 distinct unicode_tag values for _ws_=demo, _ns_=App-0.
+    // Limit=1 means count == limit → partial.
+    val filters = Seq(
+      ColumnFilter("_ws_", Filter.Equals("demo")),
+      ColumnFilter("_ns_", Filter.Equals("App-0"))
+    )
+    val execPlan = LabelCardinalityExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanLeafSamples = 1))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, now - 5000, now)
+
+    val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
+    (resp: @unchecked) match {
+      case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
+        mayBePartial shouldEqual true
+        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+    }
+  }
+
+  it("should not set mayBePartial in QueryResult when LabelCardinalityExec does not hit execPlanLeafSamples limit") {
+    // shard 0 has 2 distinct unicode_tag values for _ws_=demo, _ns_=App-0.
+    // Limit=100 means count < limit → not partial.
+    val filters = Seq(
+      ColumnFilter("_ws_", Filter.Equals("demo")),
+      ColumnFilter("_ns_", Filter.Equals("App-0"))
+    )
+    val execPlan = LabelCardinalityExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanLeafSamples = 100))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, now - 5000, now)
 
     val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
     (resp: @unchecked) match {

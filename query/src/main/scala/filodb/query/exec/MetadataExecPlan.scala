@@ -390,7 +390,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
           val labels = memStore.labelValues(dataset, shard, columns.head, limit).map(_.term.toString)
           if (labels.size == limit) {
             querySession.resultCouldBePartial = true
-            querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+            querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
           }
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             StringArrayRowReader(labels), None))
@@ -458,6 +458,11 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
               endMs, startMs, querySession,
               queryContext.plannerParams.enforcedLimits.execPlanLeafSamples).foreach { labelValue =>
               sketchMap.getOrElseUpdate(label, new CpcSketch(logK)).update(labelValue.toString)
+              count += 1
+            }
+            if (count == leafLimit) {
+              querySession.resultCouldBePartial = true
+              querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $leafLimit; apply more filters or reduce the query time-range.")
             }
           }
 

@@ -676,6 +676,10 @@ class TimeSeriesShard(val ref: DatasetRef,
           schemas.part.binSchema.singleColValues(nextPart.base, nextPart.offset, label, rows)
         partLoopIndx += 1
       }
+      if (rows.size == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
+      }
       shardStats.partkeyLabelScans.increment(partLoopIndx)
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
@@ -714,6 +718,10 @@ class TimeSeriesShard(val ref: DatasetRef,
 
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
+      }
+      if (rows.size == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
       }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
@@ -2000,7 +2008,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val result = partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit)
       if (result.length == limit) {
         querySession.resultCouldBePartial = true
-        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
       }
       result.iterator.map { pk =>
         val partKeyMap = convertPartKeyWithTimesToMap(
@@ -2013,7 +2021,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, limit)
       if (partIds.length == limit) {
         querySession.resultCouldBePartial = true
-        querySession.partialResultsReason = Some("Result may be partial since some shards exceeded the query limit")
+        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
       }
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
