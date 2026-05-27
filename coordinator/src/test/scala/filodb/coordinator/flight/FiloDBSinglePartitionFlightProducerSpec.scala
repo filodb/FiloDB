@@ -339,5 +339,43 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
 
       capturedEncoding shouldEqual Some("zstd")
     }
+
+    it("should not use zstd encoding when client does not advertise zstd in grpc-accept-encoding") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("NoZstdAcceptTest", 0, 1000000)
+      // No ZstdClientInterceptor — grpc-accept-encoding: zstd is never sent
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(headerCapture)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding should not equal Some("zstd")
+    }
   }
 }

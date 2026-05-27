@@ -10,7 +10,7 @@ import com.github.luben.zstd.{ZstdInputStream, ZstdOutputStream}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Compressor,
-  CompressorRegistry, Decompressor, DecompressorRegistry, Metadata, MethodDescriptor,
+  CompressorRegistry, Decompressor, DecompressorRegistry, ForwardingClientCall, Metadata, MethodDescriptor,
   Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
 import io.grpc.netty.NettyServerBuilder
 import monix.eval.Task
@@ -148,19 +148,36 @@ object ZstdDecompressor extends Decompressor {
 
 object ZstdServerInterceptor extends ServerInterceptor {
   CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
+
+  private val AcceptEncodingKey =
+    Metadata.Key.of("grpc-accept-encoding", Metadata.ASCII_STRING_MARSHALLER)
+
   override def interceptCall[ReqT, RespT](call: ServerCall[ReqT, RespT],
                                           headers: Metadata,
                                           next: ServerCallHandler[ReqT, RespT]): ServerCall.Listener[ReqT] = {
-    call.setCompression("zstd")
+    val acceptEncoding = headers.get(AcceptEncodingKey)
+    if (acceptEncoding != null && acceptEncoding.split(",").map(_.trim).contains("zstd")) {
+      call.setCompression("zstd")
+    }
     next.startCall(call, headers)
   }
 }
 
 object ZstdClientInterceptor extends ClientInterceptor {
   CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
+
+  private val AcceptEncodingKey =
+    Metadata.Key.of("grpc-accept-encoding", Metadata.ASCII_STRING_MARSHALLER)
+
   override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
                                           callOptions: CallOptions,
                                           next: Channel): ClientCall[ReqT, RespT] = {
-    next.newCall(method, callOptions.withCompression("zstd"))
+    val delegate = next.newCall(method, callOptions.withCompression("zstd"))
+    new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](delegate) {
+      override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit = {
+        headers.put(AcceptEncodingKey, "zstd")
+        super.start(responseListener, headers)
+      }
+    }
   }
 }
