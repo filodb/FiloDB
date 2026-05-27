@@ -12,7 +12,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
-import filodb.coordinator.{KamonInit, KamonShutdownHook}
+import filodb.coordinator.{KamonSingleton, KamonShutdownHook}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
@@ -67,7 +67,7 @@ class DefaultSparkSessionFactory extends SparkSessionFactory {
   */
 object DownsamplerMain extends App {
 
-  KamonInit.initOnce()  // kamon init should be first thing in driver jvm
+  KamonSingleton.initOnce()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val d = new Downsampler(settings)
   val sparkConf = new SparkConf(loadDefaults = true)
@@ -173,7 +173,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
     val rdd = spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
-        KamonInit.initOnce()
+        KamonSingleton.initOnce()
         KamonShutdownHook.registerShutdownHook()
         val rawDataSource = batchDownsampler.rawCassandraColStore
         rawDataSource.initialize(batchDownsampler.rawDatasetRef, -1, settings.rawDatasetIngestionConfig.resources)
@@ -188,7 +188,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
         batchIter
       }
       .map { rawPartsBatch =>
-        KamonInit.initOnce()
+        KamonSingleton.initOnce()
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
         rawPartsBatch.map { rawPart =>

@@ -5,7 +5,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
-import filodb.coordinator.KamonInit
+import filodb.coordinator.KamonSingleton
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.downsampler.index.DSIndexJobSettings
 
@@ -64,10 +64,10 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
       val numPksDeleted = spark.sparkContext
         .makeRDD(busterForShard.colStore.getScanSplits(busterForShard.dataset))
         .mapPartitions { split =>
-          KamonInit.initOnce() // kamon init should be first thing in worker jvm
+          KamonSingleton.initOnce() // kamon init should be first thing in worker jvm
           split.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens)
         }.map { sp =>
-          KamonInit.initOnce() // kamon init should be first thing in worker jvm
+          KamonSingleton.initOnce() // kamon init should be first thing in worker jvm
           busterForShard.bustIndexRecords( -1 /* not used for v2 */, sp, isSimulation)
         }.sum()
       BusterContext.log.info(s"CardinalityBuster completed successfully with " +
@@ -78,14 +78,14 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
       val numPksDeleted = spark.sparkContext
         .makeRDD(0 until numShards)
         .mapPartitions { shards =>
-          KamonInit.initOnce() // kamon init should be first thing in worker jvm
+          KamonSingleton.initOnce() // kamon init should be first thing in worker jvm
           val splits = busterForShard.colStore.getScanSplits(busterForShard.dataset)
           for {sh <- shards
                sp <- splits.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens).iterator} yield {
             (sh, sp)
           }
         }.map { case (shard, sp) =>
-          KamonInit.initOnce() // kamon init should be first thing in worker jvm
+          KamonSingleton.initOnce() // kamon init should be first thing in worker jvm
           busterForShard.bustIndexRecords(shard, sp, isSimulation)
         }.sum()
       BusterContext.log.info(s"CardinalityBuster completed successfully with " +
