@@ -9,7 +9,7 @@ import kamon.Kamon
  * Singleton object to ensure Kamon is initialized only once per JVM.
  * This prevents memory leaks from multiple Kamon.init() calls in Spark workers.
  */
-object KamonInit extends StrictLogging {
+object KamonSingleton extends StrictLogging {
   
   private val initialized = new AtomicBoolean(false)
   

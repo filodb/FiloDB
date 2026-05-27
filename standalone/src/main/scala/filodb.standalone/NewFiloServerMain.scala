@@ -25,7 +25,7 @@ object NewFiloServerMain extends StrictLogging {
 
       val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
       val settings = FilodbSettings.initialize(allConfig)
-filodb.coordinator.KamonInit.initOnce()
+filodb.coordinator.KamonSingleton.initOnce()
 
 
       val system = ActorSystemHolder.createActorSystem("filo-standalone", allConfig)
