@@ -8,13 +8,12 @@ import scala.collection.mutable.ListBuffer
 import scala.collection.parallel.CollectionConverters._
 import scala.collection.parallel.ForkJoinTaskSupport
 
-import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types._
 
-import filodb.coordinator.KamonShutdownHook
+import filodb.coordinator.{KamonShutdownHook, KamonSingleton}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.metrics.FilodbMetrics
@@ -70,7 +69,7 @@ class DefaultDSPartitionReader extends DSPartitionReader {
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter: Iterator[ScanSplit] =>
-        Kamon.init()
+        KamonSingleton.initOnce()
         KamonShutdownHook.registerShutdownHook()
         val rawDataSource = batchDownsampler.rawCassandraColStore
         rawDataSource.initialize(
@@ -120,7 +119,7 @@ class DefaultDSPartitionReader extends DSPartitionReader {
   */
 object DownsamplerMain extends App {
 
-  Kamon.init()  // kamon init should be first thing in driver jvm
+  KamonSingleton.initOnce()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val d = new Downsampler(settings)
   val sparkConf = new SparkConf(loadDefaults = true)
@@ -241,7 +240,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
     val pagedReadablePartitionsRdd: RDD[Seq[PagedReadablePartition]] =
       sourceRdd.map { rawPartsBatch: Seq[RawPartData] =>
-        Kamon.init()
+        KamonSingleton.initOnce()
         KamonShutdownHook.registerShutdownHook()
         // convert each RawPartData to a ReadablePartition
         rawPartsBatch.map { rawPart =>

@@ -43,6 +43,7 @@ object Params {
  */
 @State(Scope.Thread)
 class QueryInMemoryBenchmark extends StrictLogging {
+  filodb.coordinator.KamonSingleton.initOnce()   // Needed for metrics logging
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.INFO)
 
   import filodb.coordinator._

@@ -13,7 +13,6 @@ import akka.cluster.ClusterEvent._
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 
 import filodb.core.GlobalScheduler
@@ -244,7 +243,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
 }
 
 private[filodb] trait KamonInit {
-  Kamon.init()
+  filodb.coordinator.KamonSingleton.initOnce()
 }
 
 /** Mixin for easy usage of the FiloDBCluster Extension.

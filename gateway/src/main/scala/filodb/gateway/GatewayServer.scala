@@ -62,7 +62,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
-  Kamon.init
+  filodb.coordinator.KamonSingleton.initOnce()
 
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
