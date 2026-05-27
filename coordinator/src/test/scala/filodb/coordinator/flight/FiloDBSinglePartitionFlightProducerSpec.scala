@@ -1,7 +1,11 @@
 package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
-import org.apache.arrow.flight.Location
+import io.grpc.{CallOptions, Channel, ClientCall, ClientInterceptor, DecompressorRegistry, Metadata, MethodDescriptor}
+import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
+import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
+import io.grpc.netty.NettyChannelBuilder
+import org.apache.arrow.flight.{FlightGrpcUtils, Location, Ticket}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -294,6 +298,46 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       // println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+    }
+
+    it("should use zstd encoding on the wire when compression-enabled is true") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("CompressionTest", 0, 1000000)
+      val decompReg = DecompressorRegistry.getDefaultInstance().`with`(ZstdDecompressor, true)
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(ZstdClientInterceptor)
+        .intercept(headerCapture)
+        .decompressorRegistry(decompReg)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding shouldEqual Some("zstd")
     }
   }
 }

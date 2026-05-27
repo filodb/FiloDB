@@ -6,9 +6,11 @@ import java.util.{Collections, Optional}
 import java.util.concurrent.Executors
 
 import akka.actor.ActorRef
+import com.github.luben.zstd.{ZstdInputStream, ZstdOutputStream}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor,
+import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Compressor,
+  CompressorRegistry, Decompressor, DecompressorRegistry, Metadata, MethodDescriptor,
   Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
 import io.grpc.netty.NettyServerBuilder
 import monix.eval.Task
@@ -123,7 +125,10 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
       executor)
 
     val server1 = NettyServerBuilder.forPort(port)
-    val server2 = if (compressionEnabled) server1.intercept(GzipServerInterceptor) else server1
+    val server2 = if (compressionEnabled) {
+      val decompReg = DecompressorRegistry.getDefaultInstance().`with`(ZstdDecompressor, true)
+      server1.intercept(ZstdServerInterceptor).decompressorRegistry(decompReg)
+    } else server1
     val server3 = server2.addService(svc).build()
     logger.info(s"Starting FiloDB Flight server on $host:$port with compression = $compressionEnabled")
     server3.start()
@@ -131,20 +136,31 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
   }
 }
 
-object GzipServerInterceptor extends ServerInterceptor {
+object ZstdCompressor extends Compressor {
+  override def getMessageEncoding: String = "zstd"
+  override def compress(os: java.io.OutputStream): java.io.OutputStream = new ZstdOutputStream(os)
+}
+
+object ZstdDecompressor extends Decompressor {
+  override def getMessageEncoding: String = "zstd"
+  override def decompress(is: java.io.InputStream): java.io.InputStream = new ZstdInputStream(is)
+}
+
+object ZstdServerInterceptor extends ServerInterceptor {
+  CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
   override def interceptCall[ReqT, RespT](call: ServerCall[ReqT, RespT],
                                           headers: Metadata,
                                           next: ServerCallHandler[ReqT, RespT]): ServerCall.Listener[ReqT] = {
-    call.setCompression("gzip")
+    call.setCompression("zstd")
     next.startCall(call, headers)
   }
 }
 
-object GzipClientInterceptor extends ClientInterceptor {
-
+object ZstdClientInterceptor extends ClientInterceptor {
+  CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
   override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
                                           callOptions: CallOptions,
                                           next: Channel): ClientCall[ReqT, RespT] = {
-    next.newCall(method, callOptions.withCompression("gzip"))
+    next.newCall(method, callOptions.withCompression("zstd"))
   }
 }
