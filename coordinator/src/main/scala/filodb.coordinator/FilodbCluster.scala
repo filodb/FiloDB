@@ -242,7 +242,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
 }
 
 private[filodb] trait KamonInit {
-  Kamon.init()
+  filodb.coordinator.KamonInit.initOnce()
 }
 
 /** Mixin for easy usage of the FiloDBCluster Extension.
