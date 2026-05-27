@@ -6,7 +6,6 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.DecompressorRegistry
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
@@ -159,8 +158,9 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
       val channel1 = NettyChannelBuilder.forAddress(location.getUri.getHost, location.getUri.getPort)
         .usePlaintext()
       val channel2 = if (compressionEnabled) {
-        val decompReg = DecompressorRegistry.getDefaultInstance.`with`(ZstdDecompressor, true)
-        channel1.intercept(ZstdClientInterceptor).decompressorRegistry(decompReg)
+        channel1.intercept(ZstdClientInterceptor)
+          .compressorRegistry(ZstdCodecs.compressorRegistry)
+          .decompressorRegistry(ZstdCodecs.decompressorRegistry)
       } else channel1
       val channel3 = channel2.build()
       val client = FlightGrpcUtils.createFlightClient(allocator, channel3)

@@ -126,58 +126,13 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
 
     val server1 = NettyServerBuilder.forPort(port)
     val server2 = if (compressionEnabled) {
-      val decompReg = DecompressorRegistry.getDefaultInstance().`with`(ZstdDecompressor, true)
-      server1.intercept(ZstdServerInterceptor).decompressorRegistry(decompReg)
+      server1.intercept(ZstdServerInterceptor)
+        .compressorRegistry(ZstdCodecs.compressorRegistry)
+        .decompressorRegistry(ZstdCodecs.decompressorRegistry)
     } else server1
     val server3 = server2.addService(svc).build()
     logger.info(s"Starting FiloDB Flight server on $host:$port with compression = $compressionEnabled")
     server3.start()
     server3
-  }
-}
-
-object ZstdCompressor extends Compressor {
-  override def getMessageEncoding: String = "zstd"
-  override def compress(os: java.io.OutputStream): java.io.OutputStream = new ZstdOutputStream(os)
-}
-
-object ZstdDecompressor extends Decompressor {
-  override def getMessageEncoding: String = "zstd"
-  override def decompress(is: java.io.InputStream): java.io.InputStream = new ZstdInputStream(is)
-}
-
-object ZstdServerInterceptor extends ServerInterceptor {
-  CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
-
-  private val AcceptEncodingKey =
-    Metadata.Key.of("grpc-accept-encoding", Metadata.ASCII_STRING_MARSHALLER)
-
-  override def interceptCall[ReqT, RespT](call: ServerCall[ReqT, RespT],
-                                          headers: Metadata,
-                                          next: ServerCallHandler[ReqT, RespT]): ServerCall.Listener[ReqT] = {
-    val acceptEncoding = headers.get(AcceptEncodingKey)
-    if (acceptEncoding != null && acceptEncoding.split(",").map(_.trim).contains("zstd")) {
-      call.setCompression("zstd")
-    }
-    next.startCall(call, headers)
-  }
-}
-
-object ZstdClientInterceptor extends ClientInterceptor {
-  CompressorRegistry.getDefaultInstance().register(ZstdCompressor)
-
-  private val AcceptEncodingKey =
-    Metadata.Key.of("grpc-accept-encoding", Metadata.ASCII_STRING_MARSHALLER)
-
-  override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
-                                          callOptions: CallOptions,
-                                          next: Channel): ClientCall[ReqT, RespT] = {
-    val delegate = next.newCall(method, callOptions.withCompression("zstd"))
-    new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](delegate) {
-      override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit = {
-        headers.put(AcceptEncodingKey, "zstd")
-        super.start(responseListener, headers)
-      }
-    }
   }
 }

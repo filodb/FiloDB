@@ -1,7 +1,7 @@
 package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
-import io.grpc.{CallOptions, Channel, ClientCall, ClientInterceptor, DecompressorRegistry, Metadata, MethodDescriptor}
+import io.grpc.{CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor}
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
 import io.grpc.netty.NettyChannelBuilder
@@ -320,13 +320,13 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       }
 
       val testAllocator = FlightAllocator.newChildAllocatorForTesting("CompressionTest", 0, 1000000)
-      val decompReg = DecompressorRegistry.getDefaultInstance().`with`(ZstdDecompressor, true)
       val channel = NettyChannelBuilder
         .forAddress("localhost", 38815)
         .usePlaintext()
         .intercept(ZstdClientInterceptor)
         .intercept(headerCapture)
-        .decompressorRegistry(decompReg)
+        .compressorRegistry(ZstdCodecs.compressorRegistry)
+        .decompressorRegistry(ZstdCodecs.decompressorRegistry)
         .build()
       val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
       try {
