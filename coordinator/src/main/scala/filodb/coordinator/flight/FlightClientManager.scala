@@ -6,8 +6,8 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
+import io.grpc.DecompressorRegistry
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
-import io.grpc.{DecompressorRegistry, ManagedChannelBuilder}
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, FlightGrpcUtils, Location}
