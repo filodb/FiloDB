@@ -167,7 +167,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     val result = partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit)
     if (result.length == limit) {
       querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
+      querySession.partialResultsReason = Some(
+        s"Some shards returned a result size greater than $limit;" +
+          " apply more filters or reduce the query time-range.")
     }
     result.iterator.map { pk =>
       val partKey = PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
@@ -588,7 +590,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       )
       if (limitReached) {
         querySession.resultCouldBePartial = true
-        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
+        querySession.partialResultsReason = Some(
+        s"Some shards returned a result size greater than $limit;" +
+          " apply more filters or reduce the query time-range.")
       }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
       rows.toIterator
@@ -637,7 +641,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       )
       if (limitReached) {
         querySession.resultCouldBePartial = true
-        querySession.partialResultsReason = Some(s"Some shards returned a result size greater than $limit; apply more filters or reduce the query time-range.")
+        querySession.partialResultsReason = Some(
+        s"Some shards returned a result size greater than $limit;" +
+          " apply more filters or reduce the query time-range.")
       }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(matched)
       rows.toIterator
