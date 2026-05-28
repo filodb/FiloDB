@@ -727,7 +727,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   it("should not set mayBePartial in QueryResult when LabelCardinalityExec does not hit execPlanLeafSamples limit") {
     // shard 0 has 2 distinct unicode_tag values for _ws_=demo, _ns_=App-0.
-    // Limit=100 means count < limit → not partial.
+    // Limit=100 means count < limit → not  partial.
     val filters = Seq(
       ColumnFilter("_ws_", Filter.Equals("demo")),
       ColumnFilter("_ns_", Filter.Equals("App-0"))
