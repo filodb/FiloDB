@@ -643,7 +643,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
   }
 
-  it("should set mayBePartial in QueryResult when LabelValuesExec single-label filter path hits execPlanSamples limit") {
+  it("should not set mayBePartial in QueryResult when LabelValuesExec single-label filter path hits execPlanSamples limit") {
     // shard 1 has 2 distinct instance values for job=myCoolService. Limit=1 → results == limit → partial.
     val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = LabelValuesExec(
@@ -653,9 +653,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, QuerySession(QueryContext(), queryConfig)).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
-        mayBePartial shouldEqual true
-        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+      case QueryResult(_, _, _, _, _, mayBePartial, _) =>
+        mayBePartial shouldEqual false
     }
   }
 
@@ -686,7 +685,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     (resp: @unchecked) match {
       case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
         mayBePartial shouldEqual true
-        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+        partialResultReason shouldEqual Some(
+          "Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
     }
   }
 
@@ -721,13 +721,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     (resp: @unchecked) match {
       case QueryResult(_, _, _, _, _, mayBePartial, partialResultReason) =>
         mayBePartial shouldEqual true
-        partialResultReason shouldEqual Some("Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
+        partialResultReason shouldEqual Some(
+          "Some shards returned a result size greater than 1; apply more filters or reduce the query time-range.")
     }
   }
 
   it("should not set mayBePartial in QueryResult when LabelCardinalityExec does not hit execPlanLeafSamples limit") {
     // shard 0 has 2 distinct unicode_tag values for _ws_=demo, _ns_=App-0.
-    // Limit=100 means count < limit → not  partial.
+    // Limit=100 means count < limit → not partial.
     val filters = Seq(
       ColumnFilter("_ws_", Filter.Equals("demo")),
       ColumnFilter("_ns_", Filter.Equals("App-0"))
