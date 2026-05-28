@@ -11,7 +11,6 @@ import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.kafka._
@@ -62,7 +61,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
-  Kamon.init
+  filodb.coordinator.KamonSingleton.initOnce()
 
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
