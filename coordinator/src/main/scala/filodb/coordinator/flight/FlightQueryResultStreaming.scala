@@ -216,6 +216,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
             }.bracket { state =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               listener.start(state.flightVsr)
+              var numResultSamples = 0
+              var resultSize = 0L
               if (res.result.forall(rv => rv.isInstanceOf[ArrowSerializedRangeVector] ||
                                             (rv.isInstanceOf[SerializableRangeVector] &&
                                             rv.asInstanceOf[SerializableRangeVector].hasFormulatedRows))) {
@@ -227,10 +229,25 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   case asrv: ArrowSerializedRangeVector => asrv.vsrs  // only cast ArrowSerializedRangeVector
                   case _ => Iterator.empty  // skip SRVs like ScalarFixedDouble (they are already in VSRs)
                 }.toSeq.distinct
+                val samplesScannedConfig = queryConfig.samplesScannedConfig
+                numResultSamples = res.result.foldLeft(0) {
+                  case (acc, srv: SerializableRangeVector) =>
+                    if (samplesScannedConfig.srvSamplesEnabled)
+                      QueryUtils.trackSamplesScanned(srv, execPlan.getClass, res.queryStats,
+                        res.resultSchema, samplesScannedConfig)
+                    acc + srv.numRowsSerialized
+                  case _ =>
+                    throw new IllegalStateException("should not reach here since RVs are all serializable")
+                }
+                execPlan.checkSamplesLimit(numResultSamples, res.warnings)
                 Observable.fromIterable(resultVsrs).map { vsr =>
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
                   Using.resource(unloader.getRecordBatch) { rb =>
+                    val vsrBytes = rb.computeBodyLength()
+                    resultSize += vsrBytes
+                    res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                    execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                     loader.load(rb)
                   }
                   logger.debug(s"Putting arrow vsr directly into flight response queryPlanId=${execPlan.planId} " +
@@ -256,6 +273,15 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                     flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
+                    if (queryConfig.samplesScannedConfig.srvSamplesEnabled)
+                      QueryUtils.trackSamplesScanned(rv, execPlan.getClass, res.queryStats,
+                        res.resultSchema, queryConfig.samplesScannedConfig)
+                    val samplesForRv = rv match {
+                      case srv: SerializableRangeVector => srv.numRowsSerialized
+                      case _                            => rv.estimateNumRows().toInt
+                    }
+                    numResultSamples += samplesForRv
+                    execPlan.checkSamplesLimit(numResultSamples, res.warnings)
                     flightAllocator.withRequestAllocator { allocator =>
                       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
                         s"${execPlan.queryContext.queryId}:${queryResult.id}", res.queryStats,
@@ -270,6 +296,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
                       val unloader = new VectorUnloader(vsr)
                       val loader = new VectorLoader(state.flightVsr)
                       Using.resource(unloader.getRecordBatch) { rb =>
+                        val vsrBytes = rb.computeBodyLength()
+                        resultSize += vsrBytes
+                        res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                        execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                         loader.load(rb)
                       }
                       logger.debug(s"Putting next vsr into flight response for " +
@@ -288,6 +318,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     val unloader = new VectorUnloader(lastVsr)
                     val loader = new VectorLoader(state.flightVsr)
                     Using.resource(unloader.getRecordBatch) { rb =>
+                      val vsrBytes = rb.computeBodyLength()
+                      resultSize += vsrBytes
+                      res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                      execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                       loader.load(rb)
                     }
                     logger.debug(s"Putting last vsr into flight response for " +
