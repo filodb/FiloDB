@@ -451,9 +451,11 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         val labelNames = memstore.labelNames(dataset, shard, filters, endMs, startMs)
         if (labelNames.nonEmpty) {
           val sketchMap = scala.collection.mutable.Map[String, CpcSketch]()
+          val leafLimit = queryContext.plannerParams.enforcedLimits.execPlanLeafSamples
           labelNames.foreach { case label =>
             // GOTCHA: This approach will not catch cardinality of labels which are disabled for faceting
             // since their value lengths are > 1000. We expect the gateway to reject (or shorten) that data early on.
+            var count = 0
             memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
               endMs, startMs, querySession,
               queryContext.plannerParams.enforcedLimits.execPlanLeafSamples).foreach { labelValue =>
