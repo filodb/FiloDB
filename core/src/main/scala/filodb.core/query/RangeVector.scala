@@ -19,6 +19,7 @@ import filodb.core.store._
 import filodb.memory.{BinaryRegionLarge, MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
 import filodb.memory.format.vectors.Histogram
 
 // scalastyle:off number.of.types
@@ -35,6 +36,27 @@ trait RangeVectorKey extends java.io.Serializable {
   def schemaNames: Seq[String]
   def keySize: Int
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
+
+  override def equals(obj: Any): Boolean = {
+    obj match {
+      case other: RangeVectorKey =>
+          this.labelValues == other.labelValues
+      case _ => false
+    }
+  }
+
+  override def hashCode(): Int = {
+    this.labelValues.hashCode()
+  }
+
+  /**
+   * Add contents of the range vector key as a BR into a RecordBuilder.
+   * The schema used should be BrMapRangeVectorKey.schema, which has a single map column with no predefined keys.
+   * The map will contain all the key-value pairs of the RangeVectorKey.
+   * This is used for serializing the key into a BinaryRecord for sending over the wire.
+   * @param rb the RecordBuilder to write the key into.
+   */
+  def writeToMapBr(rb: RecordBuilderBase): Unit
 }
 
 class SeqMapConsumer extends MapItemConsumer {
@@ -90,6 +112,53 @@ final case class PartitionRangeVectorKey(partKeyData: Either[ReadablePartition, 
     }.toMap
   }
   override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
+
+  def writeToMapBr(rb: RecordBuilderBase): Unit = {
+    rb.startNewRecord(BrMapRangeVectorKey.schema)
+    rb.startMap()
+    partKeyCols.zipWithIndex.foreach { case (c, pos) =>
+      c.colType match {
+        case StringColumn =>
+          val key = c.name.utf8
+          val vRelOffset = partSchema.getStringOffset(partBase, partOffset, pos)
+          rb.addMapKeyValue(key, partBase, partOffset + vRelOffset)
+
+        case MapColumn =>
+          partSchema.consumeMapItems(partBase, partOffset, pos, new MapItemConsumer {
+            def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+              rb.addMapKeyValue(keyBase, keyOffset, valueBase, valueOffset)
+            }
+          })
+        case _ => throw new UnsupportedOperationException(s"Column type ${c.colType} not supported in writeToMapBr" +
+        s" - we dont have part keys with long or int columns yet, so we skip implementing this for now")
+      }
+    }
+    rb.endMap()
+    rb.endRecord(false)
+  }
+}
+
+final case class BrMapRangeVectorKey(base: Any, offset: Long) extends RangeVectorKey {
+  lazy val labelValues: Map[UTF8Str, UTF8Str] = {
+    val consumer = new SeqMapConsumer
+    BrMapRangeVectorKey.schema.consumeMapItems(base, offset, 0, consumer)
+    consumer.pairs.toMap
+  }
+  override def sourceShards: Seq[Int] = Nil
+  override def partIds: Seq[Int] = Nil
+  override def schemaNames: Seq[String] = Nil
+  def keySize: Int = BinaryRegionLarge.numBytes(base, offset)
+
+  // Copy entire record
+  def writeToMapBr(rb: RecordBuilderBase): Unit = {
+    rb.addFromBr(base, offset)
+  }
+}
+
+object BrMapRangeVectorKey {
+  // Fixed schema for the single-map-column BinaryRecord that backs BrMapRangeVectorKey.
+  // All writeToMapBr callers must use this schema (no predefined keys).
+  val schema = new RecordSchema(Seq(ColumnInfo("labels", MapColumn)))
 }
 
 final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
@@ -101,6 +170,11 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
     labelValues.foldLeft(0) { case (s, e) =>
       s + e._1.numBytes + e._2.numBytes
     }
+  }
+  def writeToMapBr(rb: RecordBuilderBase): Unit = {
+    rb.startNewRecord(BrMapRangeVectorKey.schema)
+    rb.addMap(labelValues)
+    rb.endRecord(false)
   }
 }
 
@@ -231,7 +305,7 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
  * @param endMs the end timestamp in ms
  */
 final case class RepeatValueVector(rv: RangeVector,
-                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector with StrictLogging {
+                              startMs: Long, stepMs: Long, endMs: Long) extends RangeVector {
   override lazy val outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
   override lazy val numRows: Option[Int] = Some((endMs - startMs) / math.max(1, stepMs) + 1).map(_.toInt)
 

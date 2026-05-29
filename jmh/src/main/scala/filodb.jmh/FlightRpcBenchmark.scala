@@ -27,12 +27,14 @@ import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.StoreConfig
 import filodb.http.PromQLGrpcServer
+import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError, QueryResult}
 import filodb.query.exec._
 import filodb.timeseries.TestTimeseriesProducer
 
 /**
- * JMH benchmark comparing two PromQL multi-partition query execution paths:
+ * JMH benchmark comparing two PromQL single and multi-partition query execution paths:
  *
  *   A. Flight path  — PromQLGrpcServer (flight-multi-partition-service-enabled=true)
  *                     → FiloDBMultiPartitionFlightProducer
@@ -60,10 +62,10 @@ import filodb.timeseries.TestTimeseriesProducer
  * Run with:
  *   sbt "jmh/jmh:run -rf json -i 5 -wi 3 -f 1 \
  *     -jvmArgsAppend -Xmx6g \
- *     filodb.jmh.FlightMultiPartitionBenchmark"
+ *     filodb.jmh.FlightRpcBenchmark"
  */
 @State(Scope.Benchmark)
-class FlightMultiPartitionBenchmark extends StrictLogging {
+class FlightRpcBenchmark extends StrictLogging {
 
   {
     import ch.qos.logback.classic.encoder.PatternLayoutEncoder
@@ -280,23 +282,28 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
   private val queryStart = startTime / 1000 + (7 * 60)
   private val queryEnd   = queryStart + queryIntervalMin * 60
 
-  private val spreadProvider = StaticSpreadProvider(SpreadChange(0, spread))
+  private val spreadProvider       = StaticSpreadProvider(SpreadChange(0, spread))
 
-  private val flightSucceeded = new AtomicInteger(0)
-  private val flightFailed    = new AtomicInteger(0)
-  private val akkaSucceeded   = new AtomicInteger(0)
-  private val akkaFailed      = new AtomicInteger(0)
+  // Pre-parsed once; LogicalPlan is immutable so safe to share across concurrent materialize() calls.
+  private val singlePartLogicalPlan = Parser.queryRangeToLogicalPlan(
+    promQL, TimeStepParams(queryStart, queryStep, queryEnd))
+
+  private val flightSucceeded   = new AtomicInteger(0)
+  private val flightFailed      = new AtomicInteger(0)
+  private val akkaSucceeded     = new AtomicInteger(0)
+  private val akkaFailed        = new AtomicInteger(0)
+  private val flightSpSucceeded = new AtomicInteger(0)
+  private val flightSpFailed    = new AtomicInteger(0)
+  private val akkaSpSucceeded   = new AtomicInteger(0)
+  private val akkaSpFailed      = new AtomicInteger(0)
 
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
-  private def mkFlightCtx(): QueryContext = QueryContext(
+  private def mkCtx(): QueryContext = QueryContext(
     origQueryParams = PromQlQueryParams(promQL, queryStart, queryStep, queryEnd),
     plannerParams   = PlannerParams(spreadOverride = Some(spreadProvider), queryTimeoutMillis = 60000))
 
-  private def mkAkkaCtx(): QueryContext = QueryContext(
-    origQueryParams = PromQlQueryParams(promQL, queryStart, queryStep, queryEnd),
-    plannerParams   = PlannerParams(spreadOverride = Some(spreadProvider), queryTimeoutMillis = 60000))
 
   // -------------------------------------------------------------------------
   // Teardown
@@ -312,8 +319,12 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
     cluster.shutdown()
     logger.info(s"Flight  — succeeded: ${flightSucceeded.get}  failed: ${flightFailed.get}")
     logger.info(s"Akka    — succeeded: ${akkaSucceeded.get}    failed: ${akkaFailed.get}")
-    if (flightFailed.get > 0) throw new RuntimeException(s"${flightFailed.get} flight queries failed")
-    if (akkaFailed.get  > 0) throw new RuntimeException(s"${akkaFailed.get} akka queries failed")
+    logger.info(s"Flight SP — succeeded: ${flightSpSucceeded.get}  failed: ${flightSpFailed.get}")
+    logger.info(s"Akka   SP — succeeded: ${akkaSpSucceeded.get}    failed: ${akkaSpFailed.get}")
+    if (flightFailed.get   > 0) throw new RuntimeException(s"${flightFailed.get} flight queries failed")
+    if (akkaFailed.get     > 0) throw new RuntimeException(s"${akkaFailed.get} akka queries failed")
+    if (flightSpFailed.get > 0) throw new RuntimeException(s"${flightSpFailed.get} flight SP queries failed")
+    if (akkaSpFailed.get   > 0) throw new RuntimeException(s"${akkaSpFailed.get} akka SP queries failed")
   }
 
   // =========================================================================
@@ -339,7 +350,7 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
     val flightAlloc = new FlightAllocator(invocAllocator)
     try {
       val tasks = (0 until numQueries).map { _ =>
-        val ctx          = mkFlightCtx()
+        val ctx          = mkCtx()
         val querySession = QuerySession(ctx, queryConfig, flightAllocator = Some(flightAlloc))
         val remoteExec   = PromQLFlightRemoteExec(
           queryContext            = ctx,
@@ -378,7 +389,7 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
   @OperationsPerInvocation(50)
   def akkaGrpcMultiPartitionQuery(): Unit = {
     val tasks = (0 until numQueries).map { _ =>
-      val ctx          = mkAkkaCtx()
+      val ctx          = mkCtx()
       val querySession = QuerySession(ctx, queryConfig)
       val remoteExec   = PromQLGrpcRemoteExec(
         channel                 = akkaGrpcChannel,
@@ -408,7 +419,7 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.SampleTime))
   @OutputTimeUnit(TimeUnit.MILLISECONDS)
   def flightSingleQueryLatency(): Unit = {
-    val ctx            = mkFlightCtx()
+    val ctx            = mkCtx()
     val singleAlloc    = flightRootAllocator.newChildAllocator(
       s"flight-single-${System.nanoTime()}", 0, 50_000_000L)
     val flightAlloc    = new FlightAllocator(singleAlloc)
@@ -444,7 +455,7 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.SampleTime))
   @OutputTimeUnit(TimeUnit.MILLISECONDS)
   def akkaSingleQueryLatency(): Unit = {
-    val ctx          = mkAkkaCtx()
+    val ctx          = mkCtx()
     val querySession = QuerySession(ctx, queryConfig)
     val remoteExec   = PromQLGrpcRemoteExec(
       channel                 = akkaGrpcChannel,
@@ -465,4 +476,118 @@ class FlightMultiPartitionBenchmark extends StrictLogging {
         .runToFuture,
       60.seconds)
   }
+
+  // =========================================================================
+  // Throughput benchmark — Flight single-partition path (bypasses PromQLGrpcServer)
+  //
+  // Directly materializes ExecPlan via flightPlanner (spread=0 → 1 shard) and
+  // dispatches it.  The root ExecPlan carries a FlightPlanDispatcher targeting
+  // 127.0.0.1:38824, so the plan goes straight to
+  // FiloDBSinglePartitionFlightProducer → TimeSeriesMemStore.
+  // =========================================================================
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime, Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  @OperationsPerInvocation(50)
+  def flightSinglePartitionQuery(): Unit = {
+    val invocAllocator = flightRootAllocator.newChildAllocator(
+      s"flight-sp-bench-${System.nanoTime()}", 0, 200_000_000L)
+    val flightAlloc = new FlightAllocator(invocAllocator)
+    try {
+      val tasks = (0 until numQueries).map { _ =>
+        val ctx          = mkCtx()
+        val querySession = QuerySession(ctx, queryConfig, flightAllocator = Some(flightAlloc))
+        val execPlan     = flightPlanner.materialize(singlePartLogicalPlan, ctx)
+        execPlan.dispatcher
+          .dispatch(ExecPlanWithClientParams(execPlan, ClientParams(60000), querySession),
+            UnsupportedChunkSource())
+          .map {
+            case _: QueryResult => flightSpSucceeded.incrementAndGet()
+            case e: QueryError  => flightSpFailed.incrementAndGet(); e.t.printStackTrace()
+          }
+      }
+      Await.result(monix.eval.Task.parSequenceUnordered(tasks).runToFuture, 120.seconds)
+    } finally {
+      flightAlloc.close()
+    }
+  }
+
+  // =========================================================================
+  // Throughput benchmark — Akka single-partition path (bypasses PromQLGrpcServer)
+  //
+  // Directly materializes ExecPlan via akkaPlanner (spread=0 → 1 shard) and
+  // dispatches it.  Leaf plans carry ActorPlanDispatcher → QueryActor →
+  // TimeSeriesMemStore.
+  // =========================================================================
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime, Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  @OperationsPerInvocation(50)
+  def akkaSinglePartitionQuery(): Unit = {
+    val tasks = (0 until numQueries).map { _ =>
+      val ctx          = mkCtx()
+      val querySession = QuerySession(ctx, queryConfig)
+      val execPlan     = akkaPlanner.materialize(singlePartLogicalPlan, ctx)
+      execPlan.dispatcher
+        .dispatch(ExecPlanWithClientParams(execPlan, ClientParams(60000), querySession),
+          UnsupportedChunkSource())
+        .map {
+          case _: QueryResult => akkaSpSucceeded.incrementAndGet()
+          case _: QueryError  => akkaSpFailed.incrementAndGet()
+        }
+    }
+    Await.result(monix.eval.Task.parSequenceUnordered(tasks).runToFuture, 120.seconds)
+  }
+
+  // =========================================================================
+  // Latency benchmark — Flight single-partition path (SampleTime, no queuing)
+  // =========================================================================
+  @Benchmark
+  @BenchmarkMode(Array(Mode.SampleTime))
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  def flightSinglePartitionLatency(): Unit = {
+    val ctx         = mkCtx()
+    val singleAlloc = flightRootAllocator.newChildAllocator(
+      s"flight-sp-single-${System.nanoTime()}", 0, 50_000_000L)
+    val flightAlloc = new FlightAllocator(singleAlloc)
+    try {
+      val querySession = QuerySession(ctx, queryConfig, flightAllocator = Some(flightAlloc))
+      val execPlan     = flightPlanner.materialize(singlePartLogicalPlan, ctx)
+      Await.result(
+        execPlan.dispatcher
+          .dispatch(ExecPlanWithClientParams(execPlan, ClientParams(60000), querySession),
+            UnsupportedChunkSource())
+          .map {
+            case _: QueryResult => flightSpSucceeded.incrementAndGet()
+            case _: QueryError  => flightSpFailed.incrementAndGet()
+          }
+          .runToFuture,
+        60.seconds)
+    } finally {
+      flightAlloc.close()
+    }
+  }
+
+  // =========================================================================
+  // Latency benchmark — Akka single-partition path (SampleTime, no queuing)
+  // =========================================================================
+  @Benchmark
+  @BenchmarkMode(Array(Mode.SampleTime))
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  def akkaSinglePartitionLatency(): Unit = {
+    val ctx          = mkCtx()
+    val querySession = QuerySession(ctx, queryConfig)
+    val execPlan     = akkaPlanner.materialize(singlePartLogicalPlan, ctx)
+    Await.result(
+      execPlan.dispatcher
+        .dispatch(ExecPlanWithClientParams(execPlan, ClientParams(60000), querySession),
+          UnsupportedChunkSource())
+        .map {
+          case _: QueryResult => akkaSpSucceeded.incrementAndGet()
+          case _: QueryError  => akkaSpFailed.incrementAndGet()
+        }
+        .runToFuture,
+      60.seconds)
+  }
+
 }

@@ -22,8 +22,6 @@ import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.VsrPopulationState
 import filodb.core.QueryTimeoutException
-import filodb.core.binaryrecord2.BinaryRecordRowReader
-import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
@@ -42,9 +40,8 @@ object FlightQueryResultStreaming {
  */
 trait FlightQueryResultStreaming extends StrictLogging {
 
-  // FIXME enable debugging for now until we stabilize and productionize. Then remove.
-  //  It has performance overhead.
-  System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
+  // Enable if debugging. Then certainly remove - It has performance overhead.
+  // System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
 
   def serverAllocator: BufferAllocator
   def sysConfig: com.typesafe.config.Config
@@ -201,12 +198,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
           Task.eval {
             logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-            val respHeader = RespHeader(res.resultSchema)
-            // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-            // and hence not closed here
+            // ownership of metadata buf is now with flight listener and hence not closed here
             flightAllocator.checkAllocatorLimits(execPlan.queryContext)
             logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
-            listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respHeader, flightAllocator))
+            listener.putMetadata(FlightProtoSerDeser.serializeHeaderToArrowBuf(res.resultSchema, flightAllocator))
           }.flatMap { _ =>
             Task.eval {
               logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
@@ -221,7 +216,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
             }.bracket { state =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               listener.start(state.flightVsr)
-              val rb = SerializedRangeVector.newBuilder()
+              var numResultSamples = 0
+              var resultSize = 0L
               if (res.result.forall(rv => rv.isInstanceOf[ArrowSerializedRangeVector] ||
                                             (rv.isInstanceOf[SerializableRangeVector] &&
                                             rv.asInstanceOf[SerializableRangeVector].hasFormulatedRows))) {
@@ -233,10 +229,25 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   case asrv: ArrowSerializedRangeVector => asrv.vsrs  // only cast ArrowSerializedRangeVector
                   case _ => Iterator.empty  // skip SRVs like ScalarFixedDouble (they are already in VSRs)
                 }.toSeq.distinct
+                val samplesScannedConfig = queryConfig.samplesScannedConfig
+                numResultSamples = res.result.foldLeft(0) {
+                  case (acc, srv: SerializableRangeVector) =>
+                    if (samplesScannedConfig.srvSamplesEnabled)
+                      QueryUtils.trackSamplesScanned(srv, execPlan.getClass, res.queryStats,
+                        res.resultSchema, samplesScannedConfig)
+                    acc + srv.numRowsSerialized
+                  case _ =>
+                    throw new IllegalStateException("should not reach here since RVs are all serializable")
+                }
+                execPlan.checkSamplesLimit(numResultSamples, res.warnings)
                 Observable.fromIterable(resultVsrs).map { vsr =>
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
                   Using.resource(unloader.getRecordBatch) { rb =>
+                    val vsrBytes = rb.computeBodyLength()
+                    resultSize += vsrBytes
+                    res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                    execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                     loader.load(rb)
                   }
                   logger.debug(s"Putting arrow vsr directly into flight response queryPlanId=${execPlan.planId} " +
@@ -248,7 +259,6 @@ trait FlightQueryResultStreaming extends StrictLogging {
                 }.completedL
               } else {
                 val recSchema = res.resultSchema.toRecordSchema
-                val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
                 Observable.fromIterable(res.result).mapEval { rv =>
                   if (rv.isInstanceOf[ArrowSerializedRangeVector]) {
                     // Mixed is unexpected but we should still be able to handle it - just log at
@@ -263,10 +273,19 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                     flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
+                    if (queryConfig.samplesScannedConfig.srvSamplesEnabled)
+                      QueryUtils.trackSamplesScanned(rv, execPlan.getClass, res.queryStats,
+                        res.resultSchema, queryConfig.samplesScannedConfig)
+                    val samplesForRv = rv match {
+                      case srv: SerializableRangeVector => srv.numRowsSerialized
+                      case _                            => rv.estimateNumRows().toInt
+                    }
+                    numResultSamples += samplesForRv
+                    execPlan.checkSamplesLimit(numResultSamples, res.warnings)
                     flightAllocator.withRequestAllocator { allocator =>
                       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(rv, recSchema,
-                        s"${execPlan.queryContext.queryId}:${queryResult.id}", rb, res.queryStats,
-                        allocator, state, brIterator)
+                        s"${execPlan.queryContext.queryId}:${queryResult.id}", res.queryStats,
+                        allocator, state)
                     } {
                       throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
                     }
@@ -277,6 +296,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
                       val unloader = new VectorUnloader(vsr)
                       val loader = new VectorLoader(state.flightVsr)
                       Using.resource(unloader.getRecordBatch) { rb =>
+                        val vsrBytes = rb.computeBodyLength()
+                        resultSize += vsrBytes
+                        res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                        execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                         loader.load(rb)
                       }
                       logger.debug(s"Putting next vsr into flight response for " +
@@ -295,6 +318,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     val unloader = new VectorUnloader(lastVsr)
                     val loader = new VectorLoader(state.flightVsr)
                     Using.resource(unloader.getRecordBatch) { rb =>
+                      val vsrBytes = rb.computeBodyLength()
+                      resultSize += vsrBytes
+                      res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                      execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
                       loader.load(rb)
                     }
                     logger.debug(s"Putting last vsr into flight response for " +
@@ -339,10 +366,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t")
-      val respFooter = RespFooter(s, t)
-      // ownership of metadata buf that is the result of serializeToArrowBuf is now with flight listener
-      // and hence not closed here
-      listener.putMetadata(FlightKryoSerDeser.serializeToArrowBuf(respFooter, flightAllocator))
+      // ownership of metadata buf is now with flight listener and hence not closed here
+      listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator))
       listener.completed()
     }
   }

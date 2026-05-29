@@ -1,7 +1,11 @@
 package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
-import org.apache.arrow.flight.Location
+import io.grpc.{CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor}
+import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
+import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
+import io.grpc.netty.NettyChannelBuilder
+import org.apache.arrow.flight.{FlightGrpcUtils, Location, Ticket}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -115,8 +119,8 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-          "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+        List("/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -152,10 +156,10 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
                                (0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+        List("/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -184,7 +188,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
+        List("/shard:/Map(host -> host1, region -> region1)", "/shard:/Map(host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -294,6 +298,84 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       // println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+    }
+
+    it("should use zstd encoding on the wire when compression-enabled is true") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("CompressionTest", 0, 1000000)
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(ZstdClientInterceptor)
+        .intercept(headerCapture)
+        .compressorRegistry(ZstdCodecs.compressorRegistry)
+        .decompressorRegistry(ZstdCodecs.decompressorRegistry)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding shouldEqual Some("zstd")
+    }
+
+    it("should not use zstd encoding when client does not advertise zstd in grpc-accept-encoding") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("NoZstdAcceptTest", 0, 1000000)
+      // No ZstdClientInterceptor — grpc-accept-encoding: zstd is never sent
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(headerCapture)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding should not equal Some("zstd")
     }
   }
 }

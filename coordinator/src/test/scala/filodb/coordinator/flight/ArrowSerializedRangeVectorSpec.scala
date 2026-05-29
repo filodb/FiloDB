@@ -5,8 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 import org.apache.arrow.memory.RootAllocator
 
-import filodb.core.binaryrecord2.RecordContainer.BRIterator
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordSchema}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
@@ -16,7 +15,6 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
   System.setProperty("arrow.memory.debug.allocator", "true")
   private val allocator = new RootAllocator(10000000)
-  private val rb = SerializedRangeVector.newBuilder()
 
   val resSchema = new ResultSchema(Seq(
     ColumnInfo("time", ColumnType.TimestampColumn),
@@ -69,16 +67,15 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       // Populate VSR
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val srv2 = ScalarFixedDouble(RangeParams(1, 1, 5), 100.0)
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        srv2, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        srv2, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       // Convert to ArrowSerializedRangeVector2 instances
@@ -117,10 +114,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -163,10 +159,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -199,17 +194,16 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       // Populate multiple RVs
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv1, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv1, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv2, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv2, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv3, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv3, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -246,10 +240,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -274,12 +267,27 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      // we choose 52411 because next RVK is written at row 52412, and new VSR is created for 52413
+      // we choose 52424 because next RVK is written at row 52425, and new VSR is created for 52426
+      // Here is the math:
+      // For key Map("metric" -> "counter"):
+      //  - BinaryRecord = 4B header + 4B fixed field + 2B map len + 7B key (1+6) + 9B value (2+7) = 26 bytes
+      //  - Proto bytes rvKey = 1 field: 1B tag + 1B varint(26) + 26B = 28 bytes
+      //  - Proto RvRange (fields 3×int64): 3+5+3 = 11 bytes, wrapped as field 2: 1+1+11 = 13 bytes
+      //  - RvKey total = 28+13 = 41 bytes, wrapped in RvMetadata oneof field 2: 1+1+41 = 43 bytes
+      //
+      // maxVectorLen = 1048576 (1 MB)
+      // proto RvMetadata bytes = 43, data row bytes = 20
+      // Since we are trying to spill over the second RV key, we subtract 2*43 before dividing it by data record size.
+      // Flooring that gives us number of records we can fit in the first VSR before we have to spill over to second VSR
+      // for the next RVK.
+      // NumRecords N = floor((1048576 - 2×43) / 20) = floor(52424.5) = 52424
+      //
+      // 52424 data rows fill the first VSR leaving < 20 bytes free after RVK)
       // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
       // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR.
       // Do by adding temporary print statements in ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs to
       // find the row number when RVK is written and when new VSR is created.
-      val largeDataset = (1 to 52411).map { i =>
+      val largeDataset = (1 to 52424).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -288,14 +296,13 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
-      println(s"Done with first RV, now adding one more row to trigger RVK at last row of VSR")
+      // println(s"Done with first RV, now adding one more row to trigger RVK at last row of VSR")
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
@@ -334,10 +341,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -363,10 +369,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -399,10 +404,9 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       val queryStats = QueryStats()
       val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
-      val brIterator = new BRIterator(new BinaryRecordRowReader(recSchema))
 
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
-        rv, recSchema, "testExecPlan", rb, queryStats, allocator, vsrs, brIterator
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
       val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
@@ -414,6 +418,98 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       cursor.hasNext shouldEqual false
 
       an[NoSuchElementException] should be thrownBy cursor.next()
+
+      allVsrs.foreach(_.close())
+    }
+
+    it("addNullRow should keep the Arrow offset chain intact so data rows after nulls are not corrupted") {
+      // Arrow's VarBinaryVector.setNull only clears the validity bit — it never updates the offset
+      // buffer. If addNullRow skipped the offset propagation (offsetBuffer[i+1] = offsetBuffer[i]),
+      // the next addFromReader would read offsetBuffer[rowNum]=0 and write at byte 0, silently
+      // overwriting the RVK kryo bytes that live at the start of the data buffer.
+      //
+      // This test catches that regression by:
+      //   1. Placing NaN (null) rows before and between real data rows.
+      //   2. Asserting the offset chain is monotonically non-decreasing across every row.
+      //   3. Round-tripping the RV to confirm data rows survive intact.
+      val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("null_row_test")))
+      // Pattern: null, data, null, data — leading null is the critical case because the RVK
+      // is at position 0 in the data buffer and would be overwritten by a broken offset chain.
+      val rv = toRv(
+        Seq((0, Double.NaN), (1000, 42.0), (2000, Double.NaN), (3000, 99.0)),
+        key,
+        RvRange(0, 1000, 3000)
+      )
+
+      val queryStats = QueryStats()
+      val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
+      ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
+      )
+
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      allVsrs.length shouldEqual 1
+
+      // Verify the offset chain directly: offsetBuffer[i+1] >= offsetBuffer[i] for every row.
+      val rvkBrVec = allVsrs.head.getVector(1).asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
+      val offsetBuf = rvkBrVec.getOffsetBuffer
+      val rowCount  = allVsrs.head.getRowCount
+      for (i <- 0 until rowCount) {
+        val start = offsetBuf.getInt(i.toLong * 4)
+        val end   = offsetBuf.getInt((i + 1).toLong * 4)
+        withClue(s"offset chain broken at row $i: start=$start end=$end") {
+          end should be >= start
+        }
+      }
+
+      // Round-trip: data values must survive and null rows reconstruct as NaN.
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
+      srvs.length shouldEqual 1
+      val srv  = srvs.head
+      srv.numRowsSerialized shouldEqual 4
+      val rows = srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList
+      rows.map(_._1) shouldEqual Seq(0L, 1000L, 2000L, 3000L)
+      rows(0)._2.isNaN shouldBe true
+      rows(1)._2 shouldEqual 42.0
+      rows(2)._2.isNaN shouldBe true
+      rows(3)._2 shouldEqual 99.0
+
+      allVsrs.foreach(_.close())
+    }
+
+    it("data rows should spill to a new VSR when the byte buffer fills before the row count limit") {
+      // Each (timestamp, Double) record occupies 20 bytes on the wire (4 header + 8 Long + 8 Double).
+      // maxVecLen / 20 rows exhaust the 1 MB data buffer well before maxNumRows is reached,
+      // so the VSR split here is driven by byte exhaustion (the spill path in requireBytes),
+      // not the row-count check.
+      import ArrowSerializedRangeVectorOps.{maxNumRows, maxVecLen}
+
+      val rowCount = maxVecLen / 20 + 500          // 52 928, well below maxNumRows (~69 905)
+      assert(rowCount < maxNumRows, "test relies on byte-overflow spill, not row-count overflow")
+
+      val key  = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("spill_test")))
+      val data = (1 to rowCount).map(i => (i.toLong * 1000L, i.toDouble))
+      val rv   = toRv(data, key, RvRange(data.head._1, 1000L, data.last._1))
+
+      val queryStats = QueryStats()
+      val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
+
+      ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
+      )
+
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+
+      // Byte exhaustion must have triggered exactly one additional VSR allocation.
+      allVsrs.length shouldEqual 2
+
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
+      srvs.length shouldEqual 1
+
+      val srv = srvs.head
+      srv.key                shouldEqual key
+      srv.numRowsSerialized  shouldEqual rowCount
+      srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual data
 
       allVsrs.foreach(_.close())
     }

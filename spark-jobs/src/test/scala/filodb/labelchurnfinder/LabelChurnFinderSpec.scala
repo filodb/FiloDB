@@ -77,7 +77,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     case class PkToWrite(pkr: PartKeyRecord, updateHour: Long)
     val pks = for { i <- 0 to numContainers } yield {
       val schema = schemas(i % schemas.size)
-      val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric", bulkSeriesTags ++ Map(
+      val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric", Map(
         "_ws_".utf8 -> "bulk_ws".utf8,
         "_ns_".utf8 -> s"bulk_ns${i % numNs}".utf8,
         "pod".utf8 -> s"pod${i % numPods}".utf8,

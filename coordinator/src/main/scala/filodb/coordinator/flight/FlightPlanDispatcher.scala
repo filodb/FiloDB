@@ -14,9 +14,10 @@ import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.query.{QuerySession, QueryStats}
+import filodb.core.query.{QuerySession, QueryStats, ResultSchema}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
+import filodb.query.ProtoConverters._
 import filodb.query.exec.{ExecPlan, ExecPlanWithClientParams, PlanDispatcher}
 
 case class FlightPlanDispatcher(location: Location,
@@ -67,8 +68,9 @@ case class FlightPlanDispatcher(location: Location,
       val flightAllocator = querySession.flightAllocator.get
       FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
       Using.resource(client.getStream(ticket, CallOptions.timeout(timeoutMs, TimeUnit.MILLISECONDS))) { stream =>
-        var respHeader: Option[RespHeader] = None
-        var respFooter: Option[RespFooter] = None
+        var resultSchema: Option[ResultSchema] = None
+        var footerStats: Option[QueryStats] = None
+        var footerThrowable: Option[Throwable] = None
         val vsrs = mutable.ListBuffer[VectorSchemaRoot]()
         var canceled = false
         // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
@@ -91,7 +93,7 @@ case class FlightPlanDispatcher(location: Location,
                 s"vectorSize0=${reqVsr.getVector(0).getValueCount} " +
                 s"vectorSize1=${reqVsr.getVector(1).getValueCount}")
 
-              require(respHeader.isDefined, "ResultSchema must be received before RangeVectors")
+              require(resultSchema.isDefined, "ResultSchema must be received before RangeVectors")
               vsrs += reqVsr
               qLogger.debug(s"FlightPlanDispatcher received VSR planId=${plan.planId}")
             } {
@@ -101,27 +103,31 @@ case class FlightPlanDispatcher(location: Location,
               canceled = true
             }
           } else {
-            FlightKryoSerDeser.deserializeFromArrowBuf(stream.getLatestMetadata) match {
-              case header: RespHeader =>
-                respHeader = Some(header)
-                qLogger.debug(s"FlightPlanDispatcher received RespHeader for queryPlanId=${plan.planId} " +
-                  s"with schema: ${header.resultSchema}")
-              case footer: RespFooter =>
-                respFooter = Some(footer)
-                qLogger.debug(s"FlightPlanDispatcher received RespFooter for queryPlanId=${plan.planId} with stats: " +
-                  s"${footer.queryStats}, throwable: ${footer.throwable}")
+            val meta = FlightProtoSerDeser.deserializeMetadata(stream.getLatestMetadata)
+            if (meta.hasHeader) {
+              resultSchema = Some(meta.getHeader.getResultSchema.fromProto)
+              qLogger.debug(s"FlightPlanDispatcher received header for queryPlanId=${plan.planId} " +
+                s"with schema: ${resultSchema.get}")
+            } else if (meta.hasFooter) {
+              val footer = meta.getFooter
+              footerStats = Some(footer.getQueryStats.fromProto)
+              footerThrowable = if (footer.hasThrowable) Some(footer.getThrowable.fromProto) else None
+              qLogger.debug(s"FlightPlanDispatcher received footer for queryPlanId=${plan.planId} with stats: " +
+                s"${footerStats.get}, throwable: $footerThrowable")
+            } else {
+              qLogger.warn(s"FlightPlanDispatcher received metadata with unknown type for queryPlanId=${plan.planId}")
             }
           }
           // Error on stream is thrown as exception and will be handled at onErrorHandle below
         }
         if (canceled) {
           QueryError(plan.queryContext.queryId, QueryStats(), new RuntimeException("FlightAllocator closed"))
-        } else if (respFooter.isDefined && respFooter.get.throwable.isDefined) {
-          QueryError(plan.queryContext.queryId, respFooter.get.queryStats, respFooter.get.throwable.get)
+        } else if (footerThrowable.isDefined) {
+          QueryError(plan.queryContext.queryId, footerStats.getOrElse(QueryStats()), footerThrowable.get)
         } else {
-          val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(vsrs.toSeq, respHeader.get.resultSchema)
-          QueryResult(plan.queryContext.queryId, respHeader.get.resultSchema, srvs,
-            respFooter.map(_.queryStats).getOrElse(QueryStats()))
+          val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(vsrs.toSeq, resultSchema.get)
+          QueryResult(plan.queryContext.queryId, resultSchema.get, srvs,
+            footerStats.getOrElse(QueryStats()))
         }
       }
     }.onErrorHandle { ex =>

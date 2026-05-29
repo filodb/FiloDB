@@ -6,9 +6,11 @@ import java.util.{Collections, Optional}
 import java.util.concurrent.Executors
 
 import akka.actor.ActorRef
+import com.github.luben.zstd.{ZstdInputStream, ZstdOutputStream}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor,
+import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Compressor,
+  CompressorRegistry, Decompressor, DecompressorRegistry, ForwardingClientCall, Metadata, MethodDescriptor,
   Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
 import io.grpc.netty.NettyServerBuilder
 import monix.eval.Task
@@ -123,28 +125,14 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
       executor)
 
     val server1 = NettyServerBuilder.forPort(port)
-    val server2 = if (compressionEnabled) server1.intercept(GzipServerInterceptor) else server1
+    val server2 = if (compressionEnabled) {
+      server1.intercept(ZstdServerInterceptor)
+        .compressorRegistry(ZstdCodecs.compressorRegistry)
+        .decompressorRegistry(ZstdCodecs.decompressorRegistry)
+    } else server1
     val server3 = server2.addService(svc).build()
     logger.info(s"Starting FiloDB Flight server on $host:$port with compression = $compressionEnabled")
     server3.start()
     server3
-  }
-}
-
-object GzipServerInterceptor extends ServerInterceptor {
-  override def interceptCall[ReqT, RespT](call: ServerCall[ReqT, RespT],
-                                          headers: Metadata,
-                                          next: ServerCallHandler[ReqT, RespT]): ServerCall.Listener[ReqT] = {
-    call.setCompression("gzip")
-    next.startCall(call, headers)
-  }
-}
-
-object GzipClientInterceptor extends ClientInterceptor {
-
-  override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
-                                          callOptions: CallOptions,
-                                          next: Channel): ClientCall[ReqT, RespT] = {
-    next.newCall(method, callOptions.withCompression("gzip"))
   }
 }

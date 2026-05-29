@@ -1152,6 +1152,22 @@ message RemoteExecPlan {
   QueryContext queryContext  = 2;
 }
 
+message FlightResultHeader {
+  ResultSchema resultSchema = 1;
+}
+
+message FlightResultFooter {
+  QueryResultStats queryStats  = 1;
+  optional Throwable throwable = 2;
+}
+
+message FlightMetadata {
+  oneof content {
+    FlightResultHeader header = 1;
+    FlightResultFooter footer = 2;
+  }
+}
+
 service RemoteExec {
 
   rpc exec(Request) returns (Response);

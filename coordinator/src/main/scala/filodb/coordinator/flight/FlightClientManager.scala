@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.ManagedChannelBuilder
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, FlightGrpcUtils, Location}
@@ -155,10 +155,14 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
   private def createNewClientEntry(location: Location): FlightClientEntry = {
     try {
 
-      val channel1 = ManagedChannelBuilder.forAddress(location.getUri.getHost, location.getUri.getPort)
-        .usePlaintext().asInstanceOf[ManagedChannelBuilder[_]]
-      val channel2 = if (compressionEnabled) channel1.intercept(GzipClientInterceptor) else channel1
-      val channel3 = channel2.asInstanceOf[ManagedChannelBuilder[_]].build()
+      val channel1 = NettyChannelBuilder.forAddress(location.getUri.getHost, location.getUri.getPort)
+        .usePlaintext()
+      val channel2 = if (compressionEnabled) {
+        channel1.intercept(ZstdClientInterceptor)
+          .compressorRegistry(ZstdCodecs.compressorRegistry)
+          .decompressorRegistry(ZstdCodecs.decompressorRegistry)
+      } else channel1
+      val channel3 = channel2.build()
       val client = FlightGrpcUtils.createFlightClient(allocator, channel3)
 
       val entry = FlightClientEntry(

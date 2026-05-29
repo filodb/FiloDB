@@ -85,6 +85,7 @@ object LabelChurnFinder {
   private[labelchurnfinder] val LabelCard1h = "labelCard1h"
   private[labelchurnfinder] val LabelCard3d = "labelCard3d"
   private[labelchurnfinder] val LabelCard7d = "labelCard7d"
+  private[labelchurnfinder] val SaltCol     = "salt"
 }
 
 case class LabelValRow(ws: String, ns: String, label: String, labelVal: String, endTime: Long)
@@ -122,6 +123,9 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     .find(_.getString("dataset") == datasetName)
     .getOrElse(ConfigFactory.empty())
     .as[Option[Int]]("num-shards").get
+
+  @transient private[labelchurnfinder] val numSalts =
+    dsSettings.filodbConfig.as[Option[Int]]("labelchurnfinder.num-salts").getOrElse(50)
 
   /**
    * Returns iterator of LcfRow objects containing label/value for given token range split and shard.
@@ -192,8 +196,12 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
                            tMinus7d: Long): DataFrame = {
 
     val hllSketch = udaf(HllSketchAgg())
-    labelAndValuesDf
-      .groupBy(WsCol, LabelCol)
+    val hllMerge  = udaf(HllSketchMergeAgg())
+
+    // Phase 1: salt by row position to break up skewed (ws, label) keys across numSalts partitions.
+    val partial = labelAndValuesDf
+      .withColumn(SaltCol, pmod(monotonically_increasing_id(), lit(numSalts)))
+      .groupBy(WsCol, LabelCol, SaltCol)
       .agg(
         count(when(col(EndTimeCol) === Long.MaxValue, col(LabelValCol))).alias(Ats1hWithLabelCol),
         count(when(col(EndTimeCol) > tMinus3d, col(LabelValCol))).alias(Ats3dWithLabelCol),
@@ -201,6 +209,18 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         hllSketch(when(col(EndTimeCol) === Long.MaxValue, col(LabelValCol))).alias(LabelSketch1hCol),
         hllSketch(when(col(EndTimeCol) >= tMinus3d, col(LabelValCol))).alias(LabelSketch3dCol),
         hllSketch(when(col(EndTimeCol) >= tMinus7d, col(LabelValCol))).alias(LabelSketch7dCol)
+      )
+
+    // Phase 2: merge partial results per (ws, label).
+    partial
+      .groupBy(WsCol, LabelCol)
+      .agg(
+        sum(col(Ats1hWithLabelCol)).alias(Ats1hWithLabelCol),
+        sum(col(Ats3dWithLabelCol)).alias(Ats3dWithLabelCol),
+        sum(col(Ats7dWithLabelCol)).alias(Ats7dWithLabelCol),
+        hllMerge(col(LabelSketch1hCol)).alias(LabelSketch1hCol),
+        hllMerge(col(LabelSketch3dCol)).alias(LabelSketch3dCol),
+        hllMerge(col(LabelSketch7dCol)).alias(LabelSketch7dCol)
       )
       .withColumn(NsGroupCol, lit("All")) // placeholder for future ns grouping
   }
