@@ -229,7 +229,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   case asrv: ArrowSerializedRangeVector => asrv.vsrs  // only cast ArrowSerializedRangeVector
                   case _ => Iterator.empty  // skip SRVs like ScalarFixedDouble (they are already in VSRs)
                 }.toSeq.distinct
-                val samplesScannedConfig = queryConfig.samplesScannedConfig
+                val samplesScannedConfig = execPlan.queryContext.plannerParams.samplesScannedConfig
                 numResultSamples = res.result.foldLeft(0) {
                   case (acc, srv: SerializableRangeVector) =>
                     if (samplesScannedConfig.srvSamplesEnabled)
@@ -273,9 +273,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                     flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                     logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
-                    if (queryConfig.samplesScannedConfig.srvSamplesEnabled)
+                    val samplesScannedConfig = execPlan.queryContext.plannerParams.samplesScannedConfig
+                    if (samplesScannedConfig.srvSamplesEnabled)
                       QueryUtils.trackSamplesScanned(rv, execPlan.getClass, res.queryStats,
-                        res.resultSchema, queryConfig.samplesScannedConfig)
+                        res.resultSchema, samplesScannedConfig)
                     val samplesForRv = rv match {
                       case srv: SerializableRangeVector => srv.numRowsSerialized
                       case _                            => rv.estimateNumRows().toInt
