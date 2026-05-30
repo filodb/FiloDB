@@ -44,7 +44,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     ep
   }
 
-  def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
+  def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+                (implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
     val remainingTime = plan.clientParams.deadlineMs - queryTimeElapsed
@@ -95,7 +96,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     }
   }
 
-  def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
+  def doDispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime

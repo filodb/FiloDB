@@ -29,7 +29,7 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
   val clusterName = InetAddress.getLocalHost().getHostName()
   lazy val partition = extractPartition(clusterName)
 
-  override def dispatch(plan: ExecPlanWithClientParams,
+  override def doDispatch(plan: ExecPlanWithClientParams,
                         source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     lazy val emptyPartialResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
@@ -80,7 +80,7 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
 
   override def isLocalCall: Boolean = true
 
-  override def dispatchStreaming(plan: ExecPlanWithClientParams,
+  override def doDispatchStreaming(plan: ExecPlanWithClientParams,
                                  source: ChunkSource)
                                 (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
 }

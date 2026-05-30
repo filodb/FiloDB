@@ -26,14 +26,14 @@ import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 
 object SplitLocalPartitionDistConcatExecSpec {
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+    override def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = true
 
-    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+    override def doDispatchStreaming(plan: ExecPlanWithClientParams,
                                    source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 

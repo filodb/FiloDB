@@ -44,9 +44,9 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = planDispatcher.getOrElse(new PlanDispatcher {
       override def clusterName: String = ???
-      override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+      override def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                            (implicit sched: Scheduler): Task[QueryResponse] = ???
-      override def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
+      override def doDispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
                                     (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
       // Force serialization by making this false, in case of true, no such filtering is performed
       override def isLocalCall: Boolean = false
