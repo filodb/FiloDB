@@ -100,9 +100,19 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     }
   }
 
-  it ("should run LCF job for one namespace and workspace") {
+  private def localSparkConf(): SparkConf = {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
+    // Pin driver/executor to loopback so tests pass regardless of WiFi/VPN state.
+    // Without this, InetAddress.getLocalHost resolves to the WiFi IP on macOS,
+    // causing Spark internal RPC to bind on a non-loopback address that may not be reachable.
+    sparkConf.set("spark.driver.host", "127.0.0.1")
+    sparkConf.set("spark.driver.bindAddress", "127.0.0.1")
+    sparkConf
+  }
+
+  it ("should run LCF job for one namespace and workspace") {
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = bulk_ns0
@@ -133,8 +143,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   }
 
   it ("should run LCF job for multiple namespaces and workspaces") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = "bulk_ns.*"
@@ -164,8 +173,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   }
 
   it ("should run LCF job for different time range") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = "bulk_ns.*"
@@ -196,8 +204,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   }
 
   it ("should call publishLabelStats when actionOnLabelStats is invoked") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     sparkSession = SparkSession.builder()
       .appName("LabelChurnFinder")
