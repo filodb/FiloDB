@@ -3,7 +3,7 @@ import Keys._
 import sbt.librarymanagement.ScalaModuleInfo
 
 import com.typesafe.sbt.SbtMultiJvm
-import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.{MultiJvm, jvmOptions => multiJvmJvmOptions}
 import sbt.Tests.Output._
 import org.scalastyle.sbt.ScalastylePlugin.autoImport._
 import pl.project13.scala.sbt.JmhPlugin
@@ -103,6 +103,7 @@ object FiloSettings {
     "--add-opens=java.base/java.io=ALL-UNNAMED",
     "--add-opens=java.base/java.net=ALL-UNNAMED",
     "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.util=ALL-UNNAMED",
     "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
     "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
     "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
@@ -148,7 +149,10 @@ object FiloSettings {
       internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
+    // javaOptions in MultiJvm controls the sbt controller process only.
+    // multiJvmJvmOptions (jvmOptions) controls each spawned multi-JVM node process.
+    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
+    multiJvmJvmOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
     compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
 
   lazy val testMultiJvmToo = Seq(
