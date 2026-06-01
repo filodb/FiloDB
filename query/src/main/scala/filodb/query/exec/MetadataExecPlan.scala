@@ -460,7 +460,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
             var count = 0
             memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
               endMs, startMs, querySession,
-              queryContext.plannerParams.enforcedLimits.execPlanLeafSamples).foreach { labelValue =>
+              leafLimit).foreach { labelValue =>
               sketchMap.getOrElseUpdate(label, new CpcSketch(logK)).update(labelValue.toString)
               count += 1
             }
