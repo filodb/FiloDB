@@ -60,8 +60,14 @@ trait Histogram extends Ordered[Histogram] {
     if (numBuckets <= 0) Double.NaN else bucketValue(numBuckets - 1)
 
   /**
-   * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
+   * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE).
+   *
+   * When `evenDistribution` is true, the calculation uses the order-statistic convention instead:
+   * the rank is `(N-1)*q + 1`, samples are assumed evenly spaced within a bucket at
+   * `k*width/(count+1)`, and the top fractional sample interpolates toward `max`.
    */
+  //scalastyle:off method.length
+  //scalastyle:off cyclomatic.complexity
   def quantile(q: Double,
                min: Double = 0, // negative observations not supported yet
                max: Double = Double.PositiveInfinity,
@@ -70,8 +76,9 @@ trait Histogram extends Ordered[Histogram] {
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2 || topBucketValue <= 0) Double.NaN
     else {
-      // find rank for the quantile using total number of occurrences (which is the last bucket value)
-      var rank = q * topBucketValue
+      // find rank for the quantile using total number of occurrences (which is the last bucket value).
+      // evenDistribution uses the order-statistic convention (N-1)*q + 1; default uses Prometheus' q*N.
+      val rank = if (evenDistribution) (topBucketValue - 1) * q + 1 else q * topBucketValue
       // using rank, find the le bucket which would have the identified rank
       val bucket = firstBucketGTE(rank)
 
@@ -89,23 +96,50 @@ trait Histogram extends Ordered[Histogram] {
       } else if (bucket == 0 && bucketTop(0) <= 0) {
         return bucketTop(0) // zero or negative bucket
       } else {
-
-        // interpolate quantile within boundaries of "bucket"
-        val count = if (bucket == 0) bucketValue(bucket) else bucketValue(bucket) - bucketValue(bucket-1)
-        rank -= (if (bucket == 0) 0 else bucketValue(bucket-1))
-        val fraction = if (evenDistribution) rank / (count + 1) else rank / count
-        if (!hasExponentialBuckets || bucketStart == 0) {
-          bucketStart + (bucketEnd-bucketStart) * fraction
+        if (evenDistribution) {
+          // Reconstruct evenly-spaced samples within each bucket: the j-th of `s` samples in a bucket
+          // [lo, hi] sits at lo + j*(hi-lo)/(s+1).  The quantile interpolates between the two samples
+          // straddling `rank` (floor(rank) and floor(rank)+1); these may live in different buckets, so
+          // the interpolation can cross a bucket boundary.  A sample index that reaches the total
+          // observation count snaps to `max`.
+          def reconstructSample(g: Double): Double = {
+            if (g >= topBucketValue) max
+            else {
+              val b = firstBucketGTE(g)                        // bucket containing the g-th sample
+              val cumPrev = if (b == 0) 0d else bucketValue(b - 1)
+              val s = bucketValue(b) - cumPrev
+              var lo = if (b == 0) 0d else bucketTop(b - 1)
+              var hi = bucketTop(b)
+              if (min > lo && min <= hi) lo = min
+              if (max > lo && max <= hi) hi = max
+              lo + (g - cumPrev) * (hi - lo) / (s + 1)
+            }
+          }
+          val f = Math.floor(rank)
+          val frac = rank - f
+          val xi = reconstructSample(f)
+          if (frac <= 0.001) xi else xi + (reconstructSample(f + 1) - xi) * frac
         } else {
-          val logBucketEnd = log2(bucketEnd)
-          val logBucketStart = log2(bucketStart)
-          val logRank = logBucketStart + (logBucketEnd - logBucketStart) * fraction
-          Math.pow(2, logRank)
+          // interpolate quantile within boundaries of "bucket"
+          val prevBucketVal = if (bucket == 0) 0d else bucketValue(bucket-1)
+          val count = bucketValue(bucket) - prevBucketVal
+          val localRank = rank - prevBucketVal
+          val fraction = localRank / count
+          if (!hasExponentialBuckets || bucketStart == 0) {
+            bucketStart + (bucketEnd-bucketStart) * fraction
+          } else {
+            val logBucketEnd = log2(bucketEnd)
+            val logBucketStart = log2(bucketStart)
+            val logRank = logBucketStart + (logBucketEnd - logBucketStart) * fraction
+            Math.pow(2, logRank)
+          }
         }
       }
     }
     result
   }
+  //scalastyle:on method.length
+  //scalastyle:on cyclomatic.complexity
 
   private def log2(v: Double) = Math.log(v) / Math.log(2)
 

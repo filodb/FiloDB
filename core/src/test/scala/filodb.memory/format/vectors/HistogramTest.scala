@@ -117,6 +117,35 @@ class HistogramTest extends NativeVectorTest {
       customHistograms(0).quantile(0.95) shouldEqual 10
     }
 
+    it("should calculate even-distribution quantile (order-statistic convention) with max") {
+      // A fixed 64-bucket Base2 exponential histogram (scale=0 => base=2, startIndex=1, 63 pos buckets).
+      // Per-bucket (non-cumulative) counts sum to 120; max observed = 998821.
+      // Pinned values are the order-statistic / even-distribution quantiles: rank = (N-1)*q + 1,
+      // even sample spacing within a bucket, and the top fractional sample snapped toward `max`.
+      // p25 specifically exercises cross-bucket interpolation: rank=30.75, floor(rank)=30 falls exactly
+      // on a cumulative bucket boundary, so the two straddling samples live in different buckets.
+      val scheme = Base2ExpHistogramBuckets(0, 1, 63)
+      val perBucket = Array[Long](
+        0,0,0,0,0,0,0,0,1,0,0,0,0,0,3,5,8,13,36,54,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0)
+      val hist = LongHistogram(scheme, perBucket.scanLeft(0L)(_ + _).tail)
+      val max = 998821.0
+
+      hist.quantile(0.25,  0, max, evenDistribution = true) shouldEqual 265117.15625 +- 0.1
+      hist.quantile(0.5,   0, max, evenDistribution = true) shouldEqual 478235.6875 +- 0.1
+      hist.quantile(0.9,   0, max, evenDistribution = true) shouldEqual 887521.375 +- 0.1
+      hist.quantile(0.95,  0, max, evenDistribution = true) shouldEqual 938857.25 +- 0.1
+      hist.quantile(0.99,  0, max, evenDistribution = true) shouldEqual 979925.9375 +- 0.1
+      hist.quantile(0.999, 0, max, evenDistribution = true) shouldEqual 996767.625 +- 0.1
+
+      // The default (Prometheus q*N, linear) path must remain distinct from the even path: at the
+      // tail the even path snaps toward max while the default interpolates linearly within the bucket.
+      hist.quantile(0.999, 0, max, evenDistribution = false) should not equal
+        hist.quantile(0.999, 0, max, evenDistribution = true)
+    }
+
     it("should calculate quantile correctly for exponential bucket histograms") {
       val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
       val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
