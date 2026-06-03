@@ -10,8 +10,6 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.{ArrayBuffer, SortedSet}
 import scala.concurrent.duration._
 
-import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
-import com.esotericsoftware.kryo.io.{Input, Output}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
@@ -552,7 +550,7 @@ case class Stat() {
   }
 }
 
-case class QueryStats() extends KryoSerializable {
+case class QueryStats() {
 
   /**
    * Stores all stats entries.
@@ -571,56 +569,22 @@ case class QueryStats() extends KryoSerializable {
    **/
   @volatile private var containsNilKey = false;
 
-  // NOTE: all are 'var' to allow assignment from within read(...).
-  //   These fields will be left null if not explicitly set in read(...).
-  private var lock = new ReentrantReadWriteLock()
-  private var readLock = lock.readLock()
-  private var writeLock = lock.writeLock()
+  // NOTE: all are 'var' to allow assignment from within readObject.
+  //   These could be declared lazy as a readObject alternative, but
+  //   readObject is preferred to avoid the lazy overhead given that
+  //   these variables are accessed on hot paths.
+  @transient private var lock = new ReentrantReadWriteLock()
+  @transient private var readLock = lock.readLock()
+  @transient private var writeLock = lock.writeLock()
 
-  override def write(kryo: Kryo, output: Output): Unit = {
-    readLock.lock()
-    try {
-      // Write the total count of entries so we can iterate
-      //   through them during deserialization.
-      output.writeInt(entries.size)
-      entries.foreach { case (key, stat) =>
-        // Write the count of strings in the Seq key for
-        //   iteration during deserialization.
-        output.writeInt(key.size)
-        // Write each string in the Seq key.
-        key.foreach(output.writeString)
-        // Write each stat value.
-        output.writeLong(stat.timeSeriesScanned.get())
-        output.writeLong(stat.dataBytesScanned.get())
-        output.writeLong(stat.samplesScanned.get())
-        output.writeLong(stat.resultBytes.get())
-        output.writeLong(stat.cpuNanos.get())
-      }
-    } finally {
-      readLock.unlock()
-    }
-  }
-
-  override def read(kryo: Kryo, input: Input): Unit = {
-    // Must be initialized here else will be left null.
+  /**
+   * Invoked by reflection during deserialization.
+   */
+  private def readObject(in: java.io.ObjectInputStream): Unit = {
+    in.defaultReadObject()
     lock = new ReentrantReadWriteLock()
     readLock = lock.readLock()
     writeLock = lock.writeLock()
-
-    val entryCount = input.readInt()
-    var iEntry = 0
-    while (iEntry < entryCount) {
-      val keySize = input.readInt()
-      val key = (0 until keySize).map(_ => input.readString())
-      val stat = Stat()
-      stat.timeSeriesScanned.set(input.readLong())
-      stat.dataBytesScanned.set(input.readLong())
-      stat.samplesScanned.set(input.readLong())
-      stat.resultBytes.set(input.readLong())
-      stat.cpuNanos.set(input.readLong())
-      putInternal(key, stat, entryConfirmedNotPresent = true)
-      iEntry += 1
-    }
   }
 
   override def toString: String = {
