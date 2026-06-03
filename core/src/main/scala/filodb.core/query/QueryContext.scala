@@ -423,8 +423,8 @@ case class QueryStats() {
   @volatile private var containsNilKey = false;
 
   private val lock = new ReentrantReadWriteLock()
-  private val readLock = lock.readLock()
-  private val writeLock = lock.writeLock()
+  private def readLock = lock.readLock()
+  private def writeLock = lock.writeLock()
 
   override def toString: String = {
     readLock.lock()
