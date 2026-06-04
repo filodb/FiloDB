@@ -569,23 +569,9 @@ case class QueryStats() {
    **/
   @volatile private var containsNilKey = false;
 
-  // NOTE: all are 'var' to allow assignment from within readObject.
-  //   These could be declared lazy as a readObject alternative, but
-  //   readObject is preferred to avoid the lazy overhead given that
-  //   these variables are accessed on hot paths.
-  @transient private var lock = new ReentrantReadWriteLock()
-  @transient private var readLock = lock.readLock()
-  @transient private var writeLock = lock.writeLock()
-
-  /**
-   * Invoked by reflection during deserialization.
-   */
-  private def readObject(in: java.io.ObjectInputStream): Unit = {
-    in.defaultReadObject()
-    lock = new ReentrantReadWriteLock()
-    readLock = lock.readLock()
-    writeLock = lock.writeLock()
-  }
+  private val lock = new ReentrantReadWriteLock()
+  private val readLock = lock.readLock()
+  private val writeLock = lock.writeLock()
 
   override def toString: String = {
     readLock.lock()
