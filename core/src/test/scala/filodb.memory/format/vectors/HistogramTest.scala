@@ -124,7 +124,7 @@ class HistogramTest extends NativeVectorTest {
       // even sample spacing within a bucket, and the top fractional sample snapped toward `max`.
       // p25 specifically exercises cross-bucket interpolation: rank=30.75, floor(rank)=30 falls exactly
       // on a cumulative bucket boundary, so the two straddling samples live in different buckets.
-      val scheme = Base2ExpHistogramBuckets(0, 1, 63)
+      val scheme = GeometricBuckets(2, 2, 64, minusOne = true)
       val perBucket = Array[Long](
         0,0,0,0,0,0,0,0,1,0,0,0,0,0,3,5,8,13,36,54,
         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -133,12 +133,12 @@ class HistogramTest extends NativeVectorTest {
       val hist = LongHistogram(scheme, perBucket.scanLeft(0L)(_ + _).tail)
       val max = 998821.0
 
-      hist.quantile(0.25,  0, max, evenDistribution = true) shouldEqual 265117.15625 +- 0.1
-      hist.quantile(0.5,   0, max, evenDistribution = true) shouldEqual 478235.6875 +- 0.1
-      hist.quantile(0.9,   0, max, evenDistribution = true) shouldEqual 887521.375 +- 0.1
-      hist.quantile(0.95,  0, max, evenDistribution = true) shouldEqual 938857.25 +- 0.1
-      hist.quantile(0.99,  0, max, evenDistribution = true) shouldEqual 979925.9375 +- 0.1
-      hist.quantile(0.999, 0, max, evenDistribution = true) shouldEqual 996767.625 +- 0.1
+      hist.quantile(0.25,  0, max, evenDistribution = true) shouldEqual 265117.1583 +- 0.1
+      hist.quantile(0.5,   0, max, evenDistribution = true) shouldEqual 478235.6757 +- 0.1
+      hist.quantile(0.9,   0, max, evenDistribution = true) shouldEqual 887521.4418 +- 0.1
+      hist.quantile(0.95,  0, max, evenDistribution = true) shouldEqual 938857.2845 +- 0.1
+      hist.quantile(0.99,  0, max, evenDistribution = true) shouldEqual 979925.9587 +- 0.1
+      hist.quantile(0.999, 0, max, evenDistribution = true) shouldEqual 996767.5663 +- 0.1
 
       // The default (Prometheus q*N, linear) path must remain distinct from the even path: at the
       // tail the even path snaps toward max while the default interpolates linearly within the bucket.

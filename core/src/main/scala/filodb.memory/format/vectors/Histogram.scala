@@ -102,17 +102,30 @@ trait Histogram extends Ordered[Histogram] {
           // straddling `rank` (floor(rank) and floor(rank)+1); these may live in different buckets, so
           // the interpolation can cross a bucket boundary.  A sample index that reaches the total
           // observation count snaps to `max`.
+          //
+          // Scheme-aware lower/upper edges (used only here, in evenDistribution mode):
+          // encodes integer-valued samples whose smallest possible value in bucket `no`
+          // is bucketTop(no-1)+1;
+          // the exclusive upper before max-capping is bucketTop(no)+1.
+          def schemeEdges(no: Int): (Double, Double) = {
+              val lo = if (no == 0) 0d else bucketTop(no - 1) + 1
+              (lo, bucketTop(no) + 1)
+          }
           def reconstructSample(g: Double): Double = {
             if (g >= topBucketValue) max
             else {
               val b = firstBucketGTE(g)                        // bucket containing the g-th sample
-              val cumPrev = if (b == 0) 0d else bucketValue(b - 1)
-              val s = bucketValue(b) - cumPrev
-              var lo = if (b == 0) 0d else bucketTop(b - 1)
-              var hi = bucketTop(b)
+              val prevBucketVal = if (b == 0) 0d else bucketValue(b - 1)
+              val s = bucketValue(b) - prevBucketVal
+              val (schemeLo, schemeHi) = schemeEdges(b)
+              // Always clip the upper edge to `max`.
+              // Unlike a guarded `max <= hi` clip, this collapses the bucket to a degenerate span
+              // when `max <= lo`, snapping interpolated values toward `max` at the boundary.
+              var lo = schemeLo
+              val hi = Math.min(schemeHi, max)
               if (min > lo && min <= hi) lo = min
-              if (max > lo && max <= hi) hi = max
-              lo + (g - cumPrev) * (hi - lo) / (s + 1)
+              val width = Math.max(0d, hi - lo)
+              lo + (g - prevBucketVal) * width / (s + 1)
             }
           }
           val f = Math.floor(rank)
