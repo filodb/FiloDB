@@ -3,9 +3,7 @@ package filodb.downsampler.index
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
 
-import kamon.Kamon
 import monix.reactive.Observable
 
 import filodb.cassandra.columnstore.CassandraColumnStore
