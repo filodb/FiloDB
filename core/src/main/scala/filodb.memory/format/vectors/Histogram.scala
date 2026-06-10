@@ -97,41 +97,57 @@ trait Histogram extends Ordered[Histogram] {
         return bucketTop(0) // zero or negative bucket
       } else {
         if (evenDistribution) {
-          // Reconstruct evenly-spaced samples within each bucket: the j-th of `s` samples in a bucket
-          // [lo, hi] sits at lo + j*(hi-lo)/(s+1).  The quantile interpolates between the two samples
-          // straddling `rank` (floor(rank) and floor(rank)+1); these may live in different buckets, so
-          // the interpolation can cross a bucket boundary.  A sample index that reaches the total
-          // observation count snaps to `max`.
+          // Order-statistic / even-distribution quantile, faithfully matching Hubble's
+          // derivePercentileStats.  rank = (N-1)*q + 1; the quantile interpolates between the two
+          // samples straddling rank: the k-th (k = floor(rank)) and the (k+1)-th, where the j-th of
+          // `s` samples in a bucket [lo, hi] is assumed at lo + j*(hi-lo)/(s+1).  The two neighbours
+          // may live in different buckets, so the interpolation can cross a bucket boundary.
           //
           // Scheme-aware lower/upper edges (used only here, in evenDistribution mode):
           // encodes integer-valued samples whose smallest possible value in bucket `no`
-          // is bucketTop(no-1)+1;
-          // the exclusive upper before max-capping is bucketTop(no)+1.
-          def schemeEdges(no: Int): (Double, Double) = {
-              val lo = if (no == 0) 0d else bucketTop(no - 1) + 1
-              (lo, bucketTop(no) + 1)
-          }
-          def reconstructSample(g: Double): Double = {
-            if (g >= topBucketValue) max
-            else {
-              val b = firstBucketGTE(g)                        // bucket containing the g-th sample
-              val prevBucketVal = if (b == 0) 0d else bucketValue(b - 1)
-              val s = bucketValue(b) - prevBucketVal
-              val (schemeLo, schemeHi) = schemeEdges(b)
-              // Always clip the upper edge to `max`.
-              // Unlike a guarded `max <= hi` clip, this collapses the bucket to a degenerate span
-              // when `max <= lo`, snapping interpolated values toward `max` at the boundary.
-              var lo = schemeLo
-              val hi = Math.min(schemeHi, max)
-              if (min > lo && min <= hi) lo = min
-              val width = Math.max(0d, hi - lo)
-              lo + (g - prevBucketVal) * width / (s + 1)
+          // is bucketTop(no-1)+1; the exclusive upper before max-capping is bucketTop(no)+1.
+          // For the GeometricBuckets minusOne (integer power-of-2) scheme, bucket `no` covers
+          // [base^no, base^(no+1)-1], so even bucket 0's lower edge is base^0 = bucketTop(-1)+1
+          // (= 1 for the standard 2/2 scheme), NOT 0 -- matching Hubble's getValueForIndex(0) = 2^0.
+          // Other schemes keep a genuine zero-bucket lower edge of 0.
+          val minusOneGeom = this match {
+            case h: HistogramWithBuckets => h.buckets match {
+              case g: GeometricBuckets => g.minusOne
+              case _                    => false
             }
+            case _ => false
           }
-          val f = Math.floor(rank)
-          val frac = rank - f
-          val xi = reconstructSample(f)
-          if (frac <= 0.001) xi else xi + (reconstructSample(f + 1) - xi) * frac
+          def schemeEdges(no: Int): (Double, Double) = {
+            val lo = if (no == 0 && !minusOneGeom) 0d else bucketTop(no - 1) + 1
+            (lo, bucketTop(no) + 1)
+          }
+          // Reconstruct the g-th global sample within its own bucket (no max-snap).
+          def reconstructInBucket(g: Double): Double = {
+            val b = firstBucketGTE(g)                          // bucket containing the g-th sample
+            val prevBucketVal = if (b == 0) 0d else bucketValue(b - 1)
+            val s = bucketValue(b) - prevBucketVal
+            val (schemeLo, schemeHi) = schemeEdges(b)
+            // Clip the upper edge to `max`; collapses the bucket to a degenerate span when max <= lo.
+            var lo = schemeLo
+            val hi = Math.min(schemeHi, max)
+            if (min > lo && min <= hi) lo = min
+            val width = Math.max(0d, hi - lo)
+            lo + (g - prevBucketVal) * width / (s + 1)
+          }
+          val n = topBucketValue
+          val k = Math.floor(rank)                             // lower neighbour ordinal (Hubble breakPoint)
+          val frac = rank - k
+          // Lower neighbour (k-th sample): snaps to max only past the last observation (q == 1).
+          val xi = if (k >= n) max else reconstructInBucket(k)
+          if (frac <= 0.001) xi
+          else {
+            // Upper neighbour is the (k+1)-th sample.  Hubble snaps the LAST sample to `max` only when
+            // it shares a bucket with the lower neighbour; across a bucket boundary (Hubble's
+            // pendingSample path) the last sample is reconstructed within its own bucket, NOT snapped.
+            val sameBucket = firstBucketGTE(k) == firstBucketGTE(k + 1)
+            val xi1 = if (k >= n || (sameBucket && k + 1 >= n)) max else reconstructInBucket(k + 1)
+            xi + (xi1 - xi) * frac
+          }
         } else {
           // interpolate quantile within boundaries of "bucket"
           val prevBucketVal = if (bucket == 0) 0d else bucketValue(bucket-1)
