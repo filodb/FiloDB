@@ -97,8 +97,7 @@ trait Histogram extends Ordered[Histogram] {
         return bucketTop(0) // zero or negative bucket
       } else {
         if (evenDistribution) {
-          // Order-statistic / even-distribution quantile, faithfully matching Hubble's
-          // derivePercentileStats.  rank = (N-1)*q + 1; the quantile interpolates between the two
+          // Order-statistic / even-distribution quantile. rank = (N-1)*q + 1; the quantile interpolates between the two
           // samples straddling rank: the k-th (k = floor(rank)) and the (k+1)-th, where the j-th of
           // `s` samples in a bucket [lo, hi] is assumed at lo + j*(hi-lo)/(s+1).  The two neighbours
           // may live in different buckets, so the interpolation can cross a bucket boundary.
@@ -108,7 +107,7 @@ trait Histogram extends Ordered[Histogram] {
           // is bucketTop(no-1)+1; the exclusive upper before max-capping is bucketTop(no)+1.
           // For the GeometricBuckets minusOne (integer power-of-2) scheme, bucket `no` covers
           // [base^no, base^(no+1)-1], so even bucket 0's lower edge is base^0 = bucketTop(-1)+1
-          // (= 1 for the standard 2/2 scheme), NOT 0 -- matching Hubble's getValueForIndex(0) = 2^0.
+          // (= 1 for the standard 2/2 scheme), NOT 0 -- matching getValueForIndex(0) = 2^0.
           // Other schemes keep a genuine zero-bucket lower edge of 0.
           val minusOneGeom = this match {
             case h: HistogramWithBuckets => h.buckets match {
@@ -135,15 +134,15 @@ trait Histogram extends Ordered[Histogram] {
             lo + (g - prevBucketVal) * width / (s + 1)
           }
           val n = topBucketValue
-          val k = Math.floor(rank)                             // lower neighbour ordinal (Hubble breakPoint)
+          val k = Math.floor(rank)                             // lower neighbour ordinal
           val frac = rank - k
           // Lower neighbour (k-th sample): snaps to max only past the last observation (q == 1).
           val xi = if (k >= n) max else reconstructInBucket(k)
           if (frac <= 0.001) xi
           else {
-            // Upper neighbour is the (k+1)-th sample.  Hubble snaps the LAST sample to `max` only when
-            // it shares a bucket with the lower neighbour; across a bucket boundary (Hubble's
-            // pendingSample path) the last sample is reconstructed within its own bucket, NOT snapped.
+            // Upper neighbour is the (k+1)-th sample.  it snaps the LAST sample to `max` only when
+            // it shares a bucket with the lower neighbour; across a bucket boundary (pendingSample path)
+            // the last sample is reconstructed within its own bucket, NOT snapped.
             val sameBucket = firstBucketGTE(k) == firstBucketGTE(k + 1)
             val xi1 = if (k >= n || (sameBucket && k + 1 >= n)) max else reconstructInBucket(k + 1)
             xi + (xi1 - xi) * frac
