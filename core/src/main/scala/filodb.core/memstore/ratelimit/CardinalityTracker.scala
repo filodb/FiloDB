@@ -248,6 +248,43 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   /**
+   * Non-mutating check: would adding one new time series with the given shard key
+   * breach a quota at any level of the trie?
+   *
+   * Mirrors the breach checks in `modifyCountWithoutAggregation`:
+   *  - Leaf level (i == shardKeyLen): breach if `tsCount + 1 > childrenQuota`.
+   *  - Parent levels: when a level's current `tsCount` is 0 the insert would
+   *    create a new child prefix, so the parent's `childrenCount + 1` is
+   *    checked against the parent's `childrenQuota`.
+   *
+   * Returns the first prefix that would breach, or None. Does NOT mutate the
+   * store and does NOT invoke quotaExceededProtocol.
+   */
+  def wouldBreachQuota(shardKey: Seq[String]): Option[CardinalityRecord] = synchronized {
+    require(shardKey.length == shardKeyLen, "full shard key is needed")
+    val records = (0 to shardKeyLen).map { i =>
+      val prefix = shardKey.take(i)
+      store.getOrZero(prefix,
+        CardinalityRecord(shard, prefix, CardinalityValue(0L, 0L, 0L, 0L, defaultChildrenQuota(i))))
+    }
+    var i = 0
+    while (i <= shardKeyLen) {
+      val rec = records(i)
+      if (i == shardKeyLen && rec.value.tsCount + 1 > rec.value.childrenQuota) {
+        return Some(rec)
+      }
+      if (i > 0 && rec.value.tsCount == 0) {
+        val parent = records(i - 1)
+        if (parent.value.childrenCount + 1 > parent.value.childrenQuota) {
+          return Some(parent)
+        }
+      }
+      i += 1
+    }
+    None
+  }
+
+  /**
    * Fetch cardinality for given shard key or shard key prefix
    *
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix

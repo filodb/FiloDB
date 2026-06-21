@@ -26,7 +26,8 @@ import spire.syntax.cfor._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
-import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaReachedException,
+  QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -72,6 +73,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   // Tracking the index adds and updates during active kafka ingestion.
   val partKeyIndexAdded = FilodbMetrics.counter("partkey-index-added", tags)
   val partKeyIndexUpdated = FilodbMetrics.counter("partkey-index-updated", tags)
+
+  // Incremented when a new time series is rejected at ingest because adding it
+  // would breach the cardinality quota at some shard-key prefix (e.g. ws+ns).
+  val seriesRejectedQuotaBreach = FilodbMetrics.counter("memstore-series-rejected-quota-breach", tags)
 
   /**
     * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
@@ -637,6 +642,10 @@ class TimeSeriesShard(val ref: DatasetRef,
             val part: FiloPartition = getOrAddPartitionForIngestion(recBase, recOffset, group, schema)
             if (part == OutOfMemPartition) { disableAddPartitions() }
           } catch {
+            case e: QuotaReachedException =>
+              shardStats.seriesRejectedQuotaBreach.increment()
+              logger.warn(s"Recovery: rejected new series for dataset=$ref shard=$shardNum " +
+                s"prefix=${e.prefix} quota=${e.quota}")
             case e: OutOfOffheapMemoryException => disableAddPartitions()
             case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
           }
@@ -1076,6 +1085,16 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
     val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
+    // Quota pre-check: if this would be a brand-new series (not just a re-ingestion of a known/evicted
+    // partKey), and admitting it would push some shard-key prefix past its cardinality quota, reject
+    // the series before allocating any partition state. We throw QuotaReachedException so all the
+    // existing rollback behavior (no partitions.put, no Lucene addPartKey, no offheap alloc) is free.
+    if (storeConfig.meteringEnabled && previousPartId == CREATE_NEW_PARTID) {
+      val shardKey = schema.partKeySchema.colValues(partKeyArray, partKeyOffset, schema.options.shardKeyColumns)
+      cardTracker.wouldBreachQuota(shardKey).foreach { breached =>
+        throw QuotaReachedException(shardKey, breached.prefix, breached.value.childrenQuota)
+      }
+    }
     // TODO: remove when no longer needed
     logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
@@ -1169,6 +1188,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       }
     } catch {
+      case e: QuotaReachedException =>
+        shardStats.seriesRejectedQuotaBreach.increment()
+        logger.warn(s"Rejected new series for dataset=$ref shard=$shardNum " +
+          s"prefix=${e.prefix} quota=${e.quota}")
       case e: OutOfOffheapMemoryException => disableAddPartitions()
       case e: Exception =>
         shardStats.dataDropped.increment()
