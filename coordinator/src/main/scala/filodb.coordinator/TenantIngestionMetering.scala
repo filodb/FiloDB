@@ -2,8 +2,9 @@ package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
@@ -12,6 +13,7 @@ import monix.execution.Scheduler.Implicits.{global => scheduler}
 import filodb.coordinator.client.Client
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
+import filodb.core.memstore.ratelimit.{ConfigQuotaSource, QuotaSource}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.QueryContext
 import filodb.query.{QueryError, QueryResult, TsCardinalities}
@@ -45,6 +47,37 @@ case class TenantIngestionMetering(settings: FilodbSettings,
   private val METRIC_BILLABLE = "tsdb_metering_billable_timeseries"
   private val METRIC_TOTAL = "tsdb_metering_total_timeseries"
   private val METRIC_LONGTERM = "tsdb_metering_longterm_timeseries"
+  // Configured cardinality quota that applies at the (ws, ns) prefix level. Published with the
+  // same metric_ws / metric_ns tags as METRIC_ACTIVE so consumers can compute headroom against
+  // the active count without a separate quota lookup.
+  private val METRIC_ACTIVE_QUOTA = "tsdb_metering_active_quota"
+
+  // Per-dataset quota source cache; ConfigQuotaSource just reads from the static filodb config so
+  // construction is cheap, but caching avoids repeating parse work on every metering tick.
+  private val quotaSourceCache = new TrieMap[DatasetRef, QuotaSource]()
+  private lazy val shardKeyLen: Int =
+    Try(settings.schemas.part.options.shardKeyColumns.length).getOrElse(3)
+
+  private def quotaSourceFor(ds: DatasetRef): QuotaSource =
+    quotaSourceCache.getOrElseUpdate(ds, new ConfigQuotaSource(settings.allConfig, shardKeyLen))
+
+  /**
+   * Returns the configured cardinality quota for the given shard-key prefix on the given dataset,
+   * preferring an exact custom-quota match before falling back to the dataset-level defaults
+   * indexed by prefix length. Returns None when no usable quota is found.
+   */
+  private[coordinator] def lookupQuota(ds: DatasetRef, prefix: Seq[String]): Option[Long] = {
+    val src = quotaSourceFor(ds)
+    val customMatch =
+      try src.getQuotas(ds).find(_.shardKeyPrefix == prefix).map(_.quota)
+      catch { case _: Throwable => None }
+    customMatch.orElse {
+      try {
+        val defaults = src.getDefaults(ds)
+        if (defaults.length > prefix.length) Some(defaults(prefix.length)) else None
+      } catch { case _: Throwable => None }
+    }
+  }
 
   def schedulePeriodicPublishJob() : Unit = {
     // NOTE: the FiniteDuration overload of scheduleWithFixedDelay
@@ -99,6 +132,9 @@ case class TenantIngestionMetering(settings: FilodbSettings,
               FilodbMetrics.gauge(METRIC_ACTIVE, tags).update(data.counts.active.toDouble)
               FilodbMetrics.gauge(METRIC_BILLABLE, tags).update(data.counts.billable.toDouble)
               FilodbMetrics.gauge(METRIC_TOTAL, tags).update(data.counts.shortTerm.toDouble)
+              lookupQuota(dsRef, prefix.toIndexedSeq).foreach { q =>
+                FilodbMetrics.gauge(METRIC_ACTIVE_QUOTA, tags).update(q.toDouble)
+              }
             }
           })
         case Success(QueryError(_, _, t)) => logger.warn("QueryError: " + t.getMessage)
