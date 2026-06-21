@@ -26,7 +26,8 @@ import spire.syntax.cfor._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
-import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaProtocolFactory,
+  QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -734,8 +735,9 @@ class TimeSeriesShard(val ref: DatasetRef,
       val cardStore = new RocksDbCardinalityStore(ref, shardNum)
 
       val defaultQuota = quotaSource.getDefaults(ref)
+      val quotaProtocol = QuotaProtocolFactory.fromConfig(filodbConfig)
       val tracker = new CardinalityTracker(ref, shardNum, schemas.part.options.shardKeyColumns.length,
-        defaultQuota, cardStore)
+        defaultQuota, cardStore, quotaExceededProtocol = quotaProtocol)
       quotaSource.getQuotas(ref).foreach { q =>
         tracker.setQuota(q.shardKeyPrefix, q.quota)
       }

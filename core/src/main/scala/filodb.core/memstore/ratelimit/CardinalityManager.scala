@@ -220,9 +220,10 @@ class CardinalityManager(datasetRef: DatasetRef,
   private def getNewCardTracker(): CardinalityTracker = {
     val cardStore = new RocksDbCardinalityStore(datasetRef, shardNum)
     val defaultQuota = quotaSource.getDefaults(datasetRef)
+    val quotaProtocol = QuotaProtocolFactory.fromConfig(filodbConfig)
     logger.info(s"[CardinalityManager] Creating new CardinalityTracker with flushCount=$cardFlushCount")
     val tracker = new CardinalityTracker(datasetRef, shardNum, shardKeyLen, defaultQuota, cardStore,
-      flushCount = cardFlushCount)
+      quotaExceededProtocol = quotaProtocol, flushCount = cardFlushCount)
     quotaSource.getQuotas(datasetRef).foreach { q =>
       tracker.setQuota(q.shardKeyPrefix, q.quota)
     }
