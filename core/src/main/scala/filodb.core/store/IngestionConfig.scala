@@ -40,7 +40,15 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              estimatedIngestResolutionMillis: Int,
                              // Zeroes memory when it is first allocated.
                              // NOTE: this will incur a memset(); memory will be eagerly allocated if enabled.
-                             clearAllocations: Boolean) {
+                             clearAllocations: Boolean,
+                             // Mirror active series state to Redis (experimental). When enabled, every
+                             // activation/deactivation transition is forwarded to a Redis SET keyed by
+                             // (workspace, namespace).
+                             activeSeriesRedisEnabled: Boolean,
+                             activeSeriesRedisHost: String,
+                             activeSeriesRedisPort: Int,
+                             activeSeriesRedisBatchSize: Int,
+                             activeSeriesRedisBatchIntervalMillis: Long) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -65,7 +73,13 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
-                               "clear-allocations" -> clearAllocations).asJava)
+                               "clear-allocations" -> clearAllocations,
+                               "active-series-redis.enabled" -> activeSeriesRedisEnabled,
+                               "active-series-redis.host" -> activeSeriesRedisHost,
+                               "active-series-redis.port" -> activeSeriesRedisPort,
+                               "active-series-redis.batch-size" -> activeSeriesRedisBatchSize,
+                               "active-series-redis.batch-interval-ms" ->
+                                 activeSeriesRedisBatchIntervalMillis).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -104,6 +118,13 @@ object StoreConfig {
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
                                            |clear-allocations = false
+                                           |active-series-redis {
+                                           |  enabled = false
+                                           |  host = "localhost"
+                                           |  port = 6379
+                                           |  batch-size = 100
+                                           |  batch-interval-ms = 100
+                                           |}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -144,7 +165,12 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.getBoolean("clear-allocations"))
+                config.getBoolean("clear-allocations"),
+                config.getBoolean("active-series-redis.enabled"),
+                config.getString("active-series-redis.host"),
+                config.getInt("active-series-redis.port"),
+                config.getInt("active-series-redis.batch-size"),
+                config.getLong("active-series-redis.batch-interval-ms"))
   }
 }
 

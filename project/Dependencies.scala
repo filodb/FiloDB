@@ -98,6 +98,7 @@ object Dependencies {
     "org.apache.commons"           % "commons-lang3"      % "3.14.0",
     "org.apache.arrow"             % "arrow-vector"       % arrowVersion,
     "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion,
+    "io.lettuce"                   % "lettuce-core"       % "6.3.2.RELEASE",
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
