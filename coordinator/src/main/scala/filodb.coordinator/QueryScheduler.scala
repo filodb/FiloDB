@@ -4,7 +4,7 @@ import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{Executors, ForkJoinPool, ForkJoinWorkerThread}
 
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.Scheduler
+import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.schedulers.SchedulerService
 
 import filodb.core.GlobalConfig
@@ -25,6 +25,11 @@ object QueryScheduler extends StrictLogging {
       }
     }
   }
+
+  // UncaughtExceptionReporter.apply receives only the Throwable; delegate to exceptionHandler
+  // with the current thread so the same logging + haltAndCatchFire logic applies.
+  private val exceptionReporter = UncaughtExceptionReporter(e =>
+                  exceptionHandler.uncaughtException(Thread.currentThread(), e))
   val queryScheduler: SchedulerService = createInstrumentedQueryScheduler()
 
   val flightIoScheduler: SchedulerService = createFlightIoScheduler()
@@ -69,16 +74,16 @@ object QueryScheduler extends StrictLogging {
                            .invoke(null, factory)
                            .asInstanceOf[java.util.concurrent.ExecutorService]
         logger.info(s"$FlightIoSchedName: using virtual-thread-per-task executor (Java $majorVersion)")
-        Scheduler.apply(executor)
+        Scheduler.apply(executor, exceptionReporter)
       } catch {
         case e: Exception =>
           logger.warn(s"$FlightIoSchedName: failed to create virtual-thread executor, " +
             s"falling back to Scheduler.io", e)
-          Scheduler.io(name = FlightIoSchedName)
+          Scheduler.io(name = FlightIoSchedName, reporter = exceptionReporter)
       }
     } else {
       logger.info(s"$FlightIoSchedName: using Scheduler.io (Java $majorVersion < 21)")
-      Scheduler.io(name = FlightIoSchedName)
+      Scheduler.io(name = FlightIoSchedName, reporter = exceptionReporter)
     }
   }
 
@@ -103,14 +108,13 @@ object QueryScheduler extends StrictLogging {
       def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
         val thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool)
         thread.setDaemon(true)
-        thread.setUncaughtExceptionHandler(exceptionHandler)
         thread.setName(QuerySchedName)
         thread
       }
     }
     val executor = new ForkJoinPool(numSchedThreads, threadFactory, exceptionHandler, true)
 
-    Scheduler.apply(FilodbMetrics.instrumentExecutor(executor, QuerySchedName))
+    Scheduler.apply(FilodbMetrics.instrumentExecutor(executor, QuerySchedName), exceptionReporter)
   }
 
 }
