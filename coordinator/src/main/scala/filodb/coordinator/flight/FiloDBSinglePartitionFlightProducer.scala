@@ -1,17 +1,15 @@
 package filodb.coordinator.flight
 
 import java.net.InetAddress
-import java.util
-import java.util.{Collections, Optional}
+import java.util.Collections
 import java.util.concurrent.Executors
 
+import scala.annotation.nowarn
+
 import akka.actor.ActorRef
-import com.github.luben.zstd.{ZstdInputStream, ZstdOutputStream}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.{BindableService, CallOptions, Channel, ClientCall, ClientInterceptor, Compressor,
-  CompressorRegistry, Decompressor, DecompressorRegistry, ForwardingClientCall, Metadata, MethodDescriptor,
-  Server, ServerBuilder, ServerCall, ServerCallHandler, ServerInterceptor}
+import io.grpc.{BindableService, Server}
 import io.grpc.netty.NettyServerBuilder
 import monix.eval.Task
 import org.apache.arrow.flight._
@@ -23,6 +21,7 @@ import filodb.core.memstore.TimeSeriesStore
 import filodb.core.query._
 import filodb.query.{QueryError, QueryResponse}
 import filodb.query.exec.ExecPlan
+
 
 /**
  * FiloDB Flight Producer for single-partition queries - serves Flight RPCs for FiloDB single-partition queries
@@ -113,15 +112,10 @@ object FiloDBSinglePartitionFlightProducer extends StrictLogging {
     val port = akkaPortToFlightPort(allConfig.getInt("akka.remote.netty.tcp.port"))
     val location = Location.forGrpcInsecure(host, port)
     val executor = Executors.newCachedThreadPool()
-    val noAuthHandler = new ServerAuthHandler {
-      override def isValid(token: Array[Byte]): Optional[String] = Optional.of("")
-      override def authenticate(outgoing: ServerAuthHandler.ServerAuthSender,
-                                incoming: util.Iterator[Array[Byte]]): Boolean = true
-    }
-
+    @nowarn
     val svc: BindableService = FlightGrpcUtils.createFlightService(FlightAllocator.serverAllocator,
       new FiloDBSinglePartitionFlightProducer(memStore, FlightAllocator.serverAllocator, location, allConfig),
-      noAuthHandler,
+      ServerAuthHandler.NO_OP,
       executor)
 
     val server1 = NettyServerBuilder.forPort(port)
