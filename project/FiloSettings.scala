@@ -195,6 +195,12 @@ object FiloSettings {
 
   // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
   // Also note: CLI-specific config overrides are set in FilodbCluster.scala
+  //
+  // JDK 21 requires --add-opens flags so that kryo-serializers can reflectively
+  // access private fields inside java.util.Collections$UnmodifiableCollection.
+  // Without them, UnmodifiableCollectionsSerializer.<clinit> throws
+  // ExceptionInInitializerError, which crashes Akka remoting on the first
+  // serialization call.
   lazy val shellScript = """#!/bin/bash
   while [ "${1:0:2}" = "-D" ]
   do
@@ -210,7 +216,27 @@ object FiloSettings {
     config="-Dconfig.file=$FILO_CONFIG_FILE"
   fi
   : ${FILOLOG:="."}
-  exec $CMD -Xmx2g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" "$@"  ;
+  exec $CMD -Xmx2g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops \
+    --add-opens=java.base/java.util=ALL-UNNAMED \
+    --add-opens=java.base/java.lang=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+    --add-opens=java.base/java.io=ALL-UNNAMED \
+    --add-opens=java.base/java.net=ALL-UNNAMED \
+    --add-opens=java.base/java.nio=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED \
+    --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+    --add-opens=java.base/sun.nio.cs=ALL-UNNAMED \
+    --add-opens=java.base/sun.security.action=ALL-UNNAMED \
+    --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
+    --add-opens=java.base/java.math=ALL-UNNAMED \
+    --add-opens=java.base/java.text=ALL-UNNAMED \
+    --add-opens=java.base/java.time=ALL-UNNAMED \
+    --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED \
+    -Djdk.reflect.useDirectMethodHandle=false \
+    -jar "$0" "$@"  ;
   """.split("\n")
 
   lazy val kafkaSettings = Seq(

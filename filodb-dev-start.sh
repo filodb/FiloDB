@@ -44,6 +44,32 @@ fi
 
 FIXED_JAVA_OPTS="-Xmx2G -Dconfig.file=$CONFIG -Dlogback.configurationFile=conf/logback-dev.xml "
 
+# JDK 21 requires --add-opens so that kryo-serializers can reflectively access
+# private fields inside java.util.Collections$UnmodifiableCollection (and friends).
+# Without these flags UnmodifiableCollectionsSerializer.<clinit> throws
+# ExceptionInInitializerError, which crashes Akka remoting on the first serialization.
+JDK21_OPENS="\
+  --add-opens=java.base/java.util=ALL-UNNAMED \
+  --add-opens=java.base/java.lang=ALL-UNNAMED \
+  --add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
+  --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+  --add-opens=java.base/java.io=ALL-UNNAMED \
+  --add-opens=java.base/java.net=ALL-UNNAMED \
+  --add-opens=java.base/java.nio=ALL-UNNAMED \
+  --add-opens=java.base/java.util.concurrent=ALL-UNNAMED \
+  --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+  --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.cs=ALL-UNNAMED \
+  --add-opens=java.base/sun.security.action=ALL-UNNAMED \
+  --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
+  --add-opens=java.base/java.math=ALL-UNNAMED \
+  --add-opens=java.base/java.text=ALL-UNNAMED \
+  --add-opens=java.base/java.time=ALL-UNNAMED \
+  --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED \
+  -Djdk.reflect.useDirectMethodHandle=false"
+
 echo "Starting FiloDB standalone server ..."
 echo "Java Opts Used: $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS"
-java $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS -cp standalone/target/scala-2.13/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer
+java $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS $JDK21_OPENS \
+  -cp standalone/target/scala-2.13/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer
