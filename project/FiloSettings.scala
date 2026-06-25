@@ -37,7 +37,9 @@ object FiloSettings {
 
     javacOptions ++= Seq(
       "-encoding", "UTF-8",
-      "--release", "21"  // Target JDK 21
+      "--release", "11"
+      // Target JDK 11 so that we can run on JDK 11 and 17 (and 21) without issues
+      // and other repos dependent on this one are not forced to upgrade in lock step
     ))
 
   // Create a default Scala style task to run with tests
