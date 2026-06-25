@@ -8,15 +8,25 @@ import monix.execution.atomic.AtomicBoolean
 import org.apache.arrow.memory.{AllocationListener, BufferAllocator, RootAllocator}
 
 import filodb.core.GlobalConfig
+import filodb.core.memstore.AutoMemoryAllocUtil
 import filodb.core.metrics.FilodbMetrics
 import filodb.memory.data.Shutdown
 
 object FlightAllocator {
 
-  private val rootAllocatorMaxSize = GlobalConfig.systemConfig.getBytes("filodb.flight.root-allocator-max-memory")
+  val filodbConfig = GlobalConfig.systemConfig.getConfig("filodb")
+
+  private val rootAllocatorMaxSize: Long =
+    if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig))
+      AutoMemoryAllocUtil.getFlightRPCMemoryAllocSize(filodbConfig)
+    else
+      filodbConfig.getBytes("flight.root-allocator-max-memory")
+
   lazy private val rootAllocator = new RootAllocator(rootAllocatorMaxSize)
-  private val flightServerMaxAlloc = GlobalConfig.systemConfig.getBytes("filodb.flight.server.allocator-limit")
-  private val flightClientMaxAlloc = GlobalConfig.systemConfig.getBytes("filodb.flight.client.allocator-limit")
+  private val flightServerMaxAlloc =
+    filodbConfig.getBytes("flight.server.fraction-allocator-limit") * rootAllocatorMaxSize
+  private val flightClientMaxAlloc =
+    filodbConfig.getBytes("flight.client.fraction-allocator-limit") * rootAllocatorMaxSize
 
   /**
    * We need metrics to track both total allocated memory (counter) and currently used memory (up-down counter which

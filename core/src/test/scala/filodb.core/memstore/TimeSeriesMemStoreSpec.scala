@@ -340,6 +340,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
         |      lucene-memory-percent = 10
         |      native-memory-manager-percent = 30
         |      block-memory-manager-percent = 60
+        |      flight-rpc-memory-percent = 0
         |    }
         |}
         |""".stripMargin).withFallback(config)
