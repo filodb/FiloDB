@@ -71,8 +71,8 @@ object AutoMemoryAllocUtil extends StrictLogging {
       val lucenePercent = filodbConfig.getDouble("memstore.memory-alloc.lucene-memory-percent")
       require(Math.abs(nativeMemoryManagerPercent + blockMemoryManagerPercent + lucenePercent +
         flightRpcMemoryPercent - 100) < 0.001,
-        s"isAutoMemoryConfigEnabled but configured Block($nativeMemoryManagerPercent), " +
-          s"Native($blockMemoryManagerPercent), Flight($flightRpcMemoryPercent) and " +
+        s"isAutoMemoryConfigEnabled but configured Native($nativeMemoryManagerPercent), " +
+          s"Block($blockMemoryManagerPercent), Flight($flightRpcMemoryPercent) and " +
           s"Lucene($lucenePercent) memory percents don't sum to 100.0")
     }
     enabled
@@ -104,10 +104,11 @@ object AutoMemoryAllocUtil extends StrictLogging {
       blockMemForDatasetPercent / 100 / 100 / numShardsPerNode).toLong
   }
 
+  private lazy val containerMemory = ManagementFactory.getOperatingSystemMXBean()
+    .asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize()
+  private lazy val currentJavaHeapMemory = Runtime.getRuntime().maxMemory()
+
   private def calculateAvailableOffHeapMemory(filodbConfig: Config): Long = {
-    val containerMemory = ManagementFactory.getOperatingSystemMXBean()
-      .asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize()
-    val currentJavaHeapMemory = Runtime.getRuntime().maxMemory()
     val osMemoryNeeds = filodbConfig.getMemorySize("memstore.memory-alloc.os-memory-needs").toBytes
     logger.info(s"Detected available memory containerMemory=$containerMemory" +
       s" currentJavaHeapMemory=$currentJavaHeapMemory osMemoryNeeds=$osMemoryNeeds")
