@@ -12,7 +12,7 @@ import filodb.core.memstore.AutoMemoryAllocUtil
 import filodb.core.metrics.FilodbMetrics
 import filodb.memory.data.Shutdown
 
-object FlightAllocator {
+object FlightAllocator extends StrictLogging {
 
   val filodbConfig = GlobalConfig.systemConfig.getConfig("filodb")
 
@@ -22,7 +22,11 @@ object FlightAllocator {
     else
       filodbConfig.getBytes("flight.root-allocator-max-memory")
 
-  lazy private val rootAllocator = new RootAllocator(rootAllocatorMaxSize)
+  lazy private val rootAllocator = {
+    require(rootAllocatorMaxSize > 0, s"Flight root allocator max size must be > 0, but was $rootAllocatorMaxSize")
+    logger.info(s"Creating flight root allocator with limit: $rootAllocatorMaxSize bytes")
+    new RootAllocator(rootAllocatorMaxSize)
+  }
   private val flightServerMaxAlloc =
     filodbConfig.getBytes("flight.server.fraction-allocator-limit") * rootAllocatorMaxSize
   private val flightClientMaxAlloc =
@@ -57,10 +61,17 @@ object FlightAllocator {
     }
   }
 
-  lazy val serverAllocator: BufferAllocator = rootAllocator.newChildAllocator("FilodbFlightServer",
-                                                                  serverAllocationListener, 0, flightServerMaxAlloc)
-  lazy val clientAllocator: BufferAllocator = rootAllocator.newChildAllocator("FilodbFlightClient",
-                                                                  clientAllocationListener, 0, flightClientMaxAlloc)
+  lazy val serverAllocator: BufferAllocator = {
+    logger.info(s"Creating flight server allocator with limit: $flightServerMaxAlloc bytes")
+    rootAllocator.newChildAllocator("FilodbFlightServer",
+      serverAllocationListener, 0, flightServerMaxAlloc)
+
+  }
+  lazy val clientAllocator: BufferAllocator = {
+    logger.info(s"Creating flight client allocator with limit: $flightClientMaxAlloc bytes")
+    rootAllocator.newChildAllocator("FilodbFlightClient",
+      clientAllocationListener, 0, flightClientMaxAlloc)
+  }
 
   /**
    * Use only for unit testing
