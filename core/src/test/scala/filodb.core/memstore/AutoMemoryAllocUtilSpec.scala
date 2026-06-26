@@ -19,7 +19,9 @@ class AutoMemoryAllocUtilSpec extends AnyFunSpec with Matchers {
     lucenePercent: Double  = 5.0,
     flightPercent: Double  = 0.0,
     numNodes: Int         = 2,
-    overrideAvailableMemory: Boolean = true
+    overrideAvailableMemory: Boolean = true,
+    serverFraction: Double = 0.6,
+    clientFraction: Double = 0.4
   ): Config = {
     val availableMemLine =
       if (overrideAvailableMemory) s"available-memory-bytes = ${availableMemoryBytes}b" else ""
@@ -35,6 +37,10 @@ class AutoMemoryAllocUtilSpec extends AnyFunSpec with Matchers {
          |    lucene-memory-percent         = $lucenePercent
          |    flight-rpc-memory-percent     = $flightPercent
          |    $availableMemLine
+         |  }
+         |  flight {
+         |    server.fraction-allocator-limit = $serverFraction
+         |    client.fraction-allocator-limit = $clientFraction
          |  }
          |}
          |""".stripMargin
@@ -251,6 +257,180 @@ class AutoMemoryAllocUtilSpec extends AnyFunSpec with Matchers {
           AutoMemoryAllocUtil.getPerShardBlockMemoryAllocSize(cfg, 4, DatasetRef(name), storeConf)
         }
       }
+    }
+  }
+
+  // ── getFlightServerMemoryAllocSize ──────────────────────────────────────────
+
+  describe("getFlightServerMemoryAllocSize") {
+
+    it("returns the server fraction of the total Flight RPC memory") {
+      val availMem       = 10L * 1024 * 1024 * 1024 // 10 GB
+      val flightPct      = 10.0
+      val serverFraction = 0.6
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent  = 24, blockPercent = 61, lucenePercent = 5, flightPercent = flightPct,
+        serverFraction = serverFraction
+      )
+      val expectedFlightRpc = (availMem * flightPct / 100).toLong
+      val expected          = (serverFraction * expectedFlightRpc).toLong
+      AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg) shouldEqual expected
+    }
+
+    it("returns 0 when flight-rpc-memory-percent is 0") {
+      val cfg = makeConfig(flightPercent = 0, serverFraction = 0.6)
+      AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg) shouldEqual 0L
+    }
+
+    it("returns 0 when server fraction-allocator-limit is 0.0") {
+      val availMem = 8L * 1024 * 1024 * 1024 // 8 GB
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.0, clientFraction = 1.0
+      )
+      AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg) shouldEqual 0L
+    }
+
+    it("equals the full Flight RPC size when server fraction-allocator-limit is 1.0") {
+      val availMem = 8L * 1024 * 1024 * 1024 // 8 GB
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 1.0, clientFraction = 0.0
+      )
+      val expectedFlightRpc = AutoMemoryAllocUtil.getFlightRPCMemoryAllocSize(cfg)
+      AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg) shouldEqual expectedFlightRpc
+    }
+
+    it("scales linearly with the server fraction-allocator-limit") {
+      val availMem = 10L * 1024 * 1024 * 1024 // 10 GB
+      val cfgHalf = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.5
+      )
+      val cfgQuarter = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.25
+      )
+      val resultHalf    = AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfgHalf)
+      val resultQuarter = AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfgQuarter)
+      // quarter should be half of half (within 1 byte rounding tolerance)
+      (resultHalf / 2 - resultQuarter).abs should be <= 1L
+    }
+
+    it("scales linearly with the available memory") {
+      val cfg4GB = makeConfig(
+        availableMemoryBytes = 4L * 1024 * 1024 * 1024,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.6
+      )
+      val cfg8GB = makeConfig(
+        availableMemoryBytes = 8L * 1024 * 1024 * 1024,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.6
+      )
+      val result4 = AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg4GB)
+      val result8 = AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg8GB)
+      // Two independent .toLong truncations can cause a 1-byte rounding gap
+      (result8 - result4 * 2).abs should be <= 1L
+    }
+  }
+
+  // ── getFlightClientMemoryAllocSize ──────────────────────────────────────────
+
+  describe("getFlightClientMemoryAllocSize") {
+
+    it("returns the client fraction of the total Flight RPC memory") {
+      val availMem       = 10L * 1024 * 1024 * 1024 // 10 GB
+      val flightPct      = 10.0
+      val clientFraction = 0.4
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent  = 24, blockPercent = 61, lucenePercent = 5, flightPercent = flightPct,
+        clientFraction = clientFraction
+      )
+      val expectedFlightRpc = (availMem * flightPct / 100).toLong
+      val expected          = (clientFraction * expectedFlightRpc).toLong
+      AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg) shouldEqual expected
+    }
+
+    it("returns 0 when flight-rpc-memory-percent is 0") {
+      val cfg = makeConfig(flightPercent = 0, clientFraction = 0.4)
+      AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg) shouldEqual 0L
+    }
+
+    it("returns 0 when client fraction-allocator-limit is 0.0") {
+      val availMem = 8L * 1024 * 1024 * 1024 // 8 GB
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 1.0, clientFraction = 0.0
+      )
+      AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg) shouldEqual 0L
+    }
+
+    it("equals the full Flight RPC size when client fraction-allocator-limit is 1.0") {
+      val availMem = 8L * 1024 * 1024 * 1024 // 8 GB
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.0, clientFraction = 1.0
+      )
+      val expectedFlightRpc = AutoMemoryAllocUtil.getFlightRPCMemoryAllocSize(cfg)
+      AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg) shouldEqual expectedFlightRpc
+    }
+
+    it("scales linearly with the client fraction-allocator-limit") {
+      val availMem = 10L * 1024 * 1024 * 1024 // 10 GB
+      val cfgHalf = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        clientFraction = 0.5
+      )
+      val cfgQuarter = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        clientFraction = 0.25
+      )
+      val resultHalf    = AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfgHalf)
+      val resultQuarter = AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfgQuarter)
+      // quarter should be half of half (within 1 byte rounding tolerance)
+      (resultHalf / 2 - resultQuarter).abs should be <= 1L
+    }
+
+    it("scales linearly with the available memory") {
+      val cfg4GB = makeConfig(
+        availableMemoryBytes = 4L * 1024 * 1024 * 1024,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        clientFraction = 0.4
+      )
+      val cfg8GB = makeConfig(
+        availableMemoryBytes = 8L * 1024 * 1024 * 1024,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        clientFraction = 0.4
+      )
+      val result4 = AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg4GB)
+      val result8 = AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg8GB)
+      // Two independent .toLong truncations can cause a 1-byte rounding gap
+      (result8 - result4 * 2).abs should be <= 1L
+    }
+
+    it("server and client allocations sum to the total Flight RPC size when fractions sum to 1.0") {
+      val availMem = 10L * 1024 * 1024 * 1024 // 10 GB
+      val cfg = makeConfig(
+        availableMemoryBytes = availMem,
+        nativePercent = 24, blockPercent = 61, lucenePercent = 5, flightPercent = 10,
+        serverFraction = 0.6, clientFraction = 0.4
+      )
+      val flightRpc = AutoMemoryAllocUtil.getFlightRPCMemoryAllocSize(cfg)
+      val server    = AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(cfg)
+      val client    = AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(cfg)
+      // Both fractions apply independently to the same flightRpc total; rounding can cause a 1-byte gap.
+      (server + client - flightRpc).abs should be <= 1L
     }
   }
 }
