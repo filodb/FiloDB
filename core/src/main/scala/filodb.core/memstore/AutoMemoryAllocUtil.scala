@@ -6,7 +6,6 @@ import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
-import filodb.core.query.FlightAllocator.filodbConfig
 import filodb.core.store.StoreConfig
 
 /**
@@ -120,6 +119,10 @@ object AutoMemoryAllocUtil extends StrictLogging {
   private lazy val currentJavaHeapMemory = Runtime.getRuntime().maxMemory()
 
   private def calculateAvailableOffHeapMemory(filodbConfig: Config): Long = {
+    require(isAutoMemoryConfigEnabled(filodbConfig), s"Automatic memory allocation is not enabled in config but" +
+      s"calculateAvailableOffHeapMemory method was called")
+    // If Xmx is not set, maxMemory() returns Long.MaxValue, which is not useful for calculating available memory.
+    require(currentJavaHeapMemory < Long.MaxValue, s"Xmx was not set but auto memory configuration was enabled")
     val osMemoryNeeds = filodbConfig.getMemorySize("memstore.memory-alloc.os-memory-needs").toBytes
     logger.info(s"Detected available memory containerMemory=$containerMemory" +
       s" currentJavaHeapMemory=$currentJavaHeapMemory osMemoryNeeds=$osMemoryNeeds")
