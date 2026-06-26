@@ -2,38 +2,10 @@
 
 This document describes the Apache Arrow Flight transport layer in FiloDB: its wire protocol, request/response schema, versioning mechanism, and the advantages it provides over the Akka Actor and gRPC dispatchers it augments or replaces.
 
-## Table of Contents
+## Pre-requsite Reading
 
-- [Background and Motivation](#background-and-motivation)
-- [Architecture Overview](#architecture-overview)
-- [Server Implementations](#server-implementations)
-  - [Single-Partition Flight Server](#single-partition-flight-server)
-  - [Multi-Partition Flight Server](#multi-partition-flight-server)
-- [Request Differences: Single-Partition vs Multi-Partition](#request-differences-single-partition-vs-multi-partition)
-- [Unified Response Protocol](#unified-response-protocol)
-  - [Arrow VSR Schema (`arrowSrvSchema`)](#arrow-vsr-schema-arrowsrvschema)
-  - [Message Order on the Wire](#message-order-on-the-wire)
-  - [Header: `FlightResultHeader`](#header-flightresultheader)
-  - [Data Frames: `VectorSchemaRoot` batches](#data-frames-vectorschemaroot-batches)
-  - [Footer: `FlightResultFooter`](#footer-flightresultfooter)
-- [ArrowSerializedRangeVector](#arrowserializedrangevector)
-- [Serialization Stack](#serialization-stack)
-  - [Kryo – ExecPlan tickets (single-partition)](#kryo--execplan-tickets-single-partition)
-  - [Protobuf – Request tickets (multi-partition)](#protobuf--request-tickets-multi-partition)
-  - [Direct-write row encoding (data rows)](#direct-write-row-encoding-data-rows)
-- [Response Versioning](#response-versioning)
-- [Client: FlightPlanDispatcher and FlightClientManager](#client-flightplandispatcher-and-flightclientmanager)
-  - [Connection pooling and health-checking](#connection-pooling-and-health-checking)
-  - [Memory isolation with `FlightAllocator`](#memory-isolation-with-flightallocator)
-- [Compression](#compression)
-- [Protocol Comparison: Arrow Flight vs Akka vs gRPC](#protocol-comparison-arrow-flight-vs-akka-vs-grpc)
-  - [Single-partition: Arrow Flight vs Akka](#single-partition-arrow-flight-vs-akka)
-  - [Multi-partition: Arrow Flight vs gRPC](#multi-partition-arrow-flight-vs-grpc)
-- [Future Improvements Enabled by Versioning](#future-improvements-enabled-by-versioning)
-- [Configuration Reference](#configuration-reference)
-- [Related Code](#related-code)
-
----
+* [Arrow Flight RPC](https://arrow.apache.org/docs/format/Flight.html)
+* [Arrow Flight Java Cookbook](https://arrow.apache.org/cookbook/java/flight.html)
 
 ## Background and Motivation
 
@@ -71,18 +43,18 @@ The Flight transport is implemented in `coordinator/src/main/scala/filodb/coordi
                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  FiloDB Flight Server  (Netty, port = akkaPort + 5000)          │
-│                                                                  │
+│                                                                 │
 │  FiloDBSinglePartitionFlightProducer                            │
 │    getStream(Ticket)                                            │
 │      deserialize Kryo ticket → ExecPlan                         │
 │      executePlan(q, querySession) → QueryResponse               │
-│      FlightQueryResultStreaming.streamResults(…)                 │
-│                                                                  │
+│      FlightQueryResultStreaming.streamResults(…)                │
+│                                                                 │
 │  FiloDBMultiPartitionFlightProducer                             │
 │    getStream(Ticket)                                            │
 │      parse Proto Request → PromQL string                        │
 │      queryPlanner.materialize(logicalPlan, qContext)            │
-│      → ExecPlan                                                  │
+│      → ExecPlan                                                 │
 │      executePhysicalPlanAndRespond(…)                           │
 │        FlightQueryResultStreaming.streamResults(…)              │
 └─────────────────────────────────────────────────────────────────┘
@@ -97,7 +69,32 @@ The Flight transport is implemented in `coordinator/src/main/scala/filodb/coordi
 │    → QueryResult(id, schema, List[ArrowSerializedRangeVector])  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+Here is a potential deployment diagram
 
+```
+
+┌───────────────────────────────┐                   ┌───────────────────────────────┐
+│     Partition/Cell 1          │                   │     Partition/Cell 2          │ 
+│                               │                   │                               │
+│   ┌───────────────────────┐   │                   │   ┌───────────────────────┐   │
+│   │                       │   │  Multi Partition  │   │                       │   │
+│   │ Partition Query Facade│───│────Flight RPC────>│   │ Partition Query Facade│   │
+│   │                       │   │                   │   │                       │   │
+│   └───────────────────────┘   │                   │   └───────────────────────┘   │
+│               │               │                   │               │               │
+│     Single Partition Flight   │                   │     Single Partition Flight   │
+│              RPC              │                   │              RPC              │
+│               │               │                   │               │               │
+│               V               │                   │               V               │
+│   ┌───────────────────────┐   │                   │   ┌───────────────────────┐   │
+│   │                       │   │                   │   │                       │   │
+│   │       FiloDB          │   │                   │   │       FiloDB          │   │
+│   │                       │   │                   │   │                       │   │
+│   └───────────────────────┘   │                   │   └───────────────────────┘   │
+│                               │                   │                               │
+└───────────────────────────────┘                   └───────────────────────────────┘
+
+```
 ---
 
 ## Server Implementations
