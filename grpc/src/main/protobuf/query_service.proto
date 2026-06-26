@@ -1157,8 +1157,11 @@ message FlightResultHeader {
 }
 
 message FlightResultFooter {
-  QueryResultStats queryStats  = 1;
-  optional Throwable throwable = 2;
+  QueryResultStats queryStats           = 1;
+  optional Throwable throwable          = 2;
+  bool mayBePartial                     = 3;
+  optional string partialResultReason   = 4;
+  optional QueryWarnings warnings       = 5;
 }
 
 message FlightMetadata {

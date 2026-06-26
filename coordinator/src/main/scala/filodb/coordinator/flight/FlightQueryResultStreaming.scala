@@ -346,18 +346,23 @@ trait FlightQueryResultStreaming extends StrictLogging {
             }.map { _ =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               sendRespFooterAndComplete(listener, flightAllocator, execPlan,
-                                        querySpan, res.queryStats, None)
+                                        querySpan, res.queryStats, None,
+                                        res.mayBePartial, res.partialResultReason, res.warnings)
             }
           }
       }
     }
 
+    // scalastyle:off parameter.number
     def sendRespFooterAndComplete(listener: ServerStreamListener,
                                   flightAllocator: FlightAllocator,
                                   execPlan: ExecPlan,
                                   queryExecuteSpan: Span,
                                   s: QueryStats,
-                                  t: Option[Throwable]): Unit = {
+                                  t: Option[Throwable],
+                                  mayBePartial: Boolean = false,
+                                  partialResultReason: Option[String] = None,
+                                  warnings: QueryWarnings = QueryWarnings()): Unit = {
       t.foreach { e =>
         logQueryErrors(e, execPlan)
         queryExecuteSpan.fail(e.getMessage)
@@ -366,9 +371,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
       // 10% room for precisely this
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
-        s"stream for queryStats=$s, throwable=$t")
+        s"stream for queryStats=$s, throwable=$t, mayBePartial=$mayBePartial, warnings=$warnings")
       // ownership of metadata buf is now with flight listener and hence not closed here
-      listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator))
+      listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator,
+        mayBePartial, partialResultReason, warnings))
       listener.completed()
     }
   }

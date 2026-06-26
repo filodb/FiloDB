@@ -4,7 +4,8 @@ import org.apache.arrow.memory.ArrowBuf
 
 import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.{maxNumRows, VsrPopulationState}
 import filodb.core.binaryrecord2.SingleRecordBuilder
-import filodb.core.query.{FlightAllocator, QueryStats, RangeVectorKey, ResultSchema, RvRange, SerializableRangeVector}
+import filodb.core.query.{FlightAllocator, QueryStats, QueryWarnings, RangeVectorKey,
+                          ResultSchema, RvRange, SerializableRangeVector}
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.ProtoConverters._
@@ -72,10 +73,16 @@ object FlightProtoSerDeser {
         .setResultSchema(resultSchema.toProto)).build().toByteArray, fAllocator)
 
   def serializeFooterToArrowBuf(queryStats: QueryStats, throwable: Option[Throwable],
-                                 fAllocator: FlightAllocator): ArrowBuf = {
+                                 fAllocator: FlightAllocator,
+                                 mayBePartial: Boolean = false,
+                                 partialResultReason: Option[String] = None,
+                                 warnings: QueryWarnings = QueryWarnings()): ArrowBuf = {
     val footerBuilder = GrpcMultiPartitionQueryService.FlightResultFooter.newBuilder()
       .setQueryStats(queryStats.toProto)
+      .setMayBePartial(mayBePartial)
+      .setWarnings(warnings.toProto)
     throwable.foreach(t => footerBuilder.setThrowable(t.toProto))
+    partialResultReason.foreach(footerBuilder.setPartialResultReason)
     toArrowBuf(GrpcMultiPartitionQueryService.FlightMetadata.newBuilder()
       .setFooter(footerBuilder.build()).build().toByteArray, fAllocator)
   }

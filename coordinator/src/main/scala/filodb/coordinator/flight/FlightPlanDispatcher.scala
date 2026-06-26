@@ -14,7 +14,7 @@ import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot, VectorUnloader}
 import filodb.coordinator.QueryScheduler
 import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
-import filodb.core.query.{QuerySession, QueryStats, ResultSchema}
+import filodb.core.query.{QuerySession, QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.ProtoConverters._
@@ -71,6 +71,9 @@ case class FlightPlanDispatcher(location: Location,
         var resultSchema: Option[ResultSchema] = None
         var footerStats: Option[QueryStats] = None
         var footerThrowable: Option[Throwable] = None
+        var footerMayBePartial: Boolean = false
+        var footerPartialResultReason: Option[String] = None
+        var footerWarnings: QueryWarnings = QueryWarnings()
         val vsrs = mutable.ListBuffer[VectorSchemaRoot]()
         var canceled = false
         // Order of messages: ResultSchema, zero or more RVs with metadata, QueryStats, Throwable (if error)
@@ -111,9 +114,16 @@ case class FlightPlanDispatcher(location: Location,
             } else if (meta.hasFooter) {
               val footer = meta.getFooter
               footerStats = Some(footer.getQueryStats.fromProto)
-              footerThrowable = if (footer.hasThrowable) Some(footer.getThrowable.fromProto) else None
+              footerThrowable = if (footer.hasThrowable) Some(footer.getThrowable.fromProto)
+                                else None
+              footerMayBePartial = footer.getMayBePartial
+              footerPartialResultReason = if (footer.hasPartialResultReason) Some(footer.getPartialResultReason)
+                                          else None
+              footerWarnings = if (footer.hasWarnings) footer.getWarnings.fromProto
+                               else QueryWarnings()
               qLogger.debug(s"FlightPlanDispatcher received footer for queryPlanId=${plan.planId} with stats: " +
-                s"${footerStats.get}, throwable: $footerThrowable")
+                s"${footerStats.get}, throwable: $footerThrowable, mayBePartial: $footerMayBePartial, " +
+                s"warnings: $footerWarnings")
             } else {
               qLogger.warn(s"FlightPlanDispatcher received metadata with unknown type for queryPlanId=${plan.planId}")
             }
@@ -127,7 +137,7 @@ case class FlightPlanDispatcher(location: Location,
         } else {
           val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(vsrs.toSeq, resultSchema.get)
           QueryResult(plan.queryContext.queryId, resultSchema.get, srvs,
-            footerStats.getOrElse(QueryStats()))
+            footerStats.getOrElse(QueryStats()), footerWarnings, footerMayBePartial, footerPartialResultReason)
         }
       }
     }.onErrorHandle { ex =>
