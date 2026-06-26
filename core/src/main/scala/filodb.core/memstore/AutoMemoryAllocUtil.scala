@@ -6,6 +6,7 @@ import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
+import filodb.core.query.FlightAllocator.filodbConfig
 import filodb.core.store.StoreConfig
 
 /**
@@ -82,6 +83,16 @@ object AutoMemoryAllocUtil extends StrictLogging {
     val availableMemoryBytes: Long = calculateAvailableOffHeapMemory(filodbConfig)
     val flightRpcMemoryPercent = filodbConfig.getDouble("memstore.memory-alloc.flight-rpc-memory-percent")
     (availableMemoryBytes * flightRpcMemoryPercent / 100).toLong
+  }
+
+  def getFlightServerMemoryAllocSize(filodbConfig: Config): Long = {
+    (filodbConfig.getDouble("flight.server.fraction-allocator-limit") *
+      getFlightRPCMemoryAllocSize(filodbConfig)).toLong
+  }
+
+  def getFlightClientMemoryAllocSize(filodbConfig: Config): Long = {
+    (filodbConfig.getDouble("flight.client.fraction-allocator-limit") *
+      getFlightRPCMemoryAllocSize(filodbConfig)).toLong
   }
 
   def getIngestionMemoryAllocSize(filodbConfig: Config): Long = {

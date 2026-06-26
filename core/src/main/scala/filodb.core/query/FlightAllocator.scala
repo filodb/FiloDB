@@ -27,10 +27,17 @@ object FlightAllocator extends StrictLogging {
     logger.info(s"Creating flight root allocator with limit: $rootAllocatorMaxSize bytes")
     new RootAllocator(rootAllocatorMaxSize)
   }
-  private val flightServerMaxAlloc =
-    filodbConfig.getBytes("flight.server.fraction-allocator-limit") * rootAllocatorMaxSize
-  private val flightClientMaxAlloc =
-    filodbConfig.getBytes("flight.client.fraction-allocator-limit") * rootAllocatorMaxSize
+  private val flightServerMaxAlloc: Long = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
+    AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(filodbConfig)
+  } else {
+    filodbConfig.getBytes("flight.server.allocator-limit")
+  }
+
+  private val flightClientMaxAlloc: Long = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
+    AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(filodbConfig)
+  } else {
+    filodbConfig.getBytes("flight.client.allocator-limit")
+  }
 
   /**
    * We need metrics to track both total allocated memory (counter) and currently used memory (up-down counter which
