@@ -816,6 +816,8 @@ Methods of configuring Kamon (except for the metrics logger):
 
 Please go to the [architecture](doc/architecture.md) doc.
 
+For details on the Apache Arrow Flight transport layer—including the wire protocol, request/response schema, versioning, and a comparison with the Akka and gRPC dispatchers—see the [Arrow Flight Protocol](doc/arrow-flight-protocol.md) doc.
+
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
