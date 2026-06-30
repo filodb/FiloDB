@@ -25,6 +25,7 @@ import filodb.core.QueryTimeoutException
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
+import filodb.memory.data.Shutdown
 import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
 
@@ -209,7 +210,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
               // here we initialize the state object with emoty flightVsr which
               // will be populated when we need to send VSR over the wire as response
               flightAllocator.withRequestAllocator { a =>
-                VsrPopulationState(flightVsr = ArrowSerializedRangeVectorOps.emptyVectorSchemaRoot(a))
+                new VsrPopulationState(flightVsr = ArrowSerializedRangeVectorOps.emptyVectorSchemaRoot(a))
               } {
                 throw new IllegalStateException("FlightAllocator is already closed, cannot create VectorSchemaRoot")
               }
@@ -308,7 +309,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                         s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
                         s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
                       listener.putNext()
-                      state.freeVsrs.offer(vsr) // add to free pool after sending over flight
+                      val offered = state.freeVsrs.offer(vsr) // add to free pool after sending over flight
+                      if (!offered) Shutdown.haltAndCatchFire(new IllegalStateException("Failed add VSR to free pool"))
                     }
                     state.finishedVsrs.clear() // clear finished list after sending all over flight
                   }
@@ -330,7 +332,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                       s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
                       s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
                     listener.putNext()
-                    state.freeVsrs.offer(lastVsr) // add to free pool after sending over flight
+                    val offered = state.freeVsrs.offer(lastVsr) // add to free pool after sending over flight
+                    if (!offered) Shutdown.haltAndCatchFire(new IllegalStateException("Failed add VSR to free pool"))
                   }
                 }
               }

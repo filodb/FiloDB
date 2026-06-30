@@ -789,6 +789,7 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
 
         // Check if this is a null row (empty data that was filtered out during serialization)
         val retRow = if (currentBrIsNull) {
+          val curTimestamp = outputRange.get.startMs + rowsRead.toLong * step
           if (canRemoveEmptyDouble) {
             emptyDouble.timestamp = curTimestamp
             emptyDouble
@@ -808,7 +809,6 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
         }
         currentRowInVsr += 1
         rowsRead += 1
-        curTimestamp += step
         offsetBufferPtr += 4 // Move to next offset (4 bytes per offset)
         retRow
       }

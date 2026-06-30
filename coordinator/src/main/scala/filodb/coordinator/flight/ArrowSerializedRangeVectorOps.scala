@@ -34,20 +34,20 @@ object ArrowSerializedRangeVectorOps {
   // FIXME this should not be hard-coded
   val maxVecLen = 1048576 // 1 MB
   val maxNumRows = maxVecLen / 15
+  val maxVsrs = 50
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
     VectorSchemaRoot.create(arrowSrvSchema, allocator)
   }
 
   case class VsrPopulationState(var flightVsr: VectorSchemaRoot = null,
-                                var currentVsr: VectorSchemaRoot = null,
-                                var currentIsRvkVec: BitVector = null,
-                                var currentRvkBrVec: VarBinaryVector = null,
-                                var rowNum: Int = -1,
-                                var bytesRemaining: Int = maxVecLen,
-                                // FIXME hard coded 5
-                                freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](5),
-                                finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
+                        var currentVsr: VectorSchemaRoot = null,
+                        var currentIsRvkVec: BitVector = null,
+                        var currentRvkBrVec: VarBinaryVector = null,
+                        var rowNum: Int = -1,
+                        var bytesRemaining: Int = maxVecLen,
+                        freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](maxVsrs),
+                        finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
 
     def finishAndGetCurrentVsr(): VectorSchemaRoot = {
       if (currentVsr != null) {
@@ -187,13 +187,15 @@ object ArrowSerializedRangeVectorOps {
         val startNs = Utils.currentThreadCpuTimeNanos
         try {
           ChunkMap.validateNoSharedLocks(execPlan)
+          val canRemoveEmptyRows = SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema)
+          lazy val col1Type = recordSchema.columns(1).colType
           Using.resource(rv.rows()) { rows =>
             while (rows.hasNext) {
               val nextRow = rows.next()
               // Don't encode empty-histogram / NaN data over the wire
-              if (!SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema) ||
-                recordSchema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
-                recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
+              if (!canRemoveEmptyRows ||
+                col1Type == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
+                col1Type == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
                 addFromReader(nextRow)
               } else {
                 addNullRow()

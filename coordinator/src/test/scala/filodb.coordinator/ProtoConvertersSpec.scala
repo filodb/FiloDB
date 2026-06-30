@@ -107,7 +107,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       )
 
       val queryStats = QueryStats()
-      val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
+      val vsrs = new ArrowSerializedRangeVectorOps.VsrPopulationState()
 
       // Populate VSR
       ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
