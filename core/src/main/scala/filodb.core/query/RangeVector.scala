@@ -756,12 +756,10 @@ class ArrowSerializedRangeVector(val key: RangeVectorKey,
       private var rowsRead = 0
       private val emptyDouble = new TransientRow(0L, Double.NaN)
       private val emptyHist = new TransientHistRow(0L, Histogram.empty)
-      private var curTimestamp = outputRange.map(_.startMs).getOrElse(0L)
       private val step = outputRange.map(_.stepMs).getOrElse(1L)
-      private val canRemoveEmptyDouble = SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
-        schema.columns(1).colType == DoubleColumn
-      private val canRemoveEmptyHist = SerializedRangeVector.canRemoveEmptyRows(outputRange, schema) &&
-        schema.columns(1).colType == HistogramColumn
+      private val canRemoveEmpty = SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)
+      private val canRemoveEmptyDouble = canRemoveEmpty && schema.columns(1).colType == DoubleColumn
+      private val canRemoveEmptyHist = canRemoveEmpty && schema.columns(1).colType == HistogramColumn
 
       final def hasNext: Boolean = rowsRead < numRowsSerialized
 

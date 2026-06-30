@@ -71,7 +71,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
   private val queryConfig = QueryConfig(sysConfig.getConfig("filodb.query"))
   protected val queryScheduler: Scheduler = QueryScheduler.queryScheduler
 
-  // scalastyle:off method.length
+  // scalastyle:off method.length cyclomatic.complexity
   def executePhysicalPlanAndRespond(flightContext: FlightProducer.CallContext,
                                     execPlan: ExecPlan,
                                     listener: ServerStreamListener): Unit = {
@@ -215,6 +215,45 @@ trait FlightQueryResultStreaming extends StrictLogging {
                 throw new IllegalStateException("FlightAllocator is already closed, cannot create VectorSchemaRoot")
               }
             }.bracket { state =>
+              // Sends all VSRs in state.finishedVsrs over Flight and returns each to the free pool.
+              // Each VSR is removed from finishedVsrs BEFORE sending so that, if checkResultBytes (or
+              // any step inside) throws, the bracket release finds only cleanly tracked VSRs:
+              //   • finishedVsrs — remaining unsent VSRs, closed by the bracket
+              //   • freeVsrs     — already sent VSRs, closed by the bracket
+              // The VSR that triggered the exception is closed inline in the catch before re-throwing.
+              def drainFinishedVsrs(resultSize: Long, label: String): Long = {
+                FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                var bytes = resultSize
+                while (state.finishedVsrs.nonEmpty) {
+                  val vsr = state.finishedVsrs.remove(0) // take ownership; no longer in finishedVsrs
+                  try {
+                    val unloader = new VectorUnloader(vsr)
+                    val loader = new VectorLoader(state.flightVsr)
+                    Using.resource(unloader.getRecordBatch) { rb =>
+                      val vsrBytes = rb.computeBodyLength()
+                      bytes += vsrBytes
+                      res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                      execPlan.checkResultBytes(bytes, queryConfig, res.warnings)
+                      loader.load(rb)
+                    }
+                    logger.debug(s"Putting $label vsr into flight response for " +
+                      s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
+                      s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                      s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
+                    listener.putNext()
+                    val offered = state.freeVsrs.offer(vsr) // return to free pool for reuse
+                    if (!offered) Shutdown.haltAndCatchFire(
+                      new IllegalStateException("Failed to add VSR to free pool"))
+                  } catch {
+                    case t: Throwable =>
+                      // vsr is not in finishedVsrs or freeVsrs; close here so bracket can't leak it.
+                      // Any remaining finishedVsrs items are closed by the bracket release.
+                      vsr.close()
+                      throw t
+                  }
+                }
+                bytes
+              }
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               listener.start(state.flightVsr)
               var numResultSamples = 0
@@ -241,6 +280,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                     throw new IllegalStateException("should not reach here since RVs are all serializable")
                 }
                 execPlan.checkSamplesLimit(numResultSamples, res.warnings)
+                // load each result vsr into the flightVsr and send it over the wire to listener
+                // ownership of the VSR is now with flight listener and hence not closed here
                 Observable.fromIterable(resultVsrs).map { vsr =>
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
@@ -292,59 +333,48 @@ trait FlightQueryResultStreaming extends StrictLogging {
                       throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
                     }
                   }.executeOn(queryScheduler).asyncBoundary.map { _ =>
-                    FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-                    // unload each finishedVsr into vec and putNext to listener
-                    state.finishedVsrs.foreach { vsr =>
-                      val unloader = new VectorUnloader(vsr)
-                      val loader = new VectorLoader(state.flightVsr)
-                      Using.resource(unloader.getRecordBatch) { rb =>
-                        val vsrBytes = rb.computeBodyLength()
-                        resultSize += vsrBytes
-                        res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
-                        execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
-                        loader.load(rb)
-                      }
-                      logger.debug(s"Putting next vsr into flight response for " +
-                        s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
-                        s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
-                        s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
-                      listener.putNext()
-                      val offered = state.freeVsrs.offer(vsr) // add to free pool after sending over flight
-                      if (!offered) Shutdown.haltAndCatchFire(new IllegalStateException("Failed add VSR to free pool"))
-                    }
-                    state.finishedVsrs.clear() // clear finished list after sending all over flight
+                    resultSize = drainFinishedVsrs(resultSize, "next")
                   }
                 }.completedL.map { _ =>
                   FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-                  if (state.currentVsr != null) {
-                    val lastVsr = state.finishAndGetCurrentVsr()
-                    val unloader = new VectorUnloader(lastVsr)
-                    val loader = new VectorLoader(state.flightVsr)
-                    Using.resource(unloader.getRecordBatch) { rb =>
-                      val vsrBytes = rb.computeBodyLength()
-                      resultSize += vsrBytes
-                      res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
-                      execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
-                      loader.load(rb)
-                    }
-                    logger.debug(s"Putting last vsr into flight response for " +
-                      s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
-                      s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
-                      s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
-                    listener.putNext()
-                    val offered = state.freeVsrs.offer(lastVsr) // add to free pool after sending over flight
-                    if (!offered) Shutdown.haltAndCatchFire(new IllegalStateException("Failed add VSR to free pool"))
-                  }
+                  // Move the partially-filled currentVsr into finishedVsrs first so the bracket
+                  // release can close it if drainFinishedVsrs throws below.
+                  // scalastyle:off null
+                  if (state.currentVsr != null) state.finishedVsrs += state.finishAndGetCurrentVsr()
+                  // scalastyle:on null
+                  resultSize = drainFinishedVsrs(resultSize, "last")
                 }
               }
             } { state =>
-              // this lambda is the finally clause for bracket method
+              // This lambda is the finally clause for the bracket: runs on success, error, AND
+              // cancellation, so it is the single guaranteed cleanup site for all VSR memory.
+              //
+              // VSR accounting at this point:
+              //   • state.flightVsr    — always allocated; close unconditionally
+              //   • state.freeVsrs     — VSRs that were sent and returned to the pool; close all
+              //   • state.finishedVsrs — VSRs not yet sent (non-empty only on exception mid-drain)
+              //   • state.currentVsr   — partially-filled VSR not yet moved to finishedVsrs
+              //                         (non-null only if populateRvContentsIntoVsrs threw before the
+              //                          pre-send finalisation ran — safety net)
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
               Task.eval {
                 state.flightVsr.close()
+                // close any VSRs removed from finishedVsrs mid-drain but not yet in freeVsrs
+                // (drainFinishedVsrs catch already closed the one that threw, but any items after
+                // it in the ArrayBuffer are still here)
+                state.finishedVsrs.foreach(_.close())
+                state.finishedVsrs.clear()
+                // close VSRs that were successfully sent and returned to the pool
                 while (!state.freeVsrs.isEmpty) {
                   state.freeVsrs.poll().close()
                 }
+                // safety net: should always be null here, but close if present to avoid a leak
+                // scalastyle:off null
+                if (state.currentVsr != null) {
+                  state.currentVsr.close()
+                  state.currentVsr = null
+                }
+                // scalastyle:on null
               }
             }.map { _ =>
               FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)

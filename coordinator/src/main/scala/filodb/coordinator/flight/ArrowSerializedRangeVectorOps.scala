@@ -40,6 +40,18 @@ object ArrowSerializedRangeVectorOps {
     VectorSchemaRoot.create(arrowSrvSchema, allocator)
   }
 
+  /**
+   * Holds the state of the VSR population process, including the current VSR being populated, the current row number,
+   * and the remaining bytes in the current VSR. It also maintains a queue of free VSRs and a list of finished VSRs.
+   * @param flightVsr the VSR owned by flight, which is used to hold the serialized data for the current flight request
+   * @param currentVsr the VSR currently being populated with data from the RangeVector
+   * @param currentIsRvkVec the isRvkVector BitVector cached from current VSR
+   * @param currentRvkBrVec the rvkBrVector VarBinaryVector cached from current VSR
+   * @param rowNum the last row number populated in the current VSR, -1 if no rows have been populated yet
+   * @param bytesRemaining the number of bytes remaining in the current VSR, initialized to maxVecLen
+   * @param freeVsrs a queue of free VSRs that can be reused for future population
+   * @param finishedVsrs a list of finished VSRs that have been populated and are ready to be sent back to the client
+   */
   case class VsrPopulationState(var flightVsr: VectorSchemaRoot = null,
                         var currentVsr: VectorSchemaRoot = null,
                         var currentIsRvkVec: BitVector = null,
@@ -107,13 +119,15 @@ object ArrowSerializedRangeVectorOps {
                                  allocator: BufferAllocator,
                                  state: VsrPopulationState): Unit = {
 
-    // TODO update metrics & query statistics on result bytes during RV serialization
-
-    def addNewVsr(): Unit = {
-      if (state.currentVsr != null) {
+    def updateVsrLengthInState(): Unit = {
         state.currentIsRvkVec.setValueCount(state.rowNum)
         state.currentRvkBrVec.setValueCount(state.rowNum)
         state.currentVsr.setRowCount(state.rowNum)
+    }
+
+    def addNewVsr(): Unit = {
+      if (state.currentVsr != null) {
+        updateVsrLengthInState()
         state.finishedVsrs += state.currentVsr
       }
 
@@ -178,9 +192,7 @@ object ArrowSerializedRangeVectorOps {
         // If the RV has formulated rows, serialize the entire RV as a single proto object
         // and skip row iteration and BR building
         FlightProtoSerDeser.serializeSrvToArrowVsr(srv, state) { () => addNewVsr() }
-        state.currentIsRvkVec.setValueCount(state.rowNum)
-        state.currentRvkBrVec.setValueCount(state.rowNum)
-        state.currentVsr.setRowCount(state.rowNum)
+        updateVsrLengthInState()
       case _ =>
         // Serialize the RV key and output range as a proto header row, then iterate data rows
         FlightProtoSerDeser.serializeRvKeyToArrowVsr(rv.key, rv.outputRange, state) { () => addNewVsr() }
@@ -201,9 +213,7 @@ object ArrowSerializedRangeVectorOps {
                 addNullRow()
               }
             }
-            state.currentIsRvkVec.setValueCount(state.rowNum)
-            state.currentRvkBrVec.setValueCount(state.rowNum)
-            state.currentVsr.setRowCount(state.rowNum)
+            updateVsrLengthInState()
           }
         } finally {
           ChunkMap.releaseAllSharedLocks()

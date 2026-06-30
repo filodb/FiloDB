@@ -22,7 +22,7 @@ import filodb.core.store.{InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan
 import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
 import filodb.query.AggregationOperator.Count
 import filodb.query.exec._
-import filodb.query.{BinaryOperator, Cardinality, QueryResult}
+import filodb.query.{BinaryOperator, Cardinality, QueryError, QueryResult}
 
 class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfter
                                                   with BeforeAndAfterAll with ScalaFutures {
@@ -376,6 +376,136 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       }
 
       capturedEncoding should not equal Some("zstd")
+    }
+
+    // ---- memory-safety tests for query-limit exceptions ----
+
+    it("should return QueryError and not leak Arrow memory when checkResultBytes throws QueryLimitException") {
+      // Enforce a tiny result-bytes limit (1 byte) so that the very first VSR drained inside
+      // drainFinishedVsrs triggers checkResultBytes → QueryLimitException.  The bracket must
+      // close every in-flight VSR even when the exception fires mid-drain.
+      //
+      // Use a dedicated child allocator so this test is fully self-contained and does not
+      // interfere with the shared `allocator` managed by before/after.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("ResultBytesLimitTest", 0, 3000000)
+      val tinyBytesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanResultBytes = 1L),
+        warnLimits     = PerQueryLimits(execPlanResultBytes = 1L))
+      val limitedContext = QueryContext(plannerParams = tinyBytesLimit)
+      val limitedSession = QuerySession(limitedContext,
+        QueryConfig.unitTestingQueryConfig.copy(enforceResultByteLimit = true),
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref,
+        0,
+        filters,
+        chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1000, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      // The query should fail with QueryLimitException delivered as a QueryError footer
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // Crucial: the bracket must have closed all in-flight VSRs — no Arrow memory should remain
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
+    }
+
+    it("should return QueryError and not leak Arrow memory when checkSamplesLimit throws QueryLimitException") {
+      // Enforce a tiny samples limit (1 sample) so that checkSamplesLimit fires as soon as the
+      // first range-vector's sample count is tallied, before any VSR is fully drained.
+      // The bracket must still close all VSRs even though streaming aborted partway through.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("SamplesLimitTest", 0, 3000000)
+      val tinySamplesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanSamples = 1),
+        warnLimits     = PerQueryLimits(execPlanSamples = 1))
+      val limitedContext = QueryContext(plannerParams = tinySamplesLimit)
+      val limitedSession = QuerySession(limitedContext, QueryConfig.unitTestingQueryConfig,
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref,
+        0,
+        filters,
+        chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1000, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      // The query should fail with QueryLimitException delivered as a QueryError footer
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // Crucial: the bracket must have closed all in-flight VSRs — no Arrow memory should remain
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
+    }
+
+    it("should return QueryError and not leak Arrow memory when checkResultBytes throws on the second VSR") {
+      // This test exercises the specific code path where:
+      //   1. VSR1 is fully drained (putNext succeeds, VSR1 moved to freeVsrs)
+      //   2. VSR2 is taken from finishedVsrs (ownership transferred),
+      //      checkResultBytes fires, drainFinishedVsrs closes VSR2 inline before re-throwing
+      //   3. The bracket release closes VSR3 (currentVsr) and VSR1 (in freeVsrs)
+      //
+      // Two full VSRs are produced by using step=1ms over 0..100000ms, giving 100001 periodic
+      // samples per series.  Each binary record is ~20 bytes, so the first VSR fills at ~52 000
+      // rows (maxVecLen = 1MB).  The two series together produce at least 2 full VSRs before
+      // the limit is breached.
+      //
+      // Limit: maxVecLen * 2 = 2MB.  Each full VSR body is ~1.27MB (1MB data + offset/validity
+      // overhead), so VSR1 passes (1.27MB < 2MB) but VSR1+VSR2 (~2.54MB) exceeds the limit.
+      //
+      // After the query errors, the client holds one registered VSR copy (VSR1).
+      // limitedSession.close() releases it, returning testAllocator to allocatedMemBeforeQuery.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("ResultBytesSecondVsrTest", 0, 10000000)
+      val limitBetweenTwoVsrs = ArrowSerializedRangeVectorOps.maxVecLen * 2L
+      val twoVsrBytesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanResultBytes = limitBetweenTwoVsrs),
+        warnLimits     = PerQueryLimits(execPlanResultBytes = limitBetweenTwoVsrs))
+      val limitedContext = QueryContext(plannerParams = twoVsrBytesLimit)
+      val limitedSession = QuerySession(limitedContext,
+        QueryConfig.unitTestingQueryConfig.copy(enforceResultByteLimit = true),
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref, 0, filters, chunkScanMethod,
+        timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      // step=1ms produces 100001 samples per series, overflowing the first VSR (~52 000-row limit)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // limitedSession.close() releases the client-side VSR1 copy registered in flightAllocator
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
     }
   }
 }
