@@ -1609,7 +1609,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
       Observable.fromIteratorUnsafe(partKeyRecords),
-      storeConfig.diskTTLSeconds, updateHour).map { resp =>
+      storeConfig.diskTTLSeconds, updateHour, storeConfig.writeToPkUTTable).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")

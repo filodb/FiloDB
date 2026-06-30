@@ -40,7 +40,11 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              estimatedIngestResolutionMillis: Int,
                              // Zeroes memory when it is first allocated.
                              // NOTE: this will incur a memset(); memory will be eagerly allocated if enabled.
-                             clearAllocations: Boolean) {
+                             clearAllocations: Boolean,
+                             // Whether the partkeysbyupdatetime (PkUT) table is updated on part key flush.
+                             // The PkUT table is only consumed by the downsampler's DSIndexJob, so this can be
+                             // set false to avoid wasted writes when downsampling is disabled.
+                             writeToPkUTTable: Boolean = true) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -65,7 +69,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
-                               "clear-allocations" -> clearAllocations).asJava)
+                               "clear-allocations" -> clearAllocations,
+                               "write-to-pk-ut-table" -> writeToPkUTTable).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -104,6 +109,7 @@ object StoreConfig {
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
                                            |clear-allocations = false
+                                           |write-to-pk-ut-table = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -144,7 +150,8 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.getBoolean("clear-allocations"))
+                config.getBoolean("clear-allocations"),
+                config.getBoolean("write-to-pk-ut-table"))
   }
 }
 
