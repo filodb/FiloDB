@@ -1,0 +1,46 @@
+package filodb.core.memstore
+
+import filodb.core.memstore.ratelimit.CardinalityRecord
+
+/**
+ * Sink for periodic cardinality snapshots from a TimeSeriesShard.
+ *
+ * The shard owns the schedule, the CardinalityTracker scans, and the state
+ * that tracks which (ws, ns) pairs were written last cycle. The sink is
+ * stateless with respect to the shard: every `publish` is a full overwrite
+ * intent for the passed records, and every `evict` is a full removal intent.
+ *
+ * Implementations MUST be thread-safe (may be called concurrently by shards
+ * on the same JVM sharing one sink instance) and MUST NOT throw — exceptions
+ * are caught and logged by the caller, but should not occur in steady state.
+ */
+trait CardinalitySnapshotSink {
+
+  /**
+   * Publish this shard's current cardinality view.
+   *
+   * @param partition FiloDB deployment-partition name (e.g. "tsdb3")
+   * @param shardNum  shard number within this partition
+   * @param ns        depth-2 records: one per (ws, ns) this shard has data for
+   * @param perMetric depth-3 records grouped by (ws, ns): metric-level counts
+   */
+  def publish(partition: String, shardNum: Int,
+              ns: Seq[CardinalityRecord],
+              perMetric: Map[Seq[String], Seq[CardinalityRecord]]): Unit
+
+  /**
+   * Remove this shard's contribution for namespaces that were written in
+   * a prior cycle but are no longer present in this shard's tracker.
+   */
+  def evict(partition: String, shardNum: Int, stale: Set[(String, String)]): Unit
+
+  def close(): Unit
+}
+
+object NoOpCardinalitySnapshotSink extends CardinalitySnapshotSink {
+  override def publish(partition: String, shardNum: Int,
+                       ns: Seq[CardinalityRecord],
+                       perMetric: Map[Seq[String], Seq[CardinalityRecord]]): Unit = ()
+  override def evict(partition: String, shardNum: Int, stale: Set[(String, String)]): Unit = ()
+  override def close(): Unit = ()
+}
