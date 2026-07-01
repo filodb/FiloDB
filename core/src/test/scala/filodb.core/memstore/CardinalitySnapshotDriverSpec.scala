@@ -79,6 +79,38 @@ class CardinalitySnapshotDriverSpec extends AnyFunSpec with Matchers {
       sink.evictCalls shouldBe empty
     }
 
+    it("filters out zombie records (tsCount = 0) from both scans") {
+      val store = new InMemoryCardinalityStore
+      // Seed a zombie: tsCount = 0 but activeTsCount = 5. This is exactly the
+      // state CardinalityTracker.decrementCount leaves behind after removing the
+      // last series in a namespace, because it only decrements tsCount/childrenCount.
+      val zombieNs = CardinalityRecord(shard = 0, prefix = Seq("wsA", "zombieNs"),
+        value = CardinalityValue(tsCount = 0, activeTsCount = 5,
+          billableTsCount = 5, childrenCount = 0, childrenQuota = 1000000L))
+      val zombieMetric = CardinalityRecord(shard = 0, prefix = Seq("wsA", "zombieNs", "cpu"),
+        value = CardinalityValue(tsCount = 0, activeTsCount = 5,
+          billableTsCount = 5, childrenCount = 0, childrenQuota = 1000000L))
+      store.store(zombieNs)
+      store.store(zombieMetric)
+
+      val tracker = new CardinalityTracker(
+        ref = DatasetRef("test"),
+        shard = 0,
+        shardKeyLen = 3,
+        defaultChildrenQuota = Seq(1000000L, 1000000L, 1000000L, 1000000L),
+        store = store)
+
+      val sink = new RecordingCardinalitySnapshotSink
+      val driver = new CardinalitySnapshotDriver(
+        partition = "tsdb0", shardNum = 0, cardTracker = tracker, sink = sink)
+
+      driver.snapshotOnce()
+
+      sink.publishCalls should have size 1
+      sink.publishCalls.head.ns shouldBe empty
+      sink.publishCalls.head.perMetric shouldBe empty
+    }
+
     it("swallows sink exceptions and does not update lastCycleTouched") {
       val tracker = newTracker(shardNum = 0)
       tracker.modifyCount(Seq("wsA", "ns1", "cpu"), 1, 1, 1)
