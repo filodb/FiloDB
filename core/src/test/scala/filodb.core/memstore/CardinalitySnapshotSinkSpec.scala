@@ -80,3 +80,20 @@ object RecordingCardinalitySnapshotSink {
   final case class EvictCall(partition: String, shardNum: Int,
                               stale: Set[(String, String)])
 }
+
+class RedisSnapshotClientSpec extends AnyFunSpec with Matchers {
+  describe("RedisSnapshotClient.acquire") {
+    it("returns the same client for the same (host, port)") {
+      val a = RedisSnapshotClient.acquire("localhost", 6379, commandTimeoutMs = 500)
+      val b = RedisSnapshotClient.acquire("localhost", 6379, commandTimeoutMs = 500)
+      (a eq b) shouldBe true
+      RedisSnapshotClient.releaseAllForTest()
+    }
+    it("returns a different client for a different (host, port)") {
+      val a = RedisSnapshotClient.acquire("localhost", 6379, commandTimeoutMs = 500)
+      val b = RedisSnapshotClient.acquire("localhost", 6380, commandTimeoutMs = 500)
+      (a eq b) shouldBe false
+      RedisSnapshotClient.releaseAllForTest()
+    }
+  }
+}
