@@ -374,15 +374,6 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
-  private[memstore] val activeSeriesSink: ActiveSeriesSink =
-    if (storeConfig.activeSeriesRedisEnabled)
-      new RedisActiveSeriesSink(storeConfig.activeSeriesRedisHost,
-                                storeConfig.activeSeriesRedisPort,
-                                storeConfig.activeSeriesRedisBatchSize,
-                                storeConfig.activeSeriesRedisBatchIntervalMillis)
-    else
-      NoOpActiveSeriesSink
-
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
     * This is generally used to report status and metrics.
@@ -865,11 +856,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (storeConfig.meteringEnabled) {
         modifyCardinalityCountNoThrow(shardKey, schema, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
-      if (pk.endTime == Long.MaxValue) {
-        try activeSeriesSink.onActivate(shardKey, pk.partKey) catch { case t: Throwable =>
-          logger.warn(s"activeSeriesSink.onActivate (recovery) threw: ${t.getMessage}")
-        }
-      }
     }
     partId
   }
@@ -1026,7 +1012,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     activelyIngesting.synchronized {
       if (partFlushChunks.isEmpty && p.ingesting) {
         logger.info(s"DEACTIVATE-DBG shard=$shardNum partId=${p.partID} " +
-                    s"shardKey=${p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, p.schema.options.shardKeyColumns)}")
+                    s"shardKey=${p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+                      p.schema.options.shardKeyColumns)}")
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
@@ -1039,9 +1026,6 @@ class TimeSeriesShard(val ref: DatasetRef,
                                                         p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
           modifyCardinalityCount(shardKey, p.schema, 0, -1)
-        }
-        try activeSeriesSink.onDeactivate(shardKey, p.partKeyBytes) catch { case t: Throwable =>
-          logger.warn(s"activeSeriesSink.onDeactivate threw: ${t.getMessage}")
         }
       }
     }
@@ -1155,9 +1139,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       } finally {
         partSetLock.unlockWrite(stamp)
       }
-      try activeSeriesSink.onActivate(shardKey, newPart.partKeyBytes) catch { case t: Throwable =>
-        logger.warn(s"activeSeriesSink.onActivate threw: ${t.getMessage}")
-      }
     }
     newPart
   }
@@ -1204,9 +1185,6 @@ class TimeSeriesShard(val ref: DatasetRef,
                 tsp.schema.options.shardKeyColumns)
               if (storeConfig.meteringEnabled) {
                 modifyCardinalityCountNoThrow(shardKey, schema, 0, 1)
-              }
-              try activeSeriesSink.onActivate(shardKey, tsp.partKeyBytes) catch { case t: Throwable =>
-                logger.warn(s"activeSeriesSink.onActivate threw: ${t.getMessage}")
               }
             }
           }
@@ -2247,9 +2225,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       logger.info(s"Shutting down dataset=$ref shard=$shardNum")
       if (storeConfig.meteringEnabled) {
         cardTracker.close()
-      }
-      try activeSeriesSink.close() catch { case t: Throwable =>
-        logger.warn(s"activeSeriesSink.close failed: ${t.getMessage}")
       }
       evictedPartKeys.synchronized {
         if (!evictedPartKeysDisposed) {

@@ -47,8 +47,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              activeSeriesRedisEnabled: Boolean,
                              activeSeriesRedisHost: String,
                              activeSeriesRedisPort: Int,
-                             activeSeriesRedisBatchSize: Int,
-                             activeSeriesRedisBatchIntervalMillis: Long) {
+                             activeSeriesRedisSnapshotIntervalSeconds: Int,
+                             activeSeriesRedisCommandTimeoutMs: Long) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -77,9 +77,10 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "active-series-redis.enabled" -> activeSeriesRedisEnabled,
                                "active-series-redis.host" -> activeSeriesRedisHost,
                                "active-series-redis.port" -> activeSeriesRedisPort,
-                               "active-series-redis.batch-size" -> activeSeriesRedisBatchSize,
-                               "active-series-redis.batch-interval-ms" ->
-                                 activeSeriesRedisBatchIntervalMillis).asJava)
+                               "active-series-redis.snapshot-interval-seconds" ->
+                                 activeSeriesRedisSnapshotIntervalSeconds,
+                               "active-series-redis.command-timeout-ms" ->
+                                 activeSeriesRedisCommandTimeoutMs).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -122,8 +123,8 @@ object StoreConfig {
                                            |  enabled = false
                                            |  host = "localhost"
                                            |  port = 6379
-                                           |  batch-size = 100
-                                           |  batch-interval-ms = 100
+                                           |  snapshot-interval-seconds = 60
+                                           |  command-timeout-ms = 500
                                            |}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
@@ -169,8 +170,8 @@ object StoreConfig {
                 config.getBoolean("active-series-redis.enabled"),
                 config.getString("active-series-redis.host"),
                 config.getInt("active-series-redis.port"),
-                config.getInt("active-series-redis.batch-size"),
-                config.getLong("active-series-redis.batch-interval-ms"))
+                config.getInt("active-series-redis.snapshot-interval-seconds"),
+                config.getLong("active-series-redis.command-timeout-ms"))
   }
 }
 
