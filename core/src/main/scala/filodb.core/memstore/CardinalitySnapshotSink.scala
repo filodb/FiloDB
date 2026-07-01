@@ -10,8 +10,9 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
  * stateless with respect to the shard: every `publish` is a full overwrite
  * intent for the passed records, and every `evict` is a full removal intent.
  *
- * Implementations MUST be thread-safe (may be called concurrently by shards
- * on the same JVM sharing one sink instance) and MUST NOT throw — exceptions
+ * Implementations MAY assume single-threaded invocation per instance
+ * (the driver constructs one sink per shard) and MUST NOT throw except
+ * for programmer-error guards like invalid input — exceptions
  * are caught and logged by the caller, but should not occur in steady state.
  */
 trait CardinalitySnapshotSink {

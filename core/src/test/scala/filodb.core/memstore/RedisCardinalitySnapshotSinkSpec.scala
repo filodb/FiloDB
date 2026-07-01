@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import scala.jdk.CollectionConverters._
-
 import io.lettuce.core.RedisClient
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funspec.AnyFunSpec
