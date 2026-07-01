@@ -93,5 +93,13 @@ class CardinalitySnapshotDriver(partition: String,
   def close(): Unit = {
     scheduled.foreach(_.cancel(false))
     scheduled = None
+    // Best-effort wait for an in-flight snapshotOnce() to finish so that
+    // downstream sink.close() doesn't race with a mid-flight publish/evict.
+    // Bounded to ~1s — snapshots are I/O-bound (a few Redis round-trips)
+    // and should complete well within that window in practice.
+    val deadlineMs = System.currentTimeMillis() + 1000L
+    while (running.get() && System.currentTimeMillis() < deadlineMs) {
+      Thread.sleep(20L)
+    }
   }
 }

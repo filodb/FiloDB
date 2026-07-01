@@ -375,13 +375,22 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
   private[memstore] val cardinalitySnapshotSink: CardinalitySnapshotSink =
-    if (storeConfig.activeSeriesRedisEnabled)
-      new RedisCardinalitySnapshotSink(
-        host = storeConfig.activeSeriesRedisHost,
-        port = storeConfig.activeSeriesRedisPort,
-        commandTimeoutMs = storeConfig.activeSeriesRedisCommandTimeoutMs)
-    else
+    if (storeConfig.activeSeriesRedisEnabled) {
+      try new RedisCardinalitySnapshotSink(
+            host = storeConfig.activeSeriesRedisHost,
+            port = storeConfig.activeSeriesRedisPort,
+            commandTimeoutMs = storeConfig.activeSeriesRedisCommandTimeoutMs)
+      catch {
+        case scala.util.control.NonFatal(t) =>
+          logger.error(s"Failed to construct RedisCardinalitySnapshotSink for " +
+            s"shard=$shardNum host=${storeConfig.activeSeriesRedisHost}:" +
+            s"${storeConfig.activeSeriesRedisPort}; falling back to NoOp. Cause: ${t.getMessage}",
+            t)
+          NoOpCardinalitySnapshotSink
+      }
+    } else {
       NoOpCardinalitySnapshotSink
+    }
 
   private[memstore] val cardinalitySnapshotDriver: CardinalitySnapshotDriver =
     new CardinalitySnapshotDriver(
