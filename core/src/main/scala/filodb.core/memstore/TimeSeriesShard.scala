@@ -374,6 +374,29 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
+  private[memstore] val cardinalitySnapshotSink: CardinalitySnapshotSink =
+    if (storeConfig.activeSeriesRedisEnabled)
+      new RedisCardinalitySnapshotSink(
+        host = storeConfig.activeSeriesRedisHost,
+        port = storeConfig.activeSeriesRedisPort,
+        commandTimeoutMs = storeConfig.activeSeriesRedisCommandTimeoutMs)
+    else
+      NoOpCardinalitySnapshotSink
+
+  private[memstore] val cardinalitySnapshotDriver: CardinalitySnapshotDriver =
+    new CardinalitySnapshotDriver(
+      partition = deploymentPartitionName,
+      shardNum = shardNum,
+      cardTracker = cardTracker,
+      sink = cardinalitySnapshotSink)
+
+  if (storeConfig.meteringEnabled && storeConfig.activeSeriesRedisEnabled) {
+    cardinalitySnapshotDriver.start(
+      scheduler = CardinalitySnapshotScheduler.get,
+      intervalSeconds = storeConfig.activeSeriesRedisSnapshotIntervalSeconds,
+      totalShardsHint = numShards)
+  }
+
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
     * This is generally used to report status and metrics.
@@ -2222,6 +2245,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   def shutdown(): Unit = {
     try {
+      try cardinalitySnapshotDriver.close() catch { case _: Throwable => }
+      try cardinalitySnapshotSink.close() catch { case _: Throwable => }
       logger.info(s"Shutting down dataset=$ref shard=$shardNum")
       if (storeConfig.meteringEnabled) {
         cardTracker.close()
