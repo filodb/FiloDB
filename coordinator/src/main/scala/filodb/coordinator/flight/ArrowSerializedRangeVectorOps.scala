@@ -33,7 +33,7 @@ object ArrowSerializedRangeVectorOps {
 
   // TODO later, this should not be hard-coded
   private[flight] val maxVecLen = 1048576 // 1 MB
-  private[flight] val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
+  val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
   private[flight] val maxVsrs = 50
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
