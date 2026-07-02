@@ -31,10 +31,10 @@ object ArrowSerializedRangeVectorOps {
     new Schema(util.Arrays.asList(isRvk, rvkBr))
   }
 
-  // FIXME this should not be hard-coded
-  val maxVecLen = 1048576 // 1 MB
-  val maxNumRows = maxVecLen / 15
-  val maxVsrs = 50
+  // TODO later, this should not be hard-coded
+  private[flight] val maxVecLen = 1048576 // 1 MB
+  private[flight] val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
+  private[flight] val maxVsrs = 50
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
     VectorSchemaRoot.create(arrowSrvSchema, allocator)
@@ -230,9 +230,13 @@ object ArrowSerializedRangeVectorOps {
    * marker rows) are skipped in O(1) rather than tested one bit at a time. Arrow bit buffers are
    * always allocated padded to an 8-byte boundary, so reading a full trailing word past `rowCount`
    * is always in-bounds; the `rowIndex < rowCount` guard just discards any padding bits.
+   *
+   * @param bufAddr the address of the BitVector's data buffer
+   * @param rowCount the number of rows in the BitVector (the number of valid bits to consider)
+   * @param f the function to invoke with each set-bit row index
    */
   private def cforSetBitPositions(bufAddr: Long, rowCount: Int)(f: Int => Unit): Unit = {
-    val numWords = (rowCount + 63) >> 6
+    val numWords = (rowCount + 63) >> 6 // ceil(rowCount / 64.0) in integer math
     cforRange (0 until numWords) { wordIdx =>
       var bits = UnsafeUtils.getLong(bufAddr + (wordIdx.toLong << 3))
       while (bits != 0L) {
