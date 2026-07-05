@@ -507,5 +507,87 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
       testAllocator.close()
     }
+
+    it("should fail gracefully with a clean QueryError (no hang) and leak no memory when the server " +
+       "per-request allocator throws a genuine Arrow OutOfMemoryException") {
+      // Unlike the QueryLimitException tests above (which exercise the *soft* app-level
+      // checkResultBytes/checkSamplesLimit guards), this test forces a *hard* Arrow allocator
+      // failure: org.apache.arrow.memory.OutOfMemoryException thrown directly by
+      // BufferAllocator.buffer() because even the response header can't fit. This reproduces the
+      // scenario where the per-request child allocator (or, under concurrent load, the shared
+      // server/root allocator) is exhausted mid-request, and exercises both:
+      //   1. the header-send OOM being rethrown so the circuit breaker can see it, and
+      //   2. the footer-send fallback in sendRespFooterAndComplete, since the footer
+      //      (which also carries the full exception stack trace) will *also* overflow the
+      //      same tiny allocator - the exact "double OOM" scenario that previously left the
+      //      client blocked in a blocking stream.next() call with no response at all.
+      //
+      // A dedicated Flight server is started with an absurdly small
+      // filodb.flight.server.per-request-allocator-limit so the very first allocation inside
+      // executePhysicalPlanAndRespond (the response header ArrowBuf) always overflows it.
+      val tinyAkkaPort = 33817
+      val tinyFlightPort = FiloDBSinglePartitionFlightProducer.akkaPortToFlightPort(tinyAkkaPort)
+      val tinyPerReqConfig = ConfigFactory.parseString(
+        s"""filodb.flight.server.per-request-allocator-limit = 100000
+           |akka.remote.netty.tcp.port = $tinyAkkaPort
+           |""".stripMargin).withFallback(config).resolve()
+      val tinyLocation = Location.forGrpcInsecure("localhost", tinyFlightPort)
+      val tinyServer = FiloDBSinglePartitionFlightProducer.start(memStore, tinyPerReqConfig)
+
+      val clientAllocator = FlightAllocator.newChildAllocatorForTesting("OomClientTest", 0, 3000000)
+      val clientSession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig,
+        flightAllocator = Some(new FlightAllocator(clientAllocator)))
+      val allocatedMemBeforeQuery = clientAllocator.getAllocatedMemory
+      val serverAllocBeforeQuery = FlightAllocator.serverAllocator.getAllocatedMemory
+
+      try {
+        val oomMspe = MultiSchemaPartitionsExec(
+          QueryContext(),
+          FlightPlanDispatcher(tinyLocation, "test"),
+          timeseriesDatasetWithMetric.ref,
+          0,
+          filters,
+          chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+        oomMspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 100, 100000, None, None))
+
+        // futureValue is bounded by patienceConfig (5s) - if the server ever left the client
+        // blocked in the blocking stream.next() call instead of sending a clean error, this
+        // call fails the test with a timeout instead of hanging the test run.
+        val qRes = oomMspe.dispatcher.dispatch(
+          ExecPlanWithClientParams(oomMspe, ClientParams(60000), clientSession),
+          UnsupportedChunkSource()).runToFuture.futureValue
+
+        qRes shouldBe a[QueryError]
+
+        // Client-side: no VSR was ever received, so closing the session must return the
+        // client allocator to its pre-query baseline.
+        clientSession.close()
+        clientAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+
+        // Server-side: the per-request allocator (a child of the shared serverAllocator) must
+        // be fully reclaimed by the guaranteed querySession.close(), even though two
+        // allocations (header, then footer) failed in a row. Poll briefly since the server's
+        // cleanup runs asynchronously relative to the client observing the stream error.
+        val deadline = System.currentTimeMillis() + 5000
+        while (FlightAllocator.serverAllocator.getAllocatedMemory != serverAllocBeforeQuery &&
+               System.currentTimeMillis() < deadline) {
+          Thread.sleep(50)
+        }
+        FlightAllocator.serverAllocator.getAllocatedMemory shouldEqual serverAllocBeforeQuery
+
+        // Prove the shared allocator hierarchy is still healthy afterwards: a normal query
+        // against the main (non-tiny) server, sharing the same root/server allocator, must
+        // still succeed - i.e. memory freed up by the failed request is usable by later ones.
+        val allocatedMemBeforeFollowup = allocator.getAllocatedMemory
+        val followupRes = mspe1.dispatcher.dispatch(
+          ExecPlanWithClientParams(mspe1, ClientParams(60000), querySession),
+          UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+        followupRes.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
+        allocator.getAllocatedMemory shouldEqual allocatedMemBeforeFollowup
+      } finally {
+        tinyServer.shutdown()
+        clientAllocator.close()
+      }
+    }
   }
 }

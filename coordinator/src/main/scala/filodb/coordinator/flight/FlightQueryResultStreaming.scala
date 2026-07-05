@@ -16,7 +16,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.apache.arrow.flight.{CallStatus, FlightProducer, FlightRuntimeException}
 import org.apache.arrow.flight.FlightProducer.ServerStreamListener
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{BufferAllocator, OutOfMemoryException}
 import org.apache.arrow.vector.{VectorLoader, VectorUnloader}
 
 import filodb.coordinator.QueryScheduler
@@ -116,6 +116,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                                         querySession.queryStats, Some(f))
             case qte: QueryTimeoutException =>
               throw qte // rethrow so circuit breaker can handle
+            case oom: OutOfMemoryException =>
+              throw oom // rethrow so circuit breaker can handle
             case e =>
               sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
                                         querySession.queryStats, Some(e))
@@ -192,7 +194,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
             logger.debug(s"Streaming error for queryPlanId=${execPlan.planId}")
             FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
             // rethrow so circuit breaker can handle
-            if (qe.t.isInstanceOf[QueryTimeoutException]) throw qe.t
+            if (qe.t.isInstanceOf[QueryTimeoutException] || qe.t.isInstanceOf[OutOfMemoryException]) throw qe.t
             sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
           }
         case res: QueryResult =>
@@ -405,10 +407,37 @@ trait FlightQueryResultStreaming extends StrictLogging {
       // checkAllocatorLimits(flightAllocator, execPlan.queryContext)
       logger.debug(s"Sending response footer for queryPlanId=${execPlan.planId} and completing " +
         s"stream for queryStats=$s, throwable=$t, mayBePartial=$mayBePartial, warnings=$warnings")
-      // ownership of metadata buf is now with flight listener and hence not closed here
-      listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator,
-        mayBePartial, partialResultReason, warnings))
-      listener.completed()
+      t match {
+        case Some(oom: OutOfMemoryException) =>
+          // We already know the allocator is exhausted - that's exactly why we're here. Attempting
+          // to allocate a footer buffer would almost certainly hit the same OutOfMemoryException
+          // again, wasting a retry against an allocator we know is out of room. Skip straight to
+          // listener.error(), which needs no further Arrow allocation, so the client gets an
+          // immediate, clean failure instead of a doomed allocation attempt.
+          logger.warn(s"Skipping response footer allocation for queryPlanId=${execPlan.planId} " +
+            s"since the Arrow allocator is already known to be exhausted; completing stream with error", oom)
+          listener.error(oom)
+        case _ =>
+          try {
+            // ownership of metadata buf is now with flight listener and hence not closed here
+            listener.putMetadata(FlightProtoSerDeser.serializeFooterToArrowBuf(s, t, flightAllocator,
+              mayBePartial, partialResultReason, warnings))
+            listener.completed()
+          } catch {
+            case oom: OutOfMemoryException =>
+              // The footer buffer allocation itself failed - typically because the shared
+              // server/root allocator (not necessarily this request's own per-request allocator)
+              // is exhausted by other concurrent requests. Retrying the same allocation here would
+              // likely fail again and leave the client blocked in a blocking stream.next() call
+              // until its own RPC deadline. Fall back to listener.error(), which does not require
+              // any further Arrow buffer allocation, so the client always gets an immediate,
+              // clean failure instead of a hang. Query memory is still fully reclaimed by the
+              // guaranteed querySession.close() that runs regardless of how this method exits.
+              logger.warn(s"Failed to allocate response footer buffer for queryPlanId=${execPlan.planId} " +
+                s"due to Arrow allocator exhaustion; completing stream with error instead", oom)
+              listener.error(t.getOrElse(oom))
+          }
+      }
     }
   }
 
