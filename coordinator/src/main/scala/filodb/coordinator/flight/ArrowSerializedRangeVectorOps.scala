@@ -31,23 +31,35 @@ object ArrowSerializedRangeVectorOps {
     new Schema(util.Arrays.asList(isRvk, rvkBr))
   }
 
-  // FIXME this should not be hard-coded
-  val maxVecLen = 1048576 // 1 MB
-  val maxNumRows = maxVecLen / 15
+  // TODO later, this should not be hard-coded
+  private[flight] val maxVecLen = 1048576 // 1 MB
+  val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
+  private[flight] val maxVsrs = 50
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
     VectorSchemaRoot.create(arrowSrvSchema, allocator)
   }
 
+  /**
+   * Holds the state of the VSR population process, including the current VSR being populated, the current row number,
+   * and the remaining bytes in the current VSR. It also maintains a queue of free VSRs and a list of finished VSRs.
+   * @param flightVsr the VSR owned by flight, which is used to hold the serialized data for the current flight request
+   * @param currentVsr the VSR currently being populated with data from the RangeVector
+   * @param currentIsRvkVec the isRvkVector BitVector cached from current VSR
+   * @param currentRvkBrVec the rvkBrVector VarBinaryVector cached from current VSR
+   * @param rowNum the last row number populated in the current VSR, -1 if no rows have been populated yet
+   * @param bytesRemaining the number of bytes remaining in the current VSR, initialized to maxVecLen
+   * @param freeVsrs a queue of free VSRs that can be reused for future population
+   * @param finishedVsrs a list of finished VSRs that have been populated and are ready to be sent back to the client
+   */
   case class VsrPopulationState(var flightVsr: VectorSchemaRoot = null,
-                                var currentVsr: VectorSchemaRoot = null,
-                                var currentIsRvkVec: BitVector = null,
-                                var currentRvkBrVec: VarBinaryVector = null,
-                                var rowNum: Int = -1,
-                                var bytesRemaining: Int = maxVecLen,
-                                // FIXME hard coded 5
-                                freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](5),
-                                finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
+                        var currentVsr: VectorSchemaRoot = null,
+                        var currentIsRvkVec: BitVector = null,
+                        var currentRvkBrVec: VarBinaryVector = null,
+                        var rowNum: Int = -1,
+                        var bytesRemaining: Int = maxVecLen,
+                        freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](maxVsrs),
+                        finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
 
     def finishAndGetCurrentVsr(): VectorSchemaRoot = {
       if (currentVsr != null) {
@@ -107,13 +119,15 @@ object ArrowSerializedRangeVectorOps {
                                  allocator: BufferAllocator,
                                  state: VsrPopulationState): Unit = {
 
-    // TODO update metrics & query statistics on result bytes during RV serialization
-
-    def addNewVsr(): Unit = {
-      if (state.currentVsr != null) {
+    def updateVsrLengthInState(): Unit = {
         state.currentIsRvkVec.setValueCount(state.rowNum)
         state.currentRvkBrVec.setValueCount(state.rowNum)
         state.currentVsr.setRowCount(state.rowNum)
+    }
+
+    def addNewVsr(): Unit = {
+      if (state.currentVsr != null) {
+        updateVsrLengthInState()
         state.finishedVsrs += state.currentVsr
       }
 
@@ -178,30 +192,28 @@ object ArrowSerializedRangeVectorOps {
         // If the RV has formulated rows, serialize the entire RV as a single proto object
         // and skip row iteration and BR building
         FlightProtoSerDeser.serializeSrvToArrowVsr(srv, state) { () => addNewVsr() }
-        state.currentIsRvkVec.setValueCount(state.rowNum)
-        state.currentRvkBrVec.setValueCount(state.rowNum)
-        state.currentVsr.setRowCount(state.rowNum)
+        updateVsrLengthInState()
       case _ =>
         // Serialize the RV key and output range as a proto header row, then iterate data rows
         FlightProtoSerDeser.serializeRvKeyToArrowVsr(rv.key, rv.outputRange, state) { () => addNewVsr() }
         val startNs = Utils.currentThreadCpuTimeNanos
         try {
           ChunkMap.validateNoSharedLocks(execPlan)
+          val canRemoveEmptyRows = SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema)
+          lazy val col1Type = recordSchema.columns(1).colType
           Using.resource(rv.rows()) { rows =>
             while (rows.hasNext) {
               val nextRow = rows.next()
               // Don't encode empty-histogram / NaN data over the wire
-              if (!SerializedRangeVector.canRemoveEmptyRows(rv.outputRange, recordSchema) ||
-                recordSchema.columns(1).colType == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
-                recordSchema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
+              if (!canRemoveEmptyRows ||
+                col1Type == DoubleColumn && !java.lang.Double.isNaN(nextRow.getDouble(1)) ||
+                col1Type == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
                 addFromReader(nextRow)
               } else {
                 addNullRow()
               }
             }
-            state.currentIsRvkVec.setValueCount(state.rowNum)
-            state.currentRvkBrVec.setValueCount(state.rowNum)
-            state.currentVsr.setRowCount(state.rowNum)
+            updateVsrLengthInState()
           }
         } finally {
           ChunkMap.releaseAllSharedLocks()
@@ -209,6 +221,30 @@ object ArrowSerializedRangeVectorOps {
         }
     }
 
+  }
+
+  /**
+   * Invokes `f` with each set-bit row index (ascending) in a bit-packed Arrow BitVector's data
+   * buffer at `bufAddr`, without testing cleared bits individually. Reads the buffer one 64-bit
+   * word at a time so runs of unset bits (the common case: many data rows between sparse RVK
+   * marker rows) are skipped in O(1) rather than tested one bit at a time. Arrow bit buffers are
+   * always allocated padded to an 8-byte boundary, so reading a full trailing word past `rowCount`
+   * is always in-bounds; the `rowIndex < rowCount` guard just discards any padding bits.
+   *
+   * @param bufAddr the address of the BitVector's data buffer
+   * @param rowCount the number of rows in the BitVector (the number of valid bits to consider)
+   * @param f the function to invoke with each set-bit row index
+   */
+  private def cforSetBitPositions(bufAddr: Long, rowCount: Int)(f: Int => Unit): Unit = {
+    val numWords = (rowCount + 63) >> 6 // ceil(rowCount / 64.0) in integer math
+    cforRange (0 until numWords) { wordIdx =>
+      var bits = UnsafeUtils.getLong(bufAddr + (wordIdx.toLong << 3))
+      while (bits != 0L) {
+        val rowIndex = (wordIdx << 6) + java.lang.Long.numberOfTrailingZeros(bits)
+        if (rowIndex < rowCount) f(rowIndex)
+        bits &= bits - 1 // clear the lowest set bit
+      }
+    }
   }
 
   def convertVsrsIntoArrowSrvs(vsrs: Seq[VectorSchemaRoot],
@@ -222,49 +258,57 @@ object ArrowSerializedRangeVectorOps {
     var currentNumDataRows = 0
     lazy val rs = schema.toRecordSchema
 
-    // Iterate through all VSRs and rows to find RV boundaries
-    cforRange ( 0 until vsrs.size) { vsrIndex =>
-      val vsr = vsrs(vsrIndex)
-      val isRvkVec = vsr.getVector(0).asInstanceOf[BitVector]
-      val rvkBrVec = vsr.getVector(1).asInstanceOf[VarBinaryVector]
-
-      cforRange (0 until vsr.getRowCount) { rowIndex =>
-        if (isRvkVec.get(rowIndex) == 1) {
-          // Found a new RV key row — flush the previous RV if any
-          if (currentKey != null) {
-            result += new ArrowSerializedRangeVector(
-              currentKey, vsrs, rs, currentStartVsrIndex,
-              currentStartRowIndex, currentNumDataRows, currentRvRange)
-          }
-
-          val proto = FlightProtoSerDeser.deserializeFromBytes(rvkBrVec.get(rowIndex))
-          if (proto.hasSrv) {
-            currentKey = null
-            currentRvRange = None
-            result += proto.getSrv.fromProto
-          } else if (proto.hasRvKey) {
-            val rvKeyProto = proto.getRvKey
-            val (base, offset, _) = UnsafeUtils.BOLfromBuffer(rvKeyProto.getRvKey.asReadOnlyByteBuffer())
-            currentKey = BrMapRangeVectorKey(base, offset)
-            currentRvRange = if (rvKeyProto.hasRvRange) Some(rvKeyProto.getRvRange.fromProto) else None
-            currentStartVsrIndex = vsrIndex
-            currentStartRowIndex = rowIndex
-            currentNumDataRows = 0
-          } else {
-            throw new IllegalStateException(s"Invalid RV metadata in VSR at index $vsrIndex, row $rowIndex")
-          }
-        } else {
-          currentNumDataRows += 1
-        }
+    def flushCurrentRv(): Unit = {
+      if (currentKey != null) {
+        result += new ArrowSerializedRangeVector(
+          currentKey, vsrs, rs, currentStartVsrIndex,
+          currentStartRowIndex, currentNumDataRows, currentRvRange)
       }
     }
 
-    // Flush the last RV
-    if (currentKey != null) {
-      result += new ArrowSerializedRangeVector(
-        currentKey, vsrs, rs, currentStartVsrIndex,
-        currentStartRowIndex, currentNumDataRows, currentRvRange)
+    // Iterate through all VSRs, jumping directly between RV-key marker rows instead of testing
+    // every row's isRvk bit individually (see cforSetBitPositions). All rows between markers are
+    // known to be data rows, so their count is derived from position arithmetic, not counted one
+    // at a time.
+    cforRange ( 0 until vsrs.size) { vsrIndex =>
+      val vsr = vsrs(vsrIndex)
+      val rowCount = vsr.getRowCount
+      val isRvkVec = vsr.getVector(0).asInstanceOf[BitVector]
+      val rvkBrVec = vsr.getVector(1).asInstanceOf[VarBinaryVector]
+
+      var afterLastMarker = 0
+      cforSetBitPositions(isRvkVec.getDataBufferAddress, rowCount) { rowIndex =>
+        // Rows [afterLastMarker, rowIndex), since the previous marker (or the start of this VSR),
+        // are data rows belonging to whatever RV is currently open.
+        if (currentKey != null) currentNumDataRows += rowIndex - afterLastMarker
+        // Found a new RV key row — flush the previous RV if any
+        flushCurrentRv()
+
+        val proto = FlightProtoSerDeser.deserializeFromBytes(rvkBrVec.get(rowIndex))
+        if (proto.hasSrv) {
+          currentKey = null
+          currentRvRange = None
+          result += proto.getSrv.fromProto
+        } else if (proto.hasRvKey) {
+          val rvKeyProto = proto.getRvKey
+          val (base, offset, _) = UnsafeUtils.BOLfromBuffer(rvKeyProto.getRvKey.asReadOnlyByteBuffer())
+          currentKey = BrMapRangeVectorKey(base, offset)
+          currentRvRange = if (rvKeyProto.hasRvRange) Some(rvKeyProto.getRvRange.fromProto) else None
+          currentStartVsrIndex = vsrIndex
+          currentStartRowIndex = rowIndex
+          currentNumDataRows = 0
+        } else {
+          throw new IllegalStateException(s"Invalid RV metadata in VSR at index $vsrIndex, row $rowIndex")
+        }
+        afterLastMarker = rowIndex + 1
+      }
+      // Remaining rows after the last marker (or all rows, if this VSR had none) are data rows
+      // for whatever RV is still open.
+      if (currentKey != null) currentNumDataRows += rowCount - afterLastMarker
     }
+
+    // Flush the last RV
+    flushCurrentRv()
 
     result.toSeq
   }

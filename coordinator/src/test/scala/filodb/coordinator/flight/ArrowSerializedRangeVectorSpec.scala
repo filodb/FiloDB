@@ -513,5 +513,35 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
       allVsrs.foreach(_.close())
     }
+
+    it("should locate RV key rows correctly across 64-bit word boundaries in the isRvk bitmap") {
+      // convertVsrsIntoArrowSrvs scans the isRvk BitVector 64 rows (one machine word) at a time.
+      // Use enough small RVs that RV-key marker rows land at/around word boundaries (rows 63/64,
+      // 127/128, etc.) to exercise that boundary-crossing logic explicitly.
+      val numRvs = 130
+      val outputRange = Some(RvRange(1000, 1000, 2000))
+      val keys = (0 until numRvs).map(i => CustomRangeVectorKey(Map(UTF8Str("host") -> UTF8Str(s"server$i"))))
+      val rvs = keys.map(k => toRv(Seq((1000, 1.0), (2000, 2.0)), k, outputRange.get))
+
+      val queryStats = QueryStats()
+      val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
+      rvs.foreach { rv =>
+        ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
+          rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
+        )
+      }
+
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
+
+      srvs.length shouldEqual numRvs
+      srvs.zip(keys).foreach { case (srv, key) =>
+        srv.key shouldEqual key
+        srv.numRowsSerialized shouldEqual 2
+        srv.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual Seq((1000, 1.0), (2000, 2.0))
+      }
+
+      allVsrs.foreach(_.close())
+    }
   }
 }
