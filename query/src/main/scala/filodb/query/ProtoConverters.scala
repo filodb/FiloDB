@@ -451,6 +451,7 @@ object ProtoConverters extends StrictLogging {
       pp.downPartitions.foreach(dp => builder.addDownPartitions(dp.toProto))
       builder.setFailoverMode(pp.failoverMode.toProto)
       builder.setSamplesScannedConfig(pp.samplesScannedConfig.toProto)
+      pp.minStepMsOpt.foreach(m => builder.setMinStepMs(m))
       builder.build()
     }
   }
@@ -497,7 +498,8 @@ object ProtoConverters extends StrictLogging {
         downPartitions = downPartitionsMutableSet,
         failoverMode = failoverMode,
         samplesScannedConfig = if (gpp.hasSamplesScannedConfig) gpp.getSamplesScannedConfig.fromProto
-                               else pp.samplesScannedConfig
+                               else pp.samplesScannedConfig,
+        minStepMsOpt = if (gpp.hasMinStepMs) Option(gpp.getMinStepMs) else None
       )
     }
   }

@@ -72,6 +72,7 @@ message PlannerParams {
     repeated DownPartition downPartitions               = 20;
     optional FailoverMode failoverMode                  = 21;
     optional SamplesScannedConfig samplesScannedConfig  = 22;
+    optional uint64 minStepMs                           = 23;
 }
 
 message Request {
