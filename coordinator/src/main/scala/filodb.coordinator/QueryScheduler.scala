@@ -56,23 +56,31 @@ object QueryScheduler extends StrictLogging {
         //     .name(FlightIoSchedName, 0L)
         //     .uncaughtExceptionHandler(exceptionHandler)
         //     .factory()
+        //
+        // Method lookups must go through the public `java.lang.Thread$Builder$OfVirtual`
+        // interface (exported by java.base), NOT via `ofVirtual.getClass()`. The runtime
+        // type returned by Thread.ofVirtual() is the non-public impl class
+        // `java.lang.ThreadBuilders$VirtualThreadBuilder`; Method objects resolved against
+        // that class fail reflective access checks even though the methods are public,
+        // because the declaring class itself isn't accessible.
         // scalastyle:off null
+        val ofVirtualClass = Class.forName("java.lang.Thread$Builder$OfVirtual")
         val ofVirtual  = classOf[Thread].getMethod("ofVirtual").invoke(null)
-        val named      = ofVirtual.getClass
+        val named      = ofVirtualClass
                            .getMethod("name", classOf[String], java.lang.Long.TYPE)
                            .invoke(ofVirtual, FlightIoSchedName, java.lang.Long.valueOf(0L))
-        val withHandler = named.getClass
+        val withHandler = ofVirtualClass
                             .getMethod("uncaughtExceptionHandler", classOf[UncaughtExceptionHandler])
                             .invoke(named, exceptionHandler)
-        val factory    = withHandler.getClass
+        val factory    = ofVirtualClass
                            .getMethod("factory")
                            .invoke(withHandler)
                            .asInstanceOf[java.util.concurrent.ThreadFactory]
         // Reflectively equivalent to: Executors.newThreadPerTaskExecutor(factory)
         val executor   = classOf[Executors]
-                           .getMethod("newThreadPerTaskExecutor", classOf[java.util.concurrent.ThreadFactory])
-                           .invoke(null, factory)
-                           .asInstanceOf[java.util.concurrent.ExecutorService]
+          .getMethod("newThreadPerTaskExecutor", classOf[java.util.concurrent.ThreadFactory])
+          .invoke(null, factory)
+          .asInstanceOf[java.util.concurrent.ExecutorService]
         logger.info(s"$FlightIoSchedName: using virtual-thread-per-task executor (Java $majorVersion)")
         Scheduler.apply(executor, exceptionReporter)
       } catch {

@@ -64,8 +64,10 @@ final case class PeriodicSamplesMapper(startMs: Long,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (startMs < endMs && stepMs < querySession.queryConfig.minStepMs) // range query with small step
-      throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
+    // a per-query override (from PlannerParams) takes precedence over the cluster-wide QueryConfig default.
+    val minStepMs = querySession.qContext.plannerParams.minStepMsOpt.getOrElse(querySession.queryConfig.minStepMs)
+    if (startMs < endMs && stepMs < minStepMs) // range query with small step
+      throw new BadQueryException(s"step should be at least ${minStepMs/1000}s")
     val valColType = ResultSchema.valueColumnType(sourceSchema)
     // If a max and min column is present, the ExecPlan's job is to put it into column 3
     val hasMaxMinCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 3 &&
