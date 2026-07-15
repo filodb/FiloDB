@@ -26,7 +26,8 @@ import spire.syntax.cfor._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
-import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaReachedException,
+  QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -72,6 +73,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   // Tracking the index adds and updates during active kafka ingestion.
   val partKeyIndexAdded = FilodbMetrics.counter("partkey-index-added", tags)
   val partKeyIndexUpdated = FilodbMetrics.counter("partkey-index-updated", tags)
+
+  // Incremented when a new time series is rejected at ingest because adding it
+  // would breach the cardinality quota at some shard-key prefix (e.g. ws+ns).
+  val seriesRejectedQuotaBreach = FilodbMetrics.counter("memstore-series-rejected-quota-breach", tags)
 
   /**
     * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
@@ -369,6 +374,37 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] val cardTracker: CardinalityTracker = initCardTracker()
 
+  private[memstore] val cardinalitySnapshotSink: CardinalitySnapshotSink =
+    if (storeConfig.activeSeriesRedis.enabled) {
+      try new RedisCardinalitySnapshotSink(storeConfig.activeSeriesRedis)
+      catch {
+        case t: Throwable if scala.util.control.NonFatal(t) || t.isInstanceOf[LinkageError] =>
+          Kamon.counter("filodb-cardinality-snapshot-redis-connect-failures")
+            .withTag("partition", deploymentPartitionName)
+            .increment()
+          logger.error(s"Failed to construct RedisCardinalitySnapshotSink for " +
+            s"shard=$shardNum cluster=${storeConfig.activeSeriesRedis.clusterName}; " +
+            s"falling back to NoOp. Cause: ${t.getMessage}", t)
+          NoOpCardinalitySnapshotSink
+      }
+    } else {
+      NoOpCardinalitySnapshotSink
+    }
+
+  private[memstore] val cardinalitySnapshotDriver: CardinalitySnapshotDriver =
+    new CardinalitySnapshotDriver(
+      partition = deploymentPartitionName,
+      shardNum = shardNum,
+      cardTracker = cardTracker,
+      sink = cardinalitySnapshotSink)
+
+  if (storeConfig.meteringEnabled && storeConfig.activeSeriesRedis.enabled) {
+    cardinalitySnapshotDriver.start(
+      scheduler = CardinalitySnapshotScheduler.get,
+      intervalSeconds = storeConfig.activeSeriesRedis.snapshotIntervalSeconds,
+      totalShardsHint = numShards)
+  }
+
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
     * This is generally used to report status and metrics.
@@ -421,8 +457,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private[memstore] val blockMemorySize = {
-    val size = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
-      AutoMemoryAllocUtil.getPerShardBlockMemoryAllocSize(filodbConfig, numShards, ref, storeConfig)
+    val size = if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val numNodes = filodbConfig.getInt("min-num-nodes-in-cluster")
+      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
+      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
+      val blockMemForDatasetPercent = storeConfig.shardMemPercent // fraction of block memory for this dataset
+      val numShardsPerNode = Math.ceil(numShards / numNodes.toDouble)
+      logger.info(s"Calculating Block memory size with automatic allocation strategy. " +
+        s"Dataset dataset=$ref has blockMemForDatasetPercent=$blockMemForDatasetPercent " +
+        s"numShardsPerNode=$numShardsPerNode")
+      (availableMemoryBytes * blockMemoryManagerPercent *
+        blockMemForDatasetPercent / 100 / 100 / numShardsPerNode).toLong
     } else {
       storeConfig.shardMemSize
     }
@@ -628,6 +673,10 @@ class TimeSeriesShard(val ref: DatasetRef,
             val part: FiloPartition = getOrAddPartitionForIngestion(recBase, recOffset, group, schema)
             if (part == OutOfMemPartition) { disableAddPartitions() }
           } catch {
+            case e: QuotaReachedException =>
+              shardStats.seriesRejectedQuotaBreach.increment()
+              logger.warn(s"Recovery: rejected new series for dataset=$ref shard=$shardNum " +
+                s"prefix=${e.prefix} quota=${e.quota}")
             case e: OutOfOffheapMemoryException => disableAddPartitions()
             case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
           }
@@ -833,9 +882,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
+      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
+        schema.options.shardKeyColumns)
       if (storeConfig.meteringEnabled) {
-        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
-          schema.options.shardKeyColumns)
         modifyCardinalityCountNoThrow(shardKey, schema, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
@@ -993,6 +1042,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     // where we try to activate an inactive time series
     activelyIngesting.synchronized {
       if (partFlushChunks.isEmpty && p.ingesting) {
+        logger.info(s"DEACTIVATE-DBG shard=$shardNum partId=${p.partID} " +
+                    s"shardKey=${p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+                      p.schema.options.shardKeyColumns)}")
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
@@ -1001,9 +1053,9 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting -= p.partID
 
         markPartAsNotIngesting(p, odp = false)
+        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+                                                        p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
-          val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-                                                          p.schema.options.shardKeyColumns)
           modifyCardinalityCount(shardKey, p.schema, 0, -1)
         }
       }
@@ -1067,6 +1119,16 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
     val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
+    // Quota pre-check: if this would be a brand-new series (not just a re-ingestion of a known/evicted
+    // partKey), and admitting it would push some shard-key prefix past its cardinality quota, reject
+    // the series before allocating any partition state. We throw QuotaReachedException so all the
+    // existing rollback behavior (no partitions.put, no Lucene addPartKey, no offheap alloc) is free.
+    if (storeConfig.meteringEnabled && previousPartId == CREATE_NEW_PARTID) {
+      val shardKey = schema.partKeySchema.colValues(partKeyArray, partKeyOffset, schema.options.shardKeyColumns)
+      cardTracker.wouldBreachQuota(shardKey).foreach { breached =>
+        throw QuotaReachedException(shardKey, breached.prefix, breached.value.childrenQuota)
+      }
+    }
     // TODO: remove when no longer needed
     logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
@@ -1160,6 +1222,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       }
     } catch {
+      case e: QuotaReachedException =>
+        shardStats.seriesRejectedQuotaBreach.increment()
+        logger.warn(s"Rejected new series for dataset=$ref shard=$shardNum " +
+          s"prefix=${e.prefix} quota=${e.quota}")
       case e: OutOfOffheapMemoryException => disableAddPartitions()
       case e: Exception =>
         shardStats.dataDropped.increment()
@@ -2187,6 +2253,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   def shutdown(): Unit = {
     try {
+      try cardinalitySnapshotDriver.close() catch { case _: Throwable => }
+      try cardinalitySnapshotSink.close() catch { case _: Throwable => }
       logger.info(s"Shutting down dataset=$ref shard=$shardNum")
       if (storeConfig.meteringEnabled) {
         cardTracker.close()

@@ -98,6 +98,8 @@ object Dependencies {
     "org.apache.commons"           % "commons-lang3"      % "3.14.0",
     "org.apache.arrow"             % "arrow-vector"       % arrowVersion,
     "org.apache.arrow"             % "arrow-memory-netty" % arrowVersion,
+    "com.apple.its"                % "redis-cluster"      % "4.4.0",
+    "com.apple.its"                % "rjplumbing-noop"    % "1.5.1",
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(

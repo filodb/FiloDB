@@ -40,32 +40,38 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              estimatedIngestResolutionMillis: Int,
                              // Zeroes memory when it is first allocated.
                              // NOTE: this will incur a memset(); memory will be eagerly allocated if enabled.
-                             clearAllocations: Boolean) {
+                             clearAllocations: Boolean,
+                             // Publish per-namespace cardinality snapshots to a managed Redis/Valkey cluster.
+                             // Each shard writes its active-timeseries count into the
+                             // ns_total:{partition}:{ws}:{ns} HASH on that cluster.
+                             activeSeriesRedis: AciRedisConfig) {
   import collection.JavaConverters._
   def toConfig: Config =
-    ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
-                               "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
-                               "disk-time-to-live" -> (diskTTLSeconds + "s"),
-                               "max-chunks-size" -> maxChunksSize,
-                               "max-blob-buffer-size" -> maxBlobBufferSize,
-                               "shard-mem-size" -> shardMemSize,
-                               "shard-mem-percent" -> shardMemPercent,
-                               "max-buffer-pool-size" -> maxBufferPoolSize,
-                               "groups-per-shard" -> groupsPerShard,
-                               "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
-                               "num-block-pages" -> numPagesPerBlock,
-                               "failure-retries" -> failureRetries,
-                               "retry-delay" -> (retryDelay.toSeconds + "s"),
-                               "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
-                               "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
-                               "multi-partition-odp" -> multiPartitionODP,
-                               "demand-paging-parallelism" -> demandPagingParallelism,
-                               "demand-paging-enabled" -> demandPagingEnabled,
-                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
-                               "metering-enabled" -> meteringEnabled,
-                               "accept-duplicate-samples" -> acceptDuplicateSamples,
-                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
-                               "clear-allocations" -> clearAllocations).asJava)
+    ConfigFactory.parseMap((Map[String, Any](
+      "flush-interval" -> (flushInterval.toSeconds + "s"),
+      "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
+      "disk-time-to-live" -> (diskTTLSeconds + "s"),
+      "max-chunks-size" -> maxChunksSize,
+      "max-blob-buffer-size" -> maxBlobBufferSize,
+      "shard-mem-size" -> shardMemSize,
+      "shard-mem-percent" -> shardMemPercent,
+      "max-buffer-pool-size" -> maxBufferPoolSize,
+      "groups-per-shard" -> groupsPerShard,
+      "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
+      "num-block-pages" -> numPagesPerBlock,
+      "failure-retries" -> failureRetries,
+      "retry-delay" -> (retryDelay.toSeconds + "s"),
+      "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
+      "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
+      "multi-partition-odp" -> multiPartitionODP,
+      "demand-paging-parallelism" -> demandPagingParallelism,
+      "demand-paging-enabled" -> demandPagingEnabled,
+      "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
+      "metering-enabled" -> meteringEnabled,
+      "accept-duplicate-samples" -> acceptDuplicateSamples,
+      "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
+      "clear-allocations" -> clearAllocations)
+      ++ AciRedisConfig.toConfigMap("active-series-redis", activeSeriesRedis)).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -104,6 +110,22 @@ object StoreConfig {
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
                                            |clear-allocations = false
+                                           |active-series-redis {
+                                           |  enabled = false
+                                           |  snapshot-interval-seconds = 60
+                                           |  discovery-service-endpoint = ""
+                                           |  workspace-name = ""
+                                           |  cluster-name = ""
+                                           |  cluster-dc = ""
+                                           |  password = ""
+                                           |  health-check-interval-in-ms = 60000
+                                           |  connection-timeout-ms = 500
+                                           |  mtls {
+                                           |    enabled = false
+                                           |    keystore { path = "", password = "", type = "PKCS12" }
+                                           |    truststore { path = "", password = "", type = "PKCS12" }
+                                           |  }
+                                           |}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -144,7 +166,8 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.getBoolean("clear-allocations"))
+                config.getBoolean("clear-allocations"),
+                AciRedisConfig.fromConfig(config.getConfig("active-series-redis")))
   }
 }
 
