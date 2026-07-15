@@ -91,7 +91,7 @@ object Dependencies {
     "org.apache.lucene"            % "lucene-facet"       % "8.8.2" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.13.1", // Updated for Scala 2.13
     "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
-    "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
+    "com.esotericsoftware"         % "kryo"               % "4.0.2" excludeAll(excludeMinlog),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
     "com.twitter"                  %% "chill"             % "0.10.0", // Updated for Scala 2.13
