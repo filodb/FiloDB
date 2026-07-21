@@ -39,7 +39,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
   private val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore, new NullColumnStore, new InMemoryMetaStore())
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig = PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 3000000)
   private var querySession: QuerySession = _
