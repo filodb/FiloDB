@@ -159,7 +159,7 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
       val df = createTestDataFrame(testData)
       val config = ConfigFactory.parseString(
         """
-          |partition = "us-east-1-p1"
+          |deployment-partition-name = "us-east-1-p1"
           |labelchurnfinder.kafka {
           |  topic = "test-topic"
           |  pie.queue.kaffe.connect = "localhost:9092"
@@ -227,7 +227,7 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
     it("should use correct Kafka configuration values") {
       val config = ConfigFactory.parseString(
         """
-          |partition = "us-east-1-p1"
+          |deployment-partition-name = "us-east-1-p1"
           |labelchurnfinder.kafka {
           |  topic = "test-topic"
           |  pie.queue.kaffe.connect = "test-server:9092"
@@ -249,7 +249,7 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
 
     val accConfig = ConfigFactory.parseString(
       """
-        |partition = "us-east-1-p1"
+        |deployment-partition-name = "us-east-1-p1"
         |labelchurnfinder.kafka {
         |  topic = "test-topic"
         |  pie.queue.kaffe.connect = "localhost:9092"
