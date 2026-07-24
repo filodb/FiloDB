@@ -32,7 +32,7 @@ class LabelStatsKafkaProducer(config: Config,
 
   private[labelchurnfinder] val kafkaConfig = config.getConfig("labelchurnfinder.kafka")
   private[labelchurnfinder] val topic = kafkaConfig.getString("topic")
-  private[labelchurnfinder] val mosaicPartition = config.getString("partition")
+  private[labelchurnfinder] val mosaicPartition = config.getString("deployment-partition-name")
 
   // Collect all kafka config properties to broadcast to executors
   private[labelchurnfinder] val kafkaProps: Map[String, String] = {
