@@ -32,4 +32,23 @@ class StoreConfigSpec extends AnyFunSpec with Matchers {
       roundTripped.writeToPkUTTable shouldEqual false
     }
   }
+
+  describe("StoreConfig write-to-ingestion-time-index") {
+    it("should default to true when the key is absent (falls back to code default)") {
+      storeConf("").writeToIngestionTimeIndex shouldEqual true
+    }
+
+    it("should honor a per-dataset override of write-to-ingestion-time-index = false") {
+      storeConf("write-to-ingestion-time-index = false").writeToIngestionTimeIndex shouldEqual false
+    }
+
+    it("should honor an explicit write-to-ingestion-time-index = true") {
+      storeConf("write-to-ingestion-time-index = true").writeToIngestionTimeIndex shouldEqual true
+    }
+
+    it("should round-trip writeToIngestionTimeIndex through toConfig") {
+      val roundTripped = StoreConfig(storeConf("write-to-ingestion-time-index = false").toConfig)
+      roundTripped.writeToIngestionTimeIndex shouldEqual false
+    }
+  }
 }

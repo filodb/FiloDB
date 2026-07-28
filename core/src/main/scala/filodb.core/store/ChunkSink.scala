@@ -36,10 +36,14 @@ trait ChunkSink {
    * @param ref the DatasetRef for the chunks to write to
    * @param chunksets an Observable stream of chunksets to write
    * @param diskTimeToLive the time for chunksets to live on disk (Cassandra)
+   * @param writeToIngestionTimeIndex whether to also write the ingestion_time_index (write-time index) table.
+   *        Defaults to true. When false, only chunks are written and the index write is skipped; this is only
+   *        safe when downsampling does not consume the raw ingestion_time_index (see StoreConfig).
    * @return Success when the chunksets stream ends and is completely written.
    *         Future.failure(exception) if an exception occurs.
    */
-  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long = 259200): Future[Response]
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long = 259200,
+            writeToIngestionTimeIndex: Boolean = true): Future[Response]
 
   /**
     * Used to bootstrap lucene index with partition keys for a shard
@@ -163,7 +167,8 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   // in-memory store of partition keys
   val partitionKeys = new ConcurrentHashMap[DatasetRef, scala.collection.mutable.Set[Types.PartitionKey]]().asScala
 
-  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long): Future[Response] = {
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long,
+            writeToIngestionTimeIndex: Boolean = true): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_.limit()).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)

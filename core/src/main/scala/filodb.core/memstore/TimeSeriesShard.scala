@@ -1634,7 +1634,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
       s"dataset=$ref shard=$shardNum")
 
-    colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds).recover { case e =>
+    colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds,
+      storeConfig.writeToIngestionTimeIndex).recover { case e =>
       logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=$ref " +
         s"shard=$shardNum", e)
       shardStats.flushesFailedChunkWrite.increment()
