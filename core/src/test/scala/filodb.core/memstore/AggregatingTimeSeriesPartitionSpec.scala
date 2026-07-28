@@ -8,6 +8,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.memstore.aggregation.{AggregationConfig, ColumnAggregator}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory._
@@ -24,7 +25,13 @@ object AggregatingTimeSeriesPartitionSpec {
   private val timeAlignedChunksEnabled = TestData.storeConf.timeAlignedChunksEnabled
   private val acceptDuplicateSamples = false
 
-  // Dataset with aggregation config for scalar columns (schema-level)
+  // Aggregation is now configured per-dataset (not on the schema). Test datasets are plain schemas;
+  // each is paired with an AggregationConfig via `aggConfigByDataset`, keyed by dataset name, so the
+  // existing makeAggregatingPart(...) call sites need no per-call config argument.
+  private def aggConfig(specs: Seq[String], intervalMs: Long, oooToleranceMs: Long): AggregationConfig =
+    AggregationConfig(ColumnAggregator.parseAll(specs), intervalMs, oooToleranceMs)
+
+  // Dataset with aggregation config for scalar columns
   val scalarColumns = Seq(
     "timestamp:ts",
     "value:double"
@@ -35,52 +42,57 @@ object AggregatingTimeSeriesPartitionSpec {
     shardKeyColumns = Seq("series")
   )
 
-  val scalarDataset = Dataset("scalar_metrics", Seq("series:string"), scalarColumns,
-    scalarDatasetOptions,
-    aggregatorNames = Seq("dSum(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+  val scalarDataset = Dataset("scalar_metrics", Seq("series:string"), scalarColumns, scalarDatasetOptions)
   val scalarSchema = scalarDataset.schema
 
-  // Dataset with histogram aggregation (schema-level)
+  // Dataset with histogram aggregation
   val histogramColumns = Seq(
     "timestamp:ts",
     "hist:hist:{counter=true}"
   )
 
   val histogramDataset = Dataset("histogram_metrics", Seq("series:string"), histogramColumns,
-    scalarDatasetOptions,
-    aggregatorNames = Seq("hSum(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+    scalarDatasetOptions)
   val histogramSchema = histogramDataset.schema
 
-  // Dataset with histogram_last aggregation (schema-level)
+  // Dataset with histogram_last aggregation
   val histogramLastColumns = Seq(
     "timestamp:ts",
     "hist:hist:{counter=true}"
   )
 
   val histogramLastDataset = Dataset("histogram_last_metrics", Seq("series:string"), histogramLastColumns,
-    scalarDatasetOptions,
-    aggregatorNames = Seq("hLast(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+    scalarDatasetOptions)
   val histogramLastSchema = histogramLastDataset.schema
 
-  // Mixed dataset with both scalar and histogram columns (schema-level)
+  // Mixed dataset with both scalar and histogram columns
   val mixedColumns = Seq(
     "timestamp:ts",
     "value:double",
     "hist:hist:{counter=true}"
   )
 
-  val mixedDataset = Dataset("mixed_metrics", Seq("series:string"), mixedColumns,
-    scalarDatasetOptions,
-    aggregatorNames = Seq("dSum(1)", "hSum(2)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+  val mixedDataset = Dataset("mixed_metrics", Seq("series:string"), mixedColumns, scalarDatasetOptions)
   val mixedSchema = mixedDataset.schema
+
+  // Dataset with wide tolerance (300s) for tests needing multiple simultaneous active buckets
+  val wideToleranceDataset = Dataset("wide_tol_metrics", Seq("series:string"), scalarColumns,
+    scalarDatasetOptions)
+  val wideToleranceSchema = wideToleranceDataset.schema
+
+  // Per-dataset aggregation configs, keyed by dataset name (see comment above).
+  val aggConfigByDataset: Map[String, AggregationConfig] = Map(
+    "scalar_metrics"         -> aggConfig(Seq("dSum(1)"), 60000L, 30000L),
+    "histogram_metrics"      -> aggConfig(Seq("hSum(1)"), 60000L, 30000L),
+    "histogram_last_metrics" -> aggConfig(Seq("hLast(1)"), 60000L, 30000L),
+    "mixed_metrics"          -> aggConfig(Seq("dSum(1)", "hSum(2)"), 60000L, 30000L),
+    "wide_tol_metrics"       -> aggConfig(Seq("dSum(1)"), 60000L, 300000L),
+    // datasets created inline within individual tests:
+    "zero_tol_metrics"       -> aggConfig(Seq("dSum(1)"), 60000L, 0L),
+    "wide_tol_hist"          -> aggConfig(Seq("hSum(1)"), 60000L, 300000L),
+    // "no aggregation configured" fallback test:
+    "no_agg_metrics"         -> AggregationConfig.empty
+  )
 
   val partKeyBuilder = new filodb.core.binaryrecord2.RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(scalarDataset.schema, "series0")
@@ -109,7 +121,8 @@ object AggregatingTimeSeriesPartitionSpec {
   ): AggregatingTimeSeriesPartition = {
     val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
     val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
-    new AggregatingTimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40)
+    new AggregatingTimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40,
+      aggConfigByDataset(dataset.name))
   }
 
   // Helper to create a simple histogram (uses fresh buffer to avoid shared-buffer overwrites)
@@ -119,14 +132,6 @@ object AggregatingTimeSeriesPartitionSpec {
     val hist = LongHistogram(CustomBuckets(bucketBoundaries), bucketCounts)
     hist.serialize(Some(new org.agrona.concurrent.UnsafeBuffer(new Array[Byte](4096))))
   }
-
-  // Dataset with wide tolerance (300s) for tests needing multiple simultaneous active buckets
-  val wideToleranceDataset = Dataset("wide_tol_metrics", Seq("series:string"), scalarColumns,
-    scalarDatasetOptions,
-    aggregatorNames = Seq("dSum(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 300000L)
-  val wideToleranceSchema = wideToleranceDataset.schema
 
   def makeWideToleranceBufferPool(): WriteBufferPool = {
     new WriteBufferPool(memFactory, wideToleranceSchema.data, TestData.storeConf)
@@ -882,12 +887,9 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
     }
 
     it("should only accept in-order samples with zero tolerance schema") {
-      // Create a dataset with zero OOO tolerance
+      // Create a dataset with zero OOO tolerance (config in aggConfigByDataset by name)
       val zeroToleranceDataset = Dataset("zero_tol_metrics", Seq("series:string"), scalarColumns,
-        scalarDatasetOptions,
-        aggregatorNames = Seq("dSum(1)"),
-        aggregationIntervalMs = 60000L,
-        aggregationOooToleranceMs = 0L)
+        scalarDatasetOptions)
       val zeroTolBufferPool = new WriteBufferPool(memFactory, zeroToleranceDataset.schema.data, TestData.storeConf)
       part = makeAggregatingPart(0, zeroToleranceDataset, defaultPartKey, zeroTolBufferPool)
 
@@ -1062,10 +1064,7 @@ class AggregatingTimeSeriesPartitionSpec extends AnyFunSpec with Matchers
     it("should handle switchBuffers with histogram buckets") {
       val wideToleranceHistDataset = Dataset("wide_tol_hist", Seq("series:string"),
         Seq("timestamp:ts", "hist:hist:{counter=true}"),
-        scalarDatasetOptions,
-        aggregatorNames = Seq("hSum(1)"),
-        aggregationIntervalMs = 60000L,
-        aggregationOooToleranceMs = 300000L)
+        scalarDatasetOptions)
       val bufferPool = new WriteBufferPool(memFactory, wideToleranceHistDataset.schema.data, TestData.storeConf)
       part = makeAggregatingPart(0, wideToleranceHistDataset, defaultPartKey, bufferPool)
 

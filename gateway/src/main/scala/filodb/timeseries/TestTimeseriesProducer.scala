@@ -15,7 +15,7 @@ import monix.reactive.Observable
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
 import filodb.core.metadata.{Dataset, Schema, Schemas}
-import filodb.core.metadata.Schemas.{aggregatingDeltaHistogramV2, gauge}
+import filodb.core.metadata.Schemas.{deltaHistogramV2, gauge}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{DeltaCounterRecord, InputRecord, MetricTagInputRecord, PrometheusCounterRecord,
                                   PrometheusGaugeRecord}
@@ -288,9 +288,9 @@ object TestTimeseriesProducer extends StrictLogging {
   }
 
   /**
-   * Generate a stream of out-of-order delta-histogram-v2 data for testing the aggregating schema.
+   * Generate a stream of out-of-order delta-histogram-v2 data for testing OOO aggregation.
    * Produces samples in batches, shuffling a configurable percentage out of chronological order.
-   * The generated data uses the aggregating-delta-histogram-v2 schema which has 7 data columns:
+   * The generated data uses the delta-histogram-v2 schema which has 7 data columns:
    *   (timestamp:ts, sum:double, count:double, h:hist, min:double, max:double, sumLast:double)
    * plus partition key columns (metric:string, tags:map).
    *
@@ -364,7 +364,7 @@ object TestTimeseriesProducer extends StrictLogging {
         }
         new MetricTagInputRecord(
           Seq(actualTs, sum, count, hist, minVal, maxVal, sumLast),
-          metric, tags, aggregatingDeltaHistogramV2)
+          metric, tags, deltaHistogramV2)
       }
 
       // Shuffle the batch order so OOO samples are interspersed rather than grouped

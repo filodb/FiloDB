@@ -23,32 +23,38 @@ import filodb.memory.format.vectors.MutableHistogram
  * - This avoids issues with partial column writes and chunk lifecycle transitions
  * - Aggregated data is queryable from memory for in-progress buckets
  *
+ * Aggregation is configured PER-DATASET (via [[AggregationConfig]] parsed from the ingestion source
+ * config), not on the schema. The partition still uses `schema` for columns/columnTypes; the
+ * aggregators reference this schema's data column IDs.
+ *
  * @param partID partition ID
- * @param schema the schema defining columns and aggregation configs
+ * @param schema the schema defining the partition's columns and column types
  * @param partitionKey pointer to partition key
  * @param shardInfo shard information
  * @param initMapSize initial size of the chunk map
+ * @param aggregationConfig per-dataset aggregation config (aggregators, interval, ooo-tolerance)
  */
 class AggregatingTimeSeriesPartition(
   partID: Int,
   schema: Schema,
   partitionKey: Long,
   shardInfo: TimeSeriesShardInfo,
-  initMapSize: Int
+  initMapSize: Int,
+  aggregationConfig: AggregationConfig
 ) extends TimeSeriesPartition(partID, schema, partitionKey, shardInfo, initMapSize)
   with StrictLogging {
 
   import AggregatingTimeSeriesPartition._
 
-  // Build per-column aggregation types from schema-level aggregators.
+  // Build per-column aggregation types from the per-dataset aggregators.
   // None means the column is not aggregated.
   private val aggTypes: Array[Option[AggregationType]] = {
-    val typeByCol = schema.data.aggregators.map(a => a.columnId -> a.aggType).toMap
+    val typeByCol = aggregationConfig.aggregators.map(a => a.columnId -> a.aggType).toMap
     schema.data.columns.indices.map(idx => typeByCol.get(idx)).toArray
   }
 
-  private val intervalMs: Long = schema.data.aggregationIntervalMs
-  private val oooToleranceMs: Long = schema.data.aggregationOooToleranceMs
+  private val intervalMs: Long = aggregationConfig.intervalMs
+  private val oooToleranceMs: Long = aggregationConfig.oooToleranceMs
 
   // Check if any column has aggregation configured
   private val hasAnyAggregation: Boolean = aggTypes.exists(_.isDefined)

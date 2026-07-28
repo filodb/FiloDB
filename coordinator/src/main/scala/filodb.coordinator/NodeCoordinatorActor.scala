@@ -17,6 +17,7 @@ import filodb.coordinator.client.MiscCommands
 import filodb.core._
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore.TimeSeriesStore
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
 import filodb.query.QueryCommand
@@ -125,7 +126,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                   ingestConfig.storeConfig,
                   ingestConfig.numShards,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
-                  ingestConfig.downsampleConfig)
+                  ingestConfig.downsampleConfig,
+                  ingestConfig.aggregationConfig)
   }
 
   // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
@@ -153,6 +155,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                            numShards: Int,
                            source: IngestionSource,
                            downsample: DownsampleConfig,
+                           aggregationConfig: AggregationConfig = AggregationConfig.empty,
                            schemaOverride: Boolean = false): Unit = {
     import ActorName.{Ingestion, Query}
 
@@ -164,7 +167,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
         if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
         val props = IngestionActor.props(dataset.ref, schemas, memStore,
-                                         source, downsample, storeConf, numShards, statusActor.get)
+                                         source, downsample, storeConf, aggregationConfig, numShards, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
@@ -198,7 +201,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case SetupDataset(dataset, resources, source, storeConf, downsample, overrideSchema) =>
       // used only in unit tests
       if (!(ingesters contains dataset.ref)) {
-        setupDataset(dataset, storeConf, resources.numShards, source, downsample, overrideSchema)
+        setupDataset(dataset, storeConf, resources.numShards, source, downsample, schemaOverride = overrideSchema)
       }
 
     case IngestRows(dataset, shard, rows) =>

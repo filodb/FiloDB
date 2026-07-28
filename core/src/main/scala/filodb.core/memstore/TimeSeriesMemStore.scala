@@ -13,6 +13,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types, Utils}
 import filodb.core.downsample.DownsampleConfig
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, QuerySession, ServiceUnavailableException}
@@ -77,7 +78,8 @@ extends TimeSeriesStore with StrictLogging {
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig, numShards: Int,
-            downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
+            downsample: DownsampleConfig = DownsampleConfig.disabled,
+            aggregationConfig: AggregationConfig = AggregationConfig.empty): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,
       new ConfigQuotaSource(filodbConfig, schemas.part.options.shardKeyColumns.length))
@@ -86,13 +88,13 @@ extends TimeSeriesStore with StrictLogging {
     } else {
       val tsdb : TimeSeriesShard = if (writeDownsampleIndex) {
         new DownsamplableOnDemandPagingShard(
-          ref, schemas, storeConf, numShards, quotaSource, shard,
+          ref, schemas, storeConf, aggregationConfig, numShards, quotaSource, shard,
           ingestionMemFactory, store,
           downsampleStore,
           metastore, partEvictionPolicy, downsample, filodbConfig
         )
       } else {
-        new OnDemandPagingShard(ref, schemas, storeConf, numShards, quotaSource, shard,
+        new OnDemandPagingShard(ref, schemas, storeConf, aggregationConfig, numShards, quotaSource, shard,
           ingestionMemFactory, store, metastore, partEvictionPolicy, filodbConfig)
       }
       shards.put(shard, tsdb)

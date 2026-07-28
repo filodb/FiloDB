@@ -31,7 +31,7 @@ import org.rogach.scallop.ValueConverter
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{aggregatingDeltaHistogramV2, deltaCounter, deltaHistogram,
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, deltaHistogramV2,
   gauge, otelCumulativeHistogram, otelDeltaHistogram, otelExpDeltaHistogram, promCounter, promHistogram}
 import filodb.core.metrics.FilodbMetrics
 import filodb.gateway.conversion._
@@ -216,7 +216,7 @@ object GatewayServer extends StrictLogging {
       GeneratorConfig(genDeltaCounterData, deltaCounter.name,
         () => TestTimeseriesProducer.timeSeriesData(startTime, numSeries, userOpts.numMetrics(),
           userOpts.publishIntervalSecs(), deltaCounter)),
-      GeneratorConfig(genOooData, aggregatingDeltaHistogramV2.name,
+      GeneratorConfig(genOooData, deltaHistogramV2.name,
         () => TestTimeseriesProducer.genOooHistogramData(startTime, numSeries,
           oooPercent = userOpts.oooPercent(), maxSkewSecs = userOpts.maxSkewSecs(),
           publishIntervalSec = userOpts.publishIntervalSecs(),

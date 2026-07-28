@@ -20,6 +20,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, GlobalConfig, Iterators}
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.metadata.Schemas
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.store.StoreConfig
@@ -52,15 +53,19 @@ object IngestionActor {
       (currentRecursionDepth - 1) * maxProgressPerIteration
   }
 
+  // scalastyle:off parameter.number
   def props(ref: DatasetRef,
             schemas: Schemas,
             memStore: TimeSeriesStore,
             source: NodeClusterActor.IngestionSource,
             downsample: DownsampleConfig,
             storeConfig: StoreConfig,
+            aggregationConfig: AggregationConfig,
             numShards: Int,
             statusActor: ActorRef): Props =
-    Props(new IngestionActor(ref, schemas, memStore, source, downsample, storeConfig, numShards, statusActor))
+    Props(new IngestionActor(ref, schemas, memStore, source, downsample, storeConfig, aggregationConfig,
+      numShards, statusActor))
+  // scalastyle:on parameter.number
 }
 
 /**
@@ -100,6 +105,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                                            source: NodeClusterActor.IngestionSource,
                                            downsample: DownsampleConfig,
                                            storeConfig: StoreConfig,
+                                           aggregationConfig: AggregationConfig,
                                            numShards: Int,
                                            statusActor: ActorRef) extends BaseActor {
 
@@ -209,7 +215,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   // scalastyle:off method.length
   private def startIngestion(shard: Int): Unit = {
-    try tsStore.setup(ref, schemas, shard, storeConfig, numShards, downsample) catch {
+    try tsStore.setup(ref, schemas, shard, storeConfig, numShards, downsample, aggregationConfig) catch {
       case ShardAlreadySetup(ds, s) =>
         logger.warn(s"dataset=$ds shard=$s already setup, skipping....")
         return

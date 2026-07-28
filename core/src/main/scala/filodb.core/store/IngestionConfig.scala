@@ -8,6 +8,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, IngestionKeys}
 import filodb.core.downsample.DownsampleConfig
+import filodb.core.memstore.aggregation.AggregationConfig
 
 final case class StoreConfig(flushInterval: FiniteDuration,
                              timeAlignedChunksEnabled: Boolean,
@@ -157,7 +158,8 @@ final case class IngestionConfig(ref: DatasetRef,
                                  streamFactoryClass: String,
                                  sourceConfig: Config,
                                  storeConfig: StoreConfig,
-                                 downsampleConfig: DownsampleConfig = DownsampleConfig.disabled) {
+                                 downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
+                                 aggregationConfig: AggregationConfig = AggregationConfig.empty) {
 
   // called by NodeClusterActor, by this point, validation and failure if
   // config parse issue or not available are raised from Cli / HTTP
@@ -188,9 +190,10 @@ object IngestionConfig {
       minNodes      <- minNumNodes(resolved) // fail fast if missing
       sourceConfig   = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
       downsampleConf = DownsampleConfig.downsampleConfigFromSource(sourceConfig)
+      aggregationConf = AggregationConfig.fromSourceConfig(sourceConfig)
       ref            = DatasetRef.fromDotString(dataset)
       storeConf     <- sourceConfig.configT("store").map(StoreConfig.apply)
-    } yield IngestionConfig(ref, resolved, factory, sourceConfig, storeConf, downsampleConf)
+    } yield IngestionConfig(ref, resolved, factory, sourceConfig, storeConf, downsampleConf, aggregationConf)
   }
 
   def apply(sourceConfig: Config, backupSourceFactory: String): Try[IngestionConfig] = {
@@ -206,13 +209,15 @@ object IngestionConfig {
   def apply(ref: DatasetRef, factoryclass: String, resources: String, sourceconfig: String): IngestionConfig = {
     val sourceConf = ConfigFactory.parseString(sourceconfig)
     val downsampleConf = DownsampleConfig.downsampleConfigFromSource(sourceConf)
+    val aggregationConf = AggregationConfig.fromSourceConfig(sourceConf)
     IngestionConfig(
       ref,
       ConfigFactory.parseString(resources),
       factoryclass,
       sourceConf,
       StoreConfig(sourceConf.getConfig("store")),
-      downsampleConf)
+      downsampleConf,
+      aggregationConf)
   }
 }
 

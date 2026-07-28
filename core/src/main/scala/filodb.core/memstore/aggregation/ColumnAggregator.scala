@@ -1,21 +1,7 @@
 package filodb.core.memstore.aggregation
 
 /**
- * Groups the schema-level aggregation configuration: which columns to aggregate, at what interval,
- * and how much out-of-order tolerance to allow.
- */
-case class SchemaAggregationConfig(aggregators: Seq[ColumnAggregator] = Seq.empty,
-                                   intervalMs: Long = 0L,
-                                   oooToleranceMs: Long = 0L) {
-  def nonEmpty: Boolean = aggregators.nonEmpty
-}
-
-object SchemaAggregationConfig {
-  val empty = SchemaAggregationConfig()
-}
-
-/**
- * Defines a schema-level aggregator for a specific column, parsed from a downsampler-style
+ * Defines an aggregator for a specific column, parsed from a downsampler-style
  * string notation like "dSum(1)" or "hSum(3)".
  *
  * @param columnId the data column index this aggregator applies to (must be > 0, since 0 is timestamp)

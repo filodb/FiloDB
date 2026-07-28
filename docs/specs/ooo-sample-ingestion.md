@@ -10,7 +10,7 @@
 
 Out-of-Order (OOO) Sample Ingestion Support is a per-partition ingest path in FiloDB that accepts samples whose timestamps fall behind the latest seen timestamp by up to a configurable tolerance window. Standard `TimeSeriesPartition` rejects any sample whose timestamp is earlier than the latest chunk's `endTime`, which causes data loss whenever upstream producers emit events with skew (network delay, retries, distributed clock divergence). The OOO path replaces that hard rejection with bounded in-memory aggregation: incoming samples are aggregated into fixed-width event-time buckets, and finalized buckets are then handed to the existing chunk pipeline as ordinary rows.
 
-Architecturally this feature lives entirely inside the memstore. `AggregatingTimeSeriesPartition` extends `TimeSeriesPartition` and is selected at partition-creation time when the schema declares aggregators. All on-disk formats, downsampling, query planners, and Cassandra/persistence machinery are unchanged: from their perspective the partition emits rows at bucket boundaries instead of at original sample timestamps.
+Architecturally this feature lives entirely inside the memstore. `AggregatingTimeSeriesPartition` extends `TimeSeriesPartition` and is selected at partition-creation time when the dataset's ingestion config declares an `aggregation {}` block. All on-disk formats, downsampling, query planners, and Cassandra/persistence machinery are unchanged: from their perspective the partition emits rows at bucket boundaries instead of at original sample timestamps.
 
 The mechanism in one line: samples are aggregated into event-time buckets keyed by `ceilToBucket(sampleTs, intervalMs)`; a watermark (the latest sample timestamp seen on the partition) advances forward only, and buckets whose timestamps fall more than `oooToleranceMs` behind the watermark are finalized and committed as a single row to the chunk vectors.
 
@@ -41,22 +41,31 @@ The cost of the hard-rejection model is dropped samples (visible on `outOfOrderD
 
 ## User-facing configuration
 
-Aggregation is configured at the **schema** level, not per column. Three keys are added to a schema definition:
+Aggregation is configured **per-dataset**, in an `aggregation {}` block inside the dataset's ingestion
+source config (`sourceconfig`), mirroring how the `store {}` block maps to `StoreConfig`. It is *not*
+part of the schema, so a single schema can be shared by aggregated and non-aggregated datasets. Three
+keys go inside the block:
 
 | Key | Meaning | Validation |
 |---|---|---|
-| `aggregators` | List of `name(colId)` strings, one per aggregating column | `colId > 0` (column 0 is the timestamp); `name` must match a known aggregator |
-| `aggregation-interval` | Bucket width (HOCON duration) | Must be `> 0` when `aggregators` is non-empty |
-| `aggregation-ooo-tolerance` | OOO acceptance window (HOCON duration) | Must be `>= 0` when `aggregators` is non-empty |
+| `aggregators` | List of `name(colId)` strings, one per aggregating column; `colId` references the ingestion data schema's columns | `colId > 0` (column 0 is the timestamp); `name` must match a known aggregator |
+| `interval` | Bucket width (HOCON duration) | Must be `> 0` when `aggregators` is non-empty |
+| `ooo-tolerance` | OOO acceptance window (HOCON duration) | Must be `>= 0` when `aggregators` is non-empty |
 
-The presence of a non-empty `aggregators` list is the trigger for selecting `AggregatingTimeSeriesPartition` over `TimeSeriesPartition` at partition-creation time (`core/src/main/scala/filodb.core/memstore/TimeSeriesShard.scala`, the partition-factory branch on `schema.data.hasAggregation`). Schemas without aggregators are unaffected.
+The block is parsed into `AggregationConfig`
+(`core/src/main/scala/filodb.core/memstore/aggregation/AggregationConfig.scala`) by `IngestionConfig`,
+threaded to `TimeSeriesShard` alongside `StoreConfig`, and stored on the shard as the `aggregationConfig`
+field. A non-empty `aggregators` list is the trigger for selecting `AggregatingTimeSeriesPartition` over
+`TimeSeriesPartition` at partition-creation time
+(`core/src/main/scala/filodb.core/memstore/TimeSeriesShard.scala`, the partition-factory branch on
+`aggregationConfig.nonEmpty`). Datasets without an `aggregation {}` block are unaffected.
 
-### Canonical example: `aggregating-delta-histogram-v2`
+### Canonical example: `prometheus` dataset over `delta-histogram-v2`
 
-From `core/src/main/resources/filodb-defaults.conf`:
+The schema is an ordinary schema in `core/src/main/resources/filodb-defaults.conf`:
 
 ```hocon
-aggregating-delta-histogram-v2 {
+delta-histogram-v2 {
   columns = ["timestamp:ts",
     "sum:double:{detectDrops=false,delta=true}",
     "count:double:{detectDrops=false,delta=true}",
@@ -65,13 +74,21 @@ aggregating-delta-histogram-v2 {
     "max:double:{detectDrops=false,delta=true}",
     "sumLast:double:{detectDrops=false,delta=true}"
   ]
-  aggregators              = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-  aggregation-interval     = 1m
-  aggregation-ooo-tolerance = 2m
   value-column = "h"
   downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
   downsample-schema = "delta-histogram-v2"
   downsample-period-marker = "time(0)"
+}
+```
+
+Aggregation is turned on for the dataset in its source config (`conf/timeseries-dev-source-ooo.conf`),
+inside `sourceconfig`:
+
+```hocon
+aggregation {
+  aggregators   = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  interval      = 1m
+  ooo-tolerance = 2m
 }
 ```
 
@@ -169,9 +186,9 @@ Finalization is event-driven. A partition that stops ingesting will not finalize
 
 `AggregatingRangeVector.snapshotBuckets` clones the `MutableHistogram.values` array and calls `makeMonotonic()` on the clone — the in-flight accumulator is never mutated by the query path, and concurrent ingest of further samples cannot corrupt an in-progress query result.
 
-### Schema constraint
+### Dataset constraint
 
-Only schemas with non-empty `aggregators` create `AggregatingTimeSeriesPartition`. Schemas without aggregators continue to use `TimeSeriesPartition` and remain bit-identical in behavior. The two paths are selected at `addPartition` time and never mixed for a single schema.
+Only datasets whose source config has a non-empty `aggregation {}` block create `AggregatingTimeSeriesPartition`. Datasets without one continue to use `TimeSeriesPartition` and remain bit-identical in behavior. The two paths are selected at `addPartition` time by branching on `aggregationConfig.nonEmpty`.
 
 ### Worked example
 
@@ -328,21 +345,21 @@ The OOO path exposes its observability through one existing counter and one prog
 
 | Signal                                  | Source                                                              | Meaning                                                                                                  |
 |-----------------------------------------|---------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| `memstore-out-of-order-samples` counter | `TimeSeriesShardStats.outOfOrderDropped` (incremented in `AggregatingTimeSeriesPartition.ingest:112`) | Samples rejected because they are outside the tolerance window or target an already-finalized bucket. A sustained nonzero rate means producers are emitting samples beyond `aggregation-ooo-tolerance` and the configured tolerance is too tight (or upstream skew is genuinely too large). |
+| `memstore-out-of-order-samples` counter | `TimeSeriesShardStats.outOfOrderDropped` (incremented in `AggregatingTimeSeriesPartition.ingest:112`) | Samples rejected because they are outside the tolerance window or target an already-finalized bucket. A sustained nonzero rate means producers are emitting samples beyond `ooo-tolerance` and the configured tolerance is too tight (or upstream skew is genuinely too large). |
 | `BucketAggregationStats.activeBucketCount` | `AggregatingTimeSeriesPartition.bucketAggregationStats` (per partition) | Number of active (unfinalized) buckets currently held in memory for the partition. Bounded by `tolerance/interval + 1`. |
 | `BucketAggregationStats.finalizedBucketCount` | same                                                                | Number of finalized bucket timestamps still tracked for late-sample rejection. Periodically pruned by `cleanupOldFinalizedTracking` to `2 × tolerance` behind the threshold. |
 | `BucketAggregationStats.latestSampleTimestamp` | same                                                                | Per-partition event-time watermark. Useful for diagnosing why a producer's late sample was dropped: compare against the rejected sample's timestamp. |
 
 ### Tuning guidance
 
-- **`aggregation-interval` (bucket width).** Smaller intervals preserve more time resolution in queries but increase per-partition `activeBucketCount`. The chunked write path emits one chunk row per finalized bucket, so very small intervals proportionally inflate chunk volume.
-- **`aggregation-ooo-tolerance`.** Sets the allowed event-time skew. Setting tolerance to a value smaller than producer-side skew will permanently drop the late samples; setting it much larger increases per-partition memory (`tolerance/interval + 1` buckets) and lengthens the window during which a finalized chunk row is "young" — i.e. a query immediately after a sample arrives may need to merge active and finalized data via `MergingRangeVectorCursor`.
-- **Schema selection.** A schema that does not need OOO tolerance should not declare `aggregators`. The aggregating path imposes per-bucket merge overhead on the query side (~3.1× slower than `RawDataRangeVector` per the benchmarks), and the in-place histogram fast path is not relevant when there is at most one sample per bucket.
-- **Validation at startup.** `Schemas.validateAggregators` rejects a schema whose `aggregation-interval` is non-positive, whose `aggregation-ooo-tolerance` is negative, or whose `aggregators` reference column id 0 (the timestamp). Mis-configured schemas fail to load — they will not silently fall back to standard ingestion.
+- **`interval` (bucket width).** Smaller intervals preserve more time resolution in queries but increase per-partition `activeBucketCount`. The chunked write path emits one chunk row per finalized bucket, so very small intervals proportionally inflate chunk volume.
+- **`ooo-tolerance`.** Sets the allowed event-time skew. Setting tolerance to a value smaller than producer-side skew will permanently drop the late samples; setting it much larger increases per-partition memory (`tolerance/interval + 1` buckets) and lengthens the window during which a finalized chunk row is "young" — i.e. a query immediately after a sample arrives may need to merge active and finalized data via `MergingRangeVectorCursor`.
+- **Dataset selection.** A dataset that does not need OOO tolerance should not declare an `aggregation {}` block. The aggregating path imposes per-bucket merge overhead on the query side (~3.1× slower than `RawDataRangeVector` per the benchmarks), and the in-place histogram fast path is not relevant when there is at most one sample per bucket.
+- **Validation at first partition.** `AggregationConfig.validate` (invoked in `TimeSeriesShard.createNewPartition` on the first aggregating partition, against the ingestion schema's data columns) rejects a config whose `interval` is non-positive, whose `ooo-tolerance` is negative, or whose `aggregators` reference column id 0 (the timestamp) or an out-of-range column. A mis-configured `aggregation {}` block fails fast — it will not silently fall back to standard ingestion.
 
 ### Diagnosis recipes
 
-- **"Sample drops appeared after enabling OOO."** If `outOfOrderDropped` rises but ingest looks healthy otherwise, the most common cause is producers emitting samples whose event-time falls outside the tolerance window. Compare `BucketAggregationStats.latestSampleTimestamp` to the rejected sample's timestamp (if you have it logged). Either widen `aggregation-ooo-tolerance` or fix the producer.
+- **"Sample drops appeared after enabling OOO."** If `outOfOrderDropped` rises but ingest looks healthy otherwise, the most common cause is producers emitting samples whose event-time falls outside the tolerance window. Compare `BucketAggregationStats.latestSampleTimestamp` to the rejected sample's timestamp (if you have it logged). Either widen `ooo-tolerance` or fix the producer.
 - **"Memory grows on idle partitions."** This is the trailing-bucket retention behavior described in *Limitations*. It is bounded — a single idle partition holds at most `tolerance/interval + 1` buckets — but a fleet of idle partitions can be visible. There is no mitigation today: the event-time model deliberately does not flush on wall-clock.
 - **"Crash recovery shows duplicate samples in active buckets."** Aggregators are deterministic, so re-aggregating the same Kafka records produces identical results. Duplicate values can only appear if the offset hold-back was bypassed. Check that `prepareFlushGroup` actually saw the partition (it must be a real `AggregatingTimeSeriesPartition` instance, not a fallback `TimeSeriesPartition`) and that `earliestActiveBucketOffset` returned a value other than `Long.MaxValue` at flush time.
 

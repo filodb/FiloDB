@@ -26,6 +26,7 @@ import spire.syntax.cfor._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
@@ -268,6 +269,7 @@ case class TimeSeriesShardInfo(shardNum: Int,
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
+                      val aggregationConfig: AggregationConfig,
                       numShards: Int,
                       quotaSource: QuotaSource,
                       val shardNum: Int,
@@ -341,6 +343,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     * next partition ID number
     */
   private var nextPartitionID = 0
+
+  // Set once the per-dataset aggregationConfig has been validated against an ingestion schema's columns.
+  // Validation runs lazily on the first aggregating partition (see createNewPartition), on the ingest thread.
+  private var aggregationConfigValidated = false
 
   // This should be handled by a logging-specific class if rate-limited logs become a common use-case.
   // NOTE: This is not thread-safe, but it's good enough for this application--
@@ -1206,15 +1212,19 @@ class TimeSeriesShard(val ref: DatasetRef,
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
 
-      // Check if schema has aggregation configured
-      val hasAggregation = schema.data.hasAggregation
-
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
-      } else if (hasAggregation) {
+      } else if (aggregationConfig.nonEmpty) {
+        // Aggregation is configured per-dataset (not on the schema). Validate the aggregator column IDs
+        // against this schema's data columns once, on the first aggregating partition, so a misconfigured
+        // aggregation {} block fails fast with a clear error.
+        if (!aggregationConfigValidated) {
+          aggregationConfig.validate(schema.numDataColumns)
+          aggregationConfigValidated = true
+        }
         logger.debug(s"Adding AggregatingTimeSeriesPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
-        new AggregatingTimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
+        new AggregatingTimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize, aggregationConfig)
       } else {
         new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       }

@@ -688,9 +688,6 @@ object ProtoConverters extends StrictLogging {
         ds.getName,
         columns,
         downsamplers,
-        Seq.empty,  // aggregators - not serialized over gRPC
-        0L,         // aggregationIntervalMs
-        0L,         // aggregationOooToleranceMs
         ds.getHash,
         ds.getValueColumn,
         downsampleSchema,

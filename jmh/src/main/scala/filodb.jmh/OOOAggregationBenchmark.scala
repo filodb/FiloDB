@@ -10,6 +10,7 @@ import org.openjdk.jmh.infra.Blackhole
 import filodb.core.TestData
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
+import filodb.core.memstore.aggregation.{AggregationConfig, ColumnAggregator}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query._
 import filodb.core.store._
@@ -62,12 +63,11 @@ class OOOAggregationBenchmark {
   val regularDataset = Dataset("regular_metrics", Seq("series:string"),
     Seq("timestamp:ts", "value:double"), scalarDatasetOptions)
 
-  // Aggregating dataset (with bucket aggregation for OOO support)
+  // Aggregating dataset (with bucket aggregation for OOO support). Aggregation is now configured
+  // per-dataset via AggregationConfig (not on the schema), passed to the partition constructor.
   val aggregatingDataset = Dataset("agg_metrics", Seq("series:string"),
-    Seq("timestamp:ts", "value:double"), scalarDatasetOptions,
-    aggregatorNames = Seq("dSum(1)"),
-    aggregationIntervalMs = 60000L,
-    aggregationOooToleranceMs = 30000L)
+    Seq("timestamp:ts", "value:double"), scalarDatasetOptions)
+  val aggregatingConfig = AggregationConfig(ColumnAggregator.parseAll(Seq("dSum(1)")), 60000L, 30000L)
 
   // Aggregating histogram dataset — exercises the AggregatingRangeVector.snapshotBuckets
   // histogram clone + makeMonotonic path (dead code under scalar dSum benchmarks).
@@ -75,10 +75,8 @@ class OOOAggregationBenchmark {
   // the snapshot path's per-bucket clone allocation is fully stressed (vs ~1 bucket at
   // the 60s/30s default).
   val histAggregatingDataset = Dataset("agg_histogram_metrics", Seq("series:string"),
-    Seq("timestamp:ts", "h:hist:{counter=false,delta=true}"), scalarDatasetOptions,
-    aggregatorNames = Seq("hSum(1)"),
-    aggregationIntervalMs = 10000L,
-    aggregationOooToleranceMs = 120000L)
+    Seq("timestamp:ts", "h:hist:{counter=false,delta=true}"), scalarDatasetOptions)
+  val histAggregatingConfig = AggregationConfig(ColumnAggregator.parseAll(Seq("hSum(1)")), 10000L, 120000L)
 
   // --- Partition infrastructure ---
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
@@ -169,11 +167,12 @@ class OOOAggregationBenchmark {
     new TimeSeriesPartition(0, dataset.schema, defaultPartKey, shardInfo, 40)
   }
 
-  private def makeAggPartition(dataset: Dataset, bufPool: WriteBufferPool): AggregatingTimeSeriesPartition = {
+  private def makeAggPartition(dataset: Dataset, bufPool: WriteBufferPool,
+                               aggConfig: AggregationConfig): AggregatingTimeSeriesPartition = {
     val bufPools = debox.Map(dataset.schema.schemaHash -> bufPool)
     val shardInfo = TimeSeriesShardInfo(0,
       new TimeSeriesShardStats(dataset.ref, 0), bufPools, memFactory)
-    new AggregatingTimeSeriesPartition(0, dataset.schema, defaultPartKey, shardInfo, 40)
+    new AggregatingTimeSeriesPartition(0, dataset.schema, defaultPartKey, shardInfo, 40, aggConfig)
   }
 
   @Setup(JMHLevel.Trial)
@@ -184,9 +183,10 @@ class OOOAggregationBenchmark {
     queryRegularPart = makePartition(regularDataset,
       new WriteBufferPool(memFactory, regularDataset.schema.data, TestData.storeConf))
     queryAggPart = makeAggPartition(aggregatingDataset,
-      new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf))
+      new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf), aggregatingConfig)
     queryHistAggPart = makeAggPartition(histAggregatingDataset,
-      new WriteBufferPool(memFactory, histAggregatingDataset.schema.data, TestData.storeConf))
+      new WriteBufferPool(memFactory, histAggregatingDataset.schema.data, TestData.storeConf),
+      histAggregatingConfig)
 
     ingestQueryData()
     buildQueryRangeVector()
@@ -249,11 +249,11 @@ class OOOAggregationBenchmark {
       regularDataset.schema.data.blockMetaSize, Map("test" -> "test"), true)
 
     regularPart = makePartition(regularDataset, regularBufferPool)
-    aggPart = makeAggPartition(aggregatingDataset, aggBufferPool)
-    histAggPart = makeAggPartition(histAggregatingDataset, histAggBufferPool)
+    aggPart = makeAggPartition(aggregatingDataset, aggBufferPool, aggregatingConfig)
+    histAggPart = makeAggPartition(histAggregatingDataset, histAggBufferPool, histAggregatingConfig)
 
     val finBufPool = new WriteBufferPool(memFactory, aggregatingDataset.schema.data, TestData.storeConf)
-    finalizePart = makeAggPartition(aggregatingDataset, finBufPool)
+    finalizePart = makeAggPartition(aggregatingDataset, finBufPool, aggregatingConfig)
     finalizeBlockHolder = new BlockMemFactory(blockStore,
       aggregatingDataset.schema.data.blockMetaSize, Map("finalize" -> "test"), true)
 

@@ -126,14 +126,15 @@ By default, FiloDB's ingestion drops samples that arrive with timestamps older t
 
 ### Configuration
 
-Aggregation is configured at schema level using three config keys alongside the column definitions:
+Aggregation is configured **per-dataset**, in an `aggregation {}` block inside the dataset's
+ingestion source config (`sourceconfig`) — mirroring how the `store {}` block is configured. It is
+*not* part of the schema, so the same (ordinary) schema can be shared by aggregated and
+non-aggregated datasets. The schema is a plain schema:
 
 ```yaml
-schema = "aggregating-delta-histogram-v2"
-
-# Example schema with aggregation
+# Ordinary schema in filodb-defaults.conf — no aggregation keys
 schemas {
-  aggregating-delta-histogram-v2 {
+  delta-histogram-v2 {
     columns = ["timestamp:ts",
       "sum:double:{detectDrops=false,delta=true}",
       "count:double:{detectDrops=false,delta=true}",
@@ -142,9 +143,6 @@ schemas {
       "max:double:{detectDrops=false,delta=true}",
       "sumLast:double:{detectDrops=false,delta=true}"
     ]
-    aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-    aggregation-interval = 1m
-    aggregation-ooo-tolerance = 2m
     value-column = "h"
     downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
     downsample-schema = "delta-histogram-v2"
@@ -153,10 +151,24 @@ schemas {
 }
 ```
 
-**Schema-level parameters:**
-- `aggregators` - List of column aggregators in `"name(colId)"` format (same syntax as downsamplers)
-- `aggregation-interval` - Time bucket interval (e.g., 30s, 1m, 5m, 1h)
-- `aggregation-ooo-tolerance` - Maximum out-of-order tolerance window (e.g., 60s, 2m, 5m)
+Aggregation is turned on for the dataset in its ingestion source config:
+
+```yaml
+sourceconfig {
+  schema = "delta-histogram-v2"
+  store { ... }
+  aggregation {
+    aggregators   = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+    interval      = 1m
+    ooo-tolerance = 2m
+  }
+}
+```
+
+**Per-dataset aggregation parameters:**
+- `aggregators` - List of column aggregators in `"name(colId)"` format (same syntax as downsamplers); `colId` references the ingestion data schema's columns
+- `interval` - Time bucket interval (e.g., 30s, 1m, 5m, 1h)
+- `ooo-tolerance` - Maximum out-of-order tolerance window (e.g., 60s, 2m, 5m)
 
 **Aggregator names:**
 - `dSum` - sum of double values
@@ -183,27 +195,15 @@ schemas {
 
 ### Multi-Column Aggregation
 
-Different columns can have different aggregation types. The `aggregating-delta-histogram-v2`
-schema demonstrates this — sum/count columns use `dSum`, the histogram uses `hSum`,
-min/max use their respective aggregations, and sumLast uses `dLast`:
+Different columns can have different aggregation types. The example aggregation block for the
+`delta-histogram-v2` schema demonstrates this — sum/count columns use `dSum`, the histogram uses
+`hSum`, min/max use their respective aggregations, and sumLast uses `dLast`:
 
 ```yaml
-aggregating-delta-histogram-v2 {
-  columns = ["timestamp:ts",
-    "sum:double:{detectDrops=false,delta=true}",
-    "count:double:{detectDrops=false,delta=true}",
-    "h:hist:{counter=false,delta=true}",
-    "min:double:{detectDrops=false,delta=true}",
-    "max:double:{detectDrops=false,delta=true}",
-    "sumLast:double:{detectDrops=false,delta=true}"
-  ]
-  aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-  aggregation-interval = 1m
-  aggregation-ooo-tolerance = 2m
-  value-column = "h"
-  downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-  downsample-schema = "delta-histogram-v2"
-  downsample-period-marker = "time(0)"
+aggregation {
+  aggregators   = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+  interval      = 1m
+  ooo-tolerance = 2m
 }
 ```
 
@@ -245,24 +245,18 @@ For 1 million partitions with 5 aggregated columns: ~263 MB additional memory
 
 ### Usage Example
 
-**Delta histogram with out-of-order tolerance:**
+**Delta histogram with out-of-order tolerance** — plain `delta-histogram-v2` schema plus a
+per-dataset `aggregation {}` block in the source config:
+
 ```yaml
-aggregating-delta-histogram-v2 {
-  columns = ["timestamp:ts",
-    "sum:double:{detectDrops=false,delta=true}",
-    "count:double:{detectDrops=false,delta=true}",
-    "h:hist:{counter=false,delta=true}",
-    "min:double:{detectDrops=false,delta=true}",
-    "max:double:{detectDrops=false,delta=true}",
-    "sumLast:double:{detectDrops=false,delta=true}"
-  ]
-  aggregators = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-  aggregation-interval = 1m
-  aggregation-ooo-tolerance = 2m
-  value-column = "h"
-  downsamplers = ["tTime(0)", "dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
-  downsample-schema = "delta-histogram-v2"
-  downsample-period-marker = "time(0)"
+sourceconfig {
+  schema = "delta-histogram-v2"
+  store { ... }
+  aggregation {
+    aggregators   = ["dSum(1)", "dSum(2)", "hSum(3)", "dMin(4)", "dMax(5)", "dLast(6)"]
+    interval      = 1m
+    ooo-tolerance = 2m
+  }
 }
 ```
 
