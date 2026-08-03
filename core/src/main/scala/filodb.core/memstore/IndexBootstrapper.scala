@@ -106,7 +106,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
    * A ShapeStats is returned iff the stats should be published according to the config.
    */
   private def getShapeStats(pk: PartKeyRecord, shardNum: Int, schema: Schema): Option[ShapeStats] = {
-    val statsKey = new mutable.ArraySeq[String](downsampleConfig.dataShapeKeyIndex.size)
+    val statsKey = mutable.ArraySeq.make(new Array[String](downsampleConfig.dataShapeKeyIndex.size))
     val labelValuePairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
     val keyLengths = new mutable.ArrayBuffer[Int](labelValuePairs.size)
     val valueLengths = new mutable.ArrayBuffer[Int](labelValuePairs.size)
@@ -127,15 +127,15 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
         metricLength = value.length
       }
     }
-    if (!shouldPublishShapeStats(statsKey)) {
+    if (!shouldPublishShapeStats(statsKey.toSeq)) {
       return None
     }
     if (downsampleConfig.enableDataShapeBucketCount && schemaHashToHistCol.contains(schema.schemaHash)) {
       bucketCount = Some(getHistBucketCount(pk, shardNum, schema))
     }
     Some(ShapeStats(
-      statsKey, labelValuePairs.size, keyLengths,
-      valueLengths, metricLength, totalLength, bucketCount))
+      statsKey.toSeq, labelValuePairs.size, keyLengths.toSeq,
+      valueLengths.toSeq, metricLength, totalLength, bucketCount))
   }
 
   /**

@@ -37,7 +37,10 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              acceptDuplicateSamples: Boolean,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
-                             estimatedIngestResolutionMillis: Int) {
+                             estimatedIngestResolutionMillis: Int,
+                             // Zeroes memory when it is first allocated.
+                             // NOTE: this will incur a memset(); memory will be eagerly allocated if enabled.
+                             clearAllocations: Boolean) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -61,7 +64,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
-                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis).asJava)
+                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
+                               "clear-allocations" -> clearAllocations).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -99,6 +103,7 @@ object StoreConfig {
                                            |accept-duplicate-samples = false
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
+                                           |clear-allocations = false
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -138,7 +143,8 @@ object StoreConfig {
                 config.as[Map[String, String]]("trace-filters"),
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
-                config.getInt("ingest-resolution-millis"))
+                config.getInt("ingest-resolution-millis"),
+                config.getBoolean("clear-allocations"))
   }
 }
 

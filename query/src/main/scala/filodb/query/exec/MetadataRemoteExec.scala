@@ -34,7 +34,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(config))
 
   private val dummyQueryStats = QueryStats()
-  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+  override def sendRequest(execPlan2Span: Span, httpTimeoutMs: Long, querySession: QuerySession)
                           (implicit sched: Scheduler): Task[QueryResponse] = {
     import PromCirceSupport._
     import io.circe.parser
@@ -88,7 +88,11 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSamplV2]]
       .map { ts =>
         val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
-        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("shortTerm"), ts.cardinality("longTerm"))
+        val counts = CardCounts(
+          ts.cardinality("active"),
+          ts.cardinality.getOrElse("billable", 0),  // Backwards compatibility.
+          ts.cardinality("shortTerm"),
+          ts.cardinality("longTerm"))
         CardRowReader(prefixToGroupWithDataset(prefix, ts._type), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)

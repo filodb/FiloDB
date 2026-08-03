@@ -6,6 +6,7 @@ import scala.reflect.ClassTag
 
 import debox.Buffer
 
+import filodb.core.binaryrecord2.RecordContainer.BRIterator
 import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge}
 import filodb.memory.format.UnsafeUtils
 
@@ -84,6 +85,19 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
       curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes
       reader
     }
+  }
+
+  /**
+   * Iterates through each BinaryRecord using the provided RowReader instance to avoid allocation.
+   * This is used by ArrowSerializedRangeVector to populate Arrow vectors without per-record allocations.
+   * In a later effort, we should try to write directly to Arrow buffers to avoid the onHeap RecordBuilder
+   * entirely.
+   */
+  final def iterate(brIterator: BRIterator): Iterator[BinaryRecordRowReader] = {
+    brIterator.reader.recordBase = base
+    brIterator.endOffset = offset + 4 + numBytes
+    brIterator.curOffset = offset + ContainerHeaderLen
+    brIterator
   }
 
   class FunctionalConsumer(func: (Any, Long) => Unit) extends BinaryRegionConsumer {
@@ -166,4 +180,18 @@ object RecordContainer {
     val (base, offset, _) = UnsafeUtils.BOLfromBuffer(buf)
     new RecordContainer(base, offset, 0)
   }
+
+  class BRIterator(val reader: BinaryRecordRowReader) extends Iterator[BinaryRecordRowReader] {
+    var endOffset: Long = 0
+    var curOffset: Long = 0
+
+    final def hasNext: Boolean = curOffset < endOffset
+    final def next: BinaryRecordRowReader = {
+      val recordLen = BinaryRegionLarge.numBytes(reader.recordBase, curOffset)
+      reader.recordOffset = curOffset
+      curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes
+      reader
+    }
+  }
+
 }

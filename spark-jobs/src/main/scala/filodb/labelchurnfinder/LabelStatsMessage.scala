@@ -16,7 +16,7 @@ case class LabelStatisticsMessage(
   mosaicPartition: String,
   nsGroup: String,
   jobTimestamp: Instant,
-  labels: Seq[LabelStatDto]
+  labels: scala.collection.Seq[LabelStatDto]
 )
 
 /**

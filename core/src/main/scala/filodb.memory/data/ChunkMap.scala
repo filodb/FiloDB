@@ -114,7 +114,7 @@ object ChunkMap extends StrictLogging {
         }
       }
 
-      countMap.clear
+      countMap.clear()
     }
     execPlanTracker.remove(Thread.currentThread())
     total

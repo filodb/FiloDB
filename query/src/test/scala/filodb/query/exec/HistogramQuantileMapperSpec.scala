@@ -87,7 +87,7 @@ class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFut
       IteratorBackedRangeVector(histBuckets2(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator, None)
     }
 
-    val expectedResult = Seq(histKey2 -> quantile50Result, histKey1 -> quantile50Result)
+    val expectedResult = Seq(histKey1 -> quantile50Result, histKey2 -> quantile50Result)
     calculateAndVerify(0.5, histRvs, expectedResult)
   }
 

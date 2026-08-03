@@ -7,9 +7,9 @@ import java.util
 import java.util.{Base64, PriorityQueue}
 import java.util.concurrent.{ScheduledThreadPoolExecutor, TimeUnit}
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -19,7 +19,6 @@ import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.facet.{FacetsCollector, FacetsConfig}
-import org.apache.lucene.facet.FacetsConfig.DrillDownTermsIndexing
 import org.apache.lucene.facet.sortedset.{SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
 import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState
 import org.apache.lucene.index._
@@ -184,7 +183,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       if (name.nonEmpty && value.nonEmpty &&
         (always || facetEnabledForLabel(name)) &&
         value.length < FACET_FIELD_MAX_LEN) {
-        facetsConfig.setDrillDownTermsIndexing(name, DrillDownTermsIndexing.NONE)
+        facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
       }
@@ -359,14 +358,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .maximumSize(100)
     .recordStats()
     .build((key: (IndexReader, String)) => {
-      new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2, new FacetsConfig())
+      new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
     })
   private val readerStateCacheNonShardKeys: LoadingCache[(IndexReader, String), DefaultSortedSetDocValuesReaderState] =
     Caffeine.newBuilder()
       .maximumSize(200)
       .recordStats()
       .build((key: (IndexReader, String)) => {
-        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2, new FacetsConfig())
+        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
       })
 
   /**
@@ -439,7 +438,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     labelValuesQueryLatency.record(System.nanoTime() - start)
     readerStateCacheHitRate.update(readerStateCacheShardKeys.stats().hitRate(), Map("label" -> "shardKey"))
     readerStateCacheHitRate.update(readerStateCacheNonShardKeys.stats().hitRate(), Map("label" -> "other"))
-    labelValues
+    labelValues.toSeq
   }
 
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
@@ -688,7 +687,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                 limit: Int = Int.MaxValue): Seq[PartKeyLuceneIndexRecord] = {
     val collector = new PartKeyRecordCollector(limit)
     searchFromFilters(columnFilters, startTime, endTime, collector)
-    collector.records
+    collector.records.toSeq
   }
 
 
@@ -867,7 +866,7 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
 
       try {
         // update the cardinality count by 1, since the shardKey for each document in index is unique
-        cardTracker.modifyCount(shardKey, 1, 0)
+        cardTracker.modifyCount(shardKey, 1, 0, 0)
       } catch {
         case t: Throwable =>
           logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)

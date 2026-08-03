@@ -10,6 +10,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
+import filodb.coordinator.flight.FiloDBSinglePartitionFlightProducer
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.coordinator.v2.{FiloDbClusterDiscovery, NewNodeCoordinatorActor}
 import filodb.core.{DatasetRef, GlobalConfig, GlobalScheduler}
@@ -20,13 +21,13 @@ import filodb.http.{FiloHttpServer, PromQLGrpcServer}
 
 object NewFiloServerMain extends StrictLogging {
 
+  // scalastyle:off method.length
   def start(): Unit = {
     try {
 
       val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
       val settings = FilodbSettings.initialize(allConfig)
-
-      Kamon.init()
+      filodb.coordinator.KamonSingleton.initOnce()
 
       val system = ActorSystemHolder.createActorSystem("filo-standalone", allConfig)
 
@@ -47,6 +48,11 @@ object NewFiloServerMain extends StrictLogging {
         clusterDiscovery, settings), "coordinator")
 
       nodeCoordinatorActor ! NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
+
+      val flightServerEnabled = allConfig.getBoolean("filodb.flight.server.enabled")
+      if (flightServerEnabled) {
+        FiloDBSinglePartitionFlightProducer.start(memStore, allConfig)
+      }
 
       val filoHttpServer = new FiloHttpServer(system, settings)
       filoHttpServer.start(nodeCoordinatorActor, nodeCoordinatorActor, true)

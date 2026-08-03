@@ -27,6 +27,12 @@ object QueryConstants {
 object LogicalPlanParser {
   import QueryConstants._
 
+  // Matched against metric names.
+  // If a metric name matches, it is valid to prefix a selector's curly braces, i.e. "foo{...}".
+  // Otherwise, it must be included as an explicit __name__ filter.
+  // Sourced from IDENTIFIER_EXTENDED in PromQL grammar.
+  private val PREPENDABLE_METRIC_NAME_REGEX = "[_:]*[a-zA-Z][a-zA-Z0-9_:\\-.]*".r
+
   private def getFiltersFromRawSeries(lp: RawSeries)= getFiltersFromColumnFilters(lp.filters)
 
   private def getFiltersFromColumnFilters(filters: Seq[ColumnFilter]) = {
@@ -36,20 +42,49 @@ object LogicalPlanParser {
 
   private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String],
                              lookback: Option[Long], offset: Option[Long], addWindow: Boolean): String = {
-    val columnString = if (columns.isEmpty) "" else s"::${columns.head}"
-    // Get metric name from filters and remove quotes from start and end
-    val name = s"${filters.find(x => x._1.equals(PromMetricLabel)).head._3.
-      replaceAll("^\"|\"$", "")}$columnString"
-    val window = if (lookback.isDefined) {
+    val metricFilter = filters.find { case (name, op, value) => name == PromMetricLabel }
+    require(metricFilter.nonEmpty, s"Missing metric filter! filters=$filters")
+
+    val fullMetricName = metricFilter
+      .map { case (name, op, value) =>
+        val colSuffix = columns.headOption.map("::" + _).getOrElse("")
+        val metricNameNoQuotes = value.replaceAll("^\"|\"$", "")
+        s"$metricNameNoQuotes$colSuffix"
+      }.get
+    val metricCanPrefixBraces = PREPENDABLE_METRIC_NAME_REGEX.matches(fullMetricName)
+
+    val filterStringWithoutMetric = filters
+      .filter { case (name, op, value) => name != PromMetricLabel }
+      .map { case (name, op, value) => s"$name$op$value" }
+      .mkString(Comma)
+
+    val windowString = if (lookback.isDefined) {
       // Window should not be added for queries like sum(foo) even though they have lookback
       if (lookback.get.equals(WindowConstants.staleDataLookbackMillis) && !addWindow) ""
       else s"$OpeningSquareBracket${lookback.get / 1000}s$ClosingSquareBracket"
     } else ""
+
     val offsetString = offset.map(o => s"$Space$Offset$Space${(o / 1000).toString}s").getOrElse("")
-    // When only metric name is present
-    if (filters.size == 1) name + window + offsetString
-    else s"$name$OpeningCurlyBraces${filters.filterNot(x => x._1.equals(PromMetricLabel)).
-      map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces" + window + offsetString
+
+    val selectorString = if (metricCanPrefixBraces) {
+      if (filterStringWithoutMetric.nonEmpty) {
+        s"${fullMetricName}$OpeningCurlyBraces$filterStringWithoutMetric$ClosingCurlyBraces"
+      } else {
+        // Nothing to include inside the curly braces, so the braces are excluded.
+        fullMetricName
+      }
+    } else {  // Metric cannot prepend braces.
+      // Add a metric filter inside the curly braces.
+      val (filterName, filterOp, filterVal) = metricFilter.get
+      val metricFilterString = s"$filterName$filterOp\"${fullMetricName}\""
+      if (filterStringWithoutMetric.nonEmpty) {
+        s"$OpeningCurlyBraces$filterStringWithoutMetric,$metricFilterString$ClosingCurlyBraces"
+      } else {
+        s"$OpeningCurlyBraces$metricFilterString$ClosingCurlyBraces"
+      }
+    }
+
+    s"$selectorString$windowString$offsetString"
   }
 
   private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean): String = {

@@ -389,7 +389,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     // Collect isEmpty states during iteration since TransientHistRow is mutable and reused
     // We need to capture the state as we iterate, not after collecting all rows
-    val isEmptyStates = result.head.rows.map(row => row.getHistogram(1).isEmpty).toList
+    val isEmptyStates = result.head.rows().map(row => row.getHistogram(1).isEmpty).toList
 
     // Verify the result has 3 rows
     isEmptyStates.size shouldEqual 3
@@ -439,7 +439,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     result.size shouldEqual 1
 
     // Collect bucket counts and first bucket values during iteration
-    val bucketInfo = result.head.rows.map { row =>
+    val bucketInfo = result.head.rows().map { row =>
       val hist = row.getHistogram(1)
       (hist.numBuckets, if (hist.numBuckets > 0) hist.bucketValue(0) else Double.NaN)
     }.toList

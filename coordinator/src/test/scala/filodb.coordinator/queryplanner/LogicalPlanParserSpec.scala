@@ -70,6 +70,13 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")
     parseAndAssertResult("""foo[5m:1m]""")("""foo[300s:60s]""")
     parseAndAssertResult("""last_over_time_is_mad_outlier(3.0,1.0,sum(rate(http_requests_total{job="app"}[300s]))[432000s:300s])""")()
+    parseAndAssertResult("""{__name__="foo"}""")("foo")
+    parseAndAssertResult("""{__name__="foo bar baz"}""")()
+    parseAndAssertResult("""{__name__="!@#$%^&*()"}""")()
+    parseAndAssertResult("""{job="app1",__name__="foo bar baz"}""")()
+    parseAndAssertResult("""sum({job="app1",__name__="foo bar baz"})""")()
+    parseAndAssertResult("""histogram_quantile({job="app1",__name__="foo bar baz"})""")()
+    parseAndAssertResult("""({job="app1",__name__="foo bar baz"} + {job="app1",__name__="foo bar baz"})""")()
   }
 
   it("should generate query from LogicalPlan having offset") {
@@ -346,5 +353,12 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual "(http_requests_total{job=\"app\"} + 2.1)"
+  }
+
+  it("should fail to convert query to plan if metric name is missing") {
+    val query = """{job="app"}"""
+    assertThrows[IllegalArgumentException] {
+      Parser.queryToLogicalPlan(query, 1000, 1000)
+    }
   }
 }

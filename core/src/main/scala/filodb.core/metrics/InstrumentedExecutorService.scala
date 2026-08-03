@@ -15,7 +15,7 @@ private class InstrumentedExecutorService(underlying: ExecutorService,
                                           metrics: FilodbMetrics) extends ExecutorService with StrictLogging {
 
   import java.util.concurrent._
-  import scala.collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   // Metrics
   private val baseAttributes = Map("name" -> executorName, "type" -> underlying.getClass.getSimpleName)

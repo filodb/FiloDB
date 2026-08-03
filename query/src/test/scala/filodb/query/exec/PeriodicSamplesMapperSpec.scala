@@ -152,7 +152,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
-  it("should increase resets for NaN") {
+  it("should not increase resets for NaN") {
 
     val samples = Seq(
       100000L -> Double.NaN,
@@ -171,7 +171,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).toList)
 
-    resultRows.head.head._2 shouldEqual(2)
+    resultRows.head.head._2 shouldEqual(1) // 20d to NaN should not increase for NaN
   }
 
   it("should not increase resets consecutive NaN's") {
@@ -193,7 +193,7 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows().map
     (r => (r.getLong(0), r.getDouble(1))).toList)
 
-    // 1 for 100 -> 20 and 1 for 20 -> Double.NaN. Should not increase for Double.NaN -> Double.NaN
-    resultRows.head.head._2 shouldEqual(2)
+    // 1 for 100 -> 20.  Not for 1 for 20 -> Double.NaN. Should not increase for Double.NaN -> Double.NaN
+    resultRows.head.head._2 shouldEqual(1)
   }
 }

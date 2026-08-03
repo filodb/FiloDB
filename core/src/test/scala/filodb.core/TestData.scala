@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.duration._
 import scala.io.Source
+import scala.util.Random.nextInt
 
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
@@ -475,7 +476,7 @@ object MachineMetricsData {
       false, Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong, (rowCount) => {}, Long.MaxValue, "query-id"))  // select timestamp and histogram columns only
   }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxMinDS.schema.data, TestData.storeConf)
@@ -492,7 +493,7 @@ object MachineMetricsData {
     part.switchBuffers(histMaxMinBH, encode = true)
     // Select timestamp, hist, max, min
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+      new AtomicLong, (rowCount) => {}, Long.MaxValue, "query-id"))
   }
 
   // Buffer pool and BlockMemFactory for cumulative histograms
@@ -512,7 +513,7 @@ object MachineMetricsData {
     part.switchBuffers(cumulativeHistMaxMinBH, encode = true)
     // Select timestamp, hist, max, min
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+      new AtomicLong, (rowCount) => {}, Long.MaxValue, "query-id"))
   }
 
   // Dataset for CumlDeltaTogglerChunkedFunction tests: cumulative histogram with detectDrops=true on
@@ -544,7 +545,7 @@ object MachineMetricsData {
     part.switchBuffers(cumulHistBH, encode = true)
     // Select timestamp=0, hist=3, max=5, min=4
     (rawData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3, 5, 4),
-      new AtomicLong, new AtomicLong, Long.MaxValue, "query-id"))
+      new AtomicLong, _ => {}, Long.MaxValue, "query-id"))
   }
 }
 
@@ -618,6 +619,15 @@ object MetricsTestData {
     options = DatasetOptions(Seq("__name__"), "__name__", true)
   ).get
   val downsampleSchema = downsampleDataset.schema
+
+  def timeSeriesData(tags: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): Stream[Seq[Any]] = {
+    val initTs = 0L
+    Stream.from(0).map { n =>
+      Seq(initTs + n * 1000,
+        (45 + nextInt(10)).toDouble,
+        "cpu_usage".utf8, tags)
+    }
+  }
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

@@ -4,9 +4,9 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
@@ -62,7 +62,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
-  Kamon.init
+  filodb.coordinator.KamonSingleton.initOnce()
 
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()

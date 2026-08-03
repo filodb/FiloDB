@@ -113,6 +113,7 @@ object InstantFunction {
     case HistogramQuantile =>
       if (sourceSchema.isHistMaxMin) HistogramQuantileWithMaxMinImpl() else HistogramQuantileImpl()
     case HistogramMaxQuantile => HistogramMaxQuantileImpl()
+    case HistogramMaxQuantileEven => HistogramMaxQuantileEvenImpl()
     case HistogramBucket => HistogramBucketImpl()
     case HistogramFraction =>
       if (sourceSchema.isHistMaxMin) HistogramFractionWithMaxMinImpl() else HistogramFractionImpl()
@@ -409,6 +410,20 @@ final case class HistogramMaxQuantileImpl() extends HMaxMinToDoubleIFunction {
   final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     hist.quantile(scalarParams(0), 0, max)
+  }
+}
+
+/**
+ * Histogram max quantile with even distribution mode for Histogram column + extra max (Double) column.
+ */
+final case class HistogramMaxQuantileEvenImpl() extends HMaxMinToDoubleIFunction {
+  /**
+    * @param scalarParams - two values: quantile (0 to 1) and mode (0=linear, 1=even distribution).
+    */
+  final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.length == 2, "Quantile (between 0 and 1) and mode (0=linear, 1=even) required")
+    val evenDistribution = scalarParams(1) == 1.0
+    hist.quantile(scalarParams(0), 0, max, evenDistribution)
   }
 }
 

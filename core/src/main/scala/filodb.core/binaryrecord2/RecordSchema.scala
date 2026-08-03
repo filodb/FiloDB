@@ -78,24 +78,24 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   // with no boxing or extra allocations involved
   val builderAdders = columnTypes.zipWithIndex.map {
     case (Column.ColumnType.LongColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addLong(row.getLong(colNo))
     case (Column.ColumnType.TimestampColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addLong(row.getLong(colNo))
     case (Column.ColumnType.DoubleColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addDouble(row.getDouble(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addDouble(row.getDouble(colNo))
     case (Column.ColumnType.HistogramColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.getHistogram(colNo).serialize())
+      (row: RowReader, builder: RecordBuilderBase) => builder.addBlob(row.getHistogram(colNo).serialize())
     case (Column.ColumnType.IntColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addInt(row.getInt(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addInt(row.getInt(colNo))
     case (Column.ColumnType.StringColumn, colNo) =>
       // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
-      (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addBlob(row.filoUTF8String(colNo))
     case (Column.ColumnType.BinaryRecordColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) =>
+      (row: RowReader, builder: RecordBuilderBase) =>
         builder.addBlob(row.getBlobBase(colNo), row.getBlobOffset(colNo), row.getBlobNumBytes(colNo))
     case (t: Column.ColumnType, colNo) =>
       // TODO: add more efficient methods
-      (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))
+      (row: RowReader, builder: RecordBuilderBase) => builder.addSlowly(row.getAny(colNo))
   }.toArray
 
   def numColumns: Int = columns.length
@@ -286,7 +286,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
-    result
+    result.toSeq
   }
 
   def colNames(base: Any, offset: Long): Seq[String] = {
@@ -304,7 +304,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (BinaryRecordColumn, i) => ???
       case (HistogramColumn, i) => result += colNames(i)
     }
-    result
+    result.toSeq
   }
 
   def singleColValues(base: Any, offset: Long, col: String,
@@ -344,7 +344,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     }
     if (cols.contains(Schemas.TypeLabel)) res(cols.indexOf(Schemas.TypeLabel)) =
       Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
-    res
+    res.toSeq
   }
 
   /**

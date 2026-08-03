@@ -2,17 +2,25 @@ package filodb.coordinator
 
 import akka.actor.Props
 import com.typesafe.config.ConfigFactory
+
 import filodb.core.{DatasetRef, GdeltTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
-import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, ColumnInfo, CustomRangeVectorKey, NoCloseCursor, QueryConfig, QueryContext, QueryStats, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientRow}
 import filodb.core.store.AllChunkScan
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.coordinator.ProtoConverters._
 import filodb.core.binaryrecord2.RecordBuilder
-
 import java.util.concurrent.TimeUnit
+
+import org.apache.arrow.memory.RootAllocator
+
+import filodb.coordinator.flight.ArrowSerializedRangeVectorOps
+import filodb.core.metadata.Column.ColumnType
+import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
+import filodb.query.ProtoConverters.{SerializableRangeVectorFromProtoConverter, SerializableRangeVectorToProtoConverter}
 
 class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
@@ -65,6 +73,62 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     execPlan.toProto.fromProto(qContext) shouldEqual execPlan
   }
 
+  // Helper to create mock RangeVector with double values
+  private def toRv(samples: Seq[(Long, Double)],
+                   rangeVectorKey: RangeVectorKey,
+                   rvPeriod: RvRange): RangeVector = {
+    new RangeVector {
+      override def key: RangeVectorKey = rangeVectorKey
+      override def rows(): RangeVectorCursor = NoCloseCursor.NoCloseCursor(samples.map(r => new TransientRow(r._1, r._2)).iterator)
+      override def outputRange: Option[RvRange] = Some(rvPeriod)
+    }
+  }
+
+  it("should convert the ArrowSerializedRangeVector to proto and back") {
+
+    System.setProperty("arrow.memory.debug.allocator", "true") // allows debugging of memory leaks - look into logs
+    val allocator = new RootAllocator(10000000)
+
+    try {
+      val keysMap = Map(UTF8Str("metric") -> UTF8Str("temperature"),
+        UTF8Str("host") -> UTF8Str("server1"))
+      val key = CustomRangeVectorKey(keysMap)
+      val resSchema = new ResultSchema(Seq(
+        ColumnInfo("time", ColumnType.TimestampColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)
+      ), 1)
+      val recSchema = resSchema.toRecordSchema
+
+      val outputRange = Some(RvRange(1000, 1000, 5000))
+      val rv = toRv(
+        Seq((1000, 10.0), (2000, 20.0), (3000, 30.0), (4000, 40.0), (5000, 50.0)),
+        key,
+        outputRange.get
+      )
+
+      val queryStats = QueryStats()
+      val vsrs = ArrowSerializedRangeVectorOps.VsrPopulationState()
+
+      // Populate VSR
+      ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs(
+        rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
+      )
+
+      // Convert to ArrowSerializedRangeVector2 instances
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val asrvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
+      asrvs.foreach { a =>
+        val roundTrip = a.toProto.fromProto
+        roundTrip.rows().map(r => (r.getLong(0) , r.getDouble(1))).toList shouldEqual a.rows().map(r => (r.getLong(0) , r.getDouble(1))).toList
+        roundTrip.key shouldEqual a.key
+        roundTrip.outputRange shouldEqual a.outputRange
+      }
+      allVsrs.foreach(_.close())
+    } finally {
+     allocator.close()
+    }
+  }
+
   it("should convert MultiSchemaPartitionsExec to proto and back") {
     val dsRef = DatasetRef("raw-metrics")
     val qContext = QueryContext()
@@ -96,7 +160,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
   class DummyActor extends akka.actor.Actor {
     override def receive: Receive = {
-      case "" => Unit
+      case "" => ()
     }
   }
 

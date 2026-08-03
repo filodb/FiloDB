@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
+import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 
 import filodb.core._
@@ -12,7 +13,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
-
+import filodb.core.query.QueryUtils
 
 /**
  * RawChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
@@ -148,6 +149,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult
 
+  // scalastyle:off method.length
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
@@ -190,6 +192,22 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       }
     }
 
+    val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
+    val resultSchema = {
+      val numRowKeyCols = 1
+      ResultSchema(schema.infosFromIDs(columnIDs), numRowKeyCols, colIDs = columnIDs)
+    }
+
+    // Create a row-count consumer to account for row-based samples-scanned as chunks are iterated.
+    // Series/part-key-based samples are accounted for below while looping through partitions.
+    def samplesScannedRowCountConsumer(rowsScanned: Long): Unit = {
+      if (samplesScannedConfig.leafSamplesEnabled) {
+        QueryUtils.trackSamplesScanned(
+          seriesScanned = 0, rowsScanned, partKeyBytes = 0, this.getClass,
+          querySession.queryStats, resultSchema, samplesScannedConfig)
+      }
+    }
+
     filteredParts.map { partition =>
       stats.incrReadPartitions(1)
       val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
@@ -197,12 +215,22 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val key = PartitionRangeVectorKey(Left(partition),
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
+
+      // Account for series- & part-key-based samples-scanned up-front;
+      //   row-based samples-scanned are accounted for by the consumer created above.
+      if (samplesScannedConfig.leafSamplesEnabled) {
+        QueryUtils.trackSamplesScanned(
+          seriesScanned = 1, 0, partKeyBytes = key.keySize, this.getClass,
+          querySession.queryStats, resultSchema, samplesScannedConfig)
+      }
+
       RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, lookupRes.samplesScannedCtr,
+        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, samplesScannedRowCountConsumer,
         querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
       )
     }
   }
+  // scalastyle:on method.length
 
   val FILODB_PARTITION_KEY = "filodb.partition"
 

@@ -514,6 +514,29 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
 
+    // TsOfLastOverTime
+    parseSuccessfully("ts_of_last_over_time(some_metric[5m])")
+    parseError("ts_of_last_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_last_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_last_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // TsOfMaxOverTime
+    parseSuccessfully("ts_of_max_over_time(some_metric[5m])")
+    parseError("ts_of_max_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_max_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_max_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // TsOfMinOverTime
+    parseSuccessfully("ts_of_min_over_time(some_metric[5m])")
+    parseError("ts_of_min_over_time(some_metric)") // reason : Expected range-vector
+    parseError("ts_of_min_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("ts_of_min_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // Complex staleness detection query pattern
+    parseSuccessfully("(time() - ts_of_last_over_time(sum by (cluster) (your_metric)[24h:])) > 300")
+    parseSuccessfully("time() - ts_of_last_over_time(some_metric[1h])")
+    parseSuccessfully("ts_of_last_over_time(rate(http_requests_total[5m])[30m:])")
+
     // Trailing Commas
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations,)(some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations, )(some_metric)")
@@ -1005,20 +1028,20 @@ class ParserSpec extends AnyFunSpec with Matchers {
     // true -> should not throw an exception; else false
     val succeedQueryPairs = Seq(
       // Begin successful...
-      (true, s"""job=~"${"a".repeat(lim)}""""),
-      (true, s"""job=~"${".".repeat(lim)}""""),
+      (true, s"""job=~"${"a" * (lim)}""""),
+      (true, s"""job=~"${"." * (lim)}""""),
       // May want to enforce this (no regex chars, but length limit exceeded).
-      (true, s"""job=~"${"a".repeat(lim + 1)}""""),
-      (true, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}""""),
-      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim)}""""),
+      (true, s"""job=~"${"a" * (lim + 1)}""""),
+      (true, s"""job=~"${("a" * (lim + 1)).split("").mkString("|")}""""),
+      (true, s"""job=~"${"a|" * (10) + "a" * (lim)}""""),
       // May want to enforce this (single "|"-joined value exceeds limit).
-      (true, s"""job=~"${"a|".repeat(10) + "a".repeat(lim + 1)}""""),
+      (true, s"""job=~"${"a|" * (10) + "a" * (lim + 1)}""""),
 
       // Begin unsuccessful...
-      (false, s"""job=~"${".".repeat(lim + 1)}""""),
-      (false, s"""job=~"${".".repeat(lim + 1).split("").mkString("|")}""""),
-      (false, s"""job=~"${"a".repeat(lim + 1)}.*"}"""),
-      (false, s"""job=~"${"a".repeat(lim + 1).split("").mkString("|")}.*""""),
+      (false, s"""job=~"${"." * (lim + 1)}""""),
+      (false, s"""job=~"${("." * (lim + 1)).split("").mkString("|")}""""),
+      (false, s"""job=~"${"a" * (lim + 1)}.*"}"""),
+      (false, s"""job=~"${("a" * (lim + 1)).split("").mkString("|")}.*""""),
     )
     val timeParams = TimeStepParams(1000, 1, 1000)
     val testFunc = (shouldSucceed: Boolean, lambda: () => Unit) => {

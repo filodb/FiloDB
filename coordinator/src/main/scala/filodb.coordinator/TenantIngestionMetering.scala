@@ -33,7 +33,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
                                    coordActorProducer: () => ActorRef) extends StrictLogging{
 
   private val ASK_TIMEOUT = FiniteDuration(
-    settings.config.getDuration("metering-query-interval").toSeconds,
+    settings.config.getDuration("metering-query-interval").getSeconds,
     TimeUnit.SECONDS)
   private val SCHED_INIT_DELAY = ASK_TIMEOUT  // time until first job is scheduled
   private val SCHED_DELAY = ASK_TIMEOUT  // time between all jobs after the first
@@ -42,6 +42,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
   private val FILODB_PARTITION = settings.config.getString("partition")
 
   private val METRIC_ACTIVE = "tsdb_metering_active_timeseries"
+  private val METRIC_BILLABLE = "tsdb_metering_billable_timeseries"
   private val METRIC_TOTAL = "tsdb_metering_total_timeseries"
   private val METRIC_LONGTERM = "tsdb_metering_longterm_timeseries"
 
@@ -96,6 +97,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
             }
             else {
               FilodbMetrics.gauge(METRIC_ACTIVE, tags).update(data.counts.active.toDouble)
+              FilodbMetrics.gauge(METRIC_BILLABLE, tags).update(data.counts.billable.toDouble)
               FilodbMetrics.gauge(METRIC_TOTAL, tags).update(data.counts.shortTerm.toDouble)
             }
           })

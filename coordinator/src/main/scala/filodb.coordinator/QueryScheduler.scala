@@ -9,14 +9,34 @@ import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
 
 import filodb.core.GlobalConfig
-import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.memstore.FiloSchedulers.{FlightIoSchedName, QuerySchedName}
 import filodb.core.metrics.FilodbMetrics
 import filodb.memory.data.Shutdown
 
 object QueryScheduler extends StrictLogging {
 
+  private val exceptionHandler = new UncaughtExceptionHandler {
+    override def uncaughtException(t: Thread, e: Throwable): Unit = {
+      logger.error("Uncaught Exception in Query Scheduler", e)
+      e match {
+        case ie: InternalError => Shutdown.haltAndCatchFire(ie)
+        case _ => {
+          /* Do nothing. */
+        }
+      }
+    }
+  }
+  val queryScheduler: SchedulerService = createInstrumentedQueryScheduler()
 
-  val queryScheduler = createInstrumentedQueryScheduler()
+  val flightIoScheduler: SchedulerService = Scheduler.io(FlightIoSchedName, reporter = (ex: Throwable) => {
+    logger.error("Uncaught Exception in Flight IO Scheduler", ex)
+    ex match {
+      case ie: InternalError => Shutdown.haltAndCatchFire(ie)
+      case _ => {
+        /* Do nothing. */
+      }
+    }
+  })
 
   /**
    * Instrumentation adds following metrics on the Query Scheduler
@@ -35,17 +55,7 @@ object QueryScheduler extends StrictLogging {
     val numSchedThreads = Math.ceil(GlobalConfig.systemConfig.getDouble("filodb.query.threads-factor")
       * sys.runtime.availableProcessors).toInt
     val schedName = s"$QuerySchedName"
-    val exceptionHandler = new UncaughtExceptionHandler {
-      override def uncaughtException(t: Thread, e: Throwable): Unit = {
-        logger.error("Uncaught Exception in Query Scheduler", e)
-        e match {
-          case ie: InternalError => Shutdown.haltAndCatchFire(ie)
-          case _ => {
-            /* Do nothing. */
-          }
-        }
-      }
-    }
+
     val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
       def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
         val thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool)

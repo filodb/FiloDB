@@ -447,6 +447,50 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       recSchema2.partitionHash(basebase, offset4) shouldEqual lastHash
     }
 
+    it("should produce identical record with addEncodedMap as with addMapKeyValue") {
+      val tags = new java.util.TreeMap[String, String]()
+      tags.put("__name__", "host_cpu_load")
+      tags.put("dc", "AWS-USE")
+      tags.put("instance", "0123892E342342A90")
+      tags.put("job", "prometheus")
+
+      // Traditional path
+      val builder1 = new RecordBuilder(MemFactory.onHeapFactory)
+      builder1.startNewRecord(schema2)
+      builder1.addLong(System.currentTimeMillis)
+      builder1.addDouble(1.0)
+      builder1.addDouble(2.5)
+      builder1.addDouble(10.1)
+      builder1.addLong(123456L)
+      builder1.addString("Series 1")
+      builder1.startMap()
+      tags.entrySet().forEach { entry =>
+        builder1.addMapKeyValue(
+          entry.getKey.getBytes(StandardCharsets.UTF_8),
+          entry.getValue.getBytes(StandardCharsets.UTF_8))
+      }
+      builder1.endMap()
+      val off1 = builder1.endRecord()
+
+      // addEncodedMap path
+      val encoded = MapEncoder.encode(tags, recSchema2)
+      val builder2 = new RecordBuilder(MemFactory.onHeapFactory)
+      builder2.startNewRecord(schema2)
+      builder2.addLong(System.currentTimeMillis)
+      builder2.addDouble(1.0)
+      builder2.addDouble(2.5)
+      builder2.addDouble(10.1)
+      builder2.addLong(123456L)
+      builder2.addString("Series 1")
+      builder2.addEncodedMap(encoded)
+      val off2 = builder2.endRecord()
+
+      // Partition hashes must match
+      val hash1 = recSchema2.partitionHash(builder1.allContainers.head.base, off1)
+      val hash2 = recSchema2.partitionHash(builder2.allContainers.head.base, off2)
+      hash1 shouldEqual hash2
+    }
+
     it("should copy records to new byte arrays and compare equally") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
@@ -736,5 +780,81 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     hashNoMetricShardKey shouldEqual hashWithMetricShardKey
     // not equal, since some other shard key is different
     hashNoMetricShardKey should not equal otherHash
+  }
+
+  describe("SingleRecordBuilder and new addMapKeyValue overloads") {
+    val mapOnlySchema = new RecordSchema(Seq(ColumnInfo("labels", ColumnType.MapColumn)))
+
+    def readMapPairs(base: Any, offset: Long): Seq[(String, String)] = {
+      val buf = new collection.mutable.ArrayBuffer[(String, String)]
+      mapOnlySchema.consumeMapItems(base, offset, 0, new MapItemConsumer {
+        def consume(kb: Any, ko: Long, vb: Any, vo: Long, idx: Int): Unit = {
+          val k = new ZCUTF8(kb, ko + 1, UTF8StringShort.numBytes(kb, ko)).asNewString
+          val v = new ZCUTF8(vb, vo + 2, UTF8StringMedium.numBytes(vb, vo)).asNewString
+          buf += (k -> v)
+        }
+      })
+      buf.sortBy(_._1).toSeq
+    }
+
+    // Source record written once; shared across all three tests.
+    val srcBuf = new Array[Byte](1024)
+    val srcSrb = new SingleRecordBuilder(srcBuf, UnsafeUtils.arayOffset, 1024)(
+      throw new IllegalStateException("source record too large"))
+    srcSrb.startNewRecord(mapOnlySchema)
+    srcSrb.startMap()
+    Seq(ZCUTF8("__name__") -> ZCUTF8("cpu_load"),
+        ZCUTF8("dc")       -> ZCUTF8("us-west"),
+        ZCUTF8("job")      -> ZCUTF8("api-server")).sortBy(_._1).foreach {
+      case (k, v) => srcSrb.addMapKeyValue(k.bytes, v.bytes)
+    }
+    srcSrb.endMap()
+    val srcRecOff = srcSrb.endRecord(false)
+
+    val expectedPairs = Seq("__name__" -> "cpu_load", "dc" -> "us-west", "job" -> "api-server")
+
+    it("addMapKeyValue(Any, Long, Any, Long) should produce the same record as the Array[Byte] overload") {
+      val dst = new RecordBuilder(MemFactory.onHeapFactory)
+      dst.startNewRecord(mapOnlySchema)
+      dst.startMap()
+      mapOnlySchema.consumeMapItems(srcBuf, srcRecOff, 0, new MapItemConsumer {
+        def consume(kb: Any, ko: Long, vb: Any, vo: Long, idx: Int): Unit =
+          dst.addMapKeyValue(kb, ko, vb, vo)
+      })
+      dst.endMap()
+      val dstOff  = dst.endRecord()
+      val dstBase = dst.allContainers.head.base
+
+      readMapPairs(dstBase, dstOff) shouldEqual expectedPairs
+      mapOnlySchema.equals(srcBuf, srcRecOff, dstBase, dstOff) shouldBe true
+    }
+
+    it("addMapKeyValue(ZCUTF8, Any, Long) should produce the same record as the Array[Byte] overload") {
+      val dst = new RecordBuilder(MemFactory.onHeapFactory)
+      dst.startNewRecord(mapOnlySchema)
+      dst.startMap()
+      mapOnlySchema.consumeMapItems(srcBuf, srcRecOff, 0, new MapItemConsumer {
+        def consume(kb: Any, ko: Long, vb: Any, vo: Long, idx: Int): Unit = {
+          val key = new ZCUTF8(kb, ko + 1, UTF8StringShort.numBytes(kb, ko))
+          dst.addMapKeyValue(key, vb, vo)
+        }
+      })
+      dst.endMap()
+      val dstOff  = dst.endRecord()
+      val dstBase = dst.allContainers.head.base
+
+      readMapPairs(dstBase, dstOff) shouldEqual expectedPairs
+      mapOnlySchema.equals(srcBuf, srcRecOff, dstBase, dstOff) shouldBe true
+    }
+
+    it("addFromBr should produce a byte-identical copy of the source record") {
+      val dstBuf = new Array[Byte](1024)
+      val dstSrb = new SingleRecordBuilder(dstBuf, UnsafeUtils.arayOffset, 1024)(
+        throw new IllegalStateException("destination record too large"))
+      dstSrb.addFromBr(srcBuf, srcRecOff)
+
+      mapOnlySchema.equals(srcBuf, srcRecOff, dstBuf, UnsafeUtils.arayOffset) shouldBe true
+      readMapPairs(dstBuf, UnsafeUtils.arayOffset) shouldEqual expectedPairs
+    }
   }
 }

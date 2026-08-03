@@ -3,7 +3,7 @@ package filodb.cassandra.columnstore
 import java.lang.{Integer => JInt, Long => JLong}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters.asScalaIteratorConverter
+import scala.jdk.CollectionConverters._
 
 import com.datastax.driver.core.{ConsistencyLevel, Row}
 import monix.eval.Task

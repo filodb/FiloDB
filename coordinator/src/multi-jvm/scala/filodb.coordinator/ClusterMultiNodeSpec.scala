@@ -115,7 +115,7 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec { self: MultiNodeSpe
   def awaitMembersUp(numberOfMembers: Int, timeout: FiniteDuration = defaultTimeout): Unit =
     within(timeout) {
       awaitAssert(cluster.state.members.size shouldEqual numberOfMembers)
-      awaitAssert(cluster.state.members.map(_.status) shouldEqual Set(MemberStatus.Up))
+      awaitAssert(cluster.state.members.unsorted.map(_.status) shouldEqual Set(MemberStatus.Up))
     }
 
   def awaitOnClusterLeave(on: RoleName,

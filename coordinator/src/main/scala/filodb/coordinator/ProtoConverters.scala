@@ -1,19 +1,25 @@
 package filodb.coordinator
 
+import java.util.concurrent.TimeUnit
+
+import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
+import scala.util.Try
+
 import akka.serialization.SerializationExtension
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
-import java.util.concurrent.TimeUnit
-import scala.collection.JavaConverters._
-import scala.concurrent.duration.FiniteDuration
+import com.typesafe.scalalogging.StrictLogging
+import org.apache.arrow.flight.Location
 
+import filodb.coordinator.flight.FlightPlanDispatcher
 import filodb.core.downsample.{CounterDownsamplePeriodMarker, TimeDownsamplePeriodMarker}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{ComputedColumn, DataColumn}
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
-import filodb.grpc.GrpcMultiPartitionQueryService.{RangeVectorTransformerContainer, RemoteExecPlan}
 import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.grpc.GrpcMultiPartitionQueryService.{RangeVectorTransformerContainer, RemoteExecPlan}
 import filodb.grpc.GrpcMultiPartitionQueryService.ExecPlanContainer.ExecPlanCase
 import filodb.grpc.GrpcMultiPartitionQueryService.FuncArgs.FuncArgTypeCase
 import filodb.query.{AggregationOperator, QueryCommand}
@@ -24,7 +30,7 @@ import filodb.query.exec._
 // scalastyle:off file.size.limit
 // scalastyle:off method.length
 // scalastyle:off line.size.limit
-object ProtoConverters {
+object ProtoConverters extends StrictLogging {
 
   import filodb.query.ProtoConverters._
 
@@ -58,6 +64,7 @@ object ProtoConverters {
       builder.setAllowPartialResultsRangeQuery(qc.allowPartialResultsRangeQuery)
       builder.setAllowPartialResultsMetadataQuery(qc.allowPartialResultsMetadataQuery)
       builder.addAllGrpcPartitionsDenyList(qc.grpcPartitionsDenyList.asJava)
+      builder.addAllFlightPartitionsDenyList(qc.flightPartitionsDenyList.asJava)
       qc.plannerSelector.foreach(plannerSelector => builder.setPlannerSelector(plannerSelector))
       qc.recordContainerOverrides.foreach(overrides => builder.putRecordContainerOverrides(overrides._1, overrides._2))
       builder.build()
@@ -85,6 +92,7 @@ object ProtoConverters {
         qc.getAllowPartialResultsRangeQuery(),
         qc.getAllowPartialResultsMetadataQuery(),
         qc.getGrpcPartitionsDenyListList().asScala.toSet,
+        qc.getFlightPartitionsDenyListList().asScala.toSet,
         if (qc.hasPlannerSelector) Option(qc.getPlannerSelector()) else None,
         rcoIntMap
       )
@@ -909,6 +917,7 @@ object ProtoConverters {
         case filodb.query.InstantFunctionId.Floor => GrpcMultiPartitionQueryService.InstantFunctionId.FLOOR
         case filodb.query.InstantFunctionId.HistogramQuantile => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_QUANTILE
         case filodb.query.InstantFunctionId.HistogramMaxQuantile => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE
+        case filodb.query.InstantFunctionId.HistogramMaxQuantileEven => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE_EVEN
         case filodb.query.InstantFunctionId.HistogramBucket => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_BUCKET
         case filodb.query.InstantFunctionId.HistogramFraction => GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_FRACTION
         case filodb.query.InstantFunctionId.Ln => GrpcMultiPartitionQueryService.InstantFunctionId.LN
@@ -941,6 +950,7 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InstantFunctionId.FLOOR => filodb.query.InstantFunctionId.Floor
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_QUANTILE => filodb.query.InstantFunctionId.HistogramQuantile
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE => filodb.query.InstantFunctionId.HistogramMaxQuantile
+        case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_MAX_QUANTILE_EVEN => filodb.query.InstantFunctionId.HistogramMaxQuantileEven
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_BUCKET => filodb.query.InstantFunctionId.HistogramBucket
         case GrpcMultiPartitionQueryService.InstantFunctionId.HISTOGRAM_FRACTION => filodb.query.InstantFunctionId.HistogramFraction
         case GrpcMultiPartitionQueryService.InstantFunctionId.LN => filodb.query.InstantFunctionId.Ln
@@ -995,6 +1005,9 @@ object ProtoConverters {
         case InternalRangeFunction.RateAndMinMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.RATE_AND_MIN_MAX_OVER_TIME
         case InternalRangeFunction.LastSampleHistMaxMin => GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN
         case InternalRangeFunction.Timestamp => GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP
+        case InternalRangeFunction.TsOfMaxOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME
+        case InternalRangeFunction.TsOfMinOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME
+        case InternalRangeFunction.TsOfLastOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME
         case InternalRangeFunction.AbsentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME
         case InternalRangeFunction.PresentOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME
         case InternalRangeFunction.MedianAbsoluteDeviationOverTime => GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME
@@ -1034,6 +1047,9 @@ object ProtoConverters {
         case GrpcMultiPartitionQueryService.InternalRangeFunction.RATE_AND_MIN_MAX_OVER_TIME => InternalRangeFunction.RateAndMinMaxOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.LAST_SAMPLE_HIST_MAX_MIN => InternalRangeFunction.LastSampleHistMaxMin
         case GrpcMultiPartitionQueryService.InternalRangeFunction.TIME_STAMP => InternalRangeFunction.Timestamp
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MAX_OVER_TIME => InternalRangeFunction.TsOfMaxOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_MIN_OVER_TIME => InternalRangeFunction.TsOfMinOverTime
+        case GrpcMultiPartitionQueryService.InternalRangeFunction.TS_OF_LAST_OVER_TIME => InternalRangeFunction.TsOfLastOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.ABSENT_OVER_TIME => InternalRangeFunction.AbsentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.PRESENT_OVER_TIME => InternalRangeFunction.PresentOverTime
         case GrpcMultiPartitionQueryService.InternalRangeFunction.MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME => InternalRangeFunction.MedianAbsoluteDeviationOverTime
@@ -1275,7 +1291,7 @@ object ProtoConverters {
       builder.setQueryId(qc.queryId)
       builder.setSubmitTime(qc.submitTime)
       builder.setPlannerParams(qc.plannerParams.toProto)
-      val javaTraceInfoMap = mapAsJavaMap(qc.traceInfo)
+      val javaTraceInfoMap = qc.traceInfo.asJava
       builder.putAllTraceInfo(javaTraceInfoMap)
       builder.build()
     }
@@ -1314,6 +1330,7 @@ object ProtoConverters {
         case ippd: InProcessPlanDispatcher => builder.setInProcessPlanDispatcher(ippd.toProto)
         case rapd: RemoteActorPlanDispatcher => builder.setRemoteActorPlanDispatcher(rapd.toProto)
         case gpd: GrpcPlanDispatcher => builder.setGrpcPlanDispatcher(gpd.toProto)
+        case fpd: FlightPlanDispatcher => builder.setSingleClusterFlightPlanDispatcher(fpd.toProto)
         case _ => throw new IllegalArgumentException(s"Unexpected PlanDispatcher subclass ${pd.getClass.getName}")
       }
       builder.build()
@@ -1388,6 +1405,25 @@ object ProtoConverters {
   implicit class GrpcPlanDispatcherFromProtoConverter(gpd: GrpcMultiPartitionQueryService.GrpcPlanDispatcher) {
     def fromProto: GrpcPlanDispatcher = {
       val dispatcher = GrpcPlanDispatcher(gpd.getEndpoint, gpd.getRequestTimeoutMs)
+      dispatcher
+    }
+  }
+
+  implicit class SingleClusterFlightPlanDispatcherToProtoConverter(fpd: filodb.coordinator.flight.FlightPlanDispatcher) {
+    def toProto(): GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher = {
+      val builder = GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher.newBuilder()
+      val planDispatcherBuilder = GrpcMultiPartitionQueryService.PlanDispatcher.newBuilder()
+      planDispatcherBuilder.setClusterName(fpd.clusterName)
+      planDispatcherBuilder.setIsLocalCall(fpd.isLocalCall)
+      builder.setPlanDispatcher(planDispatcherBuilder.build())
+      builder.setLocation(fpd.location.getUri.toString)
+      builder.build()
+    }
+  }
+
+  implicit class SingleClusterFlightPlanDispatcherFromProtoConverter(fpd: GrpcMultiPartitionQueryService.SingleClusterFlightPlanDispatcher) {
+    def fromProto: FlightPlanDispatcher = {
+      val dispatcher = FlightPlanDispatcher(new Location(fpd.getLocation), fpd.getPlanDispatcher.getClusterName)
       dispatcher
     }
   }
@@ -2906,7 +2942,7 @@ object ProtoConverters {
       val ep = srpe.getLeafExecPlan.getExecPlan
       val dataSchema = if (srpe.hasDataSchema) Option(srpe.getDataSchema.fromProto) else None
       val lookupRes = if (srpe.hasLookupRes) Option(srpe.getLookupRes.fromProto) else None
-      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue())
+      val colIds = srpe.getColIdsList.asScala.map(intgr => intgr.intValue()).toSeq
       val leafExecPlan = srpe.getLeafExecPlan
       val execPlan = leafExecPlan.getExecPlan
       val dispatcher = execPlan.getDispatcher.fromProto
@@ -2991,6 +3027,8 @@ object ProtoConverters {
           pdc.getRemoteActorPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.GRPCPLANDISPATCHER =>
           pdc.getGrpcPlanDispatcher.fromProto
+        case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.SINGLECLUSTERFLIGHTPLANDISPATCHER =>
+          pdc.getSingleClusterFlightPlanDispatcher.fromProto
         case GrpcMultiPartitionQueryService.PlanDispatcherContainer.DispatcherCase.DISPATCHER_NOT_SET =>
           throw new IllegalArgumentException("Invalid PlanDispatcherContainer")
       }

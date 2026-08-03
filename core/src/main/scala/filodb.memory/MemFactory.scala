@@ -147,8 +147,8 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String,
 
   override def updateStats(): Unit = {
     val used = usedSoFar
-    statUsed.update(used)
-    statFree.update(upperBoundSizeInBytes - used)
+    statUsed.update(used.toDouble)
+    statFree.update((upperBoundSizeInBytes - used).toDouble)
     statEntries.update(entries)
   }
 
@@ -160,7 +160,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String,
     freeAll()
   }
 
-  override def finalize(): Unit = shutdown
+  override def finalize(): Unit = shutdown()
 }
 
 /**
@@ -237,7 +237,7 @@ class BlockMemFactory(blockStore: BlockManager,
   private def accessCurrentBlock() = synchronized {
     lastUsedNanos = now
     if (currentBlock == null) {
-      currentBlock = requestBlock
+      currentBlock = requestBlock()
     }
     currentBlock
   }

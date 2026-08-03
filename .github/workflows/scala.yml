@@ -19,6 +19,17 @@ jobs:
       with:
         java-version: '11'
         distribution: 'adopt'
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt/boot
+          ~/.sbt/launchers
+          ~/.coursier/cache
+        key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', '**/project/Dependencies.scala', '**/project/plugins.sbt', '**/project/build.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-sbt-
     - name: Install Rust Toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
@@ -29,7 +40,15 @@ jobs:
     - name: Install cargo-zigbuild
       run: pip install cargo-zigbuild
     - name: Run tests
-      run: .github/workflows/runtests.sh
+      uses: nick-fields/retry@v3
+      env:
+        # Default is 6; reduced to limit concurrent Maven Central connections to help prevent 429s.
+        SBT_OPTS: "-Dsbt.coursier.parallel-download-count=3"
+      with:
+        timeout_minutes: 120
+        max_attempts: 3
+        retry_wait_seconds: 60
+        command: .github/workflows/runtests.sh
     - name: Coverage Reports
       uses: actions/upload-artifact@v4
       with:

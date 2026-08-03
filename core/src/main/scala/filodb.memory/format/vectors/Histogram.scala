@@ -64,7 +64,8 @@ trait Histogram extends Ordered[Histogram] {
    */
   def quantile(q: Double,
                min: Double = 0, // negative observations not supported yet
-               max: Double = Double.PositiveInfinity): Double = {
+               max: Double = Double.PositiveInfinity,
+               evenDistribution: Boolean = false): Double = {
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2 || topBucketValue <= 0) Double.NaN
@@ -92,7 +93,7 @@ trait Histogram extends Ordered[Histogram] {
         // interpolate quantile within boundaries of "bucket"
         val count = if (bucket == 0) bucketValue(bucket) else bucketValue(bucket) - bucketValue(bucket-1)
         rank -= (if (bucket == 0) 0 else bucketValue(bucket-1))
-        val fraction = rank/count
+        val fraction = if (evenDistribution) rank / (count + 1) else rank / count
         if (!hasExponentialBuckets || bucketStart == 0) {
           bucketStart + (bucketEnd-bucketStart) * fraction
         } else {

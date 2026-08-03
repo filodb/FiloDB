@@ -41,7 +41,7 @@ class BlockMemFactoryPool(blockStore: BlockManager,
   private def getFactoryFromPool(flushGroup: Int) = {
     val fact = if (factoryPool.nonEmpty) {
       logger.debug(s"Checking out BlockMemFactory from pool for flushGroup=$flushGroup poolSize=$poolSize")
-      factoryPool.dequeue
+      factoryPool.dequeue()
     } else {
       logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one for flushGroup=$flushGroup")
       new BlockMemFactory(blockStore, metadataAllocSize, baseTags)
@@ -73,7 +73,7 @@ class BlockMemFactoryPool(blockStore: BlockManager,
     factoryPool.flatMap { bmf =>
       val blocks = bmf.fullBlocksToBeMarkedAsReclaimable ++ Option(bmf.currentBlock).toList
       BlockDetective.containsPtr(ptr, blocks.toSeq)
-    }
+    }.toSeq
   }
 
 }

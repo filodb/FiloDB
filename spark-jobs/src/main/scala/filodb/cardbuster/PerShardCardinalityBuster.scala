@@ -126,7 +126,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
             numPartKeysCouldNotDelete.increment()
             numCouldNotDelete += 1
         }
-        Unit
+        ()
       }
     }.completedL.runToFuture(BusterSchedulers.computeSched)
     import scala.concurrent.duration._

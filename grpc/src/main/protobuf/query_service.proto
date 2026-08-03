@@ -7,8 +7,6 @@ import "range_vector.proto";
 option java_outer_classname = "GrpcMultiPartitionQueryService";
 option java_generate_equals_and_hash = true;
 
-
-
 message QueryParams {
       uint64 start                         = 1;
       uint64 end                           = 2;
@@ -52,27 +50,28 @@ enum FailoverMode {
 }
 
 message PlannerParams {
-    optional string applicationId                   = 1;
-    optional uint32 queryTimeoutMillis              = 2;
-    optional PerQueryLimits enforcedLimits          = 3;
-    optional PerQueryLimits warnLimits              = 4;
-    optional string queryOrigin                     = 5;
-    optional string queryOriginId                   = 6;
-    optional string queryPrincipal                  = 7;
-    optional bool timeSplitEnabled                  = 8;
-    optional uint64 minTimeRangeForSplitMs          = 9;
-    optional uint64 splitSizeMs                     = 10;
-    optional bool skipAggregatePresent              = 11;
-    optional bool processFailure                    = 12;
-    optional bool processMultiPartition             = 13;
-    optional bool allowPartialResults               = 14;
-    optional bool histogramMap                      = 15;
-    optional bool useProtoExecPlans                 = 16;
-    optional bool reduceShardKeyRegexFanout         = 17;
-    optional uint32 maxShardKeyRegexFanoutBatchSize = 18;
-    optional bool allowNestedAggregatePushdown      = 19;
-    repeated DownPartition downPartitions           = 20;
-    optional FailoverMode failoverMode              = 21;
+    optional string applicationId                       = 1;
+    optional uint32 queryTimeoutMillis                  = 2;
+    optional PerQueryLimits enforcedLimits              = 3;
+    optional PerQueryLimits warnLimits                  = 4;
+    optional string queryOrigin                         = 5;
+    optional string queryOriginId                       = 6;
+    optional string queryPrincipal                      = 7;
+    optional bool timeSplitEnabled                      = 8;
+    optional uint64 minTimeRangeForSplitMs              = 9;
+    optional uint64 splitSizeMs                         = 10;
+    optional bool skipAggregatePresent                  = 11;
+    optional bool processFailure                        = 12;
+    optional bool processMultiPartition                 = 13;
+    optional bool allowPartialResults                   = 14;
+    optional bool histogramMap                          = 15;
+    optional bool useProtoExecPlans                     = 16;
+    optional bool reduceShardKeyRegexFanout             = 17;
+    optional uint32 maxShardKeyRegexFanoutBatchSize     = 18;
+    optional bool allowNestedAggregatePushdown          = 19;
+    repeated DownPartition downPartitions               = 20;
+    optional FailoverMode failoverMode                  = 21;
+    optional SamplesScannedConfig samplesScannedConfig  = 22;
 }
 
 message Request {
@@ -80,6 +79,7 @@ message Request {
       PlannerParams plannerParams   = 2;
       string dataset                = 3;
       string plannerSelector        = 4;
+      optional string flightResponseAcceptVersion = 5;
 }
 
 message StreamingErrorResponse {
@@ -396,14 +396,45 @@ message GrpcPlanDispatcher {
   int64  requestTimeoutMs    = 2;
 }
 
+message SingleClusterFlightPlanDispatcher {
+  PlanDispatcher planDispatcher      = 1;
+  string location            = 2;
+}
+
 message PlanDispatcherContainer {
   oneof dispatcher  {
     ActorPlanDispatcher actorPlanDispatcher                        = 1;
     InProcessPlanDispatcher inProcessPlanDispatcher                = 2;
     RemoteActorPlanDispatcher remoteActorPlanDispatcher            = 3;
     GrpcPlanDispatcher grpcPlanDispatcher                          = 4;
+    SingleClusterFlightPlanDispatcher singleClusterFlightPlanDispatcher         = 5;
   }
 
+}
+
+message SamplesScannedConfig {
+  bool leafSamplesEnabled                               = 1;
+  bool execResultSamplesEnabled                         = 2;
+  bool execChildSamplesEnabled                          = 3;
+  bool rvtSamplesEnabled                                = 4;
+  bool rvtChildSamplesEnabled                           = 5;
+  bool srvSamplesEnabled                                = 6;
+  optional double fixedRowMultiplier                    = 7;
+  double defaultRowMultiplier                           = 8;
+  double histogramRowMultiplier                         = 9;
+  double exponentialHistogramRowMultiplier              = 10;
+  double defaultSamplesPerRow                           = 11;
+  double defaultSamplesPerSeries                        = 12;
+  double defaultSamplesPerPartKeyByte                   = 13;
+  map<string, double> classToSamplesPerRow              = 14;
+  map<string, double> classToSamplesPerSeries           = 15;
+  map<string, double> classToSamplesPerPartKeyByte      = 16;
+  double defaultSamplesPerChildRow                      = 17;
+  double defaultSamplesPerChildSeries                   = 18;
+  double defaultSamplesPerChildPartKeyByte              = 19;
+  map<string, double> classToSamplesPerChildRow         = 20;
+  map<string, double> classToSamplesPerChildSeries      = 21;
+  map<string, double> classToSamplesPerChildPartKeyByte = 22;
 }
 
 message QueryConfig {
@@ -415,7 +446,7 @@ message QueryConfig {
   bool translatePromToFilodbHistogram        = 6;
   bool fasterRateEnabled                     = 7;
   optional string partitionName              = 8;
-  optional int64 remoteHttpTimeoutMs          = 9;
+  optional int64 remoteHttpTimeoutMs         = 9;
   optional string remoteHttpEndpoint         = 10;
   optional string remoteGrpcEndpoint         = 11;
   int32 numRvsPerResultMessage               = 12;
@@ -425,6 +456,7 @@ message QueryConfig {
   repeated string grpcPartitionsDenyList     = 16;
   optional string plannerSelector            = 17;
   map<string,int32> recordContainerOverrides = 18;
+  repeated string flightPartitionsDenyList   = 19;
 }
 
 enum ChunkScanType {
@@ -602,6 +634,7 @@ enum InstantFunctionId {
   YEAR                    = 21;
   OR_VECTOR_DOUBLE        = 22;
   HISTOGRAM_FRACTION      = 23;
+  HISTOGRAM_MAX_QUANTILE_EVEN = 24;
 }
 
 enum ScalarFunctionId {
@@ -647,6 +680,9 @@ enum InternalRangeFunction {
   MEDIAN_ABSOLUTE_DEVIATION_OVER_TIME = 28;
   RATE_AND_MIN_MAX_OVER_TIME = 29;
   LAST_OVER_TIME_IS_MAD_OUTLIER = 30;
+  TS_OF_MAX_OVER_TIME   = 31;
+  TS_OF_MIN_OVER_TIME   = 32;
+  TS_OF_LAST_OVER_TIME = 33;
 }
 
 enum SortFunctionId {
@@ -1114,6 +1150,22 @@ message ExecPlanContainer {
 message RemoteExecPlan {
   ExecPlanContainer execPlan = 1;
   QueryContext queryContext  = 2;
+}
+
+message FlightResultHeader {
+  ResultSchema resultSchema = 1;
+}
+
+message FlightResultFooter {
+  QueryResultStats queryStats  = 1;
+  optional Throwable throwable = 2;
+}
+
+message FlightMetadata {
+  oneof content {
+    FlightResultHeader header = 1;
+    FlightResultFooter footer = 2;
+  }
 }
 
 service RemoteExec {

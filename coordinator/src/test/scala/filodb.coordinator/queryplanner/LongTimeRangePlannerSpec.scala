@@ -3,10 +3,12 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
-import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 
+import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import scala.concurrent.duration._
+
 import monix.execution.Scheduler
+
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
@@ -17,6 +19,8 @@ import filodb.query._
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 
 
 class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec {
@@ -57,7 +61,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
   val dataset = MetricsTestData.timeseriesDataset
   val datasetMetricColumn = dataset.options.metricColumn
 
-  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
     earliestRawTime, latestDownsampleTime, disp,
     queryConfig, dataset)
   implicit val system: akka.actor.ActorSystem = ActorSystem()
@@ -399,7 +403,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -447,11 +451,11 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfigWithGrpcEndpoint,
       workUnit = "", buddyWorkUnit = "", clusterName = "", useShardLevelFailover = false)
 
-    val longTimeRangePlanner = new LongTimeRangePlanner(highAvailabilityPlannerRaw, downsamplePlanner,
+    val longTimeRangePlanner = new LongTimeRangePlanner(highAvailabilityPlannerRaw, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfigWithGrpcEndpoint, dataset)
 
     val execPlan = longTimeRangePlanner.materialize(lp, QueryContext(origQueryParams = promQlParams))
-    execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
+    execPlan.isInstanceOf[PromQLFlightRemoteExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "(sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])) / " +
         "sum(rate(Counter3{_ws_=\"test\",_ns_=\"test2\"}[120s])))"
@@ -482,7 +486,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -517,7 +521,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -564,7 +568,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -594,7 +598,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -626,7 +630,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     ep.asInstanceOf[LocalPartitionReduceAggregateExec].dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
@@ -652,7 +656,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     ep.asInstanceOf[LocalPartitionReduceAggregateExec].dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
@@ -678,7 +682,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     ep.isInstanceOf[StitchRvsExec] shouldEqual true
@@ -706,7 +710,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -766,7 +770,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -829,7 +833,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -932,7 +936,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
                                               queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1019,7 +1023,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1128,7 +1132,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1228,7 +1232,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1327,7 +1331,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1440,7 +1444,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1489,7 +1493,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep1 = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1574,7 +1578,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
@@ -1643,7 +1647,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
         earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
       val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
         earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
-      val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, false,
         earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
       val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))

@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.{mutable, Seq}
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
@@ -74,8 +74,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
-      case lp: TsCardinalities             => throw new UnsupportedOperationException(
-                                                          "TsCardinalities does not have times")
+      case lp: TsCardinalities             => val now = System.currentTimeMillis()
+                                              TimeRange(now - 300000, now)
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -88,6 +88,7 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
   // scalastyle:on cyclomatic.complexity
+
 
   /**
    * Used to change start and end time (with 'second' precision) of LogicalPlan
@@ -328,7 +329,7 @@ object LogicalPlanUtils extends StrictLogging {
       // when endTime == lp.endMs - exit condition
       splitPlans += copyWithUpdatedTimeRange(lp, TimeRange(startTime, endTime))
       logger.info(s"splitsize queryId=${qContext.queryId} numWindows=${splitPlans.length}")
-      splitPlans
+      splitPlans.toSeq
     } else {
       Seq(lp)
     }
@@ -430,10 +431,12 @@ object LogicalPlanUtils extends StrictLogging {
    *   label exists in "src"; in this case, the "src" filter is included.
    */
   def upsertFilters(dest: Seq[ColumnFilter], src: Seq[ColumnFilter]): Seq[ColumnFilter] = {
-    val columnMap = new mutable.HashMap[String, ColumnFilter]
-    dest.foreach(filter => columnMap(filter.column) = filter)
-    src.foreach(filter => columnMap(filter.column) = filter)
-    columnMap.values.toSeq
+    val srcMap = src.map(f => f.column -> f).toMap
+    // Preserve dest order, replacing with src where column matches
+    val updated = dest.map(f => srcMap.getOrElse(f.column, f))
+    // Append any src filters not in dest
+    val added = src.filterNot(f => dest.exists(_.column == f.column))
+    updated ++ added
   }
 
   /**
@@ -454,7 +457,7 @@ object LogicalPlanUtils extends StrictLogging {
       // Cannot handle RawSeries without IntervalSelector.
       return None
     }
-    val rsTschemaOpts = rawSeries.flatMap{ rs =>
+    val rsTschemaOpts: Seq[Option[Seq[String]]] = rawSeries.flatMap{ rs =>
         val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
         val rawShardKeyFilters = getShardKeyFilters(rs)
         // The filters might contain pipe-concatenated EqualsRegex values.

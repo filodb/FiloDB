@@ -929,7 +929,7 @@ Update QueryRangeSimulation.Configuration code with:
 Then run `GatlingDriver` from your IDE, or run Gatling via SBT with
 
 ```
-sbt gatling/gatling:testOnly filodb.gatling.QueryRangeSimulation
+sbt gatling/gatling:testOnly filodb.gatling.SumOfSumOverTimeQueryRangeSimulation
 ```
 
 If you added profiler arguments to the FiloDB command, you can profile the code when the gatling

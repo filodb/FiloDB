@@ -154,9 +154,9 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat2.timeSeriesScanned.addAndGet(156)
 
     val qStats = QueryStats()
-    qStats.stat.put(List(), stat2)
-    qStats.stat.put(List("L1", "L2", "L3"), stat1)
-    qStats.stat.put(List("L1", "L2", "L4"), stat)
+    qStats.put(List(), stat2)
+    qStats.put(List("L1", "L2", "L3"), stat1)
+    qStats.put(List("L1", "L2", "L4"), stat)
 
     qStats.toProto.fromProto shouldEqual qStats
   }
@@ -224,7 +224,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.timeSeriesScanned.addAndGet(5)
 
     val qStats = QueryStats()
-    qStats.stat.put(List(), stat)
+    qStats.put(List(), stat)
 
     val warnings = QueryWarnings()
     warnings.updateTimeSeriesScanned(1)
@@ -275,7 +275,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.timeSeriesScanned.addAndGet(5)
 
     val qStats = QueryStats()
-    qStats.stat.put(List(), stat)
+    qStats.put(List(), stat)
 
     val warnings = QueryWarnings()
     warnings.updateJoinQueryCardinality(1)
@@ -353,7 +353,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.timeSeriesScanned.addAndGet(5)
 
     val qStats = QueryStats()
-    qStats.stat.put(List(), stat)
+    qStats.put(List(), stat)
 
     val err = StreamQueryError("id", "planId", qStats, new IllegalArgumentException("Args"))
     val deser = err.toProto.fromProto.asInstanceOf[StreamQueryError]
@@ -422,7 +422,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.timeSeriesScanned.addAndGet(5)
 
     val qStats = QueryStats()
-    qStats.stat.put(List(), stat)
+    qStats.put(List(), stat)
 
     val warnings = QueryWarnings()
     warnings.updateTimeSeriesScanned(1)

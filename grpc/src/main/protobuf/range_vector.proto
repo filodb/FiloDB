@@ -110,6 +110,8 @@ message RecordSchema {
 message ColumnInfo {
   string  name                       = 1;
   ColumnType columnType              = 2;
+  bool isNotCumulative               = 3;  // Proto default is false, but constructor default is true.
+  bool isExponential                 = 4;
 }
 
 enum ColumnType {
@@ -136,4 +138,19 @@ message RvRange {
   int64 startMs = 1;
   int64 endMs = 2;
   int64 step = 3;
+}
+
+// RvKey holds the range-vector key and output range for a data-row block in an Arrow Flight VSR stream.
+message RvKey {
+  bytes rvKey              = 1;
+  optional RvRange rvRange = 2;
+}
+
+// RvMetadata is the header row written before each RV in an Arrow Flight VSR stream.
+// Exactly one of srv (formulated-rows RV) or rvKey (key for following data rows) is set.
+message RvMetadata {
+  oneof payload {
+    SerializableRangeVector srv = 1;
+    RvKey rvKey                 = 2;
+  }
 }

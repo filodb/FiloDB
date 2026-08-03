@@ -313,7 +313,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
-          groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
+          groupedByKey.map(_._2.length).toSeq.sorted shouldEqual Seq(2, 2, 2)
           val lengths = srvs.map(_.rows().toSeq.length)
           lengths.min shouldEqual 2
           lengths.max shouldEqual 3
@@ -330,7 +330,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgPF() { case s: scala.collection.Seq[String @unchecked] => s }
+      indexNames.toSeq.sorted shouldEqual Seq("_type_", "series")
 
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
       probe.expectMsg(Seq(("Series 0", 1), ("Series 1", 1), ("Series 2", 1), ("Series 3", 1)))
@@ -344,7 +345,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
-      probe.expectMsg(Seq("series", "_type_"))
+      val indexNames = probe.expectMsgPF() { case s: scala.collection.Seq[String @unchecked] => s }
+      indexNames.toSeq.sorted shouldEqual Seq("_type_", "series")
 
       //actor should restart and serve queries again
       probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))

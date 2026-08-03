@@ -131,7 +131,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
           StructField(COL_DAY, IntegerType, false),
           StructField(COL_HOUR, IntegerType, false)
         )
-        StructType(fields)
+        StructType(fields.toArray)
       }
       val partitionByCols = group.as[Seq[String]]("partition-by-columns")
       val rules = group.as[Seq[Config]]("rules").map { rule =>

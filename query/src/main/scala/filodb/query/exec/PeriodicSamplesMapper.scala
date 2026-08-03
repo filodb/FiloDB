@@ -78,7 +78,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = windowToUse.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = windowToUse.getOrElse(querySession.queryConfig.staleSampleAfterMs + 1)
 
     val rvs = sampleRangeFunc match {
       case _: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
@@ -230,14 +230,14 @@ final case class PeriodicSamplesMapper(startMs: Long,
     } else {
       source.copy(columns = source.columns.zipWithIndex.map {
         // Transform if its not a row key column
-        case (ColumnInfo(name, ColumnType.LongColumn, _), i) if i >= source.numRowKeyColumns =>
+        case (ColumnInfo(name, ColumnType.LongColumn, _, _), i) if i >= source.numRowKeyColumns =>
           ColumnInfo("value", ColumnType.DoubleColumn)
-        case (ColumnInfo(name, ColumnType.IntColumn, _), i) if i >= source.numRowKeyColumns =>
+        case (ColumnInfo(name, ColumnType.IntColumn, _, _), i) if i >= source.numRowKeyColumns =>
           ColumnInfo(name, ColumnType.DoubleColumn)
         // For double columns, just rename the output so that it's the same no matter source schema.
         // After all after applying a range function, source column doesn't matter anymore
         // NOTE: we only rename if i is 1 or second column.  If its 2 it might be max which cannot be renamed
-        case (ColumnInfo(name, ColumnType.DoubleColumn, _), i) if i == 1 =>
+        case (ColumnInfo(name, ColumnType.DoubleColumn, _, _), i) if i == 1 =>
           ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
       }, fixedVectorLen = if (endMs == startMs) Some(1) else Some(((endMs - startMs) / adjustedStep).toInt + 1))
@@ -247,6 +247,11 @@ final case class PeriodicSamplesMapper(startMs: Long,
 
 object FiloQueryConfig {
   val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive-range")
+}
+
+object ChunkedWindowIterator {
+  // Needs to be a power of 2 minus 1 for bitwise AND to work correctly below. With 255, we check every 256 windows
+  val timeoutCheckFrequencyMask = 255
 }
 
 /**
@@ -297,9 +302,13 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
     // the compiler. Copy to a local variable to reduce some overhead.
     val wit = windowIt
 
+    import ChunkedWindowIterator.timeoutCheckFrequencyMask
+    if ((querySession.timeoutCheckCountDuringScan.incrementAndGet() & timeoutCheckFrequencyMask) == 0) {
+      querySession.qContext.checkQueryTimeout(this.getClass.getName)
+    }
     wit.nextWindow()
     while (wit.hasNext) {
-      val nextInfo = wit.next
+      val nextInfo = wit.next()
       try {
         rangeFunction.addChunks(rv.partition.schema, nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr,
           nextInfo.getTsReader, nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,

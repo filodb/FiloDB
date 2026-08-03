@@ -3,9 +3,9 @@ package filodb.core.memstore
 import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.util.concurrent.TimeUnit
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}

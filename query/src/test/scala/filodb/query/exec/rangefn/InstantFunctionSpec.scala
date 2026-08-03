@@ -344,6 +344,36 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
   }
 
+  it("should compute histogram_max_quantile_even with mode=0 (linear) same as histogram_max_quantile") {
+    val (data, histRV) = MMD.histMaxMinRV(100000L, numSamples = 7)
+    val expected = data.map { row =>
+      val _hist = row(3).asInstanceOf[bv.LongHistogram]
+      val _max = row(5).asInstanceOf[Double]
+      _hist.quantile(0.9, 0, _max, evenDistribution = false)
+    }
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramMaxQuantileEven, Seq(0.9, 0.0), histMaxMinSchema)
+  }
+
+  it("should compute histogram_max_quantile_even with mode=1 (even distribution)") {
+    val (data, histRV) = MMD.histMaxMinRV(100000L, numSamples = 7)
+    val expected = data.map { row =>
+      val _hist = row(3).asInstanceOf[bv.LongHistogram]
+      val _max = row(5).asInstanceOf[Double]
+      _hist.quantile(0.9, 0, _max, evenDistribution = true)
+    }
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramMaxQuantileEven, Seq(0.9, 1.0), histMaxMinSchema)
+  }
+
+  it("should return proper schema after applying histogram_max_quantile_even") {
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantileEven,
+                                                                 Seq(StaticFuncArgs(0.99, rangeParams),
+                                                                     StaticFuncArgs(1.0, rangeParams)))
+    val outSchema = instantVectorFnMapper.schema(histMaxMinSchema)
+    outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
+  }
+
   it("should compute histogram_bucket on Histogram RV") {
     val (data, histRV) = histogramRV(numSamples = 10, infBucket = true)
     val expected = Seq(1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0)

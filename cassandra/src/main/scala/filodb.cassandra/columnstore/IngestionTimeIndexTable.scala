@@ -23,7 +23,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                      writeConsistencyLevel: ConsistencyLevel,
                                      readConsistencyLevel: ConsistencyLevel)
                                     (implicit ec: ExecutionContext) extends BaseDatasetTable {
-  import scala.collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   import filodb.cassandra.Util._
 

@@ -10,12 +10,13 @@ import io.grpc.ManagedChannel
 
 import filodb.coordinator.GrpcPlanDispatcher
 import filodb.coordinator.ShardMapper
+import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.core.DatasetRef
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ActiveShardMapper, DownPartition, LegacyFailoverMode, PlannerParams, ShardLevelFailoverMode}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.grpc.GrpcCommonUtils
-import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 object HighAvailabilityPlanner {
@@ -91,16 +92,19 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   private def stitchPlans(rootLogicalPlan: LogicalPlan,
                           execPlans: Seq[ExecPlan],
                           queryContext: QueryContext)= {
+    val localMetaFirst = PlannerUtil.localMetadataFirst(execPlans)
     rootLogicalPlan match {
-        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: LabelNames          => LabelNamesDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: LabelValues         =>
+          LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
+        case lp: LabelNames          =>
+          LabelNamesDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
+        case lp: SeriesKeysByFilters =>
+          PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
+        case lp: TsCardinalities     =>
+          TsCardReduceExec(queryContext, inProcessPlanDispatcher, localMetaFirst)
         case _                       => StitchRvsExec(queryContext, inProcessPlanDispatcher,
                                          rvRangeFromPlan(rootLogicalPlan),
-                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+                                         PlannerUtil.localPlansFirst(execPlans))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }
@@ -132,40 +136,64 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           legacyFailoverCounter.increment()
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-          // rootLogicalPlan can be different from queryParams.promQl
-          // because rootLogicalPlan may not include the transformer that will not sent to remote.
-          // For instance, when promql = 1 - sum(foo), rootLogicalPlan = sum(foo).
-          // Because the logic "1 - " is translated to a transformer that runs locally.
-          // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val promQlParams = PromQlQueryParams(LogicalPlanParser.convertToQuery(rootLogicalPlan),
-            (timeRange.startMs + offsetMs.max) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs.min) / 1000)
-          val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
-            copy(processFailure = false, processMultiPartition = false) )
-          logger.debug("PromQlExec params:" + promQlParams)
           val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
+          // TsCardinalities cannot be converted to PromQL — handle before convertToQuery
           rootLogicalPlan match {
-            case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
-            case lp: LabelNames         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            Map("match[]" -> queryParams.promQl), newQueryContext,
-                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
-            case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
-                                            MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, newQueryContext, inProcessPlanDispatcher,
-                                              dsRef, remoteExecHttpClient, queryConfig)
-            case _                       =>
-              if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
-                queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
-                val endpoint = remoteGrpcEndpoint.get
-                val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
-                PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, newQueryContext, inProcessPlanDispatcher,
-                  dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")
-              } else
-                PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+            case lp: TsCardinalities =>
+              // Force verbose=true so the buddy cluster's V2 cardinality response includes
+              // the `_type` field, which the local decoder requires.
+              val newQueryContext = qContext.copy(
+                origQueryParams = queryParams.copy(verbose = true),
+                plannerParams = qContext.plannerParams.
+                  copy(processFailure = false, processMultiPartition = false))
+              MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                lp.queryParams(), newQueryContext,
+                inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
+            case _ =>
+              // rootLogicalPlan can be different from queryParams.promQl
+              // because rootLogicalPlan may not include the transformer that will not sent to remote.
+              // For instance, when promql = 1 - sum(foo), rootLogicalPlan = sum(foo).
+              // Because the logic "1 - " is translated to a transformer that runs locally.
+              // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
+              val promQlParams = PromQlQueryParams(
+                LogicalPlanParser.convertToQuery(rootLogicalPlan),
+                (timeRange.startMs + offsetMs.max) / 1000,
+                queryParams.stepSecs,
+                (timeRange.endMs + offsetMs.min) / 1000)
+              val newQueryContext = qContext.copy(
+                origQueryParams = promQlParams,
+                plannerParams = qContext.plannerParams.
+                  copy(processFailure = false,
+                    processMultiPartition = false))
+              logger.debug("PromQlExec params:" + promQlParams)
+              rootLogicalPlan match {
+                case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                                PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
+                                                inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
+                case lp: LabelNames         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                                Map("match[]" -> queryParams.promQl), newQueryContext,
+                                                inProcessPlanDispatcher, dsRef, remoteExecHttpClient, queryConfig)
+                case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
+                                                MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                                  urlParams, newQueryContext, inProcessPlanDispatcher,
+                                                  dsRef, remoteExecHttpClient, queryConfig)
+                case _                       =>
+                  if (remoteGrpcEndpoint.isDefined && !(queryConfig.flightPartitionsDenyList.contains("*") ||
+                    queryConfig.flightPartitionsDenyList.contains(partitionName.toLowerCase))) {
+                    val endpoint = remoteGrpcEndpoint.get
+                    PromQLFlightRemoteExec(newQueryContext, inProcessPlanDispatcher, endpoint, remoteHttpTimeoutMs,
+                      dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")
+                  } else if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+                    queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
+                    val endpoint = remoteGrpcEndpoint.get
+                    val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
+                    PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, newQueryContext, inProcessPlanDispatcher,
+                      dsRef, plannerSelector, s"${partitionName}-${buddyWorkUnit}")
+                  } else
+                    PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                                newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+              }
           }
-
       }
     }
 
@@ -207,6 +235,10 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       )
       val q = qContext.copy(plannerParams = plannerParams)
       localPlanner.materialize(logicalPlan, q)
+    } else if (logicalPlan.isInstanceOf[TsCardinalities]) {
+      // Metadata query — shard-level failover is unnecessary. Use materializeLegacy
+      // for simple all-or-nothing routing to buddy when local has failures.
+      materializeLegacy(logicalPlan, qContext)
     } else if (useShardLevelFailover || qContext.plannerParams.failoverMode == ShardLevelFailoverMode) {
       // we need to populate planner params with the shard maps
       val localActiveShardMapper = getLocalActiveShardMapper(qContext.plannerParams)

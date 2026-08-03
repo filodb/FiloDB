@@ -28,7 +28,8 @@ trait InfluxRecord extends InputRecord {
 
   // Iterate through the tags for shard keys, extract values and calculate shard hash
   private var tagsShardHash = 7
-  val nonMetricShardValues = new collection.mutable.ArrayBuffer[String]
+  private val _nonMetricShardValues = new collection.mutable.ArrayBuffer[String]
+  def nonMetricShardValues: Seq[String] = _nonMetricShardValues.toSeq
 
   {
     var nonMetricIndex = 0
@@ -38,7 +39,7 @@ trait InfluxRecord extends InputRecord {
           val keyToCompare = schema.options.nonMetricShardKeyBytes(nonMetricIndex)
           if (BinaryRegion.equalBytes(bytes, keyIndex, keyLen, keyToCompare)) {
             // key match.  Add value to nonMetricShardValues
-            nonMetricShardValues += new String(bytes, valueIndex, valueLen, StandardCharsets.UTF_8)
+            _nonMetricShardValues += new String(bytes, valueIndex, valueLen, StandardCharsets.UTF_8)
 
             // calculate hash too
             nonMetricIndex += 1

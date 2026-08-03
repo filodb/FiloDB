@@ -1,9 +1,12 @@
 package filodb.labelchurnfinder
 
+import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.DurationInt
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import org.apache.datasketches.hll.HllSketch
@@ -11,14 +14,30 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.{functions, DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.functions._
 
-import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
+import filodb.cassandra.columnstore.CassandraTokenRangeSplit
+import filodb.coordinator.KamonShutdownHook
 import filodb.core.DatasetRef
 import filodb.core.metadata.Schemas
+import filodb.core.metrics.FilodbMetrics
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
 object LabelChurnFinderMain extends App {
+  Kamon.init()
+  KamonShutdownHook.registerShutdownHook()
+
+  private val jobStartMs = System.currentTimeMillis()
+
+  @transient private lazy val jobDuration         =
+    FilodbMetrics.timeHistogram("lcf_job_duration", TimeUnit.MILLISECONDS)
+  @transient private lazy val workspacesPublished =
+    FilodbMetrics.counter("lcf_workspaces_published_total")
+  @transient private lazy val labelsPublished     =
+    FilodbMetrics.counter("lcf_labels_published_total")
+  @transient private lazy val kafkaFailures       =
+    FilodbMetrics.counter("lcf_kafka_publish_failures_total")
+
   private val dsSettings = new DownsamplerSettings()
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
   private val sparkConf = new SparkConf(loadDefaults = true)
@@ -27,10 +46,26 @@ object LabelChurnFinderMain extends App {
     .appName("LabelChurnFinder")
     .config(sparkConf)
     .getOrCreate()
-  private val labelStats = labelChurnFinder.computeLabelStats(spark)
+
+  // Spark accumulators collect executor-side counts back to the driver
+  private val failuresAcc   = spark.sparkContext.longAccumulator("lcf_kafka_failures")
+  private val labelsAcc     = spark.sparkContext.longAccumulator("lcf_labels_published")
+  private val workspacesAcc = spark.sparkContext.longAccumulator("lcf_workspaces_published")
+
+  private val labelStats     = labelChurnFinder.computeLabelStats(spark)
   private val publishToKafka = dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.publish-to-kafka")
-  private val producer = if (publishToKafka) Some(new LabelStatsKafkaProducer(dsSettings.filodbConfig)) else None
+  private val producer = if (publishToKafka)
+    Some(new LabelStatsKafkaProducer(dsSettings.filodbConfig, failuresAcc, labelsAcc, workspacesAcc))
+  else None
+
   labelChurnFinder.actionOnLabelStats(labelStats, producer)
+
+  // After the Spark job completes, read accumulator totals and record to OTel on the driver
+  workspacesPublished.increment(workspacesAcc.value)
+  labelsPublished.increment(labelsAcc.value)
+  kafkaFailures.increment(failuresAcc.value)
+  jobDuration.record(System.currentTimeMillis() - jobStartMs)
+  Thread.sleep(62000) // allow Kamon MosaicReporter periodic tick to fire and complete gRPC publish before shutdown
   spark.stop()
 }
 
@@ -50,6 +85,7 @@ object LabelChurnFinder {
   private[labelchurnfinder] val LabelCard1h = "labelCard1h"
   private[labelchurnfinder] val LabelCard3d = "labelCard3d"
   private[labelchurnfinder] val LabelCard7d = "labelCard7d"
+  private[labelchurnfinder] val SaltCol     = "salt"
 }
 
 case class LabelValRow(ws: String, ns: String, label: String, labelVal: String, endTime: Long)
@@ -74,10 +110,10 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
 
   import LabelChurnFinder._
 
-  // lazy since they get initialized and used in executors as well
-  @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
-  @transient lazy private[labelchurnfinder] val colStore =
-    new CassandraColumnStore(dsSettings.filodbConfig, sched, session, false)(sched)
+
+  private[labelchurnfinder] def colStore =
+    DownsamplerContext.getOrCreateCassandraColumnStore(dsSettings.filodbConfig, dsSettings.cassandraConfig)(sched)
+
   @transient lazy val datasetName = dsSettings.filodbConfig.as[String]("labelchurnfinder.raw-dataset-name")
   @transient lazy val datasetRef = DatasetRef(datasetName)
   @transient lazy private[labelchurnfinder] val filters = dsSettings.filodbConfig
@@ -88,12 +124,14 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     .getOrElse(ConfigFactory.empty())
     .as[Option[Int]]("num-shards").get
 
+  @transient private[labelchurnfinder] val numSalts =
+    dsSettings.filodbConfig.as[Option[Int]]("labelchurnfinder.num-salts").getOrElse(50)
+
   /**
    * Returns iterator of LcfRow objects containing label/value for given token range split and shard.
    */
   private def fetchLabelValues(split: (String, String),
                        shard: Int): Iterator[LabelValRow] = {
-    logger.info(s"fetchLabelValues: shard=$shard, filters=$filters")
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
       .flatMap { pk  =>
@@ -158,8 +196,12 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
                            tMinus7d: Long): DataFrame = {
 
     val hllSketch = udaf(HllSketchAgg())
-    labelAndValuesDf
-      .groupBy(WsCol, LabelCol)
+    val hllMerge  = udaf(HllSketchMergeAgg())
+
+    // Phase 1: salt by row position to break up skewed (ws, label) keys across numSalts partitions.
+    val partial = labelAndValuesDf
+      .withColumn(SaltCol, pmod(monotonically_increasing_id(), lit(numSalts)))
+      .groupBy(WsCol, LabelCol, SaltCol)
       .agg(
         count(when(col(EndTimeCol) === Long.MaxValue, col(LabelValCol))).alias(Ats1hWithLabelCol),
         count(when(col(EndTimeCol) > tMinus3d, col(LabelValCol))).alias(Ats3dWithLabelCol),
@@ -167,6 +209,18 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         hllSketch(when(col(EndTimeCol) === Long.MaxValue, col(LabelValCol))).alias(LabelSketch1hCol),
         hllSketch(when(col(EndTimeCol) >= tMinus3d, col(LabelValCol))).alias(LabelSketch3dCol),
         hllSketch(when(col(EndTimeCol) >= tMinus7d, col(LabelValCol))).alias(LabelSketch7dCol)
+      )
+
+    // Phase 2: merge partial results per (ws, label).
+    partial
+      .groupBy(WsCol, LabelCol)
+      .agg(
+        sum(col(Ats1hWithLabelCol)).alias(Ats1hWithLabelCol),
+        sum(col(Ats3dWithLabelCol)).alias(Ats3dWithLabelCol),
+        sum(col(Ats7dWithLabelCol)).alias(Ats7dWithLabelCol),
+        hllMerge(col(LabelSketch1hCol)).alias(LabelSketch1hCol),
+        hllMerge(col(LabelSketch3dCol)).alias(LabelSketch3dCol),
+        hllMerge(col(LabelSketch7dCol)).alias(LabelSketch7dCol)
       )
       .withColumn(NsGroupCol, lit("All")) // placeholder for future ns grouping
   }

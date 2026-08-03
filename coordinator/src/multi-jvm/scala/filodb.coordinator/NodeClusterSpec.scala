@@ -65,8 +65,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
   val config = globalConfig.getConfig("filodb")
 
-  val address1 = node(first).address
-  val address2 = node(second).address
+  lazy val address1 = node(first).address
+  lazy val address2 = node(second).address
 
   var clusterActor: ActorRef = _
 
