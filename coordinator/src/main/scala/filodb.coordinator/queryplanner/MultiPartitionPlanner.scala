@@ -92,7 +92,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                             localPartitionName: String,
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
-                            val flightEnabled: Boolean,
+                            val flightEnabled: Boolean = false,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
                             new ConcurrentHashMap[String, ManagedChannel]().asScala,
