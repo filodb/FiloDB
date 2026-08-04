@@ -187,8 +187,8 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   def name: String = data.name
 
-  def hasCumulativeTemporalityColumn: Boolean = data.columns.exists {
-    case d: DataColumn => d.isCumulativeTemporality
+  def shouldApplyCumulativeRate: Boolean = !data.columns.exists {
+    case d: DataColumn => d.shouldApplyDeltaRate
     case _ => false
   }
 

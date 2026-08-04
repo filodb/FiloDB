@@ -43,7 +43,11 @@ case class DataColumn(id: Int,
                       columnType: Column.ColumnType,
                       params: Config = ConfigFactory.empty) extends Column {
 
-  def isCumulativeTemporality: Boolean = params.hasPath("detectDrops") && params.getBoolean("detectDrops")
+  /**
+   * Returns true for all delta counters and histograms.
+   * For others (including gauge and untyped), we apply cumulative rate function
+   */
+  def shouldApplyDeltaRate: Boolean = params.hasPath("delta") && params.getBoolean("delta")
 
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.
