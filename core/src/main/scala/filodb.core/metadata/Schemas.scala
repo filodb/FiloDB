@@ -187,7 +187,10 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   def name: String = data.name
 
-  def shouldApplyCumulativeRate: Boolean = !data.columns.exists {
+  /**
+   * Returns true if none of the data columns are delta-rate columns, meaning that cumulative rate should be applied
+   */
+  val shouldApplyCumulativeRate: Boolean = !data.columns.exists {
     case d: DataColumn => d.shouldApplyDeltaRate
     case _ => false
   }
