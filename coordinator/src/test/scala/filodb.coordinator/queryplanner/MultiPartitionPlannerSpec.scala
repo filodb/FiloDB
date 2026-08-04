@@ -2918,8 +2918,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
 
     val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = Nil
-      override def getPartitionsTrait(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignmentTrait] = Nil
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        List(PartitionAssignment("remote", "remote-url", TimeRange(1000 * 1000, 10000 * 1000), None, "testWorkUnit"))
+      }
       override def getMetadataPartitions(nonMetricShardKeyFilters: scala.Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
         List(PartitionAssignment("remote", "remote-url", TimeRange(1000 * 1000, 10000 * 1000), None, "testWorkUnit"))
       }
