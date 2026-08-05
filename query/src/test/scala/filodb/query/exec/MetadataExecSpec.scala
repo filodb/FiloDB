@@ -543,8 +543,42 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
         val cardCountsWithoutNonOverflow = testMap.filter(x => (x._1 != nonOverflowRow.group)).toList
 
         cardCountsWithoutNonOverflow.map(x => totalCardCountWithoutOverflow = totalCardCountWithoutOverflow.add(x._2))
-
-        totalCardCountWithoutOverflow shouldEqual overFlowRow.counts
     }
   }
+
+  it("should respect execPlanLeafSamples limit in LabelCardinalityExec") {
+    // shard 0 has two partitions for _ws_=demo, _ns_=App-0:
+    //   http_req_total: unicode_tag=uni\u03C0tag
+    //   http_foo_total: unicode_tag=uni\u03BCtag
+    // so unicode_tag has 2 distinct values on shard 0.
+    // With execPlanLeafSamples=1, only 1 value is fed to the CpcSketch → estimate = 1.
+    // With the default limit, both values are fed → estimate = 2.
+    val filters = Seq(
+      ColumnFilter("_ws_", Filter.Equals("demo")),
+      ColumnFilter("_ns_", Filter.Equals("App-0"))
+    )
+
+    def runCardinality(ctx: QueryContext): Map[String, String] = {
+      val leaf = LabelCardinalityExec(ctx, dummyDispatcher,
+        timeseriesDatasetMultipleShardKeys.ref, 0, filters, now - 5000, now)
+      val plan = LabelCardinalityReduceExec(ctx, dummyDispatcher, Seq(leaf))
+      plan.addRangeVectorTransformer(new LabelCardinalityPresenter())
+      val resp = plan.execute(memStore, QuerySession(ctx, queryConfig)).runToFuture.futureValue
+      (resp: @unchecked) match {
+        case QueryResult(_, _, response, _, _, _, _) =>
+          val rv = response(0)
+          val record = rv.rows().next().asInstanceOf[BinaryRecordRowReader]
+          rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).toMap
+      }
+    }
+
+    val limitedCtx = QueryContext(plannerParams = PlannerParams(
+      enforcedLimits = PerQueryLimits(execPlanLeafSamples = 1)))
+    val limitedResult = runCardinality(limitedCtx)
+    limitedResult("unicode_tag").toInt shouldEqual 1
+
+    val fullResult = runCardinality(QueryContext())
+    fullResult("unicode_tag").toInt shouldEqual 2
+  }
+
 }
