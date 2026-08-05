@@ -153,13 +153,11 @@ class SchemasSpec extends AnyFunSpec with Matchers {
       resp3.swap.get shouldBe an[IllegalMapColumn]
     }
 
-    it ("should return correct value for hasCumulativeTemporalityColumn") {
-      Schemas.promHistogram.hasCumulativeTemporalityColumn shouldEqual true
-      Schemas.promCounter.hasCumulativeTemporalityColumn shouldEqual true
-      Schemas.otelCumulativeHistogram.hasCumulativeTemporalityColumn shouldEqual true
-      Schemas.deltaCounter.hasCumulativeTemporalityColumn shouldEqual false
-      Schemas.deltaHistogram.hasCumulativeTemporalityColumn shouldEqual false
-      Schemas.otelDeltaHistogram.hasCumulativeTemporalityColumn shouldEqual false
+    it ("should return correct value for shouldApplyCumulativeRate") {
+      // rate on all gauges, untyped etc should use cumulative rate. Only if it has delta should it use delta rate
+      Schemas.global.schemas.values.foreach { s =>
+        s.shouldApplyCumulativeRate shouldEqual !s.name.contains("delta")
+      }
     }
 
     it("should return BadColumnType if unsupported type specified in column spec") {

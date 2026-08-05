@@ -28,9 +28,9 @@ class ColumnSpec extends AnyFunSpec with Matchers {
     }
 
     it("should return correct value for hasCumulativeIncrement") {
-      cumulHistColumn.isCumulativeTemporality shouldEqual true
-      deltaCountColumn.isCumulativeTemporality shouldEqual false
-      firstColumn.isCumulativeTemporality shouldEqual false
+      cumulHistColumn.shouldApplyDeltaRate shouldEqual false
+      deltaCountColumn.shouldApplyDeltaRate shouldEqual true
+      firstColumn.shouldApplyDeltaRate shouldEqual false // it does not have delta param, so false
     }
 
     it("should check that column names cannot contain illegal chars") {
