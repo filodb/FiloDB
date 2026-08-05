@@ -363,12 +363,13 @@ object MachineMetricsData {
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
+  // counter=false, delta=true => delta histogram, so rate/increase functions must use delta (not cumulative) logic
   val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
-                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:{counter=false,delta=true}"),
                             options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
   val expHistDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
-    Seq("timestamp:ts", "count:long", "sum:long", "min:long", "max:long", "h:hist:counter=false"),
+    Seq("timestamp:ts", "count:long", "sum:long", "min:long", "max:long", "h:hist:{counter=false,delta=true}"),
     options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
   var histBucketScheme: bv.HistogramBuckets = _
@@ -431,9 +432,10 @@ object MachineMetricsData {
   val schemas2h = Schemas(schema2.partition,
                         Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
 
+  // counter=false, delta=true => delta histogram, so rate/increase functions must use delta (not cumulative) logic
   val histMaxMinDS = Dataset.make("histmaxmin",
     Seq("metric:string", "tags:map"),
-    Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false", "min:double", "max:double"),
+    Seq("timestamp:ts", "count:long", "sum:long", "h:hist:{counter=false,delta=true}", "min:double", "max:double"),
     valueColumn = Some("h")).get
 
   // Cumulative histogram dataset with counter=true for testing CumulativeHistRateAndMinMaxFunction
