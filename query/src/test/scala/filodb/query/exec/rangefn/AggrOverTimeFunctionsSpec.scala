@@ -1936,8 +1936,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     // Monotonically increasing data so increase == last - first; delta data sums directly
     val data = (1 to 120).map(_.toDouble)
 
-    val cumulRV = timeValueRV(data)          // schema has detectDrops=true → cumulative
-    val deltaRV  = deltaTimeValueRV(data)    // schema has no detectDrops   → delta
+    val cumulRV = timeValueRV(data)          // schema does not have delta=true → cumulative
+    cumulRV.partition.schema.shouldApplyCumulativeRate shouldEqual true
+    val deltaRV  = deltaTimeValueRV(data)    // schema has delta=true   → delta
+    deltaRV.partition.schema.shouldApplyCumulativeRate shouldEqual false
 
     // The toggler wraps ChunkedIncreaseFunction (cum) and SumOverTimeChunkedFunctionD (delta)
     val windowSize = 20
@@ -1997,11 +1999,13 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("CumlDeltaToggler with histogram rate should route delta histogram to RateOverDeltaChunkedFunctionH " +
       "and cumulative histogram to HistRateFunction") {
-    // Delta histogram — histDataset has counter=false and no detectDrops
+    // Delta histogram — histDataset has delta=true
     val (deltaData, deltaRV) = histogramRV(numSamples = 50)
+    deltaRV.partition.schema.shouldApplyCumulativeRate shouldEqual false
 
-    // Cumulative histogram — cumulHistDS has detectDrops=true on count/sum and counter=true on hist
+    // Cumulative histogram — cumulHistDS does not have delta=true on count/sum
     val (cumulData, cumulRV) = MMD.cumulHistRV(defaultStartTS, pubFreq, numSamples = 50)
+    cumulRV.partition.schema.shouldApplyCumulativeRate shouldEqual true
 
     val windowSize = 10
     val step       = 5
@@ -2039,9 +2043,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       "and cumulative to CumulativeHistRateAndMinMaxFunction") {
     // Delta histogram with min/max columns (histMaxMinDS: colIds timestamp=0,count=1,sum=2,hist=3,min=4,max=5)
     val (deltaData, deltaRV) = MMD.histMaxMinRV(defaultStartTS, pubFreq, numSamples = 50)
+    deltaRV.partition.schema.shouldApplyCumulativeRate shouldEqual false
 
     // Cumulative histogram with min/max columns (cumulHistDS: same layout)
     val (cumulData, cumulRV) = MMD.cumulHistRV(defaultStartTS, pubFreq, numSamples = 50)
+    cumulRV.partition.schema.shouldApplyCumulativeRate shouldEqual true
 
     val windowSize = 10
     val step = 5

@@ -771,7 +771,7 @@ class CumlDeltaTogglerChunkedFunction[R <: MutableRowReader](cumulFn: ChunkedRan
                          tsReader: LongVectorDataReader, valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr,
                          valueReader: VectorDataReader, startTime: Long, endTime: Long,
                          info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
-    if (schema.hasCumulativeTemporalityColumn) {
+    if (schema.shouldApplyCumulativeRate) {
       cumulFn.addChunks(schema, tsVectorAcc, tsVector, tsReader, valueVectorAcc, valueVector, valueReader,
         startTime, endTime, info, queryConfig)
     } else {
@@ -782,7 +782,7 @@ class CumlDeltaTogglerChunkedFunction[R <: MutableRowReader](cumulFn: ChunkedRan
 
   override def apply(schema: Schema, windowStart: BinaryVectorPtr, windowEnd: BinaryVectorPtr,
                      sampleToEmit: R): Unit = {
-    if (schema.hasCumulativeTemporalityColumn) {
+    if (schema.shouldApplyCumulativeRate) {
       cumulFn.apply(schema, windowStart, windowEnd, sampleToEmit)
     } else {
       deltaFn.apply(schema, windowStart, windowEnd, sampleToEmit)
