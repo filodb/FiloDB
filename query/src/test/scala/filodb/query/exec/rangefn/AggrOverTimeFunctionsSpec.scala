@@ -12,7 +12,9 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
 import filodb.memory._
@@ -1999,6 +2001,49 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     togglerCumResults shouldEqual directRateCumResults
     togglerDeltaResults shouldEqual directRateDeltaResults
     togglerCumResults should not equal togglerDeltaResults
+  }
+
+  it("CumlDeltaToggler with rate should route gauge and untyped schema to ChunkedRateFunction " +
+      "since they need to be treated as cumulative metrics") {
+    // Builds a RawDataRangeVector using the given global Schema (gauge/untyped), whose partition schema
+    // is the standard timeseries partition schema (_metric_:string, tags:map)
+    def gaugeOrUntypedRV(schema: Schema, data: Seq[Double]): RawDataRangeVector = {
+      val dataset = Dataset("cuml-toggler-test-" + schema.name, schema)
+      val tuples = data.zipWithIndex.map { case (d, t) => (defaultStartTS + t * pubFreq, d) }
+      val partKeyBuilder = new RecordBuilder(TestData.nativeMem)
+      val partKey = partKeyBuilder.partKeyFromObjects(schema, "metric1",
+        Map("__name__".utf8 -> "metric1".utf8, "_ws_".utf8 -> "testws".utf8, "_ns_".utf8 -> "testns".utf8))
+      val bufferPool = new WriteBufferPool(TestData.nativeMem, schema.data, storeConf)
+      val part = TimeSeriesPartitionSpec.makePart(0, dataset, partKey = partKey, bufferPool = bufferPool)
+      val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+      readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
+      part.switchBuffers(ingestBlockHolder, encode = true)
+      RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), _ => {}, Long.MaxValue, "query-id")
+    }
+
+    val data = (1 to 120).map(_.toDouble)
+    val windowSize = 20
+    val step       = 10
+
+    val gaugeRV = gaugeOrUntypedRV(Schemas.gauge, data)
+    gaugeRV.partition.schema.shouldApplyCumulativeRate shouldEqual true
+    val untypedRV = gaugeOrUntypedRV(Schemas.untyped, data)
+    untypedRV.partition.schema.shouldApplyCumulativeRate shouldEqual true
+
+    val toggler = new CumlDeltaTogglerChunkedFunction(new ChunkedRateFunction, new RateOverDeltaChunkedFunctionD())
+
+    // Since gauge/untyped are cumulative, the toggler should delegate to ChunkedRateFunction (cumulative rate),
+    // and its results should match calling ChunkedRateFunction directly, not RateOverDeltaChunkedFunctionD.
+    val directGaugeIt = chunkedWindowIt(data, gaugeRV, new ChunkedRateFunction, windowSize, step)
+    val directGaugeResults = directGaugeIt.map(_.getDouble(1)).toBuffer
+    val togglerGaugeIt = chunkedWindowIt(data, gaugeRV, toggler, windowSize, step)
+    togglerGaugeIt.map(_.getDouble(1)).toBuffer shouldEqual directGaugeResults
+
+    val directUntypedIt = chunkedWindowIt(data, untypedRV, new ChunkedRateFunction, windowSize, step)
+    val directUntypedResults = directUntypedIt.map(_.getDouble(1)).toBuffer
+    val togglerUntypedIt = chunkedWindowIt(data, untypedRV, toggler, windowSize, step)
+    togglerUntypedIt.map(_.getDouble(1)).toBuffer shouldEqual directUntypedResults
   }
 
   it("CumlDeltaToggler with histogram rate should route delta histogram to RateOverDeltaChunkedFunctionH " +
