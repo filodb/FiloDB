@@ -10,7 +10,7 @@ addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.10.0-RC1")
 
 addSbtPlugin("io.kamon" % "sbt-kanela-runner" % "2.0.14")
 
-addSbtPlugin("io.gatling" % "gatling-sbt" % "4.8.2")
+addSbtPlugin("io.gatling" % "gatling-sbt" % "4.19.1")
 
 addSbtPlugin("com.github.sbt" % "sbt-protobuf" % "0.8.0")
 
