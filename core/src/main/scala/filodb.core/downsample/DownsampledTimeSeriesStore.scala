@@ -14,6 +14,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
@@ -62,7 +63,8 @@ extends TimeSeriesStore with StrictLogging {
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig, numShards: Int,
-            downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
+            downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
+            aggregationConfig: AggregationConfig = AggregationConfig.empty): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[DownsampledTimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,
       new ConfigQuotaSource(filodbConfig, schemas.part.options.shardKeyColumns.length))

@@ -8,6 +8,7 @@ import monix.reactive.Observable
 import filodb.core.{DataDropped, DatasetRef, Response, Success}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.DownsampleConfig
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
 import filodb.core.store.{ColumnStore, MetaStore, PartKeyRecord, StoreConfig}
@@ -17,6 +18,7 @@ class DownsamplableOnDemandPagingShard (
   ref: DatasetRef,
   schemas: Schemas,
   storeConfig: StoreConfig,
+  aggregationConfig: AggregationConfig,
   numShards: Int,
   quotaSource: QuotaSource,
   shardNum: Int,
@@ -31,6 +33,7 @@ class DownsamplableOnDemandPagingShard (
     ref: DatasetRef,
     schemas: Schemas,
     storeConfig: StoreConfig,
+    aggregationConfig: AggregationConfig,
     numShards: Int,
     quotaSource: QuotaSource,
     shardNum: Int,

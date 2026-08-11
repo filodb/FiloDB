@@ -93,7 +93,8 @@ object DataSchema {
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns),
+      DataSchema(name, dataColumns, downsamplers,
+                 Schemas.genHash(dataColumns),
                  valueColID, downsampleSchema, periodMarker)
     }
   }
@@ -114,13 +115,14 @@ object DataSchema {
    * From the example above, pass in "prometheus" as the schemaName.
    * It is advisable to parse the outer config of all schemas using `.as[Map[String, Config]]`
    */
-  def fromConfig(schemaName: String, conf: Config): DataSchema Or BadSchema =
+  def fromConfig(schemaName: String, conf: Config): DataSchema Or BadSchema = {
     make(schemaName,
          conf.as[Seq[String]]("columns"),
          conf.as[Seq[String]]("downsamplers"),
          conf.as[Option[String]]("downsample-period-marker"),
          conf.getString("value-column"),
          conf.as[Option[String]]("downsample-schema"))
+  }
 }
 
 object PartitionSchema {

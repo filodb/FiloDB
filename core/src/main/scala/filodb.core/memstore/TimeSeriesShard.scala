@@ -26,6 +26,7 @@ import spire.syntax.cfor._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
@@ -268,6 +269,7 @@ case class TimeSeriesShardInfo(shardNum: Int,
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
+                      val aggregationConfig: AggregationConfig,
                       numShards: Int,
                       quotaSource: QuotaSource,
                       val shardNum: Int,
@@ -341,6 +343,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     * next partition ID number
     */
   private var nextPartitionID = 0
+
+  // Set once the per-dataset aggregationConfig has been validated against an ingestion schema's columns.
+  // Validation runs lazily on the first aggregating partition (see createNewPartition), on the ingest thread.
+  private var aggregationConfigValidated = false
 
   // This should be handled by a logging-specific class if rate-limited logs become a common use-case.
   // NOTE: This is not thread-safe, but it's good enough for this application--
@@ -1144,6 +1150,11 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       else {
         val tsp = part.asInstanceOf[TimeSeriesPartition]
+        tsp match {
+          case agg: AggregatingTimeSeriesPartition =>
+            agg.currentIngestOffset = ingestConsumer.ingestOffset
+          case _ =>
+        }
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
         tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
@@ -1212,9 +1223,20 @@ class TimeSeriesShard(val ref: DatasetRef,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
+
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
+      } else if (aggregationConfig.nonEmpty) {
+        // Aggregation is configured per-dataset (not on the schema). Validate the aggregator column IDs
+        // against this schema's data columns once, on the first aggregating partition, so a misconfigured
+        // aggregation {} block fails fast with a clear error.
+        if (!aggregationConfigValidated) {
+          aggregationConfig.validate(schema.numDataColumns)
+          aggregationConfigValidated = true
+        }
+        logger.debug(s"Adding AggregatingTimeSeriesPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
+        new AggregatingTimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize, aggregationConfig)
       } else {
         new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       }
@@ -1276,10 +1298,24 @@ class TimeSeriesShard(val ref: DatasetRef,
   def prepareFlushGroup(groupNum: Int): FlushGroup = {
     assertThreadName(IngestSchedName)
 
-    // Rapidly switch all of the input buffers for a particular group
+    // Switch all write buffers and compute watermark hold-back in a single pass.
+    // If any agg partition has active (unfinalized) buckets, hold the commit watermark
+    // to the earliest referenced Kafka offset so crash-recovery re-ingests those samples.
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
-    InMemPartitionIterator(partitionGroups(groupNum).intIterator)
-      .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
+    var holdOffset = Long.MaxValue
+    val it = InMemPartitionIterator(partitionGroups(groupNum).intIterator)
+    while (it.hasNext) {
+      val p = it.next()
+      p.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum))
+      p match {
+        case agg: AggregatingTimeSeriesPartition =>
+          val earliest = agg.earliestActiveBucketOffset
+          if (earliest < holdOffset) holdOffset = earliest
+        case _ =>
+      }
+    }
+    val flushOffset = if (holdOffset == Long.MaxValue) latestOffset
+                      else math.min(latestOffset, holdOffset - 1)
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       purgeExpiredPartitions()
@@ -1292,7 +1328,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       debox.Buffer.ofSize[Int](0)
     }
 
-    FlushGroup(shardNum, groupNum, latestOffset, dirtyPartKeys)
+    FlushGroup(shardNum, groupNum, flushOffset, dirtyPartKeys)
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>

@@ -8,7 +8,8 @@ import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.memstore.{PartLookupResult, PopulateResult, SchemaMismatch, TimeSeriesShard}
+import filodb.core.memstore.{AggregatingTimeSeriesPartition, PartLookupResult, PopulateResult,
+  SchemaMismatch, TimeSeriesShard}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metrics.FilodbMetrics
@@ -170,27 +171,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     val partCols = schema.infosFromIDs(schema.partition.columns.map(_.id))
     val numGroups = groupsInDataset(ref)
 
-    val filteredParts = if (filterSchemas) {
-      scanPartitions(ref, lookupRes, columnIDs, querySession)
-        .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
-    } else {
-      lookupRes.firstSchemaId match {
-        case Some(reqSchemaId) =>
-          scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
-            if (!Utils.areCompatibleMetricTypes(p.schema.schemaHash, reqSchemaId)) {
-              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
-            }
-            // short term fix to prevent segv which occurs when we access non-existent columns
-            // while querying histograms that have max and min columns
-            require(columnIDs.forall(id => id < p.schema.data.columns.size), "Internal error - " +
-              "seeking non-existent columns; For now, add filter such as _type_=\"otel-delta-histogram\"" +
-              " to the query while this issue is being fixed")
-            p.hasChunks(lookupRes.chunkMethod)
-          }
-        case None =>
-          Observable.empty
-      }
-    }
+    val filteredParts = filterPartitions(ref, lookupRes, columnIDs, schema, filterSchemas, querySession)
 
     val samplesScannedConfig = querySession.qContext.plannerParams.samplesScannedConfig
     val resultSchema = {
@@ -224,10 +205,61 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
           querySession.queryStats, resultSchema, samplesScannedConfig)
       }
 
-      RawDataRangeVector(
-        key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr, samplesScannedRowCountConsumer,
-        querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
-      )
+      createRangeVector(partition, key, lookupRes, ids, querySession, samplesScannedRowCountConsumer)
+    }
+  }
+
+  // Helper to filter partitions by schema
+  private def filterPartitions(ref: DatasetRef,
+                               lookupRes: PartLookupResult,
+                               columnIDs: Seq[Types.ColumnId],
+                               schema: Schema,
+                               filterSchemas: Boolean,
+                               querySession: QuerySession): Observable[ReadablePartition] = {
+    if (filterSchemas) {
+      scanPartitions(ref, lookupRes, columnIDs, querySession)
+        .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
+    } else {
+      lookupRes.firstSchemaId match {
+        case Some(reqSchemaId) =>
+          scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
+            if (!Utils.areCompatibleMetricTypes(p.schema.schemaHash, reqSchemaId)) {
+              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
+            }
+            // short term fix to prevent segv which occurs when we access non-existent columns
+            // while querying histograms that have max and min columns
+            require(columnIDs.forall(id => id < p.schema.data.columns.size), "Internal error - " +
+              "seeking non-existent columns; For now, add filter such as _type_=\"otel-delta-histogram\"" +
+              " to the query while this issue is being fixed")
+            p.hasChunks(lookupRes.chunkMethod)
+          }
+        case None =>
+          Observable.empty
+      }
+    }
+  }
+
+  // Helper to create appropriate RangeVector for a partition
+  private def createRangeVector(partition: ReadablePartition,
+                                key: PartitionRangeVectorKey,
+                                lookupRes: PartLookupResult,
+                                ids: Array[Int],
+                                querySession: QuerySession,
+                                samplesScannedRowCountConsumer: Long => Unit): RangeVector = {
+    // Use AggregatingRangeVector for partitions that have active aggregation buckets
+    partition match {
+      case aggPart: AggregatingTimeSeriesPartition if aggPart.bucketAggregationStats.activeBucketCount > 0 =>
+        AggregatingRangeVector(
+          key, aggPart, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr,
+          samplesScannedRowCountConsumer,
+          querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
+        )
+      case _ =>
+        RawDataRangeVector(
+          key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr,
+          samplesScannedRowCountConsumer,
+          querySession.qContext.plannerParams.enforcedLimits.rawScannedBytes, querySession.qContext.queryId
+        )
     }
   }
   // scalastyle:on method.length

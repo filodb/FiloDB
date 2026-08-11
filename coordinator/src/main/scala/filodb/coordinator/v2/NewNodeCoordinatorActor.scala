@@ -13,6 +13,7 @@ import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.query.QueryCommand
@@ -99,7 +100,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     setupDataset( dataset,
                   ingestConfig.storeConfig, ingestConfig.numShards,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
-                  ingestConfig.downsampleConfig)
+                  ingestConfig.downsampleConfig,
+                  ingestConfig.aggregationConfig)
     initShards(dataset, ingestConfig)
   }
 
@@ -138,6 +140,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
                            numShards: Int,
                            source: IngestionSource,
                            downsample: DownsampleConfig,
+                           aggregationConfig: AggregationConfig = AggregationConfig.empty,
                            schemaOverride: Boolean = false): Unit = {
     import ActorName.Ingestion
 
@@ -147,7 +150,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
     if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
     val props = IngestionActor.props(dataset.ref, schemas, memStore,
-                                     source, downsample, storeConf, numShards, self)
+                                     source, downsample, storeConf, aggregationConfig, numShards, self)
     val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
     context.watch(ingester)
     ingestionActors(ref) = ingester

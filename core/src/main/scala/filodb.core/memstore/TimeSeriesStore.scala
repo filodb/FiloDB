@@ -15,6 +15,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, GlobalScheduler, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
+import filodb.core.memstore.aggregation.AggregationConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.metrics.FilodbMetrics
@@ -74,10 +75,12 @@ trait TimeSeriesStore extends ChunkSource {
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
+   * @param aggregationConfig per-dataset out-of-order aggregation config. By default it is empty (disabled).
    */
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig, numShards: Int,
-            downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
+            downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
+            aggregationConfig: AggregationConfig = AggregationConfig.empty): Unit
 
   /**
    * Ingests new rows, making them immediately available for reads
