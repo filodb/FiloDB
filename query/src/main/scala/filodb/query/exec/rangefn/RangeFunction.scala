@@ -8,8 +8,8 @@ import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.vectors.HistogramWithBuckets
 import filodb.query.Query
-//import filodb.query.RangeFunctionId.MedianAbsoluteDeviationOverTime
 import filodb.query.exec._
+import filodb.query.exec.aggregator.RowAggregator
 
 /**
   * Container for samples within a window of samples
@@ -377,7 +377,7 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
-  // scalastyle:off cyclomatic.complexity
+  // scalastyle:off cyclomatic.complexity method.length
   def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[InternalRangeFunction],
                             config: QueryConfig,
@@ -385,6 +385,24 @@ object RangeFunction {
     func match {
       case None                                   => () => new LastSampleChunkedFunctionD
       case Some(Last)                             => () => new LastSampleChunkedFunctionD
+      case Some(Rate)     if RowAggregator.isHistSumCount(schema)
+                                                  => () => new CumlDeltaTogglerChunkedFunction(
+                                                              new ChunkedSumCountCumulRangeFunctionDD(1, 2,
+                                                                new ChunkedRateFunction,
+                                                                new ChunkedRateFunction),
+                                                              new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+                                                                new RateOverDeltaChunkedFunctionD,
+                                                                new RateOverDeltaChunkedFunctionD))
+
+      case Some(Increase) if RowAggregator.isHistSumCount(schema)
+                                                  => () => new CumlDeltaTogglerChunkedFunction(
+                                                              new ChunkedSumCountCumulRangeFunctionDD(1, 2,
+                                                                new ChunkedIncreaseFunction,
+                                                                new ChunkedIncreaseFunction),
+                                                              new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+                                                                new SumOverTimeChunkedFunctionD,
+                                                                new SumOverTimeChunkedFunctionD))
+
       case Some(Increase)                         => () => new CumlDeltaTogglerChunkedFunction(
                                                                                      new ChunkedIncreaseFunction,
                                                                                      new SumOverTimeChunkedFunctionD)

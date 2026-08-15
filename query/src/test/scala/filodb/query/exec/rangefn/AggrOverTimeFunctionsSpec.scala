@@ -14,7 +14,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
 import filodb.memory._
@@ -59,6 +59,62 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
       flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
     part.switchBuffers(ingestBlockHolder, encode = true)
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), _ => {}, Long.MaxValue, "query-id")
+  }
+
+  // Two-column (sum, count) datasets for testing ChunkedSumCountCumulRangeFunctionDD /
+  // ChunkedSumCountDeltaRangeFunctionDD directly, mirroring timeseriesDatasetWithMetric /
+  // deltaTimeseriesDatasetWithMetric's partition schema so defaultPartKey can be reused.
+  protected val cumulSumCountDataset = Dataset.make("cuml-sum-count",
+    Seq("_metric_:string", "tags:map"),
+    Seq("timestamp:ts", "sum:double:detectDrops=true", "count:double:detectDrops=true"),
+    Seq.empty, None,
+    DatasetOptions(Seq("_metric_", "_ns_"), "_metric_")).get
+  protected val cumulSumCountBH = new BlockMemFactory(blockStore, cumulSumCountDataset.schema.data.blockMetaSize,
+    MMD.dummyContext, true)
+  protected val cumulSumCountBP = new WriteBufferPool(TestData.nativeMem, cumulSumCountDataset.schema.data, storeConf)
+
+  protected val deltaSumCountDataset = Dataset.make("delta-sum-count",
+    Seq("_metric_:string", "tags:map"),
+    Seq("timestamp:ts", "sum:double:{detectDrops=false,delta=true}", "count:double:{detectDrops=false,delta=true}"),
+    Seq.empty, None,
+    DatasetOptions(Seq("_metric_", "_ns_"), "_metric_")).get
+  protected val deltaSumCountBH = new BlockMemFactory(blockStore, deltaSumCountDataset.schema.data.blockMetaSize,
+    MMD.dummyContext, true)
+  protected val deltaSumCountBP = new WriteBufferPool(TestData.nativeMem, deltaSumCountDataset.schema.data, storeConf)
+
+  // Builds a fresh (timestamp, sum, count) RawDataRangeVector on the given dataset/pools
+  def sumCountRV(ds: Dataset, bh: BlockMemFactory, bp: WriteBufferPool,
+                 sums: Seq[Double], counts: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey = defaultPartKey, bufferPool = bp)
+    addSumCountChunk(part, bh, sums, counts, startTS)
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1, 2), new AtomicLong(), (_: Long) => {}, Long.MaxValue,
+      "query-id")
+  }
+
+  // Ingests more (sum, count) samples into an existing partition as a new chunk
+  def addSumCountChunk(part: TimeSeriesPartition, bh: BlockMemFactory,
+                       sums: Seq[Double], counts: Seq[Double], startTS: Long): Unit = {
+    val readers = sums.zip(counts).zipWithIndex.map { case ((s, c), t) =>
+      TupleRowReader((Some(startTS + t * pubFreq), Some(s), Some(c)))
+    }
+    readers.foreach { row => part.ingest(0, row, bh, createChunkAtFlushBoundary = false,
+      flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
+    part.switchBuffers(bh, encode = true)
+  }
+
+  def chunkedWindowItHistAvg(data: Seq[Double],
+                             rv: RawDataRangeVector,
+                             func: ChunkedRangeFunction[HistAvgAggTransientRow],
+                             windowSize: Int,
+                             step: Int): ChunkedWindowIterator[HistAvgAggTransientRow] = {
+    val windowTime = (windowSize.toLong - 1) * pubFreq
+    val windowStartTS = defaultStartTS + windowTime
+    val stepTimeMillis = step.toLong * pubFreq
+    val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
+    new ChunkedWindowIterator[HistAvgAggTransientRow](rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
+      func, querySession) {
+      var sampleToEmit: HistAvgAggTransientRow = new HistAvgAggTransientRow()
+    }
   }
 
   after {
@@ -2140,6 +2196,141 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
     togglerDeltaResults shouldEqual directDeltaResults
     togglerCumResults shouldEqual directCumResults
+  }
+
+  // ── ChunkedSumCountCumulRangeFunctionDD / ChunkedSumCountDeltaRangeFunctionDD tests ─────
+  // These exercise the havg() composite sum+count range functions directly, comparing their
+  // combined output against the same sum/count functions run standalone (single column) on
+  // the same data. Since addChunks delegates entirely to each sub-function's own addChunks,
+  // the combined and standalone results must match exactly, including across chunk boundaries
+  // and counter resets.
+
+  it("should match standalone rate results for cumulative sum/count via ChunkedSumCountCumulRangeFunctionDD") {
+    val sums = (1 to 120).map(_.toDouble)
+    val counts = (1 to 120).map(n => n * 2.0)
+    val rv = sumCountRV(cumulSumCountDataset, cumulSumCountBH, cumulSumCountBP, sums, counts)
+
+    val windowSize = 20
+    val step = 10
+
+    val directSumResults = chunkedWindowIt(sums, rv.copy(columnIDs = Array(0, 1)),
+      new ChunkedRateFunction, windowSize, step).map(_.getDouble(1)).toBuffer
+    val directCountResults = chunkedWindowIt(sums, rv.copy(columnIDs = Array(0, 2)),
+      new ChunkedRateFunction, windowSize, step).map(_.getDouble(1)).toBuffer
+
+    val combinedFunc = new ChunkedSumCountCumulRangeFunctionDD(1, 2, new ChunkedRateFunction, new ChunkedRateFunction)
+    val combinedIt = chunkedWindowItHistAvg(sums, rv, combinedFunc, windowSize, step)
+    val combinedSumResults = ArrayBuffer[Double]()
+    val combinedCountResults = ArrayBuffer[Double]()
+    combinedIt.foreach { row =>
+      combinedSumResults += row.getDouble(1)
+      combinedCountResults += row.getDouble(2)
+    }
+
+    combinedSumResults shouldEqual directSumResults
+    combinedCountResults shouldEqual directCountResults
+    // Sanity: monotonically increasing counters should yield positive rates throughout
+    combinedSumResults.foreach(_ should be > 0.0)
+    combinedCountResults.foreach(_ should be > 0.0)
+  }
+
+  it("should correctly apply counter-reset correction across chunk boundaries in " +
+    "ChunkedSumCountCumulRangeFunctionDD") {
+    // First chunk: monotonically increasing sum/count
+    val rv = sumCountRV(cumulSumCountDataset, cumulSumCountBH, cumulSumCountBP,
+      sums = (1 to 20).map(_.toDouble), counts = (1 to 20).map(n => n * 2.0))
+
+    // Second chunk: values reset back down (simulating a process restart) then continue increasing
+    addSumCountChunk(rv.partition.asInstanceOf[TimeSeriesPartition], cumulSumCountBH,
+      sums = (1 to 20).map(_.toDouble), counts = (1 to 20).map(n => n * 2.0),
+      startTS = defaultStartTS + 20 * pubFreq)
+
+    val fullData = (1 to 40).map(_.toDouble)
+    val windowSize = 30
+    val step = 10
+
+    val directSumResults = chunkedWindowIt(fullData, rv.copy(columnIDs = Array(0, 1)),
+      new ChunkedRateFunction, windowSize, step).map(_.getDouble(1)).toBuffer
+    val directCountResults = chunkedWindowIt(fullData, rv.copy(columnIDs = Array(0, 2)),
+      new ChunkedRateFunction, windowSize, step).map(_.getDouble(1)).toBuffer
+
+    val combinedFunc = new ChunkedSumCountCumulRangeFunctionDD(1, 2, new ChunkedRateFunction, new ChunkedRateFunction)
+    val combinedIt = chunkedWindowItHistAvg(fullData, rv, combinedFunc, windowSize, step)
+    val combinedSumResults = ArrayBuffer[Double]()
+    val combinedCountResults = ArrayBuffer[Double]()
+    combinedIt.foreach { row =>
+      combinedSumResults += row.getDouble(1)
+      combinedCountResults += row.getDouble(2)
+    }
+
+    // Windows spanning the reset must match the independently-corrected standalone results exactly
+    combinedSumResults shouldEqual directSumResults
+    combinedCountResults shouldEqual directCountResults
+    // Counter-reset correction should always keep rates non-negative
+    combinedSumResults.foreach(_ should be >= 0.0)
+    combinedCountResults.foreach(_ should be >= 0.0)
+  }
+
+  it("should compute rate over delta sum/count columns using ChunkedSumCountDeltaRangeFunctionDD") {
+    val sums = Seq(5.0, 7.0, 3.0, 9.0, 4.0, 6.0, 2.0, 8.0, 1.0, 10.0)
+    val counts = Seq(2.0, 3.0, 1.0, 4.0, 2.0, 3.0, 1.0, 4.0, 1.0, 5.0)
+    val rv = sumCountRV(deltaSumCountDataset, deltaSumCountBH, deltaSumCountBP, sums, counts)
+
+    val windowSize = 6
+    val step = 2
+
+    val directSumResults = chunkedWindowIt(sums, rv.copy(columnIDs = Array(0, 1)),
+      new RateOverDeltaChunkedFunctionD, windowSize, step).map(_.getDouble(1)).toBuffer
+    val directCountResults = chunkedWindowIt(sums, rv.copy(columnIDs = Array(0, 2)),
+      new RateOverDeltaChunkedFunctionD, windowSize, step).map(_.getDouble(1)).toBuffer
+
+    val combinedFunc = new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+      new RateOverDeltaChunkedFunctionD, new RateOverDeltaChunkedFunctionD)
+    val combinedIt = chunkedWindowItHistAvg(sums, rv, combinedFunc, windowSize, step)
+    val combinedSumResults = ArrayBuffer[Double]()
+    val combinedCountResults = ArrayBuffer[Double]()
+    combinedIt.foreach { row =>
+      combinedSumResults += row.getDouble(1)
+      combinedCountResults += row.getDouble(2)
+    }
+
+    combinedSumResults shouldEqual directSumResults
+    combinedCountResults shouldEqual directCountResults
+    combinedSumResults should not be empty
+  }
+
+  it("should correctly accumulate delta sum/count rate across chunk boundaries in " +
+    "ChunkedSumCountDeltaRangeFunctionDD") {
+    val firstSums = Seq(5.0, 7.0, 3.0, 9.0, 4.0)
+    val firstCounts = Seq(2.0, 3.0, 1.0, 4.0, 2.0)
+    val rv = sumCountRV(deltaSumCountDataset, deltaSumCountBH, deltaSumCountBP, firstSums, firstCounts)
+
+    val secondSums = Seq(6.0, 2.0, 8.0, 1.0, 10.0)
+    val secondCounts = Seq(3.0, 1.0, 4.0, 1.0, 5.0)
+    addSumCountChunk(rv.partition.asInstanceOf[TimeSeriesPartition], deltaSumCountBH,
+      secondSums, secondCounts, startTS = defaultStartTS + 5 * pubFreq)
+
+    val fullSums = firstSums ++ secondSums
+
+    // Single window spanning both chunks
+    val startTs = defaultStartTS
+    val endTs = defaultStartTS + (fullSums.length - 1) * pubFreq
+    val windowTime = endTs - startTs
+    val windowDurationSec = windowTime / 1000.0
+
+    val expectedSumRate = fullSums.sum / windowDurationSec
+    val expectedCountRate = (firstCounts ++ secondCounts).sum / windowDurationSec
+
+    val combinedFunc = new ChunkedSumCountDeltaRangeFunctionDD(1, 2,
+      new RateOverDeltaChunkedFunctionD, new RateOverDeltaChunkedFunctionD)
+    val it = new ChunkedWindowIterator[HistAvgAggTransientRow](rv, endTs, 100000, endTs, windowTime,
+      combinedFunc, querySession) {
+      var sampleToEmit: HistAvgAggTransientRow = new HistAvgAggTransientRow()
+    }
+    val result = it.next
+
+    result.getDouble(1) shouldEqual expectedSumRate +- errorOk
+    result.getDouble(2) shouldEqual expectedCountRate +- errorOk
   }
 
   // ── SIMD end-to-end tests ───────────────────────────────────────────────
