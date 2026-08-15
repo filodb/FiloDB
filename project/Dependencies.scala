@@ -24,6 +24,7 @@ object Dependencies {
   val ficusVersion      = "1.5.2" // Updated for Scala 2.13
   val kamonBundleVersion = "2.7.3"
   val otelVersion       = "1.54.1"
+  val otelVersionAlpha  = otelVersion + "-alpha"
   val otelInstVersion   = "2.20.1-alpha"
   val monixKafkaVersion = "1.0.0-RC7"
   val sparkVersion      = "3.4.0"
@@ -53,6 +54,7 @@ object Dependencies {
     "io.opentelemetry"             % "opentelemetry-sdk-metrics"            % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-otlp"          % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-logging-otlp"  % otelVersion,
+    "io.opentelemetry"             % "opentelemetry-exporter-prometheus"    % otelVersionAlpha,
     "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry-java8" % otelInstVersion,
     "io.opentelemetry.instrumentation" % "opentelemetry-oshi"                    % otelInstVersion,
     "org.scala-lang.modules" %% "scala-collection-compat" % "2.11.0",
