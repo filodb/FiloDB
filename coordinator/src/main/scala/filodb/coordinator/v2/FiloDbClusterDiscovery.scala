@@ -15,6 +15,7 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import filodb.coordinator.{ActorName, CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityValue}
 import filodb.core.metrics.FilodbMetrics
 
 class FiloDbClusterDiscovery(settings: FilodbSettings,
@@ -31,6 +32,8 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   val clusterDiscoveryCounter = FilodbMetrics.counter("filodb-cluster-discovery")
   // Metric to track if we have unassigned shards on a given pod
   val unassignedShardsGauge = FilodbMetrics.gauge("v2-unassigned-shards")
+  // Metric to track per-node failures while scattering a cardinality scan
+  val cardinalityScatterFailedCounter = FilodbMetrics.counter("cardinality-scatter-failed")
 
   lazy val ordinalOfLocalhost: Int = {
     if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
@@ -165,6 +168,78 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     val mapper = datasetToMapper.get(ref)
     if (mapper == null) new ShardMapper(0) else mapper
   }
+
+  /**
+   * Scatters a cardinality scan to every node of the cluster and merges the per-shard records
+   * into cluster-wide totals, grouped by shard key prefix.
+   *
+   * Unlike askShardSnapshot, a node that fails or times out is NOT substituted with an empty
+   * result. Every answering node reports the shards it actually scanned, and any shard nobody
+   * reports is returned in `missingShards`. These counts are used for metering, so silently
+   * omitting a node would produce an undercount that looks like real data.
+   *
+   * NOTE: missing shards are derived from what nodes report, NOT from shardsForOrdinal - the
+   * hostNames list is sorted lexicographically, so its index is not the node ordinal
+   * ("host-10" sorts before "host-2"). A failed node reports nothing, so all of its shards
+   * already show up as uncovered.
+   *
+   * Nodes are queried in parallel - each does a RocksDB scan, so a sequential fan-out would make
+   * latency the sum over pods rather than the max.
+   */
+  def reduceCardinalitiesFromAllNodes(ref: DatasetRef,
+                                      shardKeyPrefix: Seq[String],
+                                      depth: Int,
+                                      numShards: Int,
+                                      timeout: FiniteDuration): Future[ClusterCardinalities] = {
+    val t = Timeout(timeout)
+    val asks = nodeCoordActorSelections.zip(hostNames).map { case (nca, host) =>
+      nca.resolveOne(settings.ResolveActorTimeout)
+        .flatMap { ncaRef => (ncaRef ? GetCardinalityScatter(ref, shardKeyPrefix, depth))(t) }
+        .map {
+          case lc: LocalCardinalities => Some(lc)
+          case other =>
+            logger.error(s"[ClusterV2] Cardinality scatter to host=$host for dataset=$ref " +
+              s"returned $other")
+            None
+        }
+        .recover { case e =>
+          logger.error(s"[ClusterV2] Cardinality scatter to host=$host failed for dataset=$ref", e)
+          cardinalityScatterFailedCounter.increment(1, Map("dataset" -> ref.dataset))
+          None
+        }
+    }
+
+    Future.sequence(asks).map { results =>
+      val acc = new mutable.HashMap[Seq[String], CardinalityValue]()
+      val covered = mutable.Set[Int]()
+      results.flatten.foreach { lc =>
+        covered ++= lc.shards
+        lc.records.foreach { rec =>
+          acc.update(rec.prefix, acc.get(rec.prefix).map(sum(_, rec.value)).getOrElse(rec.value))
+        }
+      }
+      val missing = (0 until numShards).filterNot(covered.contains)
+      if (missing.nonEmpty) {
+        logger.error(s"[ClusterV2] Cardinality result for dataset=$ref is incomplete. " +
+          s"nodesAnswered=${results.count(_.isDefined)}/${results.size} missingShards=$missing")
+      }
+      // `shard` is meaningless once summed across shards
+      ClusterCardinalities(ref, acc.toSeq.map { case (p, v) => CardinalityRecord(-1, p, v) }, missing)
+    }
+  }
+
+  /**
+   * Sums cardinality counts across shards. childrenCount and childrenQuota are deliberately not
+   * summed - they describe the trie shape and the quota of a single shard, neither of which
+   * aggregates meaningfully across shards.
+   */
+  private def sum(a: CardinalityValue, b: CardinalityValue): CardinalityValue =
+    CardinalityValue(
+      tsCount = a.tsCount + b.tsCount,
+      activeTsCount = a.activeTsCount + b.activeTsCount,
+      billableTsCount = a.billableTsCount + b.billableTsCount,
+      childrenCount = math.max(a.childrenCount, b.childrenCount),
+      childrenQuota = math.max(a.childrenQuota, b.childrenQuota))
 
   def shutdown(): Unit = {
     discoveryJobs.values.foreach(_.cancel())
