@@ -18,7 +18,7 @@ import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
-import filodb.core.memstore.ratelimit.CardinalityRecord
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityValue}
 import filodb.core.metadata._
 import filodb.core.query.QueryContext
 import filodb.core.store.{IngestionConfig, StoreConfig}
@@ -66,6 +66,46 @@ final case class GetClusterCardinalities(ref: DatasetRef, shardKeyPrefix: Seq[St
 final case class ClusterCardinalities(ref: DatasetRef,
                                       cardinalities: Seq[CardinalityRecord],
                                       missingShards: Seq[Int])
+
+object ClusterCardinalities {
+
+  /**
+   * Folds per-node, per-shard cardinality records into cluster-wide totals grouped by shard key
+   * prefix. `None` entries are nodes that failed or timed out.
+   *
+   * Any shard that no answering node reports as scanned lands in `missingShards`. A failed node
+   * reports nothing, so all of its shards fall out of the covered set automatically - which is
+   * why this needs no notion of which node owns which shard.
+   */
+  def merge(ref: DatasetRef,
+            numShards: Int,
+            results: Seq[Option[LocalCardinalities]]): ClusterCardinalities = {
+    val acc = new mutable.HashMap[Seq[String], CardinalityValue]()
+    val covered = mutable.Set[Long]()
+    results.flatten.foreach { lc =>
+      covered ++= lc.shards.map(_.toLong)
+      lc.records.foreach { rec =>
+        acc.update(rec.prefix, acc.get(rec.prefix).map(sum(_, rec.value)).getOrElse(rec.value))
+      }
+    }
+    val missing = (0 until numShards).filterNot(sh => covered.contains(sh.toLong))
+    // `shard` is meaningless once summed across shards
+    ClusterCardinalities(ref, acc.toSeq.map { case (p, v) => CardinalityRecord(-1, p, v) }, missing)
+  }
+
+  /**
+   * Sums cardinality counts across shards. childrenCount and childrenQuota are deliberately NOT
+   * summed - they describe the trie shape and the quota of a single shard, neither of which
+   * aggregates meaningfully across shards, so the max is carried instead.
+   */
+  private def sum(a: CardinalityValue, b: CardinalityValue): CardinalityValue =
+    CardinalityValue(
+      tsCount = a.tsCount + b.tsCount,
+      activeTsCount = a.activeTsCount + b.activeTsCount,
+      billableTsCount = a.billableTsCount + b.billableTsCount,
+      childrenCount = math.max(a.childrenCount, b.childrenCount),
+      childrenQuota = math.max(a.childrenQuota, b.childrenQuota))
+}
 
 object NewNodeCoordinatorActor {
 

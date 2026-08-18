@@ -210,36 +210,15 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     }
 
     Future.sequence(asks).map { results =>
-      val acc = new mutable.HashMap[Seq[String], CardinalityValue]()
-      val covered = mutable.Set[Int]()
-      results.flatten.foreach { lc =>
-        covered ++= lc.shards
-        lc.records.foreach { rec =>
-          acc.update(rec.prefix, acc.get(rec.prefix).map(sum(_, rec.value)).getOrElse(rec.value))
-        }
-      }
-      val missing = (0 until numShards).filterNot(covered.contains)
-      if (missing.nonEmpty) {
+      val merged = ClusterCardinalities.merge(ref, numShards, results)
+      if (merged.missingShards.nonEmpty) {
         logger.error(s"[ClusterV2] Cardinality result for dataset=$ref is incomplete. " +
-          s"nodesAnswered=${results.count(_.isDefined)}/${results.size} missingShards=$missing")
+          s"nodesAnswered=${results.count(_.isDefined)}/${results.size} " +
+          s"missingShards=${merged.missingShards}")
       }
-      // `shard` is meaningless once summed across shards
-      ClusterCardinalities(ref, acc.toSeq.map { case (p, v) => CardinalityRecord(-1, p, v) }, missing)
+      merged
     }
   }
-
-  /**
-   * Sums cardinality counts across shards. childrenCount and childrenQuota are deliberately not
-   * summed - they describe the trie shape and the quota of a single shard, neither of which
-   * aggregates meaningfully across shards.
-   */
-  private def sum(a: CardinalityValue, b: CardinalityValue): CardinalityValue =
-    CardinalityValue(
-      tsCount = a.tsCount + b.tsCount,
-      activeTsCount = a.activeTsCount + b.activeTsCount,
-      billableTsCount = a.billableTsCount + b.billableTsCount,
-      childrenCount = math.max(a.childrenCount, b.childrenCount),
-      childrenQuota = math.max(a.childrenQuota, b.childrenQuota))
 
   def shutdown(): Unit = {
     discoveryJobs.values.foreach(_.cancel())
