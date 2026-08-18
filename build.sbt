@@ -25,7 +25,8 @@ ThisBuild / dependencyOverrides ++= Seq(
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2",
   "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
   "com.typesafe.akka" %% "akka-actor" % "2.5.32",
-  "com.typesafe.akka" %% "akka-stream" % "2.5.32"
+  "com.typesafe.akka" %% "akka-stream" % "2.5.32",
+  "com.google.protobuf" % "protobuf-java" % "3.21.7"
 )
 
 enablePlugins(ProtobufPlugin)
