@@ -1,0 +1,60 @@
+apiVersion: ase.apple.com/kandbox/v1
+kind: DeploymentConfig
+metadata:
+  name: filodb-smoke
+spec:
+  deploy:
+    - name: filodb-onebox
+      type: deployment
+      image: docker.apple.com/telemetry/mosaic-local:latest
+      imagePullPolicy: IfNotPresent
+      replicas: 1
+      stage: 0
+      args:
+        - "/bin/bash"
+        - "/opt/mosaic-local/smoke/run-filodb-smoke.sh"
+      ports:
+        - name: main
+          port: 8080
+          appProtocol: http
+      resources:
+        requests:
+          cpu: "4000m"
+          memory: 12Gi
+        limits:
+          cpu: "6000m"
+          memory: 16Gi
+      files:
+        - mountPath: /opt/mosaic-local/smoke
+          items:
+            - source: smoke/run-filodb-smoke.sh
+              target: run-filodb-smoke.sh
+              mode: 0755
+            - source: smoke/smoke-server.conf
+              target: smoke-server.conf
+            - source: smoke/smoke-source.conf
+              target: smoke-source.conf
+            - source: smoke/smoke-logback.xml
+              target: smoke-logback.xml
+      readinessProbe:
+        scheme: http
+        path: /api/v1/cluster
+        port: 8080
+        initialDelaySeconds: 120
+        periodSeconds: 15
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 40
+      livenessProbe:
+        tcpSocket:
+          port: 8080
+        initialDelaySeconds: 180
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 10
+  readiness:
+    commands:
+      - "curl -sf http://$FILODB_ONEBOX_HOST:$FILODB_ONEBOX_PORT/api/v1/cluster && echo READY"
+    initialDelaySeconds: 120
+    periodSeconds: 15
+    timeoutSeconds: 900
