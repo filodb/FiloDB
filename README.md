@@ -928,11 +928,12 @@ Update QueryRangeSimulation.Configuration code with:
 * Query Start time by looking at the output of above data generator
 * Select the query you want to run the load test on
 
-Then run `GatlingDriver` from your IDE, or run Gatling via SBT with
-
+You can run Gatling simulation via SBT with
 ```
-sbt gatling/gatling:testOnly filodb.gatling.SumOfSumOverTimeQueryRangeSimulation
+sbt 'Gatling/testOnly filodb.gatling.SumOfSumOverTimeQueryRangeSimulation'
 ```
+or run the `io.gatling.app.Gatling` main class from IDE with args `--simulation filodb.gatling.SumOfSumOverTimeQueryRangeSimulation --results-folder gatling/target/gatling`.
+It may require you to add java opens
 
 If you added profiler arguments to the FiloDB command, you can profile the code when the gatling
 job is running

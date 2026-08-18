@@ -42,7 +42,7 @@ object AntlrParser extends StrictLogging {
                                msg: String,
                                e: RecognitionException): scala.Unit =
       {
-        if (errors.length() != 0) {
+        if (errors.nonEmpty) {
           errors.append(", and ")
         }
         errors.append("at " + line + ":" + charPositionInLine + " " + msg)
@@ -60,7 +60,7 @@ object AntlrParser extends StrictLogging {
 
     try {
       val expr = cast[T](new AntlrParser().visit(entry(parser)))
-      if (expr != null && errors.length() == 0) {
+      if (expr != null && errors.isEmpty) {
         return expr
       }
     } catch {
@@ -70,7 +70,7 @@ object AntlrParser extends StrictLogging {
     }
 
     var msg = "Cannot parse [" + query + "]"
-    if (errors.length() != 0) {
+    if (errors.nonEmpty) {
       msg = msg + "\n because" + errors.toString
     }
     throw new IllegalArgumentException(msg)
