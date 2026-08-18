@@ -365,7 +365,7 @@ spec:
           items:
             - source: smoke/run-filodb-smoke.sh
               target: run-filodb-smoke.sh
-              mode: 0755
+              mode: "0755"
             - source: smoke/smoke-server.conf
               target: smoke-server.conf
             - source: smoke/smoke-source.conf
@@ -384,10 +384,10 @@ spec:
       livenessProbe:
         tcpSocket:
           port: 8080
-        initialDelaySeconds: 180
+        initialDelaySeconds: 600
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 10
+        failureThreshold: 15
   readiness:
     commands:
       - "curl -sf http://$FILODB_ONEBOX_HOST:$FILODB_ONEBOX_PORT/api/v1/cluster && echo READY"
