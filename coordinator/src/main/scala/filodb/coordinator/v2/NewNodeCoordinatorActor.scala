@@ -1,7 +1,7 @@
 package filodb.coordinator.v2
 
 import scala.collection.mutable
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success}
 
 import akka.actor.{ActorRef, OneForOneStrategy, Props}
@@ -129,15 +129,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
   private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
-  // Per-node timeout for the cardinality scatter. Deliberately SHORTER than the caller's timeout:
-  // the HTTP route asks this actor with the same query.ask-timeout value, and the inner asks start
-  // after the outer one. With equal timeouts the outer always fires first, so a slow node would
-  // surface to the caller as a generic ask-timeout (HTTP 500) instead of our 503 naming the
-  // missing shards. Mirrors askShardSnapshot's `failureDetectionInterval - 5.seconds`.
-  private val cardinalityAskTimeout = {
-    val callerTimeout = settings.config.as[FiniteDuration]("query.ask-timeout")
-    if (callerTimeout > 10.seconds) callerTimeout - 5.seconds else callerTimeout / 2
-  }
+  // Per-node budget for the cardinality scatter, covering actor resolution plus the scan ask.
+  // Kept well below the caller's query.ask-timeout so a slow or unreachable node surfaces as our
+  // 503 naming the missing shards, rather than the caller's ask timing out first (a generic 500).
+  private val cardinalityAskTimeout =
+    settings.config.as[FiniteDuration]("metering-scatter-timeout")
 
   logger.info(s"[ClusterV2] Initializing NodeCoordActor at ${self.path}")
 

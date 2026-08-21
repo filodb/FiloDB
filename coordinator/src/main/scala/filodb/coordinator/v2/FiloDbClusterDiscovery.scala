@@ -196,7 +196,10 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
     logger.info(s"[ClusterV2] Starting cardinality scatter. dataset=$ref prefix=$shardKeyPrefix " +
       s"depth=$depth numNodes=${nodeCoordActorSelections.size} perNodeTimeout=$timeout")
     val asks = nodeCoordActorSelections.zip(hostNames).map { case (nca, host) =>
-      nca.resolveOne(settings.ResolveActorTimeout)
+      // NOTE: the resolve leg is capped by the same budget. tasks.timeouts.resolve-actor is 10s and
+      // is shared with the shard-map discovery pipeline, so it cannot be lowered globally - without
+      // this cap an unreachable node could burn the full resolve timeout BEFORE the ask even starts.
+      nca.resolveOne(timeout.min(settings.ResolveActorTimeout))
         .flatMap { ncaRef => (ncaRef ? GetCardinalityScatter(ref, shardKeyPrefix, depth))(t) }
         .map {
           case lc: LocalCardinalities => Some(lc)
