@@ -239,4 +239,26 @@ class ClusterCardinalitiesSpec extends AnyFunSpec with Matchers with ScalaFuture
     val explicit = memStore.scanTsCardinalities(QueryContext(), dsRef, Seq(0, 1), Nil, 2)
     all.toSet shouldEqual explicit.toSet
   }
+
+  it("should NOT be able to express 'scan nothing' via an empty shard list") {
+    // Pins the hazard the handler guards against: an empty shard list means ALL shards, not none,
+    // so a node whose owned-shard intersection comes out empty must short circuit instead of
+    // calling scanTsCardinalities. If this ever starts returning empty, that guard can be dropped.
+    memStore.scanTsCardinalities(QueryContext(), dsRef, Nil, Nil, 2) should not be empty
+  }
+
+  it("should report a node that scanned nothing as covering no shards") {
+    // shape returned by the handler's empty-intersection short circuit
+    val merged = ClusterCardinalities.merge(dsRef, numShards,
+      Seq(Some(LocalCardinalities(dsRef, Nil, Nil))))
+    merged.cardinalities shouldEqual Nil
+    merged.missingShards shouldEqual Seq(0, 1)
+  }
+
+  it("should treat a node that scanned fewer shards than it owns as partial") {
+    // if the memstore has not instantiated an owned shard, the node reports only what it scanned,
+    // so the gap must surface rather than being inferred as complete
+    val partial = LocalCardinalities(dsRef, Seq(0), Seq(CardinalityRecord(0, Seq("demo"), cv(1, 1, 1))))
+    ClusterCardinalities.merge(dsRef, numShards, Seq(Some(partial))).missingShards shouldEqual Seq(1)
+  }
 }

@@ -1,8 +1,7 @@
 package filodb.coordinator.v2
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 
 import akka.actor.{ActorRef, OneForOneStrategy, Props}
@@ -10,12 +9,12 @@ import akka.actor.SupervisorStrategy.Resume
 import akka.event.LoggingReceive
 import akka.pattern.pipe
 import kamon.Kamon
-import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator._
 import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
+import filodb.core.GlobalScheduler.globalImplicitScheduler
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityValue}
@@ -130,17 +129,15 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
   private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
-  // Bounded pool for cardinality (RocksDB) scans, kept off this actor's thread and off the
-  // query scheduler. The bound is also the concurrency limit for cardinality requests.
-  private val cardScheduler: Scheduler = Scheduler.io(
-    name = "cardinality-scan",
-    reporter = monix.execution.UncaughtExceptionReporter(
-      logger.error("[ClusterV2] Uncaught exception in cardinality scan", _)))
-
-  // Only used for the cardinality futures above; the callbacks are trivial.
-  private implicit val cardExecutionContext: ExecutionContext = cardScheduler
-
-  private val cardinalityAskTimeout = settings.config.as[FiniteDuration]("query.ask-timeout")
+  // Per-node timeout for the cardinality scatter. Deliberately SHORTER than the caller's timeout:
+  // the HTTP route asks this actor with the same query.ask-timeout value, and the inner asks start
+  // after the outer one. With equal timeouts the outer always fires first, so a slow node would
+  // surface to the caller as a generic ask-timeout (HTTP 500) instead of our 503 naming the
+  // missing shards. Mirrors askShardSnapshot's `failureDetectionInterval - 5.seconds`.
+  private val cardinalityAskTimeout = {
+    val callerTimeout = settings.config.as[FiniteDuration]("query.ask-timeout")
+    if (callerTimeout > 10.seconds) callerTimeout - 5.seconds else callerTimeout / 2
+  }
 
   logger.info(s"[ClusterV2] Initializing NodeCoordActor at ${self.path}")
 
@@ -364,70 +361,95 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   /**
-   * Cardinality scans are RocksDB reads, so they are never run on this actor's thread: this
-   * mailbox also serves the k8s liveness/health probes (LocalShardsHealthRequest) and the
-   * peer shard-map gossip (GetShardMapScatter), and stalling either has blast radius well
-   * beyond the cardinality request itself. Actor state is read on the actor thread and the
-   * scan is handed to cardScheduler, with the reply piped back.
+   * GetCardinalityScatter is answered inline, exactly like the sibling handlers above and like
+   * QueryActor.execTopkCardinalityQuery, which already runs this same scan on an actor thread.
+   *
+   * GetClusterCardinalities cannot be: it scatters to every node INCLUDING this one, so blocking
+   * this mailbox while waiting would prevent us from ever processing our own
+   * GetCardinalityScatter, guaranteeing a self-timeout. Hence the Future + pipe. Its callbacks are
+   * trivial and run on the shared globalImplicitScheduler (imported above), which is why the
+   * synchronous handlers here need no ExecutionContext at all.
    */
   def cardinalityHandlers: Receive = LoggingReceive {
     case g: GetCardinalityScatter =>
-      val replyTo = sender()
-      scanLocalCardinalities(g).recover { case e: Exception =>
+      try {
+        sender() ! scanLocalCardinalities(g)
+      } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
-        InternalServiceError(s"Exception while executing GetCardinalityScatter for " +
-          s"dataset: ${g.ref.dataset} - ${e.getMessage}")
-      }.pipeTo(replyTo)
+        // send a response to avoid blocking of akka caller for long time
+        sender() ! InternalServiceError(s"Exception while executing GetCardinalityScatter for " +
+          s"dataset: ${g.ref.dataset}")
+      }
 
     case g: GetClusterCardinalities =>
       val replyTo = sender()
       try {
         val numShards = ingestionConfigs(g.ref).numShards
-        clusterDiscovery
+        val resp = clusterDiscovery
           .reduceCardinalitiesFromAllNodes(g.ref, g.shardKeyPrefix, g.depth, numShards, cardinalityAskTimeout)
           .recover { case e: Exception =>
             logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
             InternalServiceError(s"Exception while executing GetClusterCardinalities for " +
-              s"dataset: ${g.ref.dataset} - ${e.getMessage}")
-          }.pipeTo(replyTo)
+              s"dataset: ${g.ref.dataset}")
+          }
+        pipe(resp).pipeTo(replyTo)
       } catch { case e: Exception =>
         logger.error(s"[ClusterV2] Error occurred when processing message $g", e)
-        // send a response to avoid blocking of akka caller for long time
         replyTo ! InternalServiceError(s"Exception while executing GetClusterCardinalities " +
           s"for dataset: ${g.ref.dataset}")
       }
   }
 
   /**
-   * Reads the shards this node owns on the actor thread, then scans them off-thread.
+   * Scans this node's shards for cardinality records.
+   *
+   * The owned shard set comes from clusterDiscovery.shardsForLocalhost - the same source initShards
+   * uses - rather than from localShardMaps. It is cheap (pure arithmetic over the ordinal) and, more
+   * importantly, independent of whether the shard assignment events actually applied:
+   * updateFromShardEvent only logs on failure, so a dropped event would make a shard look "not mine"
+   * and be silently omitted from the count. Deriving the expected set independently means such a
+   * shard instead shows up as not-active below, and we refuse rather than undercount.
    *
    * Every owned shard must be ShardStatusActive. A shard that is assigned but recovering has a
    * partially built cardinality tracker, so including it would silently undercount - we fail the
    * whole node's scan instead. NOTE: this is deliberately stricter than HealthRoute's
    * healthyShardStatuses, which admits ShardStatusRecovery and ShardStatusAssigned.
    */
-  private def scanLocalCardinalities(g: GetCardinalityScatter): Future[Any] = {
-    val mapper = localShardMaps.get(g.ref)
-    if (mapper.isEmpty) {
-      Future.successful(InternalServiceError(s"Dataset ${g.ref.dataset} is not registered on this node"))
-    } else {
-      val assigned = mapper.get.assignedShards
-      val inactive = assigned.filterNot(mapper.get.isActiveShard)
-      if (inactive.nonEmpty) {
-        val statuses = inactive.map(sh => s"$sh=${mapper.get.statusForShard(sh)}").mkString(", ")
-        logger.warn(s"[ClusterV2] Refusing cardinality scan for dataset=${g.ref.dataset}: " +
-          s"shards not active [$statuses]")
-        Future.successful(
-          InternalServiceError(s"Cardinality count would be incorrect for dataset ${g.ref.dataset}: " +
-            s"shards not active [$statuses]"))
-      } else {
-        // intersect with the memstore's view so we never ask it for a shard it has not instantiated
-        val shards = assigned.intersect(memStore.activeShards(g.ref))
-        Future {
-          LocalCardinalities(g.ref, shards,
-            memStore.scanTsCardinalities(QueryContext(), g.ref, shards, g.shardKeyPrefix, g.depth))
-        }(cardScheduler)
-      }
+  private def scanLocalCardinalities(g: GetCardinalityScatter): Any = {
+    (localShardMaps.get(g.ref), ingestionConfigs.get(g.ref)) match {
+      case (Some(mapper), Some(ingestConfig)) =>
+        val owned = clusterDiscovery.shardsForLocalhost(ingestConfig.numShards)
+        val inactive = owned.filterNot(mapper.isActiveShard)
+        if (inactive.nonEmpty) {
+          val statuses = inactive.map(sh => s"$sh=${mapper.statusForShard(sh)}").mkString(", ")
+          logger.warn(s"[ClusterV2] Refusing cardinality scan for dataset=${g.ref.dataset}: " +
+            s"shards not active [$statuses]")
+          InternalServiceError(s"Cardinality count would be incorrect for dataset " +
+            s"${g.ref.dataset}: shards not active [$statuses]")
+        } else {
+          // intersect with the memstore's view so we never ask it for a shard it has not instantiated
+          val shards = owned.intersect(memStore.activeShards(g.ref))
+          if (shards.isEmpty) {
+            // IMPORTANT: scanTsCardinalities treats an empty shard list as "ALL local shards", so
+            // it must never be called with the empty result of this intersection.
+            logger.warn(s"[ClusterV2] No shards to scan for cardinality on this node. " +
+              s"dataset=${g.ref.dataset} ownedShards=$owned memStoreShards=${memStore.activeShards(g.ref)}")
+            LocalCardinalities(g.ref, Nil, Nil)
+          } else {
+            val startMs = System.currentTimeMillis()
+            val records = memStore.scanTsCardinalities(
+              QueryContext(), g.ref, shards, g.shardKeyPrefix, g.depth)
+            val elapsedMs = System.currentTimeMillis() - startMs
+            // This scan runs on the actor thread, so its duration is mailbox occupancy for this
+            // node - log it so slow scans are attributable without a profiler.
+            logger.info(s"[ClusterV2] Cardinality scan complete. dataset=${g.ref.dataset} " +
+              s"prefix=${g.shardKeyPrefix} depth=${g.depth} numShards=${shards.size} " +
+              s"numRecords=${records.size} elapsedMs=$elapsedMs")
+            LocalCardinalities(g.ref, shards, records)
+          }
+        }
+      case _ =>
+        InternalServiceError(s"Dataset ${g.ref.dataset} is not registered on this node")
     }
   }
 

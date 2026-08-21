@@ -192,12 +192,17 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
                                       numShards: Int,
                                       timeout: FiniteDuration): Future[ClusterCardinalities] = {
     val t = Timeout(timeout)
+    val startMs = System.currentTimeMillis()
+    logger.info(s"[ClusterV2] Starting cardinality scatter. dataset=$ref prefix=$shardKeyPrefix " +
+      s"depth=$depth numNodes=${nodeCoordActorSelections.size} perNodeTimeout=$timeout")
     val asks = nodeCoordActorSelections.zip(hostNames).map { case (nca, host) =>
       nca.resolveOne(settings.ResolveActorTimeout)
         .flatMap { ncaRef => (ncaRef ? GetCardinalityScatter(ref, shardKeyPrefix, depth))(t) }
         .map {
           case lc: LocalCardinalities => Some(lc)
           case other =>
+            // includes InternalServiceError from a node that refused because its shards are not
+            // all active - its shards are then reported missing rather than silently dropped
             logger.error(s"[ClusterV2] Cardinality scatter to host=$host for dataset=$ref " +
               s"returned $other")
             None
@@ -211,10 +216,16 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
 
     Future.sequence(asks).map { results =>
       val merged = ClusterCardinalities.merge(ref, numShards, results)
+      val elapsedMs = System.currentTimeMillis() - startMs
       if (merged.missingShards.nonEmpty) {
-        logger.error(s"[ClusterV2] Cardinality result for dataset=$ref is incomplete. " +
-          s"nodesAnswered=${results.count(_.isDefined)}/${results.size} " +
-          s"missingShards=${merged.missingShards}")
+        logger.error(s"[ClusterV2] Cardinality result for dataset=$ref is INCOMPLETE - counts would " +
+          s"undercount. nodesAnswered=${results.count(_.isDefined)}/${results.size} " +
+          s"numGroups=${merged.cardinalities.size} numMissingShards=${merged.missingShards.size} " +
+          s"missingShards=${merged.missingShards} elapsedMs=$elapsedMs")
+      } else {
+        logger.info(s"[ClusterV2] Cardinality scatter complete. dataset=$ref " +
+          s"nodesAnswered=${results.size}/${results.size} numGroups=${merged.cardinalities.size} " +
+          s"elapsedMs=$elapsedMs")
       }
       merged
     }

@@ -17,9 +17,24 @@ import filodb.core.query.QueryContext
 import filodb.http.apiv1.HttpSchema
 import filodb.memory.format.RowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.{MetadataSuccessResponse, QueryError, QueryResult, TsCardinalities, TsCardinalitiesSamplV2}
+import filodb.query.{QueryError, QueryResult, TsCardinalities, TsCardinalitiesSamplV2}
 import filodb.query.exec.TsCardExec
 import filodb.query.exec.TsCardExec.RowData
+
+/**
+ * Response envelope for the cardinality APIs. Mirrors MetadataSuccessResponse field-for-field so
+ * the JSON is byte-identical to the user facing /api/v2/metering API.
+ *
+ * NOTE: `data` is typed as the concrete TsCardinalitiesSamplV2 rather than the sealed MetadataSampl
+ * trait ON PURPOSE. With MetadataSampl, circe's generic auto derivation wins the implicit lookup
+ * over PromCirceSupport.encodeMetadataSampl and emits a discriminator wrapper -
+ * {"TsCardinalitiesSamplV2": {...}} - which PromCirceSupport.decodeMetadataSampl cannot read; it
+ * expects a flat object with group/cardinality/dataset/_type.
+ */
+final case class TsCardinalitiesResponse(data: Seq[TsCardinalitiesSamplV2],
+                                         status: String = "success",
+                                         partial: Option[Boolean] = None,
+                                         message: Option[String] = None)
 
 /**
  * Serves time series cardinality with the same request/response semantics as the user facing
@@ -73,7 +88,7 @@ class CardinalityRoute(coordinatorActor: ActorRef,
               onSuccess(asyncAsk(coordinatorActor, cmd, settings.queryAskTimeout)) {
                 case qr: QueryResult =>
                   val recs = qr.result.flatMap(_.rows().map(rowDataToRecord).toSeq)
-                  complete(MetadataSuccessResponse(present(recs, dataset)))
+                  complete(TsCardinalitiesResponse(present(recs, dataset)))
                 case qe: QueryError =>
                   logger.error(s"QueryError for $cmd", qe.t)
                   complete(Codes.InternalServerError -> httpErr(qe.t.getClass.getName, qe.t.getMessage))
@@ -111,7 +126,7 @@ class CardinalityRoute(coordinatorActor: ActorRef,
                       s"[${cc.missingShards.mkString(",")}]. " +
                       s"Retry, or pass allowPartial=true to accept an undercount."))
                   case cc: ClusterCardinalities =>
-                    complete(MetadataSuccessResponse(present(cc.cardinalities, dataset),
+                    complete(TsCardinalitiesResponse(present(cc.cardinalities, dataset),
                       partial = if (cc.missingShards.isEmpty) None else Some(true),
                       message = if (cc.missingShards.isEmpty) None
                                 else Some(s"shards not counted: ${cc.missingShards.mkString(",")}")))
