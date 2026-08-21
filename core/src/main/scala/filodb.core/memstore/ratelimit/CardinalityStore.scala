@@ -95,6 +95,6 @@ object CardinalityStore {
   val MAX_RESULT_SIZE: Int =
     if (GlobalConfig.systemConfig.hasPath("filodb.metering-max-result-size")) {
       GlobalConfig.systemConfig.getInt("filodb.metering-max-result-size")
-    } else 10000
+    } else 5000
   val OVERFLOW_PREFIX = Seq("_overflow_")
 }
