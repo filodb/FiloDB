@@ -52,7 +52,7 @@ will join directly.
 
 Include the library in your dependencies. 
 
-Set up neccessary configuration in your application.conf. For full list of configuration and documentation, see the 
+Set up necessary configuration in your application.conf. For full list of configuration and documentation, see the 
 library's [reference.conf](../akka-bootstrapper/src/main/resources/reference.conf)
 
 For fully working example code, look at the [use of bootstrapper in FiloDB](https://github.com/filodb/FiloDB/blob/develop/core/src/main/scala/filodb.core/memstore/PartKeyLuceneIndex.scala#L440)). 
