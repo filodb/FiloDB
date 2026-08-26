@@ -37,11 +37,29 @@ SBT=$(type -p sbt)
 
 check_sbt $SBT
 
-if [ ! -f "$CLI_FILE" ];then
-    # run assembly if file doesn't exist
-    $SBT cli/assembly
-    # initialize DB on first run
-    $CLI_FILE --command init
+# Collect any leading -D system properties so they go to the JVM, not the program
+allprops=""
+while [ "${1:0:2}" = "-D" ]; do
+    allprops="$allprops $1"
+    shift
+done
+
+if [ ! -z "$JAVA_HOME" ]; then
+    CMD="$JAVA_HOME/bin/java"
+else
+    CMD="$JAVA"
+fi
+: ${FILOLOG:="."}
+if [ ! -z "$FILO_CONFIG_FILE" ]; then
+    config="-Dconfig.file=$FILO_CONFIG_FILE"
 fi
 
-$CLI_FILE "$@"
+if [ ! -f "$CLI_FILE" ];then
+    # build the assembly (a plain fat jar) if it doesn't exist
+    $SBT cli/assembly
+    # initialize DB on first run
+    "$CMD" -Xmx2g -Xms1g -DLOG_DIR="$FILOLOG" $config $allprops -jar "$CLI_FILE" --command init
+fi
+
+# filo-cli is a plain jar (not self-executing), so launch it with java -jar
+exec "$CMD" -Xmx2g -Xms1g -DLOG_DIR="$FILOLOG" $config $allprops -jar "$CLI_FILE" "$@"

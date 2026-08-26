@@ -1,0 +1,478 @@
+- generic [active] [ref=e1]:
+  - paragraph [ref=e2]: Width = share of query CPU. Color = phase (colorblind-safe Okabe-Ito). Click a box to zoom, click the title bar to reset. Hover for exact %.
+  - img [ref=e3]:
+    - generic [ref=e5]: "suffix_exec: SUFFIX .*-exec-.* — 2.84ms/query, 30k docs"
+    - generic [ref=e7]: term-scan (walk term dictionary)
+    - generic [ref=e9]: collect-docs (read matched postings)
+    - generic [ref=e11]: dispatch / JVM
+    - generic [ref=e12]:
+      - generic "IndexSearcher.search (query CPU) | other | 8586 samples (100.00% of query CPU)" [ref=e13] [cursor=pointer]
+      - generic: IndexSearcher.search (query CPU)
+    - generic [ref=e14]:
+      - generic "IndexSearcher.search | other | 8506 samples (99.07% of query CPU)" [ref=e15] [cursor=pointer]
+      - generic: IndexSearcher.search
+    - generic [ref=e16]:
+      - generic "BooleanWeight.bulkScorer | other | 7614 samples (88.68% of query CPU)" [ref=e17] [cursor=pointer]
+      - generic: BooleanWeight.bulkScorer
+    - generic [ref=e18]:
+      - generic "Weight.bulkScorer | other | 7610 samples (88.63% of query CPU)" [ref=e19] [cursor=pointer]
+      - generic: Weight.bulkScorer
+    - generic [ref=e20]:
+      - generic "BooleanWeight.scorer | other | 7609 samples (88.62% of query CPU)" [ref=e21] [cursor=pointer]
+      - generic: BooleanWeight.scorer
+    - generic [ref=e22]:
+      - generic "BooleanWeight.scorerSupplier | other | 7537 samples (87.78% of query CPU)" [ref=e23] [cursor=pointer]
+      - generic: BooleanWeight.scorerSupplier
+    - generic [ref=e24]:
+      - generic "Weight.scorerSupplier | other | 7515 samples (87.53% of query CPU)" [ref=e25] [cursor=pointer]
+      - generic: Weight.scorerSupplier
+    - generic [ref=e26]:
+      - generic "MultiTermQueryConstantScoreWrapper$1.scorer | other | 7335 samples (85.43% of query CPU)" [ref=e27] [cursor=pointer]
+      - generic: MultiTermQueryConstantScoreWrapper$1.scorer
+    - generic [ref=e28]:
+      - generic "MultiTermQueryConstantScoreWrapper$1.rewrite | other | 7333 samples (85.41% of query CPU)" [ref=e29] [cursor=pointer]
+      - generic: MultiTermQueryConstantScoreWrapper$1.rewrite
+    - generic [ref=e30]:
+      - generic "MultiTermQueryConstantScoreWrapper$1.collectTerms | other | 4112 samples (47.89% of query CPU)" [ref=e31] [cursor=pointer]
+      - generic: MultiTermQueryConstantScoreWrapper$1.collectTerms
+    - generic [ref=e32]:
+      - generic "IntersectTermsEnum.next | scan | 4095 samples (47.69% of query CPU)" [ref=e33] [cursor=pointer]
+      - generic: IntersectTermsEnum.next
+    - generic [ref=e34]:
+      - generic "IntersectTermsEnum._next | scan | 4093 samples (47.67% of query CPU)" [ref=e35] [cursor=pointer]
+      - generic: IntersectTermsEnum._next
+    - generic [ref=e36]:
+      - generic "IntersectTermsEnum.popPushNext | scan | 2959 samples (34.46% of query CPU)" [ref=e37] [cursor=pointer]
+      - generic: IntersectTermsEnum.popPushNext
+    - generic [ref=e38]:
+      - generic "IntersectTermsEnumFrame.loadNextFloorBlock | scan | 2030 samples (23.64% of query CPU)" [ref=e39] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.loadNextFloorBlock
+    - generic [ref=e40]:
+      - generic "IntersectTermsEnumFrame.load | scan | 1419 samples (16.53% of query CPU)" [ref=e41] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.load
+    - generic [ref=e42]:
+      - generic "CompressionAlgorithm$3.read | scan | 1103 samples (12.85% of query CPU)" [ref=e43] [cursor=pointer]
+      - generic: CompressionAlgorithm$3.read
+    - generic [ref=e44]:
+      - generic "LZ4.decompress | scan | 1102 samples (12.83% of query CPU)" [ref=e45] [cursor=pointer]
+      - generic: LZ4.decompress
+    - generic [ref=e46]:
+      - generic "ByteBufferIndexInput.readBytes | scan | 613 samples (7.14% of query CPU)" [ref=e47] [cursor=pointer]
+      - generic: ByteBufferIndexInput.readBytes
+    - generic [ref=e48]:
+      - generic "ByteBufferGuard.getBytes | scan | 606 samples (7.06% of query CPU)" [ref=e49] [cursor=pointer]
+      - generic: ByteBufferGuard.getBytes
+    - generic [ref=e50]:
+      - generic "DirectByteBuffer.get | scan | 588 samples (6.85% of query CPU)" [ref=e51] [cursor=pointer]
+      - generic: DirectByteBuffer.get
+    - generic [ref=e52]:
+      - generic "ByteBuffer.get | scan | 397 samples (4.62% of query CPU)" [ref=e53] [cursor=pointer]
+      - generic: ByteBuffer.get
+    - generic "DirectByteBuffer.get | scan | 72 samples (0.84% of query CPU)" [ref=e55] [cursor=pointer]
+    - generic "Buffer.nextGetIndex | scan | 38 samples (0.44% of query CPU)" [ref=e57] [cursor=pointer]
+    - generic "Unsafe.getByte | scan | 34 samples (0.40% of query CPU)" [ref=e59] [cursor=pointer]
+    - generic "Objects.checkFromIndexSize | scan | 68 samples (0.79% of query CPU)" [ref=e61] [cursor=pointer]
+    - generic "Preconditions.checkFromIndexSize | scan | 68 samples (0.79% of query CPU)" [ref=e63] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 25 samples (0.29% of query CPU)" [ref=e65] [cursor=pointer]
+    - generic "jbyte_disjoint_arraycopy | scan | 12 samples (0.14% of query CPU)" [ref=e67] [cursor=pointer]
+    - generic "Buffer.position | scan | 10 samples (0.12% of query CPU)" [ref=e69] [cursor=pointer]
+    - generic "DirectByteBuffer.ix | scan | 8 samples (0.09% of query CPU)" [ref=e71] [cursor=pointer]
+    - generic "Buffer.limit | scan | 7 samples (0.08% of query CPU)" [ref=e73] [cursor=pointer]
+    - generic "ByteBufferGuard.ensureValid | scan | 18 samples (0.21% of query CPU)" [ref=e75] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 228 samples (2.66% of query CPU)" [ref=e77] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 174 samples (2.03% of query CPU)" [ref=e79] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 135 samples (1.57% of query CPU)" [ref=e81] [cursor=pointer]
+    - generic "Unsafe.getByte | scan | 95 samples (1.11% of query CPU)" [ref=e83] [cursor=pointer]
+    - generic "Buffer.nextGetIndex | scan | 40 samples (0.47% of query CPU)" [ref=e85] [cursor=pointer]
+    - generic "ByteBufferGuard.ensureValid | scan | 17 samples (0.20% of query CPU)" [ref=e87] [cursor=pointer]
+    - generic "jbyte_arraycopy | scan | 82 samples (0.96% of query CPU)" [ref=e89] [cursor=pointer]
+    - generic "jbyte_disjoint_arraycopy | scan | 34 samples (0.40% of query CPU)" [ref=e91] [cursor=pointer]
+    - generic "CompressionAlgorithm$2.read | scan | 106 samples (1.23% of query CPU)" [ref=e93] [cursor=pointer]
+    - generic "LowercaseAsciiCompression.decompress | scan | 106 samples (1.23% of query CPU)" [ref=e95] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 41 samples (0.48% of query CPU)" [ref=e97] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 40 samples (0.47% of query CPU)" [ref=e99] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 39 samples (0.45% of query CPU)" [ref=e101] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 35 samples (0.41% of query CPU)" [ref=e103] [cursor=pointer]
+    - generic "jbyte_disjoint_arraycopy | scan | 21 samples (0.24% of query CPU)" [ref=e105] [cursor=pointer]
+    - generic "unsafe_arraycopy | scan | 7 samples (0.08% of query CPU)" [ref=e107] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 71 samples (0.83% of query CPU)" [ref=e109] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 58 samples (0.68% of query CPU)" [ref=e111] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 57 samples (0.66% of query CPU)" [ref=e113] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 41 samples (0.48% of query CPU)" [ref=e115] [cursor=pointer]
+    - generic "unsafe_arraycopy | scan | 28 samples (0.33% of query CPU)" [ref=e117] [cursor=pointer]
+    - generic "Unsafe.copyMemoryChecks | scan | 7 samples (0.08% of query CPU)" [ref=e119] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 58 samples (0.68% of query CPU)" [ref=e121] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 44 samples (0.51% of query CPU)" [ref=e123] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 33 samples (0.38% of query CPU)" [ref=e125] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 23 samples (0.27% of query CPU)" [ref=e127] [cursor=pointer]
+    - generic "Buffer.nextGetIndex | scan | 13 samples (0.15% of query CPU)" [ref=e129] [cursor=pointer]
+    - generic "zero_blocks | scan | 7 samples (0.08% of query CPU)" [ref=e131] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 13 samples (0.15% of query CPU)" [ref=e133] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 13 samples (0.15% of query CPU)" [ref=e135] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 11 samples (0.13% of query CPU)" [ref=e137] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.seek | scan | 9 samples (0.10% of query CPU)" [ref=e139] [cursor=pointer]
+    - generic "MappedByteBuffer.position | scan | 9 samples (0.10% of query CPU)" [ref=e141] [cursor=pointer]
+    - generic "MappedByteBuffer.position | scan | 9 samples (0.10% of query CPU)" [ref=e143] [cursor=pointer]
+    - generic "ByteBuffer.position | scan | 9 samples (0.10% of query CPU)" [ref=e145] [cursor=pointer]
+    - generic "Buffer.position | scan | 9 samples (0.10% of query CPU)" [ref=e147] [cursor=pointer]
+    - generic "CompressionAlgorithm$1.read | scan | 7 samples (0.08% of query CPU)" [ref=e149] [cursor=pointer]
+    - generic [ref=e150]:
+      - generic "ByteArrayDataInput.readVLong | scan | 362 samples (4.22% of query CPU)" [ref=e151] [cursor=pointer]
+      - generic: ByteArrayDataInput.readVLong
+    - generic "ByteArrayDataInput.readByte | scan | 86 samples (1.00% of query CPU)" [ref=e153] [cursor=pointer]
+    - generic [ref=e154]:
+      - generic "IntersectTermsEnumFrame.next | scan | 860 samples (10.02% of query CPU)" [ref=e155] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.next
+    - generic [ref=e156]:
+      - generic "IntersectTermsEnumFrame.nextNonLeaf | scan | 639 samples (7.44% of query CPU)" [ref=e157] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.nextNonLeaf
+    - generic "ByteArrayDataInput.getPosition | scan | 215 samples (2.50% of query CPU)" [ref=e159] [cursor=pointer]
+    - generic "ByteArrayDataInput.readVInt | scan | 88 samples (1.02% of query CPU)" [ref=e161] [cursor=pointer]
+    - generic "IntersectTermsEnumFrame.nextLeaf | scan | 192 samples (2.24% of query CPU)" [ref=e163] [cursor=pointer]
+    - generic "ByteArrayDataInput.readVInt | scan | 99 samples (1.15% of query CPU)" [ref=e165] [cursor=pointer]
+    - generic [ref=e166]:
+      - generic "IntersectTermsEnum.pushFrame | scan | 667 samples (7.77% of query CPU)" [ref=e167] [cursor=pointer]
+      - generic: IntersectTermsEnum.pushFrame
+    - generic [ref=e168]:
+      - generic "IntersectTermsEnumFrame.load | scan | 341 samples (3.97% of query CPU)" [ref=e169] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.load
+    - generic "CompressionAlgorithm$3.read | scan | 230 samples (2.68% of query CPU)" [ref=e171] [cursor=pointer]
+    - generic "LZ4.decompress | scan | 230 samples (2.68% of query CPU)" [ref=e173] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 118 samples (1.37% of query CPU)" [ref=e175] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 117 samples (1.36% of query CPU)" [ref=e177] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 115 samples (1.34% of query CPU)" [ref=e179] [cursor=pointer]
+    - generic "ByteBuffer.get | scan | 92 samples (1.07% of query CPU)" [ref=e181] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 22 samples (0.26% of query CPU)" [ref=e183] [cursor=pointer]
+    - generic "Unsafe.getByte | scan | 11 samples (0.13% of query CPU)" [ref=e185] [cursor=pointer]
+    - generic "Buffer.nextGetIndex | scan | 11 samples (0.13% of query CPU)" [ref=e187] [cursor=pointer]
+    - generic "Objects.checkFromIndexSize | scan | 19 samples (0.22% of query CPU)" [ref=e189] [cursor=pointer]
+    - generic "Preconditions.checkFromIndexSize | scan | 19 samples (0.22% of query CPU)" [ref=e191] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 54 samples (0.63% of query CPU)" [ref=e193] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 39 samples (0.45% of query CPU)" [ref=e195] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 31 samples (0.36% of query CPU)" [ref=e197] [cursor=pointer]
+    - generic "Buffer.nextGetIndex | scan | 17 samples (0.20% of query CPU)" [ref=e199] [cursor=pointer]
+    - generic "Unsafe.getByte | scan | 14 samples (0.16% of query CPU)" [ref=e201] [cursor=pointer]
+    - generic "jbyte_arraycopy | scan | 19 samples (0.22% of query CPU)" [ref=e203] [cursor=pointer]
+    - generic "jbyte_disjoint_arraycopy | scan | 9 samples (0.10% of query CPU)" [ref=e205] [cursor=pointer]
+    - generic "CompressionAlgorithm$2.read | scan | 29 samples (0.34% of query CPU)" [ref=e207] [cursor=pointer]
+    - generic "LowercaseAsciiCompression.decompress | scan | 28 samples (0.33% of query CPU)" [ref=e209] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 8 samples (0.09% of query CPU)" [ref=e211] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 8 samples (0.09% of query CPU)" [ref=e213] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 8 samples (0.09% of query CPU)" [ref=e215] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 27 samples (0.31% of query CPU)" [ref=e217] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 17 samples (0.20% of query CPU)" [ref=e219] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 13 samples (0.15% of query CPU)" [ref=e221] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 9 samples (0.10% of query CPU)" [ref=e223] [cursor=pointer]
+    - generic "zero_blocks | scan | 9 samples (0.10% of query CPU)" [ref=e225] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 20 samples (0.23% of query CPU)" [ref=e227] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 13 samples (0.15% of query CPU)" [ref=e229] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 13 samples (0.15% of query CPU)" [ref=e231] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 8 samples (0.09% of query CPU)" [ref=e233] [cursor=pointer]
+    - generic [ref=e234]:
+      - generic "FST.findTargetArc | scan | 283 samples (3.30% of query CPU)" [ref=e235] [cursor=pointer]
+      - generic: FST.findTargetArc
+    - generic "FST.readArcByDirectAddressing | scan | 143 samples (1.67% of query CPU)" [ref=e237] [cursor=pointer]
+    - generic "FST.readArcByDirectAddressing | scan | 106 samples (1.23% of query CPU)" [ref=e239] [cursor=pointer]
+    - generic "FST.readArc | scan | 106 samples (1.23% of query CPU)" [ref=e241] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 102 samples (1.19% of query CPU)" [ref=e243] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 102 samples (1.19% of query CPU)" [ref=e245] [cursor=pointer]
+    - generic "BytesRef.<init> | scan | 50 samples (0.58% of query CPU)" [ref=e247] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readBytes | scan | 26 samples (0.30% of query CPU)" [ref=e249] [cursor=pointer]
+    - generic "FST$Arc$BitTable.countBitsUpTo | scan | 37 samples (0.43% of query CPU)" [ref=e251] [cursor=pointer]
+    - generic "BitTableUtil.countBitsUpTo | scan | 37 samples (0.43% of query CPU)" [ref=e253] [cursor=pointer]
+    - generic "BitTableUtil.read8Bytes | scan | 33 samples (0.38% of query CPU)" [ref=e255] [cursor=pointer]
+    - generic "BitTableUtil.readByte | scan | 33 samples (0.38% of query CPU)" [ref=e257] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 30 samples (0.35% of query CPU)" [ref=e259] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.readByte | scan | 26 samples (0.30% of query CPU)" [ref=e261] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 21 samples (0.24% of query CPU)" [ref=e263] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 75 samples (0.87% of query CPU)" [ref=e265] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 64 samples (0.75% of query CPU)" [ref=e267] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.readByte | scan | 46 samples (0.54% of query CPU)" [ref=e269] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 33 samples (0.38% of query CPU)" [ref=e271] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 29 samples (0.34% of query CPU)" [ref=e273] [cursor=pointer]
+    - generic "Buffer.checkIndex | scan | 11 samples (0.13% of query CPU)" [ref=e275] [cursor=pointer]
+    - generic "FST.readNextRealArc | scan | 18 samples (0.21% of query CPU)" [ref=e277] [cursor=pointer]
+    - generic "FST.readArc | scan | 17 samples (0.20% of query CPU)" [ref=e279] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 8 samples (0.09% of query CPU)" [ref=e281] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 8 samples (0.09% of query CPU)" [ref=e283] [cursor=pointer]
+    - generic "FST.readPresenceBytes | scan | 11 samples (0.13% of query CPU)" [ref=e285] [cursor=pointer]
+    - generic "FST$Arc.label | scan | 9 samples (0.10% of query CPU)" [ref=e287] [cursor=pointer]
+    - generic "FST$Arc$BitTable.isBitSet | scan | 7 samples (0.08% of query CPU)" [ref=e289] [cursor=pointer]
+    - generic "BitTableUtil.isBitSet | scan | 7 samples (0.08% of query CPU)" [ref=e291] [cursor=pointer]
+    - generic "IntersectTermsEnum.getArc | scan | 16 samples (0.19% of query CPU)" [ref=e293] [cursor=pointer]
+    - generic "Automaton.getNextTransition | scan | 35 samples (0.41% of query CPU)" [ref=e295] [cursor=pointer]
+    - generic "IntersectTermsEnum.copyTerm | scan | 28 samples (0.33% of query CPU)" [ref=e297] [cursor=pointer]
+    - generic "IntersectTermsEnum.termState | scan | 7 samples (0.08% of query CPU)" [ref=e299] [cursor=pointer]
+    - generic [ref=e300]:
+      - generic "IntersectTermsEnum.next | scan | 1660 samples (19.33% of query CPU)" [ref=e301] [cursor=pointer]
+      - generic: IntersectTermsEnum.next
+    - generic [ref=e302]:
+      - generic "IntersectTermsEnum._next | scan | 1659 samples (19.32% of query CPU)" [ref=e303] [cursor=pointer]
+      - generic: IntersectTermsEnum._next
+    - generic [ref=e304]:
+      - generic "IntersectTermsEnum.pushFrame | scan | 798 samples (9.29% of query CPU)" [ref=e305] [cursor=pointer]
+      - generic: IntersectTermsEnum.pushFrame
+    - generic [ref=e306]:
+      - generic "FST.findTargetArc | scan | 620 samples (7.22% of query CPU)" [ref=e307] [cursor=pointer]
+      - generic: FST.findTargetArc
+    - generic "FST.readArcByDirectAddressing | scan | 219 samples (2.55% of query CPU)" [ref=e309] [cursor=pointer]
+    - generic "FST$Arc$BitTable.countBitsUpTo | scan | 110 samples (1.28% of query CPU)" [ref=e311] [cursor=pointer]
+    - generic "BitTableUtil.countBitsUpTo | scan | 110 samples (1.28% of query CPU)" [ref=e313] [cursor=pointer]
+    - generic "BitTableUtil.read8Bytes | scan | 107 samples (1.25% of query CPU)" [ref=e315] [cursor=pointer]
+    - generic "BitTableUtil.readByte | scan | 107 samples (1.25% of query CPU)" [ref=e317] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 93 samples (1.08% of query CPU)" [ref=e319] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.readByte | scan | 78 samples (0.91% of query CPU)" [ref=e321] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 57 samples (0.66% of query CPU)" [ref=e323] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 13 samples (0.15% of query CPU)" [ref=e325] [cursor=pointer]
+    - generic "FST.readArcByDirectAddressing | scan | 109 samples (1.27% of query CPU)" [ref=e327] [cursor=pointer]
+    - generic "FST.readArc | scan | 109 samples (1.27% of query CPU)" [ref=e329] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 95 samples (1.11% of query CPU)" [ref=e331] [cursor=pointer]
+    - generic "ByteSequenceOutputs.read | scan | 95 samples (1.11% of query CPU)" [ref=e333] [cursor=pointer]
+    - generic "BytesRef.<init> | scan | 36 samples (0.42% of query CPU)" [ref=e335] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readBytes | scan | 7 samples (0.08% of query CPU)" [ref=e337] [cursor=pointer]
+    - generic "FST.readUnpackedNodeTarget | scan | 14 samples (0.16% of query CPU)" [ref=e339] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 14 samples (0.16% of query CPU)" [ref=e341] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 11 samples (0.13% of query CPU)" [ref=e343] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 9 samples (0.10% of query CPU)" [ref=e345] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 176 samples (2.05% of query CPU)" [ref=e347] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 151 samples (1.76% of query CPU)" [ref=e349] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.readByte | scan | 105 samples (1.22% of query CPU)" [ref=e351] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 61 samples (0.71% of query CPU)" [ref=e353] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 51 samples (0.59% of query CPU)" [ref=e355] [cursor=pointer]
+    - generic "FST$Arc.label | scan | 59 samples (0.69% of query CPU)" [ref=e357] [cursor=pointer]
+    - generic "FST.readPresenceBytes | scan | 47 samples (0.55% of query CPU)" [ref=e359] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.getPosition | scan | 26 samples (0.30% of query CPU)" [ref=e361] [cursor=pointer]
+    - generic "FST.readFirstRealTargetArc | scan | 18 samples (0.21% of query CPU)" [ref=e363] [cursor=pointer]
+    - generic "FST.readNextRealArc | scan | 18 samples (0.21% of query CPU)" [ref=e365] [cursor=pointer]
+    - generic "FST.readArc | scan | 18 samples (0.21% of query CPU)" [ref=e367] [cursor=pointer]
+    - generic "FST.readUnpackedNodeTarget | scan | 14 samples (0.16% of query CPU)" [ref=e369] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 14 samples (0.16% of query CPU)" [ref=e371] [cursor=pointer]
+    - generic "DataInput.readVLong | scan | 10 samples (0.12% of query CPU)" [ref=e373] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 9 samples (0.10% of query CPU)" [ref=e375] [cursor=pointer]
+    - generic "FST.readNextRealArc | scan | 17 samples (0.20% of query CPU)" [ref=e377] [cursor=pointer]
+    - generic "FST.readArc | scan | 14 samples (0.16% of query CPU)" [ref=e379] [cursor=pointer]
+    - generic "FST$Arc$BitTable.isBitSet | scan | 16 samples (0.19% of query CPU)" [ref=e381] [cursor=pointer]
+    - generic "BitTableUtil.isBitSet | scan | 14 samples (0.16% of query CPU)" [ref=e383] [cursor=pointer]
+    - generic "BitTableUtil.readByte | scan | 13 samples (0.15% of query CPU)" [ref=e385] [cursor=pointer]
+    - generic "ReverseRandomAccessReader.readByte | scan | 11 samples (0.13% of query CPU)" [ref=e387] [cursor=pointer]
+    - generic "IntersectTermsEnumFrame.load | scan | 79 samples (0.92% of query CPU)" [ref=e389] [cursor=pointer]
+    - generic "CompressionAlgorithm$2.read | scan | 26 samples (0.30% of query CPU)" [ref=e391] [cursor=pointer]
+    - generic "LowercaseAsciiCompression.decompress | scan | 26 samples (0.30% of query CPU)" [ref=e393] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 9 samples (0.10% of query CPU)" [ref=e395] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 9 samples (0.10% of query CPU)" [ref=e397] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 9 samples (0.10% of query CPU)" [ref=e399] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 9 samples (0.10% of query CPU)" [ref=e401] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 11 samples (0.13% of query CPU)" [ref=e403] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 8 samples (0.09% of query CPU)" [ref=e405] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 8 samples (0.09% of query CPU)" [ref=e407] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 10 samples (0.12% of query CPU)" [ref=e409] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 9 samples (0.10% of query CPU)" [ref=e411] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 7 samples (0.08% of query CPU)" [ref=e413] [cursor=pointer]
+    - generic "ByteSequenceOutputs.add | scan | 21 samples (0.24% of query CPU)" [ref=e415] [cursor=pointer]
+    - generic "ByteSequenceOutputs.add | scan | 14 samples (0.16% of query CPU)" [ref=e417] [cursor=pointer]
+    - generic "BytesRef.<init> | scan | 7 samples (0.08% of query CPU)" [ref=e419] [cursor=pointer]
+    - generic "IntersectTermsEnum.getArc | scan | 17 samples (0.20% of query CPU)" [ref=e421] [cursor=pointer]
+    - generic "FST$Arc.output | scan | 10 samples (0.12% of query CPU)" [ref=e423] [cursor=pointer]
+    - generic [ref=e424]:
+      - generic "IntersectTermsEnum.popPushNext | scan | 689 samples (8.02% of query CPU)" [ref=e425] [cursor=pointer]
+      - generic: IntersectTermsEnum.popPushNext
+    - generic [ref=e426]:
+      - generic "IntersectTermsEnumFrame.loadNextFloorBlock | scan | 316 samples (3.68% of query CPU)" [ref=e427] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.loadNextFloorBlock
+    - generic "ByteArrayDataInput.readVLong | scan | 163 samples (1.90% of query CPU)" [ref=e429] [cursor=pointer]
+    - generic "IntersectTermsEnumFrame.load | scan | 87 samples (1.01% of query CPU)" [ref=e431] [cursor=pointer]
+    - generic "CompressionAlgorithm$2.read | scan | 18 samples (0.21% of query CPU)" [ref=e433] [cursor=pointer]
+    - generic "LowercaseAsciiCompression.decompress | scan | 17 samples (0.20% of query CPU)" [ref=e435] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 8 samples (0.09% of query CPU)" [ref=e437] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 8 samples (0.09% of query CPU)" [ref=e439] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 8 samples (0.09% of query CPU)" [ref=e441] [cursor=pointer]
+    - generic "Unsafe.copyMemory | scan | 8 samples (0.09% of query CPU)" [ref=e443] [cursor=pointer]
+    - generic "DataInput.readVInt | scan | 16 samples (0.19% of query CPU)" [ref=e445] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | scan | 12 samples (0.14% of query CPU)" [ref=e447] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | scan | 11 samples (0.13% of query CPU)" [ref=e449] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 7 samples (0.08% of query CPU)" [ref=e451] [cursor=pointer]
+    - generic "CompressionAlgorithm$3.read | scan | 16 samples (0.19% of query CPU)" [ref=e453] [cursor=pointer]
+    - generic "LZ4.decompress | scan | 16 samples (0.19% of query CPU)" [ref=e455] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 7 samples (0.08% of query CPU)" [ref=e457] [cursor=pointer]
+    - generic "ByteBufferGuard.getBytes | scan | 7 samples (0.08% of query CPU)" [ref=e459] [cursor=pointer]
+    - generic "DirectByteBuffer.get | scan | 7 samples (0.08% of query CPU)" [ref=e461] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readBytes | scan | 9 samples (0.10% of query CPU)" [ref=e463] [cursor=pointer]
+    - generic "ByteArrayDataInput.readByte | scan | 18 samples (0.21% of query CPU)" [ref=e465] [cursor=pointer]
+    - generic [ref=e466]:
+      - generic "IntersectTermsEnumFrame.next | scan | 312 samples (3.63% of query CPU)" [ref=e467] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.next
+    - generic "IntersectTermsEnumFrame.nextNonLeaf | scan | 215 samples (2.50% of query CPU)" [ref=e469] [cursor=pointer]
+    - generic "ByteArrayDataInput.readVInt | scan | 102 samples (1.19% of query CPU)" [ref=e471] [cursor=pointer]
+    - generic "jbyte_disjoint_arraycopy | scan | 77 samples (0.90% of query CPU)" [ref=e473] [cursor=pointer]
+    - generic "jbyte_arraycopy | scan | 13 samples (0.15% of query CPU)" [ref=e475] [cursor=pointer]
+    - generic "ByteArrayDataInput.getPosition | scan | 31 samples (0.36% of query CPU)" [ref=e477] [cursor=pointer]
+    - generic "IntersectTermsEnumFrame.nextLeaf | scan | 93 samples (1.08% of query CPU)" [ref=e479] [cursor=pointer]
+    - generic "ByteArrayDataInput.readVInt | scan | 35 samples (0.41% of query CPU)" [ref=e481] [cursor=pointer]
+    - generic "IntersectTermsEnum.copyTerm | scan | 16 samples (0.19% of query CPU)" [ref=e483] [cursor=pointer]
+    - generic "Automaton.getNextTransition | scan | 7 samples (0.08% of query CPU)" [ref=e485] [cursor=pointer]
+    - generic [ref=e486]:
+      - generic "IntersectTermsEnum.postings | scan | 1160 samples (13.51% of query CPU)" [ref=e487] [cursor=pointer]
+      - generic: IntersectTermsEnum.postings
+    - generic [ref=e488]:
+      - generic "Lucene84PostingsReader.postings | collect | 868 samples (10.11% of query CPU)" [ref=e489] [cursor=pointer]
+      - generic: Lucene84PostingsReader.postings
+    - generic [ref=e490]:
+      - generic "Lucene84PostingsReader$BlockDocsEnum.reset | collect | 707 samples (8.23% of query CPU)" [ref=e491] [cursor=pointer]
+      - generic: Lucene84PostingsReader$BlockDocsEnum.reset
+    - generic "FieldInfo.getIndexOptions | collect | 34 samples (0.40% of query CPU)" [ref=e493] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.canReuse | collect | 28 samples (0.33% of query CPU)" [ref=e495] [cursor=pointer]
+    - generic "Enum.compareTo | collect | 14 samples (0.16% of query CPU)" [ref=e497] [cursor=pointer]
+    - generic "Enum.compareTo | collect | 15 samples (0.17% of query CPU)" [ref=e499] [cursor=pointer]
+    - generic [ref=e500]:
+      - generic "IntersectTermsEnumFrame.decodeMetaData | scan | 265 samples (3.09% of query CPU)" [ref=e501] [cursor=pointer]
+      - generic: IntersectTermsEnumFrame.decodeMetaData
+    - generic "Lucene84PostingsReader.decodeTerm | collect | 144 samples (1.68% of query CPU)" [ref=e503] [cursor=pointer]
+    - generic "ByteArrayDataInput.readVLong | collect | 34 samples (0.40% of query CPU)" [ref=e505] [cursor=pointer]
+    - generic "IntersectTermsEnumFrame.getTermBlockOrd | scan | 10 samples (0.12% of query CPU)" [ref=e507] [cursor=pointer]
+    - generic [ref=e508]:
+      - generic "DocIdSetBuilder.add | collect | 346 samples (4.03% of query CPU)" [ref=e509] [cursor=pointer]
+      - generic: DocIdSetBuilder.add
+    - generic "FixedBitSet.or | collect | 229 samples (2.67% of query CPU)" [ref=e511] [cursor=pointer]
+    - generic "BitSet.or | collect | 212 samples (2.47% of query CPU)" [ref=e513] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.nextDoc | collect | 131 samples (1.53% of query CPU)" [ref=e515] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.refillDocs | collect | 128 samples (1.49% of query CPU)" [ref=e517] [cursor=pointer]
+    - generic "ForDeltaUtil.decodeAndPrefixSum | collect | 60 samples (0.70% of query CPU)" [ref=e519] [cursor=pointer]
+    - generic "ForDeltaUtil.prefixSumOfOnes | collect | 32 samples (0.37% of query CPU)" [ref=e521] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | collect | 7 samples (0.08% of query CPU)" [ref=e523] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | collect | 7 samples (0.08% of query CPU)" [ref=e525] [cursor=pointer]
+    - generic "DirectByteBuffer.get | collect | 7 samples (0.08% of query CPU)" [ref=e527] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.nextDoc | collect | 83 samples (0.97% of query CPU)" [ref=e529] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.refillDocs | collect | 69 samples (0.80% of query CPU)" [ref=e531] [cursor=pointer]
+    - generic "ForDeltaUtil.decodeAndPrefixSum | collect | 24 samples (0.28% of query CPU)" [ref=e533] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | collect | 24 samples (0.28% of query CPU)" [ref=e535] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | collect | 22 samples (0.26% of query CPU)" [ref=e537] [cursor=pointer]
+    - generic "DocIdSetBuilder.grow | collect | 14 samples (0.16% of query CPU)" [ref=e539] [cursor=pointer]
+    - generic "DocIdSetBuilder.ensureBufferCapacity | collect | 8 samples (0.09% of query CPU)" [ref=e541] [cursor=pointer]
+    - generic "MultiTermQuery.getTermsEnum | other | 14 samples (0.16% of query CPU)" [ref=e543] [cursor=pointer]
+    - generic "AutomatonQuery.getTermsEnum | other | 13 samples (0.15% of query CPU)" [ref=e545] [cursor=pointer]
+    - generic "CompiledAutomaton.getTermsEnum | scan | 13 samples (0.15% of query CPU)" [ref=e547] [cursor=pointer]
+    - generic "FieldReader.intersect | scan | 13 samples (0.15% of query CPU)" [ref=e549] [cursor=pointer]
+    - generic "IntersectTermsEnum.<init> | scan | 13 samples (0.15% of query CPU)" [ref=e551] [cursor=pointer]
+    - generic "BooleanQuery$Builder.build | other | 10 samples (0.12% of query CPU)" [ref=e553] [cursor=pointer]
+    - generic "TermQuery$TermWeight.scorer | other | 179 samples (2.08% of query CPU)" [ref=e555] [cursor=pointer]
+    - generic "TermQuery$TermWeight.getTermsEnum | other | 139 samples (1.62% of query CPU)" [ref=e557] [cursor=pointer]
+    - generic "TermStates.get | other | 116 samples (1.35% of query CPU)" [ref=e559] [cursor=pointer]
+    - generic "TermStates.loadTermsEnum | other | 114 samples (1.33% of query CPU)" [ref=e561] [cursor=pointer]
+    - generic "SegmentTermsEnum.seekExact | scan | 71 samples (0.83% of query CPU)" [ref=e563] [cursor=pointer]
+    - generic "SegmentTermsEnum.pushFrame | scan | 61 samples (0.71% of query CPU)" [ref=e565] [cursor=pointer]
+    - generic "SegmentTermsEnum.getFrame | scan | 55 samples (0.64% of query CPU)" [ref=e567] [cursor=pointer]
+    - generic "SegmentTermsEnumFrame.<init> | scan | 51 samples (0.59% of query CPU)" [ref=e569] [cursor=pointer]
+    - generic "ByteArrayDataInput.<init> | scan | 31 samples (0.36% of query CPU)" [ref=e571] [cursor=pointer]
+    - generic "ByteArrayDataInput.reset | scan | 31 samples (0.36% of query CPU)" [ref=e573] [cursor=pointer]
+    - generic "FieldReader.iterator | other | 41 samples (0.48% of query CPU)" [ref=e575] [cursor=pointer]
+    - generic "SegmentTermsEnum.<init> | scan | 41 samples (0.48% of query CPU)" [ref=e577] [cursor=pointer]
+    - generic "FST.getBytesReader | scan | 25 samples (0.29% of query CPU)" [ref=e579] [cursor=pointer]
+    - generic "OffHeapFSTStore.getReverseBytesReader | scan | 18 samples (0.21% of query CPU)" [ref=e581] [cursor=pointer]
+    - generic "IndexInput.randomAccessSlice | scan | 17 samples (0.20% of query CPU)" [ref=e583] [cursor=pointer]
+    - generic "ByteBufferIndexInput$SingleBufferImpl.slice | scan | 17 samples (0.20% of query CPU)" [ref=e585] [cursor=pointer]
+    - generic "ByteBufferIndexInput.slice | scan | 16 samples (0.19% of query CPU)" [ref=e587] [cursor=pointer]
+    - generic "ByteBufferIndexInput.buildSlice | scan | 15 samples (0.17% of query CPU)" [ref=e589] [cursor=pointer]
+    - generic "BytesStore.getReverseReader | scan | 7 samples (0.08% of query CPU)" [ref=e591] [cursor=pointer]
+    - generic "BytesStore.getReverseReader | scan | 7 samples (0.08% of query CPU)" [ref=e593] [cursor=pointer]
+    - generic "SegmentTermsEnumFrame.<init> | scan | 12 samples (0.14% of query CPU)" [ref=e595] [cursor=pointer]
+    - generic "ByteArrayDataInput.<init> | scan | 7 samples (0.08% of query CPU)" [ref=e597] [cursor=pointer]
+    - generic "ByteArrayDataInput.reset | scan | 7 samples (0.08% of query CPU)" [ref=e599] [cursor=pointer]
+    - generic "FieldReader.iterator | other | 21 samples (0.24% of query CPU)" [ref=e601] [cursor=pointer]
+    - generic "SegmentTermsEnum.<init> | scan | 20 samples (0.23% of query CPU)" [ref=e603] [cursor=pointer]
+    - generic "FST.getBytesReader | scan | 9 samples (0.10% of query CPU)" [ref=e605] [cursor=pointer]
+    - generic "OffHeapFSTStore.getReverseBytesReader | scan | 7 samples (0.08% of query CPU)" [ref=e607] [cursor=pointer]
+    - generic "SegmentTermsEnumFrame.<init> | scan | 8 samples (0.09% of query CPU)" [ref=e609] [cursor=pointer]
+    - generic "SegmentTermsEnum.postings | scan | 38 samples (0.44% of query CPU)" [ref=e611] [cursor=pointer]
+    - generic "Lucene84PostingsReader.postings | collect | 36 samples (0.42% of query CPU)" [ref=e613] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.<init> | collect | 30 samples (0.35% of query CPU)" [ref=e615] [cursor=pointer]
+    - generic "ForUtil.<init> | collect | 30 samples (0.35% of query CPU)" [ref=e617] [cursor=pointer]
+    - generic "zero_blocks | collect | 28 samples (0.33% of query CPU)" [ref=e619] [cursor=pointer]
+    - generic "PointRangeQuery$1.scorerSupplier | other | 11 samples (0.13% of query CPU)" [ref=e621] [cursor=pointer]
+    - generic "Boolean2ScorerSupplier.get | other | 72 samples (0.84% of query CPU)" [ref=e623] [cursor=pointer]
+    - generic "Boolean2ScorerSupplier.getInternal | other | 72 samples (0.84% of query CPU)" [ref=e625] [cursor=pointer]
+    - generic "Boolean2ScorerSupplier.req | other | 47 samples (0.55% of query CPU)" [ref=e627] [cursor=pointer]
+    - generic "ConjunctionScorer.<init> | other | 38 samples (0.44% of query CPU)" [ref=e629] [cursor=pointer]
+    - generic "ConjunctionDISI.intersectScorers | other | 37 samples (0.43% of query CPU)" [ref=e631] [cursor=pointer]
+    - generic "ConjunctionDISI.createConjunction | other | 32 samples (0.37% of query CPU)" [ref=e633] [cursor=pointer]
+    - generic "ReferencePipeline.allMatch | other | 12 samples (0.14% of query CPU)" [ref=e635] [cursor=pointer]
+    - generic "AbstractPipeline.evaluate | other | 11 samples (0.13% of query CPU)" [ref=e637] [cursor=pointer]
+    - generic "MatchOps$MatchOp.evaluateSequential | other | 8 samples (0.09% of query CPU)" [ref=e639] [cursor=pointer]
+    - generic "MatchOps$MatchOp.evaluateSequential | other | 7 samples (0.08% of query CPU)" [ref=e641] [cursor=pointer]
+    - generic "AbstractPipeline.wrapAndCopyInto | other | 7 samples (0.08% of query CPU)" [ref=e643] [cursor=pointer]
+    - generic "AbstractPipeline.copyInto | other | 7 samples (0.08% of query CPU)" [ref=e645] [cursor=pointer]
+    - generic "AbstractPipeline.copyIntoWithCancel | other | 7 samples (0.08% of query CPU)" [ref=e647] [cursor=pointer]
+    - generic "LongPipeline.min | other | 8 samples (0.09% of query CPU)" [ref=e649] [cursor=pointer]
+    - generic "LongPipeline.reduce | other | 8 samples (0.09% of query CPU)" [ref=e651] [cursor=pointer]
+    - generic "AbstractPipeline.evaluate | other | 8 samples (0.09% of query CPU)" [ref=e653] [cursor=pointer]
+    - generic "ReduceOps$ReduceOp.evaluateSequential | other | 8 samples (0.09% of query CPU)" [ref=e655] [cursor=pointer]
+    - generic "ConjunctionDISI.<init> | other | 8 samples (0.09% of query CPU)" [ref=e657] [cursor=pointer]
+    - generic "CollectionUtil.timSort | other | 7 samples (0.08% of query CPU)" [ref=e659] [cursor=pointer]
+    - generic "Boolean2ScorerSupplier.cost | other | 24 samples (0.28% of query CPU)" [ref=e661] [cursor=pointer]
+    - generic "Boolean2ScorerSupplier.computeCost | other | 24 samples (0.28% of query CPU)" [ref=e663] [cursor=pointer]
+    - generic "LongPipeline.min | other | 16 samples (0.19% of query CPU)" [ref=e665] [cursor=pointer]
+    - generic "LongPipeline.reduce | other | 16 samples (0.19% of query CPU)" [ref=e667] [cursor=pointer]
+    - generic "AbstractPipeline.evaluate | other | 15 samples (0.17% of query CPU)" [ref=e669] [cursor=pointer]
+    - generic "ReduceOps$ReduceOp.evaluateSequential | other | 15 samples (0.17% of query CPU)" [ref=e671] [cursor=pointer]
+    - generic "AbstractPipeline.wrapAndCopyInto | other | 13 samples (0.15% of query CPU)" [ref=e673] [cursor=pointer]
+    - generic "AbstractPipeline.copyInto | other | 12 samples (0.14% of query CPU)" [ref=e675] [cursor=pointer]
+    - generic [ref=e676]:
+      - generic "BulkScorer.score | other | 849 samples (9.89% of query CPU)" [ref=e677] [cursor=pointer]
+      - generic: BulkScorer.score
+    - generic [ref=e678]:
+      - generic "Weight$DefaultBulkScorer.score | other | 849 samples (9.89% of query CPU)" [ref=e679] [cursor=pointer]
+      - generic: Weight$DefaultBulkScorer.score
+    - generic [ref=e680]:
+      - generic "Weight$DefaultBulkScorer.scoreAll | other | 843 samples (9.82% of query CPU)" [ref=e681] [cursor=pointer]
+      - generic: Weight$DefaultBulkScorer.scoreAll
+    - generic [ref=e682]:
+      - generic "ConjunctionDISI.nextDoc | other | 830 samples (9.67% of query CPU)" [ref=e683] [cursor=pointer]
+      - generic: ConjunctionDISI.nextDoc
+    - generic [ref=e684]:
+      - generic "ConjunctionDISI.doNext | other | 812 samples (9.46% of query CPU)" [ref=e685] [cursor=pointer]
+      - generic: ConjunctionDISI.doNext
+    - generic [ref=e686]:
+      - generic "Lucene84PostingsReader$BlockDocsEnum.advance | collect | 796 samples (9.27% of query CPU)" [ref=e687] [cursor=pointer]
+      - generic: Lucene84PostingsReader$BlockDocsEnum.advance
+    - generic [ref=e688]:
+      - generic "Lucene84SkipReader.<init> | collect | 545 samples (6.35% of query CPU)" [ref=e689] [cursor=pointer]
+      - generic: Lucene84SkipReader.<init>
+    - generic [ref=e690]:
+      - generic "MultiLevelSkipListReader.<init> | collect | 339 samples (3.95% of query CPU)" [ref=e691] [cursor=pointer]
+      - generic: MultiLevelSkipListReader.<init>
+    - generic "Object.<init> | collect | 23 samples (0.27% of query CPU)" [ref=e693] [cursor=pointer]
+    - generic "MultiLevelSkipListReader.skipTo | collect | 84 samples (0.98% of query CPU)" [ref=e695] [cursor=pointer]
+    - generic "MultiLevelSkipListReader.loadNextSkip | collect | 35 samples (0.41% of query CPU)" [ref=e697] [cursor=pointer]
+    - generic "Lucene84SkipReader.readSkipData | collect | 23 samples (0.27% of query CPU)" [ref=e699] [cursor=pointer]
+    - generic "DataInput.readVInt | collect | 10 samples (0.12% of query CPU)" [ref=e701] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readByte | collect | 10 samples (0.12% of query CPU)" [ref=e703] [cursor=pointer]
+    - generic "ByteBufferGuard.getByte | collect | 10 samples (0.12% of query CPU)" [ref=e705] [cursor=pointer]
+    - generic "DirectByteBuffer.get | collect | 9 samples (0.10% of query CPU)" [ref=e707] [cursor=pointer]
+    - generic "zero_blocks | collect | 7 samples (0.08% of query CPU)" [ref=e709] [cursor=pointer]
+    - generic "Lucene84PostingsReader$BlockDocsEnum.refillDocs | collect | 64 samples (0.75% of query CPU)" [ref=e711] [cursor=pointer]
+    - generic "ForDeltaUtil.decodeAndPrefixSum | collect | 43 samples (0.50% of query CPU)" [ref=e713] [cursor=pointer]
+    - generic "ForUtil.decodeAndPrefixSum | collect | 24 samples (0.28% of query CPU)" [ref=e715] [cursor=pointer]
+    - generic "ForUtil.decode1 | collect | 17 samples (0.20% of query CPU)" [ref=e717] [cursor=pointer]
+    - generic "ByteBufferIndexInput.readLELongs | collect | 14 samples (0.16% of query CPU)" [ref=e719] [cursor=pointer]
+    - generic "arrayof_jlong_disjoint_arraycopy | collect | 20 samples (0.23% of query CPU)" [ref=e721] [cursor=pointer]
+    - generic "forward_copy_longs | collect | 17 samples (0.20% of query CPU)" [ref=e723] [cursor=pointer]
+    - generic "Lucene84SkipReader.init | collect | 9 samples (0.10% of query CPU)" [ref=e725] [cursor=pointer]
+    - generic "MultiLevelSkipListReader.init | collect | 7 samples (0.08% of query CPU)" [ref=e727] [cursor=pointer]
+    - generic "MultiLevelSkipListReader.loadSkipLevels | collect | 7 samples (0.08% of query CPU)" [ref=e729] [cursor=pointer]
+    - generic "BitSetIterator.nextDoc | other | 10 samples (0.12% of query CPU)" [ref=e731] [cursor=pointer]
+    - generic "BitSetIterator.advance | other | 10 samples (0.12% of query CPU)" [ref=e733] [cursor=pointer]
+    - generic "TotalHitCountCollector.collect | other | 10 samples (0.12% of query CPU)" [ref=e735] [cursor=pointer]
+    - generic "IndexSearcher.rewrite | other | 52 samples (0.61% of query CPU)" [ref=e737] [cursor=pointer]
+    - generic "ConstantScoreQuery.rewrite | other | 52 samples (0.61% of query CPU)" [ref=e739] [cursor=pointer]
+    - generic "BoostQuery.rewrite | other | 31 samples (0.36% of query CPU)" [ref=e741] [cursor=pointer]
+    - generic "ConstantScoreQuery.rewrite | other | 24 samples (0.28% of query CPU)" [ref=e743] [cursor=pointer]
+    - generic "BooleanQuery.rewrite | other | 24 samples (0.28% of query CPU)" [ref=e745] [cursor=pointer]
+    - generic "BooleanQuery.rewrite | other | 12 samples (0.14% of query CPU)" [ref=e747] [cursor=pointer]
+    - generic "IndexSearcher.createWeight | other | 26 samples (0.30% of query CPU)" [ref=e749] [cursor=pointer]
+    - generic "ConstantScoreQuery.createWeight | other | 26 samples (0.30% of query CPU)" [ref=e751] [cursor=pointer]
+    - generic "IndexSearcher.createWeight | other | 26 samples (0.30% of query CPU)" [ref=e753] [cursor=pointer]
+    - generic "BooleanQuery.createWeight | other | 25 samples (0.29% of query CPU)" [ref=e755] [cursor=pointer]
+    - generic "BooleanWeight.<init> | other | 13 samples (0.15% of query CPU)" [ref=e757] [cursor=pointer]
+    - generic "IndexSearcher.createWeight | other | 12 samples (0.14% of query CPU)" [ref=e759] [cursor=pointer]
+    - generic "TermQuery.createWeight | other | 10 samples (0.12% of query CPU)" [ref=e761] [cursor=pointer]
+    - generic "TermQuery$TermWeight.<init> | other | 7 samples (0.08% of query CPU)" [ref=e763] [cursor=pointer]
+    - generic "BooleanQuery.rewriteNoScoring | other | 11 samples (0.13% of query CPU)" [ref=e765] [cursor=pointer]

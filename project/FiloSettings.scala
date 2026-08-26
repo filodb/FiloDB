@@ -228,10 +228,12 @@ object FiloSettings {
   lazy val assemblyExcludeScala = assemblySettings ++ Seq(
     assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
 
-  // Builds cli as a standalone executable to make it easier to launch commands
+  // Builds cli as a plain fat jar, launched via `java -jar` (see the ./filo-cli wrapper).
+  // We do NOT prepend a shell script here: the assembly has more than 65,535 entries,
+  // which forces the jar into ZIP64 format. sbt-assembly does not correct the ZIP64
+  // offsets for a prepended script, so a self-executing jar cannot be opened by
+  // `java -jar`. A plain jar has correct offsets and opens normally.
   lazy val cliAssemblySettings = assemblySettings ++ Seq(
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(
-      prependShellScript = Some(shellScript)),
     assemblyJarName in assembly := s"filo-cli-${version.value}"
   )
 

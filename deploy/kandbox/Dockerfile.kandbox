@@ -1,0 +1,9 @@
+# Kandbox-compatible variant of the mosaic-local one-box image.
+#
+# Why: the base image declares `USER observer` (a NAME). Kandbox/k8s enforce
+# runAsNonRoot and require a NUMERIC uid to verify the user is not root, so they
+# reject a name. `observer` is uid 1000 and owns /opt/mosaic-local, so simply
+# re-declaring the same uid numerically lets the cluster run the container as the
+# owner -> the tree stays writable, no chmod needed.
+FROM docker.apple.com/telemetry/mosaic-local:latest
+USER 1000

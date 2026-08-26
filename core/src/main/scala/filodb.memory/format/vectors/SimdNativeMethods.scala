@@ -32,7 +32,10 @@ object SimdNativeMethods {
   // so we catch UnsatisfiedLinkError to avoid duplicate loading.
   private lazy val ensureLoaded: Unit = {
     try { loadLibrary() }
-    catch { case _: UnsatisfiedLinkError => () }
+    catch {
+      case _: UnsatisfiedLinkError => ()
+      case _: IllegalStateException => ()   // platform native lib not bundled; SIMD stays disabled (JVM fallback)
+    }
   }
 
   ensureLoaded

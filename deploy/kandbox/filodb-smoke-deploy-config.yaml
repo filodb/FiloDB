@@ -6,13 +6,16 @@ spec:
   deploy:
     - name: filodb-onebox
       type: deployment
-      image: docker.apple.com/telemetry/mosaic-local:latest
+      image: docker.apple.com/telemetry/mosaic-local:filodb-kandbox
       imagePullPolicy: IfNotPresent
       replicas: 1
       stage: 0
+      securityContext:
+        runAsContainerUser: true
       args:
         - "/bin/bash"
-        - "/opt/mosaic-local/smoke/run-filodb-smoke.sh"
+        - "-c"
+        - "echo c2V0IC1ldQpTTU9LRV9ESVI9L3RtcC9zbW9rZQpCQVNFPS9vcHQvbW9zYWljLWxvY2FsCm1rZGlyIC1wICIkU01PS0VfRElSIgpjYXQgPiAiJFNNT0tFX0RJUi9zbW9rZS1zb3VyY2UuY29uZiIgPDwnQ09ORicKZGF0YXNldCA9ICJwcm9tZXRoZXVzIgpzY2hlbWEgPSAicHJvbS1jb3VudGVyIgpudW0tc2hhcmRzID0gOAptaW4tbnVtLW5vZGVzID0gMQpzb3VyY2VmYWN0b3J5ID0gImZpbG9kYi5rYWZrYS5LYWZrYUluZ2VzdGlvblN0cmVhbUZhY3RvcnkiCnNvdXJjZWNvbmZpZyB7CiAgZmlsby10b3BpYy1uYW1lID0gInRpbWVzZXJpZXMtc21va2UiCiAgYm9vdHN0cmFwLnNlcnZlcnMgPSAibG9jYWxob3N0OjkwOTIiCiAgZ3JvdXAuaWQgPSAiZmlsby1kYi1zbW9rZS1pbmdlc3Rpb24iCiAgc2h1dGRvd24taW5nZXN0LWFmdGVyLXN0b3BwZWQgPSB0cnVlCiAgc3RvcmUgewogICAgZmx1c2gtaW50ZXJ2YWwgPSAxaAogICAgZGlzay10aW1lLXRvLWxpdmUgPSA3IGRheXMKICAgIG1heC1jaHVua3Mtc2l6ZSA9IDQwMAogICAgbWF4LWJsb2ItYnVmZmVyLXNpemUgPSAxNTAwMAogICAgc2hhcmQtbWVtLXNpemUgPSA3NjhNQgogICAgZ3JvdXBzLXBlci1zaGFyZCA9IDIwCiAgICBtdWx0aS1wYXJ0aXRpb24tb2RwID0gZmFsc2UKICAgIGV2aWN0ZWQtcGstYmxvb20tZmlsdGVyLWNhcGFjaXR5ID0gNTAwMDAKICAgIG1heC1kYXRhLXBlci1zaGFyZC1xdWVyeSA9IDUwIE1CCiAgICBtZXRlcmluZy1lbmFibGVkID0gdHJ1ZQogICAgaW5nZXN0LXJlc29sdXRpb24tbWlsbGlzID0gNjAwMDAKICAgIGFjY2VwdC1kdXBsaWNhdGUtc2FtcGxlcyA9IGZhbHNlCiAgfQogIGRvd25zYW1wbGUgewogICAgcmVzb2x1dGlvbnMgPSBbIDEgbWludXRlLCA1IG1pbnV0ZXMgXQogICAgdHRscyA9IFsgMzAgZGF5cywgMTgzIGRheXMgXQogICAgcmF3LXNjaGVtYS1uYW1lcyA9IFsgImdhdWdlIiwgInVudHlwZWQiLCAicHJvbS1jb3VudGVyIiwgInByb20taGlzdG9ncmFtIl0KICB9Cn0KQ09ORgpjYXQgPiAiJFNNT0tFX0RJUi9zbW9rZS1zZXJ2ZXIuY29uZiIgPDwnQ09ORicKZmlsb2RiIHsKICBtaW4tbnVtLW5vZGVzLWluLWNsdXN0ZXIgPSAxCiAgdjItY2x1c3Rlci1lbmFibGVkID0gdHJ1ZQogIGNsdXN0ZXItZGlzY292ZXJ5IHsKICAgIGZhaWx1cmUtZGV0ZWN0aW9uLWludGVydmFsID0gMjBzCiAgICBob3N0LWxpc3QgPSBbICIxMjcuMC4wLjE6MjU1MiIgXQogICAgZ3JwYy1wb3J0LWxpc3QgPSBbICI5OTAxIiBdCiAgfQogIHN0b3JlLWZhY3RvcnkgPSAiZmlsb2RiLmNhc3NhbmRyYS5DYXNzYW5kcmFUU1N0b3JlRmFjdG9yeSIKICBxdWVyeS5ncnBjLnBhcnRpdGlvbnMtZGVueS1saXN0ID0gIioiCiAgY2Fzc2FuZHJhIHsKICAgIGhvc3RzID0gImxvY2FsaG9zdCIKICAgIHBvcnQgPSA5MDQyCiAgICBwYXJ0aXRpb24tbGlzdC1udW0tZ3JvdXBzID0gMQogICAgY3JlYXRlLXRhYmxlcy1lbmFibGVkID0gdHJ1ZQogIH0KICBpbmxpbmUtZGF0YXNldC1jb25maWdzID0gWyB7IGluY2x1ZGUgcmVxdWlyZWQoInNtb2tlLXNvdXJjZS5jb25mIikgfSBdCiAgbWVtc3RvcmUgewogICAgaW5nZXN0aW9uLWJ1ZmZlci1tZW0tc2l6ZSA9IDFHQgogIH0KfQpha2thIHsKICByZW1vdGUubmV0dHkudGNwIHsKICAgIGhvc3RuYW1lID0gIjEyNy4wLjAuMSIKICAgIHBvcnQgPSAyNTUyCiAgfQp9CmFra2EtYm9vdHN0cmFwcGVyIHsKICBzZWVkLWRpc2NvdmVyeS5jbGFzcyA9ICJmaWxvZGIuYWtrYWJvb3RzdHJhcHBlci5FeHBsaWNpdExpc3RDbHVzdGVyU2VlZERpc2NvdmVyeSIKICBodHRwLXNlZWRzIHsKICAgIGJhc2UtdXJsID0gImh0dHA6Ly9sb2NhbGhvc3Q6ODA4MC8iCiAgICByZXRyaWVzID0gMQogIH0KICBzZWVkLWRpc2NvdmVyeS50aW1lb3V0ID0gMSBtaW51dGUKICBleHBsaWNpdC1saXN0LnNlZWRzID0gWyAiYWtrYS50Y3A6Ly9maWxvLXN0YW5kYWxvbmVAMTI3LjAuMC4xOjI1NTIiIF0KfQpDT05GCmNhdCA+ICIkU01PS0VfRElSL3Ntb2tlLWxvZ2JhY2sueG1sIiA8PCdYTUwnCjxjb25maWd1cmF0aW9uPgogIDxhcHBlbmRlciBuYW1lPSJTVERPVVQiIGNsYXNzPSJjaC5xb3MubG9nYmFjay5jb3JlLkNvbnNvbGVBcHBlbmRlciI+CiAgICA8ZW5jb2Rlcj4KICAgICAgPHBhdHRlcm4+JWR7SVNPODYwMX0gJS01bGV2ZWwgWyV0aHJlYWRdICVsb2dnZXJ7MzZ9IC0gJW1zZyVuPC9wYXR0ZXJuPgogICAgPC9lbmNvZGVyPgogIDwvYXBwZW5kZXI+CiAgPHJvb3QgbGV2ZWw9IklORk8iPgogICAgPGFwcGVuZGVyLXJlZiByZWY9IlNURE9VVCIgLz4KICA8L3Jvb3Q+CjwvY29uZmlndXJhdGlvbj4KWE1MCmNkICIkQkFTRSIKZWNobyAiW3Ntb2tlXSBzdGFydGluZyBDYXNzYW5kcmEuLi4iCi4vc3RhcnQtbW9zYWljLnNoIHN0YXJ0Q2Fzc2FuZHJhCmVjaG8gIltzbW9rZV0gc3RhcnRpbmcgWm9va2VlcGVyLi4uIgouL3N0YXJ0LW1vc2FpYy5zaCBzdGFydFpvb2tlZXBlcgplY2hvICJbc21va2VdIHN0YXJ0aW5nIEthZmthLi4uIgouL3N0YXJ0LW1vc2FpYy5zaCBzdGFydEthZmthCktUPSIkKGZpbmQgIiRCQVNFL3RoaXJkcGFydHkiIC1uYW1lIGthZmthLXRvcGljcy5zaCAtdHlwZSBmIHwgaGVhZCAtMSkiCmVjaG8gIltzbW9rZV0gY3JlYXRpbmcgOC1wYXJ0aXRpb24gdG9waWMgdGltZXNlcmllcy1zbW9rZSB2aWEgJEtUIgoiJEtUIiAtLWNyZWF0ZSAtLXpvb2tlZXBlciBsb2NhbGhvc3Q6MjE4MSAtLXJlcGxpY2F0aW9uLWZhY3RvciAxIC0tcGFydGl0aW9ucyA4IC0tdG9waWMgdGltZXNlcmllcy1zbW9rZSAtLWlmLW5vdC1leGlzdHMKIiRLVCIgLS1kZXNjcmliZSAtLXpvb2tlZXBlciBsb2NhbGhvc3Q6MjE4MSAtLXRvcGljIHRpbWVzZXJpZXMtc21va2UKSkFSPSIkQkFTRS9maWxvZGIvbGliL2ZpbG9kYi1waWUtYXNzZW1ibHkuamFyIgpta2RpciAtcCAiJEJBU0UvbG9ncyIKZWNobyAiW3Ntb2tlXSBsYXVuY2hpbmcgc2luZ2xlIEZpbG9TZXJ2ZXIgKDggc2hhcmRzLCB+NkdCIGJsb2NrIG1lbW9yeSkuLi4iCmV4ZWMgamF2YSAtWG14MkcgLURmaWxvZGIuY2Fzc2FuZHJhLnBhcnQta2V5cy12Mi10YWJsZS1lbmFibGVkPXRydWUgLURjb25maWcuZmlsZT0iJFNNT0tFX0RJUi9zbW9rZS1zZXJ2ZXIuY29uZiIgLURmaWxvZGIudjItY2x1c3Rlci1lbmFibGVkPXRydWUgLURmaWxvZGIuY2x1c3Rlci1kaXNjb3ZlcnkubG9jYWxob3N0LW9yZGluYWw9MCAtRGZpbG9kYi5odHRwLmJpbmQtaG9zdD0wLjAuMC4wIC1EZmlsb2RiLmh0dHAuYmluZC1wb3J0PTgwODAgLURsb2diYWNrLmNvbmZpZ3VyYXRpb25GaWxlPSIkU01PS0VfRElSL3Ntb2tlLWxvZ2JhY2sueG1sIiAtRGxvZ1N1ZmZpeD1zbW9rZSAtY3AgIiRKQVIiIGZpbG9kYi5zdGFuZGFsb25lLkZpbG9TZXJ2ZXIK | base64 -d > /tmp/run.sh && exec bash /tmp/run.sh"
       ports:
         - name: main
           port: 8080
@@ -24,18 +27,6 @@ spec:
         limits:
           cpu: "6000m"
           memory: 16Gi
-      files:
-        - mountPath: /opt/mosaic-local/smoke
-          items:
-            - source: smoke/run-filodb-smoke.sh
-              target: run-filodb-smoke.sh
-              mode: "0755"
-            - source: smoke/smoke-server.conf
-              target: smoke-server.conf
-            - source: smoke/smoke-source.conf
-              target: smoke-source.conf
-            - source: smoke/smoke-logback.xml
-              target: smoke-logback.xml
       readinessProbe:
         scheme: http
         path: /api/v1/cluster

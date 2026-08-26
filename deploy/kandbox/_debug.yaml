@@ -1,0 +1,37 @@
+apiVersion: ase.apple.com/kandbox/v1
+kind: DeploymentConfig
+metadata:
+  name: filodb-debug
+spec:
+  deploy:
+    - name: filodb-onebox
+      type: deployment
+      image: docker.apple.com/telemetry/mosaic-local:latest
+      imagePullPolicy: IfNotPresent
+      replicas: 1
+      stage: 0
+      securityContext:
+        runAsContainerUser: false
+      args:
+        - "/bin/bash"
+        - "-c"
+        - |
+          echo "=== id ==="; id
+          echo "=== TOTAL /opt/mosaic-local ==="; du -sh /opt/mosaic-local 2>/dev/null
+          echo "=== top-level dirs (sorted) ==="; du -sh /opt/mosaic-local/* 2>/dev/null | sort -rh
+          echo "=== thirdparty/* (cassandra, kafka) ==="; du -sh /opt/mosaic-local/thirdparty/* 2>/dev/null | sort -rh
+          echo "=== depth-2 breakdown ==="; du -sh /opt/mosaic-local/*/* 2>/dev/null | sort -rh | head -50
+          echo "=== biggest files > 30 MB ==="; find /opt/mosaic-local -type f -size +30M -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -40 | awk '{printf "%8.0f MB  %s\n",$1/1048576,$2}'
+          echo "=== JDK / jvm ==="; du -sh /opt/*jdk* /usr/lib/jvm /usr/local/*jdk* 2>/dev/null
+          echo "=== DONE, sleeping ==="; sleep 1800
+      ports:
+        - name: main
+          port: 8080
+          appProtocol: http
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 1Gi
+        limits:
+          cpu: "1000m"
+          memory: 2Gi
