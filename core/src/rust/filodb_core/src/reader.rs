@@ -274,7 +274,16 @@ fn query_label_values(
         .find_field_with_default(&field, handle.default_field);
 
     if let Some((f, prefix)) = field_and_prefix {
-        if !prefix.is_empty() {
+        // When the field name resolves directly to the JSON (map) column and it
+        // IS the default field, treat the field name as a subfield path within
+        // the JSON column. This handles labels that share a name with the map column.
+        let is_map_column_self_ref = prefix.is_empty() && handle.default_field == Some(f);
+
+        if is_map_column_self_ref {
+            let field_name = handle.schema.get_field_entry(f).name();
+            let subfield = field.clone();
+            field = format!("{field_name}.{subfield}");
+        } else if !prefix.is_empty() {
             let field_name = handle.schema.get_field_entry(f).name();
             field = format!("{field_name}.{prefix}");
         }
