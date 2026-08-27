@@ -26,7 +26,7 @@ case class FlightPlanDispatcher(location: Location,
 
   import filodb.query.Query.qLogger
 
-  override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+  override def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
     // Check remaining time similar to GrpcPlanDispatcher
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
@@ -158,7 +158,7 @@ case class FlightPlanDispatcher(location: Location,
     }.executeOn(QueryScheduler.flightIoScheduler).asyncBoundary
   }
 
-  def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
+  def doDispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // TODO: Implement streaming dispatch when needed
     // This would follow similar pattern but return Observable instead of Task
