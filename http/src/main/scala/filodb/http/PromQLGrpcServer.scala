@@ -219,7 +219,9 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
               TimeStepParams(queryParams.getStart, queryParams.getStep, queryParams.getEnd))
 
             val exec = queryPlanner.materialize(logicalPlan, qContext)
-            queryPlanner.dispatchExecPlan(exec, querySession, rp.span)
+            // Tag this dispatch as originating from the gRPC entry path so the shared
+            // `query-dispatch-latency` metric carries source="grpc" (vs "http" for the query API).
+            queryPlanner.dispatchExecPlan(exec, querySession, rp.span, QueryPlanner.SourceGrpc)
               .map((qr: QueryResponse) => rp.processQueryResponse(qr))
           } { querySession =>
             Task.eval(querySession.close())
