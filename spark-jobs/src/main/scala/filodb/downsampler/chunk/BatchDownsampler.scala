@@ -432,6 +432,10 @@ class BatchDownsampler(val settings: DownsamplerSettings,
 
 
   def persistDownsampledChunks(downsampledChunksToPersist: DataFrame): Unit = {
+    // Read once outside the Spark closure; when false the downsample ingestion_time_index write is skipped
+    // while downsampled chunks are still persisted (safe only when repair/ChunkCopier/re-downsampling do not
+    // rely on that index).
+    val writeToIngestionTimeIndex = settings.writeToIngestionTimeIndex
     downsampledChunksToPersist.foreach { row =>
       val res = Duration.apply(row.getString(0)).asInstanceOf[FiniteDuration]
       val chunkTable = downsampleCassandraColStore.getOrCreateChunkTable(
@@ -449,17 +453,19 @@ class BatchDownsampler(val settings: DownsamplerSettings,
         Duration.Inf
       )
 
-      val indexTable = downsampleCassandraColStore
-        .getOrCreateIngestionTimeIndexTable(downsampleRefsByRes(res))
-      val indexInsert = indexTable.writeIndexCql.bind(ByteBuffer.wrap(row.getAs[Array[Byte]](1)),
-        row.getLong(5): java.lang.Long,
-        row.getLong(6): java.lang.Long,
-        ByteBuffer.wrap(row.getAs[Array[Byte]](7)),
-        downsampleCassandraColStore.writeTimeIndexTtlSeconds: java.lang.Integer)
-      Await.result(
-        indexTable.connector.execStmtWithRetries(indexInsert.setConsistencyLevel(ConsistencyLevel.ALL)),
-        Duration.Inf
-      )
+      if (writeToIngestionTimeIndex) {
+        val indexTable = downsampleCassandraColStore
+          .getOrCreateIngestionTimeIndexTable(downsampleRefsByRes(res))
+        val indexInsert = indexTable.writeIndexCql.bind(ByteBuffer.wrap(row.getAs[Array[Byte]](1)),
+          row.getLong(5): java.lang.Long,
+          row.getLong(6): java.lang.Long,
+          ByteBuffer.wrap(row.getAs[Array[Byte]](7)),
+          downsampleCassandraColStore.writeTimeIndexTtlSeconds: java.lang.Integer)
+        Await.result(
+          indexTable.connector.execStmtWithRetries(indexInsert.setConsistencyLevel(ConsistencyLevel.ALL)),
+          Duration.Inf
+        )
+      }
       ()
     }
   }

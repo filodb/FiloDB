@@ -32,6 +32,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val chunkDownsamplerIsEnabled = downsamplerConfig.getBoolean("chunk-downsampler-enabled")
 
+  // Whether the downsample dataset's ingestion_time_index (write-time index) is written when persisting
+  // downsampled chunks. This index is consumed by repair/ChunkCopier and re-downsampling, so only set false
+  // when those do not rely on it. Default true keeps behavior unchanged.
+  @transient lazy val writeToIngestionTimeIndex = downsamplerConfig.getBoolean("write-to-ingestion-time-index")
+
   @transient lazy val cassandraConfig = filodbConfig.getConfig("cassandra")
 
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
