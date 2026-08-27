@@ -1402,6 +1402,25 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     PlanResult(execPlan::Nil)
   }
 
+  /**
+   * Builds the routing key identifying the partition assignment for one group of shard key filters.
+   *
+   * Matches Equals explicitly to read the filter's value. Filter declares no `value` member, so a bare
+   * `filter.value` resolves instead through the implicit akka.util.Helpers.Requiring conversion
+   * imported above, whose `value` returns the wrapped object itself. The routing key then carries the
+   * filter's toString ("Equals(myWs)") rather than its value ("myWs"), matches no assignment, and
+   * metadata queries fall back to the local partition instead of fanning out.
+   *
+   * Only called when every shard key filter is an Equals, so a non-Equals cannot reach here.
+   */
+  private def buildRoutingMap(group: Seq[ColumnFilter],
+                              nonMetricCols: Seq[String]): Map[String, String] =
+    nonMetricCols.flatMap(shardKeyCol =>
+      group.collectFirst {
+        case ColumnFilter(c, Equals(value)) if c == shardKeyCol => c -> value.toString
+      }
+    ).toMap
+
   private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
     val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
     // SeriesKeysByFilters stores its filters directly; getNonMetricShardKeyFilters doesn't extract them
@@ -1424,13 +1443,6 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
             }
         ))
 
-    def buildRoutingMap(group: Seq[ColumnFilter]): Map[String, String] =
-      nonMetricCols.flatMap(shardKeyCol =>
-        group.collectFirst {
-          case ColumnFilter(c, filter) if c == shardKeyCol => c -> filter.value.toString
-        }
-      ).toMap
-
     val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
       shardKeyFilterGroups.isEmpty ||
       !shardKeyFilterGroups.forall(group => nonMetricCols.forall(col => group.exists(_.column == col)))
@@ -1446,7 +1458,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           getMetadataPartitions(lp.filters, timeRange)
         } else {
           shardKeyFilterGroups
-            .map(buildRoutingMap)
+            .map(buildRoutingMap(_, nonMetricCols))
             .flatMap(routingMap => partitionLocationProvider.getPartitions(routingMap, timeRange))
             .distinct
         }

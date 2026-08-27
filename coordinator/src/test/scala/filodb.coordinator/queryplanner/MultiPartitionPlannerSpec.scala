@@ -2797,6 +2797,35 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
     }
 
+    it("should pass unwrapped shard key values in the routing key to getPartitions") {
+      // The other tests in this describe block only assert which provider method was called, so they
+      // pass even when the routing key values are wrong. Capture the key itself: the values have to be
+      // the filter values ("demo"/"ns1"), not the filters' toString ("Equals(demo)"), or the lookup
+      // matches no partition assignment and metadata queries silently stop fanning out.
+      var capturedRoutingKey: Map[String, String] = null
+      val provider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String],
+                                   timeRange: TimeRange): List[PartitionAssignment] = {
+          capturedRoutingKey = routingKey
+          List(PartitionAssignment("direct-partition", "direct-remote-url",
+            TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+        }
+
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] =
+          List(PartitionAssignment("legacy-partition", "legacy-remote-url",
+            TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+      }
+      val engine = makeMultiShardPlanner(provider)
+      val lp = Parser.labelValuesQueryToLogicalPlan(
+        Seq("__metric__"), Some("""_ws_="demo",_ns_="ns1""""),
+        TimeStepParams(startSeconds, step, endSeconds))
+      engine.materialize(lp, QueryContext(origQueryParams = labelValuesQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      capturedRoutingKey shouldEqual Map("_ws_" -> "demo", "_ns_" -> "ns1")
+    }
+
     it("should fall back to getMetadataPartitions when useLegacyMetadataRouting is true") {
       val provider = makeFallbackProvider("legacy-remote-url", "direct-remote-url")
       val legacyConfig = queryConfig.copy(
