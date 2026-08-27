@@ -2797,6 +2797,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
     }
 
+    it("should resolve metadata partitions through getPartitionsTrait, not the V1 getPartitions") {
+      // getPartitions is kept only for backward compatibility and maps to the traffic router's V1 read
+      // API, which rejects namespaces converted to the V2 schema ("please use the V2 read API"). The
+      // provider below fails the V1 method so a regression cannot pass silently.
+      var traitCalls = 0
+      val provider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String],
+                                   timeRange: TimeRange): List[PartitionAssignment] =
+          fail("resolveMetadataPartitions must not call the V1 getPartitions")
+
+        override def getPartitionsTrait(routingKey: Map[String, String],
+                                        timeRange: TimeRange): List[PartitionAssignmentTrait] = {
+          traitCalls += 1
+          List(PartitionAssignment("direct-partition", "direct-remote-url",
+            TimeRange(timeRange.startMs, timeRange.endMs), workUnit = "testWorkUnit"))
+        }
+
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] =
+          fail("all-Equals shard keys should not take the fallback path")
+      }
+      val engine = makeMultiShardPlanner(provider)
+      val lp = Parser.labelValuesQueryToLogicalPlan(
+        Seq("__metric__"), Some("""_ws_="demo",_ns_="ns1""""),
+        TimeStepParams(startSeconds, step, endSeconds))
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = labelValuesQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+      traitCalls shouldEqual 1
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "direct-remote-url"
+    }
+
     it("should pass unwrapped shard key values in the routing key to getPartitions") {
       // The other tests in this describe block only assert which provider method was called, so they
       // pass even when the routing key values are wrong. Capture the key itself: the values have to be

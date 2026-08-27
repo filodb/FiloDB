@@ -1459,7 +1459,10 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
         } else {
           shardKeyFilterGroups
             .map(buildRoutingMap(_, nonMetricCols))
-            .flatMap(routingMap => partitionLocationProvider.getPartitions(routingMap, timeRange))
+            // getPartitionsTrait, not the getPartitions kept for backward compatibility: the traffic
+            // router rejects a V1 read for a namespace converted to the V2 schema with "please use the
+            // V2 read API", which leaves this branch with no assignments and falls back to local.
+            .flatMap(routingMap => partitionLocationProvider.getPartitionsTrait(routingMap, timeRange))
             .distinct
         }
     }
