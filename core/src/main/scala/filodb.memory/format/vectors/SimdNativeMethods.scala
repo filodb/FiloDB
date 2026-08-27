@@ -28,6 +28,14 @@ object SimdNativeMethods {
   @volatile var enabled: Boolean =
     java.lang.Boolean.getBoolean("filodb.simd.enabled")
 
+  /** Toggle for native-accelerated delta histogram sum in DeltaHistogramReader.
+   *  When true, sum() uses Rust NibblePack decompression via histogramBatchSum JNI call.
+   *  When false, falls back to JVM-based RowHistogramReader.sum().
+   *  Initialized from system property (default false), also set by GlobalConfig
+   *  via `filodb.simd.delta-histogram-sum-optimized-enabled`. */
+  @volatile var deltaHistogramSumEnabled: Boolean =
+    java.lang.Boolean.getBoolean("filodb.simd.delta-histogram-sum-optimized-enabled")
+
   // Load the native library. TantivyNativeMethods may have already loaded it,
   // so we catch UnsatisfiedLinkError to avoid duplicate loading.
   private lazy val ensureLoaded: Unit = {
@@ -83,4 +91,19 @@ object SimdNativeMethods {
    * @return count of non-NaN values
    */
   @native def simdCountDouble(dataAddr: Long, start: Int, end: Int): Int
+
+  /**
+   * Batch sum of histogram bucket values for SUBTYPE_H_SIMPLE (delta histogram) vectors.
+   * Walks sections, unpacks NibblePack delta-encoded blobs, and accumulates bucket sums
+   * — all in one JNI call.
+   *
+   * @param vectorAddr pointer to HistogramVector (start of i32 numBytes header)
+   * @param startRow   first histogram index (0-based, inclusive)
+   * @param endRow     last histogram index (inclusive)
+   * @param outAddr    pointer to pre-allocated off-heap Double[numBuckets] output buffer
+   * @param numBuckets number of histogram buckets
+   * @return number of histograms summed, or -1 on error
+   */
+  @native def histogramBatchSum(vectorAddr: Long, startRow: Int, endRow: Int,
+                                outAddr: Long, numBuckets: Int): Int
 }

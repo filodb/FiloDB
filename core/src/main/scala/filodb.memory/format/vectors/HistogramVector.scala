@@ -297,7 +297,8 @@ object HistogramVector extends StrictLogging {
   import WireFormat._
 
   def apply(acc: MemoryReader, p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(acc, p) match {
-    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(acc, Ptr.U8(p))
+    // DeltaHistogramReader overrides sum() with native-accelerated path for delta histograms
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new DeltaHistogramReader(acc, Ptr.U8(p))
     case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) => new SectDeltaHistogramReader(acc, Ptr.U8(p))
     case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_EXP_SIMPLE) => new RowExpHistogramReader(acc, Ptr.U8(p))
   }
@@ -604,14 +605,103 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
-  // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  // Subclasses may override for optimized implementations (see DeltaHistogramReader).
+  def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
     val summedHist = MutableHistogram.empty(buckets)
     cforRange { start to end } { i =>
       summedHist.addNoCorrection(apply(i))
     }
     summedHist
+  }
+}
+
+/**
+ * Optimized reader for SUBTYPE_H_SIMPLE (delta histogram) vectors.
+ * Overrides only sum() — all other methods inherited from RowHistogramReader unchanged.
+ *
+ * Why a separate class: RowHistogramReader.sum() uses apply(i) → addNoCorrection() which
+ * is correct for all subtypes but incurs JVM overhead on the NibblePack decompression loop.
+ * For delta histograms (where each blob is independently encoded), we can move the entire
+ * unpack+accumulate loop into a single native (Rust) JNI call via SimdNativeMethods.histogramBatchSum.
+ *
+ * Only used for: delta-histogram, otel-delta-histogram (counter=false, exp=false).
+ * Not used for: prom-histogram (SectDeltaHistogramReader), otel-exp (RowExpHistogramReader).
+ */
+class DeltaHistogramReader(acc2: MemoryReader, histVect2: Ptr.U8)
+extends RowHistogramReader(acc2, histVect2) with StrictLogging {
+
+  /**
+   * Native-accelerated sum for delta histograms.
+   *
+   * Called by: rate(delta_hist[5m]) → RateOverDeltaChunkedFunctionH → SumOverTimeChunkedFunctionH
+   * Query:     histogram_quantile(0.99, sum(rate(delta_hist[5m])))
+   *
+   * Moves the NibblePack decompression + accumulation loop into native Rust code,
+   * avoiding per-histogram JVM overhead (see simd_vectors.rs::histogram_batch_sum_inner).
+   *
+   * Guard rails:
+   *   - SimdNativeMethods.deltaHistogramSumEnabled must be true
+   *     (default false, opt-in via config `filodb.simd.delta-histogram-sum-optimized-enabled = true`)
+   *   - acc must be nativePtrReader (off-heap memory — on-heap ByteBuffer falls back to super)
+   *   - Any exception in the native path falls back to super.sum() with a warning log
+   *
+   * Difference from super.sum():
+   *
+   *   super.sum() [RowHistogramReader — JVM]:
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  for i in [start..end]:                  ← JVM loop      │
+   *   │    locate(i)                             ← section walk  │
+   *   │    NibblePack.unpackToSink(DirectBuffer) ← JVM unpack    │
+   *   │      getByte → bounds check + endian swap per read       │
+   *   │      DeltaSink.process → virtual dispatch                │
+   *   │    addNoCorrection(returnHist):                          │
+   *   │      similarForMath → virtual call                       │
+   *   │      bucketValue(b) → virtual call + Long.toDouble       │
+   *   └──────────────────────────────────────────────────────────┘
+   *
+   *   this.sum() [DeltaHistogramReader — Rust]:
+   *   ┌──────────────────────────────────────────────────────────┐
+   *   │  ONE JNI call → Rust native code:                        │
+   *   │    walk sections via pointer arithmetic (no objects)      │
+   *   │    unpack NibblePack via unsafe ptr reads (no checks)     │
+   *   │    prefix-sum deltas (inlined, register-allocated)        │
+   *   │    accumulate Long[] into f64[] (auto-vectorized)         │
+   *   │  copy result back to JVM Double[]                        │
+   *   └──────────────────────────────────────────────────────────┘
+   *
+   * Safety: similarForMath is safe to skip within a single HistogramVector because all
+   * blobs share the same bucket scheme — enforced by matchBucketDef() in addData().
+   * Inter-chunk bucket scheme differences are handled by SumOverTimeChunkedFunctionH
+   * which calls MutableHistogram.add() (with similarForMath) when combining chunk results.
+   */
+  override def sum(start: Int, end: Int): MutableHistogram = {
+    // Native path: only when enabled AND vector is in off-heap native memory
+    if (SimdNativeMethods.deltaHistogramSumEnabled && numBuckets > 0 &&
+        (acc eq MemoryReader.nativePtrReader)) {
+      try {
+        val outAddr = UnsafeUtils.unsafe.allocateMemory(numBuckets.toLong * 8)
+        try {
+          val summed = SimdNativeMethods.histogramBatchSum(
+            histVect2.addr, start, end, outAddr, numBuckets)
+          if (summed >= 0) {
+            val outValues = new Array[Double](numBuckets)
+            cforRange { 0 until numBuckets } { i =>
+              outValues(i) = UnsafeUtils.unsafe.getDouble(outAddr + i.toLong * 8)
+            }
+            return MutableHistogram(buckets, outValues)
+          }
+          // summed < 0 means native error — fall through to super
+        } finally {
+          UnsafeUtils.unsafe.freeMemory(outAddr)
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Native histogramBatchSum failed, falling back to JVM sum: ${e.getMessage}")
+      }
+    }
+    // Fallback: original JVM implementation
+    super.sum(start, end)
   }
 }
 

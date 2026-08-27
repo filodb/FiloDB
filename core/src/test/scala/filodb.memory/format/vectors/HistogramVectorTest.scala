@@ -431,6 +431,525 @@ class HistogramVectorTest extends NativeVectorTest {
     }
   }
 
+  // ── DeltaHistogramReader.sum() tests ───────────────────────────────
+  // Tests the native-accelerated sum() used by: rate(delta_hist[5m]) → SumOverTimeChunkedFunctionH
+  // Each test compares native (SIMD enabled) vs JVM (SIMD disabled) to ensure correctness.
+
+  it("native sum should match JVM sum for geometric bucket histograms") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(0, rawHistBuckets.length - 1)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(0, rawHistBuckets.length - 1)
+      val expected = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+      nativeSum.values shouldEqual expected
+      nativeSum.values shouldEqual jvmSum.values
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum of single histogram should match JVM") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(2, 2)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(2, 2)
+      nativeSum.values shouldEqual jvmSum.values
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum of sub-range should match JVM") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(1, 2)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(1, 2)
+      nativeSum.values shouldEqual jvmSum.values
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum should work across section boundaries (>64 histograms)") {
+    val numElements = 100
+    val appender = HistogramVector.appending(memFactory, numElements * 30)
+    (0 until numElements).foreach { i =>
+      BinaryHistogram.writeDelta(bucketScheme, rawLongBuckets(i % rawLongBuckets.length), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(50, 80)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(50, 80)
+      nativeSum.values shouldEqual jvmSum.values
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum should work with custom bucket schemes") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    customHistograms.foreach { custHist =>
+      custHist.serialize(Some(buffer))
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(0, customHistograms.length - 1)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(0, customHistograms.length - 1)
+      nativeSum.values shouldEqual jvmSum.values
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum should handle zero-valued histograms") {
+    val zeroBuckets = Array.fill(8)(0L)
+    val appender = HistogramVector.appending(memFactory, 1024)
+    (0 until 10).foreach { _ =>
+      BinaryHistogram.writeDelta(bucketScheme, zeroBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(0, 9)
+      (0 until 8).foreach { b => nativeSum.bucketValue(b) shouldEqual 0.0 }
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native sum should fallback gracefully when SIMD disabled") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+
+    // With SIMD disabled, DeltaHistogramReader should use super.sum() (JVM path)
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val sum = reader.sum(0, rawHistBuckets.length - 1)
+    val expected = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+    sum.values shouldEqual expected
+  }
+
+  // ── Intra-chunk / Inter-chunk correctness tests ────────────────────
+  // Verifies that native sum() (intra-chunk) produces results that combine
+  // correctly with MutableHistogram.add() (inter-chunk) when chunks have
+  // DIFFERENT bucket schemes — simulating a bucket schema change over time.
+
+  it("intra-chunk native sum should produce correct results independently per chunk") {
+    // Chunk A: 8-bucket geometric scheme, 4 histograms
+    val schemeA = GeometricBuckets(1.0, 2.0, 8)
+    val appenderA = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(schemeA, rawBuckets, buffer)
+      appenderA.addData(buffer) shouldEqual Ack
+    }
+
+    // Chunk B: 5-bucket custom scheme, 3 histograms
+    val schemeB = CustomBuckets(Array(0.25, 0.5, 1.0, 2.5, Double.PositiveInfinity))
+    val appenderB = HistogramVector.appending(memFactory, 1024)
+    val dataBuckets5 = Seq(Array(5L, 10L, 15L, 20L, 25L), Array(3L, 8L, 12L, 18L, 22L), Array(7L, 14L, 21L, 28L, 35L))
+    dataBuckets5.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(schemeB, rawBuckets, buffer)
+      appenderB.addData(buffer) shouldEqual Ack
+    }
+
+    // Get DeltaHistogramReaders via HistogramVector.apply (off-heap, native pointer)
+    val readerA = HistogramVector(MemoryReader.nativePtrReader, appenderA.addr).asHistReader
+    val readerB = HistogramVector(MemoryReader.nativePtrReader, appenderB.addr).asHistReader
+
+    readerA.getClass.getSimpleName shouldEqual "DeltaHistogramReader"
+    readerB.getClass.getSimpleName shouldEqual "DeltaHistogramReader"
+
+    // Native intra-chunk sum for each chunk independently
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val sumA = readerA.sum(0, rawHistBuckets.length - 1)
+      val sumB = readerB.sum(0, dataBuckets5.length - 1)
+
+      // Verify chunk A sum matches expected (8 buckets)
+      val expectedA = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+      sumA.values shouldEqual expectedA
+      sumA.numBuckets shouldEqual 8
+
+      // Verify chunk B sum matches expected (5 buckets)
+      val expectedB = (0 until 5).map { b => dataBuckets5.map(_(b).toDouble).sum }.toArray
+      sumB.values shouldEqual expectedB
+      sumB.numBuckets shouldEqual 5
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("inter-chunk add of native sum results with DIFFERENT bucket schemes should produce NaN") {
+    // This simulates SumOverTimeChunkedFunctionH.addTimeChunks() combining results
+    // from two chunks where the bucket scheme changed between chunks.
+    // MutableHistogram.add() → addNoCorrection() checks similarForMath and sets NaN.
+
+    val schemeA = GeometricBuckets(1.0, 2.0, 8)
+    val appenderA = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(schemeA, rawBuckets, buffer)
+      appenderA.addData(buffer) shouldEqual Ack
+    }
+
+    val schemeB = GeometricBuckets(1.0, 3.0, 8)  // different ratio → different bucket tops
+    val appenderB = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(schemeB, rawBuckets, buffer)
+      appenderB.addData(buffer) shouldEqual Ack
+    }
+
+    val readerA = HistogramVector(MemoryReader.nativePtrReader, appenderA.addr).asHistReader
+    val readerB = HistogramVector(MemoryReader.nativePtrReader, appenderB.addr).asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val sumA = readerA.sum(0, rawHistBuckets.length - 1)
+      val sumB = readerB.sum(0, rawHistBuckets.length - 1)
+
+      // Simulate inter-chunk combination (what SumOverTimeChunkedFunctionH does):
+      //   h = sumA.copy; h.add(sumB)
+      // Since schemes differ, add() → addNoCorrection() → similarForMath returns false
+      // → values set to NaN
+      val combined = sumA.copy.asInstanceOf[MutableHistogram]
+      combined.add(sumB)
+
+      // All values should be NaN because bucket schemes are incompatible
+      (0 until 8).foreach { b =>
+        java.lang.Double.isNaN(combined.bucketValue(b)) shouldBe true
+      }
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("inter-chunk add of native sum results with SAME bucket scheme should combine correctly") {
+    // Two chunks with the same scheme but different data — simulates normal operation
+    // where bucket scheme is stable across chunks.
+
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val appenderA = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(scheme, rawBuckets, buffer)
+      appenderA.addData(buffer) shouldEqual Ack
+    }
+
+    // Second chunk with different data, same scheme
+    val data2 = Seq(Array(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L),
+                    Array(10L, 20L, 30L, 40L, 50L, 60L, 70L, 80L))
+    val appenderB = HistogramVector.appending(memFactory, 1024)
+    data2.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(scheme, rawBuckets, buffer)
+      appenderB.addData(buffer) shouldEqual Ack
+    }
+
+    val readerA = HistogramVector(MemoryReader.nativePtrReader, appenderA.addr).asHistReader
+    val readerB = HistogramVector(MemoryReader.nativePtrReader, appenderB.addr).asHistReader
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val sumA = readerA.sum(0, rawHistBuckets.length - 1)
+      val sumB = readerB.sum(0, data2.length - 1)
+
+      // Simulate inter-chunk combination
+      val combined = sumA.copy.asInstanceOf[MutableHistogram]
+      combined.add(sumB)
+
+      // Combined should be sumA + sumB per bucket
+      val expectedA = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+      val expectedB = (0 until 8).map { b => data2.map(_(b).toDouble).sum }.toArray
+      (0 until 8).foreach { b =>
+        combined.bucketValue(b) shouldEqual (expectedA(b) + expectedB(b))
+      }
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("native and JVM sum should produce identical results for inter-chunk combination") {
+    // End-to-end: two chunks, sum each with native AND JVM, combine, compare results
+
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val appenderA = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(scheme, rawBuckets, buffer)
+      appenderA.addData(buffer) shouldEqual Ack
+    }
+
+    val data2 = Seq(Array(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L),
+                    Array(10L, 20L, 30L, 40L, 50L, 60L, 70L, 80L))
+    val appenderB = HistogramVector.appending(memFactory, 1024)
+    data2.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(scheme, rawBuckets, buffer)
+      appenderB.addData(buffer) shouldEqual Ack
+    }
+
+    val readerA = HistogramVector(MemoryReader.nativePtrReader, appenderA.addr).asHistReader
+    val readerB = HistogramVector(MemoryReader.nativePtrReader, appenderB.addr).asHistReader
+
+    // JVM path
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSumA = readerA.sum(0, rawHistBuckets.length - 1)
+    val jvmSumB = readerB.sum(0, data2.length - 1)
+    val jvmCombined = jvmSumA.copy.asInstanceOf[MutableHistogram]
+    jvmCombined.add(jvmSumB)
+
+    // Native path
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val natSumA = readerA.sum(0, rawHistBuckets.length - 1)
+      val natSumB = readerB.sum(0, data2.length - 1)
+      val natCombined = natSumA.copy.asInstanceOf[MutableHistogram]
+      natCombined.add(natSumB)
+
+      // Results must be identical
+      (0 until 8).foreach { b =>
+        natCombined.bucketValue(b) shouldEqual jvmCombined.bucketValue(b)
+      }
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  // ── NibblePack Scala vs Rust unpacking comparison tests ────────────
+  // These tests pack data with Scala NibblePack, then sum via both
+  // JVM (Scala unpack) and native (Rust unpack), comparing results
+  // to verify the Rust NibblePack port is bit-for-bit correct.
+
+  /** Helper: builds a SIMPLE histogram vector with given data, returns a
+   *  DeltaHistogramReader backed by off-heap native memory. */
+  private def buildDeltaReader(scheme: HistogramBuckets, data: Seq[Array[Long]])
+    : HistogramReader = {
+    val appender = HistogramVector.appending(memFactory, data.size * 100)
+    data.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(scheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    HistogramVector(MemoryReader.nativePtrReader, appender.addr).asHistReader
+  }
+
+  /** Helper: compares native vs JVM sum for range [start, end] */
+  private def compareNativeVsJvm(reader: HistogramReader,
+                                  start: Int, end: Int): Unit = {
+    SimdNativeMethods.deltaHistogramSumEnabled = false
+    val jvmSum = reader.sum(start, end)
+
+    SimdNativeMethods.deltaHistogramSumEnabled = true
+    try {
+      val nativeSum = reader.sum(start, end)
+      nativeSum.numBuckets shouldEqual jvmSum.numBuckets
+      (0 until jvmSum.numBuckets).foreach { b =>
+        nativeSum.bucketValue(b) shouldEqual jvmSum.bucketValue(b)
+      }
+    } finally {
+      SimdNativeMethods.deltaHistogramSumEnabled = false
+    }
+  }
+
+  it("Rust unpack should match Scala for all-zero buckets") {
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val data = (0 until 30).map(_ => Array.fill(8)(0L))
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for constant bucket values") {
+    // All histograms identical — NibblePack should produce similar encodings
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val row = Array(100L, 200L, 300L, 400L, 500L, 600L, 700L, 800L)
+    val data = (0 until 30).map(_ => row.clone())
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for small delta values (typical case)") {
+    // Small deltas between cumulative buckets — typical for real histograms
+    val scheme = GeometricBuckets(1.0, 2.0, 20)
+    val rng = new scala.util.Random(123)
+    val data = (0 until 30).map { _ =>
+      val raw = (0 until 20).map(_ => rng.nextInt(100).toLong).toArray
+      (1 until 20).foreach { i => raw(i) += raw(i - 1) }
+      raw
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for large values near Long.MaxValue") {
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val data = (0 until 10).map { i =>
+      val base = Long.MaxValue / 2 + i * 1000L
+      (0 until 8).map(b => base + b * 100L).toArray
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 9)
+  }
+
+  it("Rust unpack should match Scala for single-element buckets (1 nibble)") {
+    // Values 0-15 fit in a single nibble — tests minimal bit width encoding
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val data = (0 until 30).map { i =>
+      (0 until 8).map(b => ((i + b) % 16).toLong).toArray.
+        scanLeft(0L)(_ + _).tail.toArray  // make cumulative
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for values requiring many nibbles") {
+    // Large spread values requiring 12+ nibbles — tests wide bit packing
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val data = (0 until 20).map { i =>
+      Array(i.toLong * 1000000,
+            i.toLong * 1000000 + 500000,
+            i.toLong * 2000000,
+            i.toLong * 3000000,
+            i.toLong * 5000000,
+            i.toLong * 8000000,
+            i.toLong * 13000000,
+            i.toLong * 21000000)
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 19)
+  }
+
+  it("Rust unpack should match Scala for non-power-of-8 bucket counts") {
+    // 3 buckets — tests remainder handling in unpack8 (3 values + 5 zeros)
+    val scheme = CustomBuckets(Array(1.0, 10.0, Double.PositiveInfinity))
+    val data = (0 until 30).map { i =>
+      Array(i.toLong * 10, i.toLong * 50, i.toLong * 100)
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for exactly 8 buckets") {
+    // Exactly 8 = one pack8 call, no remainder
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val rng = new scala.util.Random(456)
+    val data = (0 until 50).map { _ =>
+      val raw = (0 until 8).map(_ => rng.nextInt(10000).toLong).toArray
+      (1 until 8).foreach { i => raw(i) += raw(i - 1) }
+      raw
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 49)
+  }
+
+  it("Rust unpack should match Scala for 16 buckets (exactly 2 pack8 calls)") {
+    val scheme = GeometricBuckets(1.0, 2.0, 16)
+    val rng = new scala.util.Random(789)
+    val data = (0 until 30).map { _ =>
+      val raw = (0 until 16).map(_ => rng.nextInt(5000).toLong).toArray
+      (1 until 16).foreach { i => raw(i) += raw(i - 1) }
+      raw
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala for many histograms crossing section boundary") {
+    // 100 histograms in SIMPLE format = 2 sections (64 + 36)
+    // Tests that Rust section walking matches Scala locate()
+    val scheme = GeometricBuckets(1.0, 2.0, 8)
+    val rng = new scala.util.Random(101)
+    val data = (0 until 100).map { _ =>
+      val raw = (0 until 8).map(_ => rng.nextInt(1000).toLong).toArray
+      (1 until 8).foreach { i => raw(i) += raw(i - 1) }
+      raw
+    }
+    val reader = buildDeltaReader(scheme, data)
+
+    // Full range
+    compareNativeVsJvm(reader, 0, 99)
+    // Entirely within section 0
+    compareNativeVsJvm(reader, 10, 50)
+    // Spans section boundary (section 0 ends at 63)
+    compareNativeVsJvm(reader, 55, 75)
+    // Entirely within section 1
+    compareNativeVsJvm(reader, 70, 95)
+    // Single element from each section
+    compareNativeVsJvm(reader, 63, 63)
+    compareNativeVsJvm(reader, 64, 64)
+  }
+
+  it("Rust unpack should match Scala for sparse histograms (mostly zero buckets)") {
+    // Only first and last bucket have values — tests bitmask with few bits set
+    val scheme = GeometricBuckets(1.0, 2.0, 20)
+    val data = (0 until 30).map { i =>
+      val raw = Array.fill(20)(0L)
+      raw(0) = i.toLong * 5
+      raw(19) = i.toLong * 5 + 100
+      // make cumulative
+      (1 until 20).foreach { b => raw(b) = Math.max(raw(b), raw(b - 1)) }
+      raw
+    }
+    val reader = buildDeltaReader(scheme, data)
+    compareNativeVsJvm(reader, 0, 29)
+  }
+
+  it("Rust unpack should match Scala with ScalaCheck random data") {
+    import org.scalacheck.Gen
+    import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+
+    ScalaCheckPropertyChecks.forAll(
+      Gen.choose(3, 30),     // numBuckets
+      Gen.choose(5, 50),     // numHistograms
+      Gen.choose(0L, 10000L) // maxBucketValue
+    ) { (numBuckets, numHistograms, maxVal) =>
+      val scheme = GeometricBuckets(1.0, 2.0, numBuckets)
+      val rng = new scala.util.Random(numBuckets * 1000 + numHistograms)
+      val data = (0 until numHistograms).map { _ =>
+        val raw = (0 until numBuckets).map(_ => (rng.nextDouble() * maxVal).toLong).toArray
+        (1 until numBuckets).foreach { i => raw(i) += raw(i - 1) }
+        raw
+      }
+      val reader = buildDeltaReader(scheme, data)
+      compareNativeVsJvm(reader, 0, numHistograms - 1)
+    }
+  }
+
   val incrAppender = HistogramVector.appendingSect(memFactory, 1024)
   incrHistBuckets.foreach { rawBuckets =>
     BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
