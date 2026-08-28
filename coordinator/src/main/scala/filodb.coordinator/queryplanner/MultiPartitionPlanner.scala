@@ -7,7 +7,6 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 
-import akka.util.Helpers.Requiring
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ManagedChannel
 
@@ -1405,11 +1404,12 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   /**
    * Builds the routing key identifying the partition assignment for one group of shard key filters.
    *
-   * Matches Equals explicitly to read the filter's value. Filter declares no `value` member, so a bare
-   * `filter.value` resolves instead through the implicit akka.util.Helpers.Requiring conversion
-   * imported above, whose `value` returns the wrapped object itself. The routing key then carries the
-   * filter's toString ("Equals(myWs)") rather than its value ("myWs"), matches no assignment, and
-   * metadata queries fall back to the local partition instead of fanning out.
+   * Matches Equals explicitly so the value comes from the case class field. Filter itself declares no
+   * `value` member, so a bare `filter.value` compiles only through an implicit identity conversion -
+   * this file used to import akka.util.Helpers.Requiring, whose `value` returns the wrapped object
+   * itself. That put the filter's toString ("Equals(myWs)") in the routing key rather than its value
+   * ("myWs"), matched no assignment, and sent metadata queries to the local partition instead of
+   * fanning them out.
    *
    * Only called when every shard key filter is an Equals, so a non-Equals cannot reach here.
    */
