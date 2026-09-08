@@ -196,4 +196,48 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     // 1 for 100 -> 20.  Not for 1 for 20 -> Double.NaN. Should not increase for Double.NaN -> Double.NaN
     resultRows.head.head._2 shouldEqual(1)
   }
+
+  it("should enforce QueryConfig.minStepMs when no per-query minStep override is provided") {
+    // cluster-wide default min-step of 5s (as configured in filodb-defaults.conf); no per-query override.
+    val session = QuerySession(QueryContext(), queryConfig.copy(minStepMs = 5000))
+    // range query with a 1s step is below the 5s floor and must be rejected
+    val mapper = exec.PeriodicSamplesMapper(100000L, 1000L, 200000L, None, None)
+    val ex = intercept[BadQueryException] {
+      mapper(Observable.fromIterable(Seq(rv)), session, 100000, resultSchema, Nil)
+    }
+    ex.getMessage should include ("at least 5s")
+  }
+
+  it("should honor per-query minStepMsOpt override, allowing a step smaller than QueryConfig.minStepMs") {
+    // cluster default is 5s, but the query service passes an explicit 1s override
+    val session = QuerySession(
+      QueryContext(plannerParams = PlannerParams(minStepMsOpt = Some(1000L))),
+      queryConfig.copy(minStepMs = 5000))
+    // step (1s) < QueryConfig.minStepMs (5s) but == override (1s): should NOT throw
+    val mapper = exec.PeriodicSamplesMapper(100000L, 1000L, 200000L, None, None)
+    val resultObs = mapper(Observable.fromIterable(Seq(rv)), session, 100000, resultSchema, Nil)
+    val resultRows = resultObs.toListL.runToFuture.futureValue
+    resultRows should not be empty
+  }
+
+  it("should reject a step smaller than the per-query minStepMsOpt override even when QueryConfig.minStepMs is lower") {
+    // override raises the floor above the (lower) cluster default, proving the override takes precedence
+    val session = QuerySession(
+      QueryContext(plannerParams = PlannerParams(minStepMsOpt = Some(2000L))),
+      queryConfig.copy(minStepMs = 1))
+    val mapper = exec.PeriodicSamplesMapper(100000L, 1000L, 200000L, None, None)
+    val ex = intercept[BadQueryException] {
+      mapper(Observable.fromIterable(Seq(rv)), session, 100000, resultSchema, Nil)
+    }
+    ex.getMessage should include ("at least 2s")
+  }
+
+  it("should not enforce minStep for instant queries (startMs == endMs)") {
+    // instant query: the min-step floor does not apply regardless of the configured/override value
+    val session = QuerySession(QueryContext(), queryConfig.copy(minStepMs = 5000))
+    val mapper = exec.PeriodicSamplesMapper(200000L, 0L, 200000L, None, None)
+    noException should be thrownBy {
+      mapper(Observable.fromIterable(Seq(rv)), session, 100000, resultSchema, Nil)
+    }
+  }
 }

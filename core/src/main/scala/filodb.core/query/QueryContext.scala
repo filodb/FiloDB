@@ -354,7 +354,10 @@ case class PlannerParams(applicationId: String = "filodb",
                          buddyGrpcTimeoutMs: Option[Long] = None,
                          localShardMapper: Option[ActiveShardMapper] = None,
                          buddyShardMapper: Option[ActiveShardMapper] = None,
-                         samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig()
+                         samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig(),
+                         // Overrides QueryConfig.minStepMs for this query when set. Passed from the query service
+                         // so clients can request a smaller minimum step (e.g. 1s) than the cluster default.
+                         minStepMsOpt: Option[Long] = None
                         )
 
 object PlannerParams {

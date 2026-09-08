@@ -128,6 +128,23 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     GrpcMultiPartitionQueryService.PlannerParams.newBuilder().build().fromProto shouldEqual PlannerParams()
   }
 
+  it("should convert PlannerParams minStepMsOpt to proto and back") {
+    // when set, the per-query min-step override round-trips through proto
+    val ppWithMinStep = PlannerParams(minStepMsOpt = Some(1000L))
+    ppWithMinStep.toProto.fromProto shouldEqual ppWithMinStep
+    ppWithMinStep.toProto.getMinStepMs shouldEqual 1000L
+    ppWithMinStep.toProto.hasMinStepMs shouldEqual true
+    ppWithMinStep.toProto.fromProto.minStepMsOpt shouldEqual Some(1000L)
+
+    // when not set, it stays None so it falls back to the cluster QueryConfig.minStepMs default downstream
+    PlannerParams().minStepMsOpt shouldEqual None
+    PlannerParams().toProto.hasMinStepMs shouldEqual false
+    PlannerParams().toProto.fromProto.minStepMsOpt shouldEqual None
+
+    // a proto message that never set the field deserializes to None
+    GrpcMultiPartitionQueryService.PlannerParams.newBuilder().build().fromProto.minStepMsOpt shouldEqual None
+  }
+
   it("should convert from Stat to proto and back") {
     val stat = Stat()
     stat.resultBytes.addAndGet(100)
