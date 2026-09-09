@@ -54,6 +54,7 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
     val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
                                            new HealthRoute(coordinatorRef, v2ClusterEnabled, settings),
+                                           new CardinalityRoute(coordinatorRef, v2ClusterEnabled, settings),
                                            new PrometheusApiRoute(coordinatorRef, settings))
 
     // Load runtime api routes from class names.
