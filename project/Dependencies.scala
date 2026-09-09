@@ -196,7 +196,8 @@ object Dependencies {
     akkaHttpCirce,
     circeGeneric,
     circeParser,
-    akkaHttpTestkit % Test,
+    akkaHttpTestkit % "test,it",
+    scalaTest       % "it",
     "org.xerial.snappy" % "snappy-java" % "1.1.8.4"
   )
 

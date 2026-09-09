@@ -1,0 +1,5 @@
+_metric_,tags,timestamp,value
+my_gauge,"_ws_=test_ws,_ns_=promcompat,mode=idle",1000000,1.0
+my_gauge,"_ws_=test_ws,_ns_=promcompat,mode=idle",1015000,2.0
+my_gauge,"_ws_=test_ws,_ns_=promcompat,mode=user",1000000,10.0
+my_gauge,"_ws_=test_ws,_ns_=promcompat,mode=user",1015000,11.0
