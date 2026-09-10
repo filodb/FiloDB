@@ -23,11 +23,12 @@ import filodb.kafka.KafkaIngestionStreamFactory
 import filodb.timeseries.TestTimeseriesProducer
 
 object KafkaGatewayIngestionSpec extends ActorSpecConfig {
-  // The gateway encodes records with the global Schemas object, whose partition-schema uses
-  // filodb-defaults' predefined-keys (10 keys). application_test.conf overrides predefined-keys to
-  // [] (a HOCON list replaces, not merges), so without this the shard would decode with an empty
-  // table, fail to read the compacted tag keys, and silently drop every record (0 rows ingested).
-  // Align the cluster's predefined-keys with filodb-defaults so encode and decode tables match.
+  // The gateway encodes each record's tag map with the global Schemas object, whose partition-schema
+  // uses filodb-defaults' predefined-keys (10 keys) as a tag-key compaction dictionary.
+  // application_test.conf overrides predefined-keys to [] (a HOCON list replaces, not merges). If the
+  // shard decoded with an empty dictionary it could not read the compacted tag keys the gateway wrote.
+  // Align the cluster's predefined-keys with filodb-defaults so the encode and decode dictionaries
+  // match. (This governs tag-key decode; schema resolution is handled by overrideSchema = false below.)
   // Keep in sync with core/src/main/resources/filodb-defaults.conf (partition-schema.predefined-keys).
   override lazy val configString = defaultConfig +
     """
@@ -114,7 +115,12 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
       ConfigFactory.parseString("store { flush-interval = 1 hour }")
         .withFallback(TestData.sourceConf).getConfig("store"))
     val ingestionSource = IngestionSource(classOf[KafkaIngestionStreamFactory].getName, innerConfig)
-    val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), ingestionSource, storeConf)
+    // overrideSchema = false so the shard registers ALL schemas from config (gauge, prom-counter,
+    // otel-exp-delta-histogram, ...), not just the dataset's single schema. The gateway generators
+    // emit gauge and otel-exp-delta-histogram records; with the default overrideSchema = true the
+    // shard knows only promCounter and drops every record as "unknown schema" (0 rows ingested).
+    val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), ingestionSource, storeConf,
+      overrideSchema = false)
     coordinatorActor ! command
     Thread.sleep(2000)
     clusterActor ! command
