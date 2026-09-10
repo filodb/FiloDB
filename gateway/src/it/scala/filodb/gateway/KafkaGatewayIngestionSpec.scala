@@ -2,11 +2,13 @@ package filodb.gateway
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import org.apache.kafka.clients.admin.{Admin, NewTopic}
+import org.apache.kafka.clients.admin.{Admin, NewTopic, OffsetSpec}
+import org.apache.kafka.common.TopicPartition
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.testcontainers.containers.KafkaContainer
@@ -37,6 +39,12 @@ object KafkaGatewayIngestionSpec extends ActorSpecConfig
  * Offset note: KafkaIngestionStream uses consumer.assign() + optional seek(offset). With no
  * checkpoint the offset is None (no seek), so the start position falls back to `auto.offset.reset`.
  * We set it to "earliest" so every produced record is read regardless of produce/consume ordering.
+ *
+ * The verification checks two boundaries so a failure is self-diagnosing:
+ *   1. the Kafka topic actually received container messages (producer side), and
+ *   2. FiloDB ingested the expected row count (consumer/decode side).
+ * Note: each Kafka message is a RecordContainer holding many records, so the topic end-offset counts
+ * container messages (small), while numRowsIngested counts individual rows.
  */
 class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getNewSystem)
   with StrictLogging with ScalaFutures {
@@ -54,12 +62,13 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
 
   private var cluster: FilodbCluster = _
   private var outerConfig: Config = _
+  private var bootstrap: String = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
     kafka.start()
     // testcontainers returns "PLAINTEXT://host:port"; Kafka's bootstrap.servers wants "host:port".
-    val bootstrap = kafka.getBootstrapServers.stripPrefix("PLAINTEXT://")
+    bootstrap = kafka.getBootstrapServers.stripPrefix("PLAINTEXT://")
 
     // Create the topic with one partition per shard (the gateway publishes partition == shard).
     val props = new java.util.Properties()
@@ -116,15 +125,27 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
     }
   }
 
-  /** Polls the aggregate ingested-row count until it reaches `atLeast` or a 90s deadline. */
-  private def waitForRows(atLeast: Long): Long = {
+  /** Sum of latest offsets across the topic's partitions = number of container messages produced. */
+  private def containersOnTopic(): Long = {
+    val props = new java.util.Properties()
+    props.put("bootstrap.servers", bootstrap)
+    val admin = Admin.create(props)
+    try {
+      val specs = (0 until numShards)
+        .map(p => new TopicPartition(topic, p) -> OffsetSpec.latest()).toMap.asJava
+      admin.listOffsets(specs).all().get().asScala.values.map(_.offset()).sum
+    } finally admin.close()
+  }
+
+  /** Polls `probe` until it reaches `atLeast` or a 90s deadline; returns the last observed value. */
+  private def waitUntil(atLeast: Long)(probe: => Long): Long = {
     val deadline = System.currentTimeMillis() + 90000
-    var count = cluster.memStore.numRowsIngested(ref)
-    while (count < atLeast && System.currentTimeMillis() < deadline) {
+    var v = probe
+    while (v < atLeast && System.currentTimeMillis() < deadline) {
       Thread.sleep(1000)
-      count = cluster.memStore.numRowsIngested(ref)
+      v = probe
     }
-    count
+    v
   }
 
   describe("gateway -> Kafka -> FiloDB ingestion") {
@@ -134,11 +155,18 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
         TestTimeseriesProducer.produceMetrics(outerConfig, numMetrics = 1, numSamples = numSamples,
           numTimeSeries = 20, startMinutesAgo = 0L, publishIntervalSec = 1),
         30.seconds)
-      waitForRows(numSamples) shouldEqual numSamples
+      val onTopic = waitUntil(1L)(containersOnTopic())          // producer boundary
+      val ingested = waitUntil(numSamples)(cluster.memStore.numRowsIngested(ref)) // consumer boundary
+      withClue(s" [diag] container-messages on topic=$onTopic, numRowsIngested=$ingested " +
+        s"(expected $numSamples rows) — ") {
+        onTopic should be > 0L
+        ingested shouldEqual numSamples
+      }
     }
 
     it("ingests OTel-exponential histograms produced by the gateway generators via Kafka") {
-      val before = cluster.memStore.numRowsIngested(ref)
+      val beforeRows = cluster.memStore.numRowsIngested(ref)
+      val beforeContainers = containersOnTopic()
       val numSamples = 200
       val shardMapper = new ShardMapper(numShards)
       val spread = if (numShards >= 2) (Math.log10(numShards / 2.0) / Math.log10(2.0)).toInt else 0
@@ -149,7 +177,13 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
         startTime, numShards, 20, 1, numSamples, dataset, shardMapper, spread, 1, true)
       GatewayServer.setupKafkaProducer(outerConfig, stream)
       Await.result(producing, 30.seconds)
-      waitForRows(before + numSamples) shouldEqual (before + numSamples)
+      val onTopic = waitUntil(beforeContainers + 1)(containersOnTopic())
+      val ingested = waitUntil(beforeRows + numSamples)(cluster.memStore.numRowsIngested(ref))
+      withClue(s" [diag] container-messages on topic=$onTopic (was $beforeContainers), " +
+        s"numRowsIngested=$ingested (was $beforeRows, expected +$numSamples) — ") {
+        onTopic should be > beforeContainers
+        ingested shouldEqual (beforeRows + numSamples)
+      }
     }
   }
 }
