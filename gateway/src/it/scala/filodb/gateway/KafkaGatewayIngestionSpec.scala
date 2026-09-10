@@ -22,7 +22,19 @@ import filodb.core.store.StoreConfig
 import filodb.kafka.KafkaIngestionStreamFactory
 import filodb.timeseries.TestTimeseriesProducer
 
-object KafkaGatewayIngestionSpec extends ActorSpecConfig
+object KafkaGatewayIngestionSpec extends ActorSpecConfig {
+  // The gateway encodes records with the global Schemas object, whose partition-schema uses
+  // filodb-defaults' predefined-keys (10 keys). application_test.conf overrides predefined-keys to
+  // [] (a HOCON list replaces, not merges), so without this the shard would decode with an empty
+  // table, fail to read the compacted tag keys, and silently drop every record (0 rows ingested).
+  // Align the cluster's predefined-keys with filodb-defaults so encode and decode tables match.
+  // Keep in sync with core/src/main/resources/filodb-defaults.conf (partition-schema.predefined-keys).
+  override lazy val configString = defaultConfig +
+    """
+      |filodb.partition-schema.predefined-keys =
+      |  ["_ws_", "_ns_", "app", "__name__", "instance", "dc", "le", "job", "exporter", "_pi_"]
+      |""".stripMargin
+}
 
 /**
  * End-to-end ingestion integration test for the real production path:
