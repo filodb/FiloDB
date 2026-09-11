@@ -7,6 +7,7 @@ import scala.jdk.CollectionConverters._
 import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import monix.execution.Scheduler.Implicits.global
 import org.apache.kafka.clients.admin.{Admin, NewTopic, OffsetSpec}
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.concurrent.ScalaFutures
@@ -17,9 +18,16 @@ import org.testcontainers.utility.DockerImageName
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.DatasetRef
+import filodb.core.GlobalConfig
 import filodb.core.TestData
-import filodb.core.store.StoreConfig
+import filodb.core.metadata.Schemas
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
+import filodb.core.store.{AllChunkScan, StoreConfig}
+import filodb.gateway.conversion.MetricTagInputRecord
 import filodb.kafka.KafkaIngestionStreamFactory
+import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.query.QueryResult
+import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 import filodb.timeseries.TestTimeseriesProducer
 
 object KafkaGatewayIngestionSpec extends ActorSpecConfig {
@@ -201,6 +209,78 @@ class KafkaGatewayIngestionSpec extends ActorTest(KafkaGatewayIngestionSpec.getN
         s"numRowsIngested=$ingested (was $beforeRows, expected +$numSamples) — ") {
         onTopic should be > beforeContainers
         ingested shouldEqual (beforeRows + numSamples)
+      }
+    }
+
+    it("preserves OTel-exponential histogram bucket values exactly, end-to-end") {
+      import filodb.memory.format.vectors.{Base2ExpHistogramBuckets, LongHistogram}
+
+      // A small, fully DETERMINISTIC histogram dataset for one time series. We choose every bucket
+      // value here (nothing random), publish it through the real gateway sharding + Kafka producer
+      // path, read the raw histogram column back with a MultiSchemaPartitionsExec scan, and assert
+      // every (timestamp, histogram) round-tripped unchanged. Histogram equality is scheme + values
+      // (Histogram.equals delegates to compare == 0), so a produced LongHistogram compares equal to
+      // the read-back histogram only when both the bucket scheme AND all bucket counts survive.
+      val scheme = Base2ExpHistogramBuckets(3, -10, 20)   // same params genHistogramData uses (numBuckets = 20)
+      val metricName = "http_request_latency_delta"        // otel-exp-delta is a *_delta metric
+      val instanceTag = s"exact-hist-${System.currentTimeMillis()}"   // unique -> isolates this test's series
+      val startTime = System.currentTimeMillis() - 10.minutes.toMillis
+      val tags = Map(
+        "_ws_".utf8     -> "demo".utf8,
+        "_ns_".utf8     -> "App-0".utf8,
+        "dc".utf8       -> "DC0".utf8,
+        "host".utf8     -> "H0".utf8,
+        "instance".utf8 -> instanceTag.utf8)
+
+      // Five samples at distinct 10s-spaced timestamps; each bucket count is a known value.
+      val samples: Seq[(Long, LongHistogram, MetricTagInputRecord)] = (0 until 5).map { i =>
+        val ts = startTime + i * 10000L
+        val buckets = Array.tabulate(scheme.numBuckets)(b => (b + 1).toLong * (i + 1))
+        val hist = LongHistogram(scheme, buckets)
+        val sum = buckets.sum.toDouble
+        val count = buckets.sum.toDouble + 1   // +1 so neither sum nor count is zero (invalid data)
+        val rec = new MetricTagInputRecord(
+          Seq(ts, sum, count, hist, buckets.min.toDouble, buckets.max.toDouble),
+          metricName, tags, Schemas.otelExpDeltaHistogram)
+        (ts, hist, rec)
+      }
+      val expected: List[(Long, LongHistogram)] = samples.map { case (ts, hist, _) => (ts, hist) }.toList
+      val records = samples.map(_._3)
+
+      val beforeRows = cluster.memStore.numRowsIngested(ref)
+
+      // Publish these exact records through the same gateway pipeline the generators use.
+      val (shardQueues, containerStream) =
+        GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
+      GatewayServer.setupKafkaProducer(outerConfig, containerStream)
+      val shardMapper = new ShardMapper(numShards)
+      val spread = if (numShards >= 2) (Math.log10(numShards / 2.0) / Math.log10(2.0)).toInt else 0
+      records.foreach { rec =>
+        val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
+        while (!shardQueues(shard).offer(rec)) Thread.sleep(50)
+      }
+      val ingested = waitUntil(beforeRows + records.size)(cluster.memStore.numRowsIngested(ref))
+
+      // Read the raw histogram column ("h") back for this single time series.
+      val queryConfig = QueryConfig(GlobalConfig.systemConfig.getConfig("filodb.query"))
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      val filters = Seq(
+        ColumnFilter("_metric_", Filter.Equals(metricName.utf8)),
+        ColumnFilter("instance", Filter.Equals(instanceTag.utf8)))
+      val queryShard =
+        shardMapper.ingestionShard(records.head.shardKeyHash, records.head.partitionKeyHash, spread)
+      val exec = MultiSchemaPartitionsExec(QueryContext(), InProcessPlanDispatcher(queryConfig), ref,
+        queryShard, filters, AllChunkScan, "_metric_", colName = Some("h"))
+      val resp = exec.execute(cluster.memStore, querySession).runToFuture.futureValue
+      val result = resp.asInstanceOf[QueryResult]
+      val readBack: List[(Long, filodb.memory.format.vectors.Histogram)] = result.result.headOption
+        .map(_.rows().map(r => (r.getLong(0), r.getHistogram(1))).toList)
+        .getOrElse(Nil)
+
+      withClue(s" [diag] ingested=$ingested (was $beforeRows), readBack.size=${readBack.size}, " +
+        s"rangeVectors=${result.result.size} — ") {
+        readBack.size shouldEqual expected.size
+        readBack.sortBy(_._1) shouldEqual expected   // expected is already timestamp-ascending
       }
     }
   }
