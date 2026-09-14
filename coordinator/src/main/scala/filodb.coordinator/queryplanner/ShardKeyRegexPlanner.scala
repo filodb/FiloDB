@@ -33,7 +33,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            partitionLocationProvider: PartitionLocationProvider,
                            config: QueryConfig,
-                           val flightEnabled: Boolean,
+                           val flightEnabled: Boolean = false,
                            _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends PartitionLocationPlanner(dataset, partitionLocationProvider) {
 

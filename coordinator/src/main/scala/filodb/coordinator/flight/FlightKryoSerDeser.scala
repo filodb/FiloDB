@@ -4,17 +4,14 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Using
 
 import com.esotericsoftware.kryo.Kryo
-import com.esotericsoftware.kryo.io.{ByteBufferInput, Input, Output}
+import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.FieldSerializer
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, DefaultStreamFactory, ListReferenceResolver}
 import io.altoo.akka.serialization.kryo.serializer.scala._
-import org.apache.arrow.memory.ArrowBuf
 import org.jctools.queues.MpmcArrayQueue
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import filodb.coordinator.client.KryoInit
-import filodb.coordinator.flight.ArrowSerializedRangeVectorOps.{maxNumRows, VsrPopulationState}
-import filodb.core.query._
 
 object FlightKryoSerDeser {
 
@@ -30,8 +27,6 @@ object FlightKryoSerDeser {
       else {
         val k = new ScalaKryo(new DefaultClassResolver(), new ListReferenceResolver(), new DefaultStreamFactory())
         k.setClassLoader(getClass.getClassLoader)
-        k.register(classOf[RespHeader])
-        k.register(classOf[RespFooter])
         k.setInstantiatorStrategy(new Kryo.DefaultInstantiatorStrategy(new StdInstantiatorStrategy))
 
         val ki = new KryoInit()
@@ -124,7 +119,6 @@ object FlightKryoSerDeser {
     // TODO all query plans
 
     // Flight Objects
-    k.register(classOf[RvMetadata])
   }
 
   def deserialize(bytes: Array[Byte]): Any = {
@@ -136,55 +130,6 @@ object FlightKryoSerDeser {
     } finally {
       kryoPool.release(k)
     }
-  }
-
-  def deserializeFromArrowBuf(buf: ArrowBuf): Any = {
-    val k = kryoPool.borrow()
-    try {
-      Using.resource(new ByteBufferInput(buf.nioBuffer())) { input =>
-        k.kryo.readClassAndObject(input)
-      }
-    } finally {
-      kryoPool.release(k)
-    }
-  }
-
-  def serializeToArrowBuf(obj: Any, fAllocator: FlightAllocator): ArrowBuf = {
-    fAllocator.withRequestAllocator { allocator =>
-      val k = kryoPool.borrow()
-      // scalastyle:off null
-      var buf: ArrowBuf = null
-      try {
-        k.kryo.writeClassAndObject(k.out, obj)
-        buf = allocator.buffer(k.out.position())
-        buf.writeBytes(k.out.getBuffer, 0, k.out.position())
-        buf.writerIndex(k.out.position()).readerIndex(0)
-        buf
-      } catch {
-        case e: Throwable =>
-          if (buf != null) buf.close()
-          throw e
-      } finally {
-        kryoPool.release(k)
-      }
-    } {
-      throw new IllegalStateException("FlightAllocator is already closed, cannot serialize to ArrowBuf")
-    }
-  }
-
-  def serializeToArrowVsr(obj: Any, state: VsrPopulationState)
-                         (needNewVec: () => Unit): Unit = {
-      val k = kryoPool.borrow()
-      try {
-        k.kryo.writeClassAndObject(k.out, obj)
-        if (state.bytesRemaining < k.out.position() || state.rowNum >= maxNumRows) needNewVec()
-        state.currentRvkBrVec.set(state.rowNum, k.out.getBuffer, 0, k.out.position())
-        state.currentIsRvkVec.set(state.rowNum, 1)
-        state.bytesRemaining -= k.out.position()
-        state.rowNum += 1
-      } finally {
-        kryoPool.release(k)
-      }
   }
 
   def serializeToBytes(obj: Any): Array[Byte] = {

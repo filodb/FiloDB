@@ -26,8 +26,14 @@ object UnsafeUtils {
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
 
   // These are specific to JDK8, definitely not guaranteed for other versions
-  val byteBufArrayField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("hb"))
-  val byteBufOffsetField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("offset"))
+  // In JDK 21, objectFieldOffset(Field) is deprecated, but we need it for ByteBuffer internal access
+  @SuppressWarnings(Array("deprecation"))
+  private def getFieldOffset(fieldName: String): Long = {
+    unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField(fieldName))
+  }
+
+  val byteBufArrayField = getFieldOffset("hb")
+  val byteBufOffsetField = getFieldOffset("offset")
 
   /** Translate ByteBuffer into base, offset, numBytes */
   //scalastyle:off method.name

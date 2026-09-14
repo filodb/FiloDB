@@ -3,7 +3,7 @@ import Keys._
 import sbt.librarymanagement.ScalaModuleInfo
 
 import com.typesafe.sbt.SbtMultiJvm
-import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.{MultiJvm, jvmOptions => multiJvmJvmOptions}
 import sbt.Tests.Output._
 import org.scalastyle.sbt.ScalastylePlugin.autoImport._
 import pl.project13.scala.sbt.JmhPlugin
@@ -26,7 +26,6 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
-      "-release:11",
       "-feature",
       "-Wconf:cat=deprecation:w", // Scala 2.13 replacement for -deprecation; report deprecations as warnings
       "-Ywarn-dead-code",
@@ -39,6 +38,8 @@ object FiloSettings {
     javacOptions ++= Seq(
       "-encoding", "UTF-8",
       "--release", "11"
+      // Target JDK 11 so that we can run on JDK 11 and 17 (and 21) without issues
+      // and other repos dependent on this one are not forced to upgrade in lock step
     ))
 
   // Create a default Scala style task to run with tests
@@ -95,6 +96,30 @@ object FiloSettings {
       evictionSettings ++
       consoleSettings
 
+  // JDK 21 module system opens required for Kryo serialization and other internal Java class access
+  lazy val jdk21ModuleOpens = List(
+    "--add-opens=java.base/java.util=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+    "--add-opens=java.base/java.io=ALL-UNNAMED",
+    "--add-opens=java.base/java.net=ALL-UNNAMED",
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.util=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+    "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+    "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+    "--add-opens=java.base/java.math=ALL-UNNAMED",
+    "--add-opens=java.base/java.text=ALL-UNNAMED",
+    "--add-opens=java.base/java.time=ALL-UNNAMED",
+    "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED",
+    "-Djdk.reflect.useDirectMethodHandle=false"
+  )
+
   lazy val testSettings = Seq(
     parallelExecution in Test := false,
     fork in Test := true,
@@ -102,7 +127,7 @@ object FiloSettings {
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
-    javaOptions ++= List("-Xmx2G", "-XX:+CMSClassUnloadingEnabled", "-Dakka.test.timefactor=3"),
+    javaOptions ++= List("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
     // Needed to avoid cryptic EOFException crashes in forked tests
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
@@ -126,7 +151,10 @@ object FiloSettings {
       internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
+    // javaOptions in MultiJvm controls the sbt controller process only.
+    // multiJvmJvmOptions (jvmOptions) controls each spawned multi-JVM node process.
+    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
+    multiJvmJvmOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3") ++ jdk21ModuleOpens,
     compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
 
   lazy val testMultiJvmToo = Seq(
@@ -169,6 +197,12 @@ object FiloSettings {
 
   // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
   // Also note: CLI-specific config overrides are set in FilodbCluster.scala
+  //
+  // JDK 21 requires --add-opens flags so that kryo-serializers can reflectively
+  // access private fields inside java.util.Collections$UnmodifiableCollection.
+  // Without them, UnmodifiableCollectionsSerializer.<clinit> throws
+  // ExceptionInInitializerError, which crashes Akka remoting on the first
+  // serialization call.
   lazy val shellScript = """#!/bin/bash
   while [ "${1:0:2}" = "-D" ]
   do
@@ -184,7 +218,27 @@ object FiloSettings {
     config="-Dconfig.file=$FILO_CONFIG_FILE"
   fi
   : ${FILOLOG:="."}
-  exec $CMD -Xmx2g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" "$@"  ;
+  exec $CMD -Xmx2g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops \
+    --add-opens=java.base/java.util=ALL-UNNAMED \
+    --add-opens=java.base/java.lang=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+    --add-opens=java.base/java.io=ALL-UNNAMED \
+    --add-opens=java.base/java.net=ALL-UNNAMED \
+    --add-opens=java.base/java.nio=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+    --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED \
+    --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+    --add-opens=java.base/sun.nio.cs=ALL-UNNAMED \
+    --add-opens=java.base/sun.security.action=ALL-UNNAMED \
+    --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
+    --add-opens=java.base/java.math=ALL-UNNAMED \
+    --add-opens=java.base/java.text=ALL-UNNAMED \
+    --add-opens=java.base/java.time=ALL-UNNAMED \
+    --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED \
+    -Djdk.reflect.useDirectMethodHandle=false \
+    -jar "$0" "$@"  ;
   """.split("\n")
 
   lazy val kafkaSettings = Seq(
@@ -226,14 +280,13 @@ object FiloSettings {
   )
 
   lazy val assemblyExcludeScala = assemblySettings ++ Seq(
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+    assembly / assemblyOption ~= { _.withIncludeScala(false) })
 
-  // Builds cli as a standalone executable to make it easier to launch commands
   lazy val cliAssemblySettings = assemblySettings ++ Seq(
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(
-      prependShellScript = Some(shellScript)),
-    assemblyJarName in assembly := s"filo-cli-${version.value}"
+    assembly / assemblyOption ~= { _.withPrependShellScript(shellScript) },
+    assembly / assemblyJarName := s"filo-cli-${version.value}"
   )
+
 
   // builds timeseries-gen as a fat jar so it can be executed for development test scenarios
   lazy val gatewayAssemblySettings = assemblySettings ++ Seq(

@@ -351,7 +351,8 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: TimeSeriesStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanLeafSamples)
+          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanLeafSamples,
+          querySession)
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case _ => Observable.empty
@@ -385,8 +386,14 @@ final case class LabelValuesExec(queryContext: QueryContext,
       filters.isEmpty match {
         // retrieves label values for a single label - no column filter
         case true if (columns.size == 1) =>
-          val labels = memStore.labelValues(dataset, shard, columns.head,
-            queryContext.plannerParams.enforcedLimits.execPlanSamples).map(_.term.toString)
+          val limit = queryContext.plannerParams.enforcedLimits.execPlanSamples
+          val labels = memStore.labelValues(dataset, shard, columns.head, limit).map(_.term.toString)
+          if (labels.size == limit) {
+            querySession.resultCouldBePartial = true
+            querySession.partialResultsReason = Some(
+              s"Some shards returned a result size greater than $limit;" +
+                " apply more filters or reduce the query time-range.")
+          }
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             StringArrayRowReader(labels), None))
           val sch = if (labels.isEmpty) ResultSchema.empty
@@ -446,12 +453,22 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         val labelNames = memstore.labelNames(dataset, shard, filters, endMs, startMs)
         if (labelNames.nonEmpty) {
           val sketchMap = scala.collection.mutable.Map[String, CpcSketch]()
+          val leafLimit = queryContext.plannerParams.enforcedLimits.execPlanLeafSamples
           labelNames.foreach { case label =>
             // GOTCHA: This approach will not catch cardinality of labels which are disabled for faceting
             // since their value lengths are > 1000. We expect the gateway to reject (or shorten) that data early on.
+            var count = 0
             memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
-              endMs, startMs, querySession, 1000000).foreach { labelValue =>
+              endMs, startMs, querySession,
+              leafLimit).foreach { labelValue =>
               sketchMap.getOrElseUpdate(label, new CpcSketch(logK)).update(labelValue.toString)
+              count += 1
+            }
+            if (count == leafLimit) {
+              querySession.resultCouldBePartial = true
+              querySession.partialResultsReason = Some(
+                s"Some shards returned a result size greater than $leafLimit;" +
+                  " apply more filters or reduce the query time-range.")
             }
           }
 

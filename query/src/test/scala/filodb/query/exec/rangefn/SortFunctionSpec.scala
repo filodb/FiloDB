@@ -161,11 +161,11 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
    )
    val resultAgg = resultObs2.toListL.runToFuture.futureValue
    resultAgg.size shouldEqual 2
-   resultAgg.flatMap(_.rows().map(_.getDouble(1)).toList) shouldEqual(List(5.0, 1.0))
+   resultAgg.flatMap(_.rows().map(_.getDouble(1)).toList) shouldEqual(List(1.0, 5.0))
    
-   val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
+   val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.SortDesc)
    val resultObs = sortFunctionMapper(resultObs2, querySession, 1000, resultSchema, Nil)
    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows().map(_.getDouble(1)).toList)
-   resultRows.shouldEqual(List(1.0, 5.0))
+   resultRows.shouldEqual(List(5.0, 1.0))
  }
 }

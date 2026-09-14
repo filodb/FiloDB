@@ -108,6 +108,11 @@ final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
     }
   }
 
+  // Allocation-free alternative for the common case of just testing overlap.
+  // Avoids the Option + Tuple2 allocations that intersection() incurs on every chunk in the hot path.
+  def intersects(time1: Long, time2: Long): Boolean =
+    time1 <= time2 && time1 <= endTime && time2 >= startTime
+
   def debugString: String =
     if (infoAddr == 0) "ChunkSetInfo(NULL)"
     else s"ChunkSetInfo(id=$id numRows=$numRows startTime=$startTime endTime=$endTime)"
@@ -473,7 +478,9 @@ extends Iterator[ChunkSetInfoReader] {
    * Advances to the next window.
    */
   final def nextWindow(): Unit = {
-    require(hasMoreWindows, s"curWindow=[$curWindowStart, $curWindowEnd] step=$step end=$end")
+    // don't do require(hasMoreWindows, "...") since lambda makes an allocation in the hot path
+    if (!hasMoreWindows) throw new IllegalArgumentException(
+      s"curWindow=[$curWindowStart, $curWindowEnd] step=$step end=$end")
     // advance window pointers and reset read index
     if (curWindowEnd == -1L) {
       curWindowEnd = start
@@ -495,7 +502,6 @@ extends Iterator[ChunkSetInfoReader] {
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfoReader
-      queryContext.checkQueryTimeout(this.getClass.getName)
 
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {

@@ -10,28 +10,32 @@ import org.apache.spark.sql.expressions.Aggregator
  * sketches built per salt bucket into the final per-(ws, label) sketch.
  */
 case class HllSketchMergeAgg(lgK: Int = 12, tgt: TgtHllType = TgtHllType.HLL_4)
-  extends Aggregator[Array[Byte], HllSketch, Array[Byte]] with Serializable {
+  extends Aggregator[Array[Byte], Array[Byte], Array[Byte]] with Serializable {
 
-  override def zero: HllSketch = new HllSketch(lgK, tgt)
+  override def zero: Array[Byte] = new HllSketch(lgK, tgt).toCompactByteArray
 
-  override def reduce(buffer: HllSketch, input: Array[Byte]): HllSketch = {
+  override def reduce(buffer: Array[Byte], input: Array[Byte]): Array[Byte] = {
     if (input != null) {
-      val union = new Union(Math.max(lgK, buffer.getLgConfigK))
-      union.update(buffer)
-      union.update(HllSketch.heapify(input))
-      union.getResult(tgt)
+      val s1 = HllSketch.heapify(buffer)
+      val s2 = HllSketch.heapify(input)
+      val union = new Union(Math.max(lgK, Math.max(s1.getLgConfigK, s2.getLgConfigK)))
+      union.update(s1)
+      union.update(s2)
+      union.getResult(tgt).toCompactByteArray
     } else buffer
   }
 
-  override def merge(b1: HllSketch, b2: HllSketch): HllSketch = {
-    val union = new Union(Math.max(lgK, Math.max(b1.getLgConfigK, b2.getLgConfigK)))
-    union.update(b1)
-    union.update(b2)
-    union.getResult(tgt)
+  override def merge(b1: Array[Byte], b2: Array[Byte]): Array[Byte] = {
+    val s1 = HllSketch.heapify(b1)
+    val s2 = HllSketch.heapify(b2)
+    val union = new Union(Math.max(lgK, Math.max(s1.getLgConfigK, s2.getLgConfigK)))
+    union.update(s1)
+    union.update(s2)
+    union.getResult(tgt).toCompactByteArray
   }
 
-  override def finish(reduction: HllSketch): Array[Byte] = reduction.toCompactByteArray
+  override def finish(reduction: Array[Byte]): Array[Byte] = reduction
 
-  override def bufferEncoder: Encoder[HllSketch]   = Encoders.kryo[HllSketch]
+  override def bufferEncoder: Encoder[Array[Byte]] = Encoders.BINARY
   override def outputEncoder: Encoder[Array[Byte]] = Encoders.BINARY
 }

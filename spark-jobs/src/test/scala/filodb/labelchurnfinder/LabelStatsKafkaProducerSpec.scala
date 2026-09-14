@@ -25,12 +25,24 @@ class LabelStatsKafkaProducerSpec extends AnyFunSpec with Matchers with BeforeAn
 
   var spark: SparkSession = _
 
-  override def beforeAll(): Unit = {
+  private def localSparkConf(): SparkConf = {
     val sparkConf = new SparkConf(loadDefaults = false)
+    sparkConf.setMaster("local[2]")
       .setMaster("local[2]")
       .setAppName("LabelStatsKafkaProducerSpec")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .set("spark.ui.enabled", "false")
+    // Pin driver/executor to loopback so tests pass regardless of WiFi/VPN state.
+    // Without this, InetAddress.getLocalHost resolves to the WiFi IP on macOS,
+    // causing Spark internal RPC to bind on a non-loopback address that may not be reachable.
+    sparkConf.set("spark.driver.host", "127.0.0.1")
+    sparkConf.set("spark.driver.bindAddress", "127.0.0.1")
+    sparkConf
+  }
+
+
+  override def beforeAll(): Unit = {
+    val sparkConf = localSparkConf()
 
     spark = SparkSession.builder()
       .config(sparkConf)

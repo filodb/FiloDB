@@ -444,5 +444,42 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     roundSrv.containersIterator.length shouldEqual oneSrv.containersIterator.length
     oneSrv.containersIterator.length shouldEqual 1
   }
-}
 
+  it("should round-trip QueryStats correctly via Kryo") {
+    val qsSer = QueryStats()
+    val key1 = Seq("hey")
+    val key2 = Seq("woah", "hello")
+
+    qsSer.getSamplesScannedCounter(key1).addAndGet(1)
+    qsSer.getCpuNanosCounter(key1).addAndGet(2)
+    qsSer.getDataBytesScannedCounter(key1).addAndGet(3)
+    qsSer.getTimeSeriesScannedCounter(key1).addAndGet(4)
+    qsSer.getResultBytesCounter(key1).addAndGet(5)
+
+    qsSer.getSamplesScannedCounter(key2).addAndGet(11)
+    qsSer.getCpuNanosCounter(key2).addAndGet(22)
+    qsSer.getDataBytesScannedCounter(key2).addAndGet(33)
+    qsSer.getTimeSeriesScannedCounter(key2).addAndGet(44)
+    qsSer.getResultBytesCounter(key2).addAndGet(55)
+
+    // Wrapping inside QueryError so KryoSerializer is used.
+    val err = QueryError("dummy-id", qsSer, new RuntimeException("Something broke :("))
+
+    val qsDeser = roundTrip(err).asInstanceOf[QueryError].queryStats
+
+    qsDeser.getSamplesScannedCounter(key1).get() shouldEqual 1
+    qsDeser.getCpuNanosCounter(key1).get() shouldEqual 2
+    qsDeser.getDataBytesScannedCounter(key1).get() shouldEqual 3
+    qsDeser.getTimeSeriesScannedCounter(key1).get() shouldEqual 4
+    qsDeser.getResultBytesCounter(key1).get() shouldEqual 5
+
+    qsDeser.getSamplesScannedCounter(key2).get() shouldEqual 11
+    qsDeser.getCpuNanosCounter(key2).get() shouldEqual 22
+    qsDeser.getDataBytesScannedCounter(key2).get() shouldEqual 33
+    qsDeser.getTimeSeriesScannedCounter(key2).get() shouldEqual 44
+    qsDeser.getResultBytesCounter(key2).get() shouldEqual 55
+
+    // Make sure locks are not left null after deserialization.
+    qsDeser.keys()
+  }
+}
