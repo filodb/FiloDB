@@ -492,6 +492,7 @@ enum AggregationOperator {
   STDVAR          =  9;
   QUANTILE        = 10;
   MAX             = 11;
+  HISTOGRAM_AVG            = 12;
 }
 
 message AggregateParameter {
@@ -1151,6 +1152,25 @@ message ExecPlanContainer {
 message RemoteExecPlan {
   ExecPlanContainer execPlan = 1;
   QueryContext queryContext  = 2;
+}
+
+message FlightResultHeader {
+  ResultSchema resultSchema = 1;
+}
+
+message FlightResultFooter {
+  QueryResultStats queryStats           = 1;
+  optional Throwable throwable          = 2;
+  bool mayBePartial                     = 3;
+  optional string partialResultReason   = 4;
+  optional QueryWarnings warnings       = 5;
+}
+
+message FlightMetadata {
+  oneof content {
+    FlightResultHeader header = 1;
+    FlightResultFooter footer = 2;
+  }
 }
 
 service RemoteExec {

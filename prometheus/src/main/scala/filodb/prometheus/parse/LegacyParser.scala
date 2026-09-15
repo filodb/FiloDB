@@ -297,6 +297,7 @@ trait AggregatesParser extends OperatorParser with BaseParser {
 
   protected val SUM = Keyword("SUM")
   protected val AVG = Keyword("AVG")
+  protected val HISTOGRAM_AVG = Keyword("HISTOGRAM_AVG")
   protected val MIN = Keyword("MIN")
   protected val MAX = Keyword("MAX")
   protected val STD_DEV = Keyword("STDDEV")
@@ -324,7 +325,7 @@ trait AggregatesParser extends OperatorParser with BaseParser {
   }
 
   lazy val aggregateOperator: PackratParser[String] =
-    SUM | AVG | MIN | MAX | STD_DEV | STD_VAR | COUNT_VALUES | COUNT |
+    SUM | AVG | HISTOGRAM_AVG | MIN | MAX | STD_DEV | STD_VAR | COUNT_VALUES | COUNT |
       GROUP | BOTTOMK | TOPK | QUANTILE
 
   lazy val aggregateRangeOperator: PackratParser[String] =

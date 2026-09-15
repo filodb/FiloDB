@@ -6,6 +6,8 @@ import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.core.binaryrecord2.RecordBuilderBase
+
 
 class RangeVectorSpec  extends AnyFunSpec with Matchers {
   val now = System.currentTimeMillis()
@@ -25,6 +27,7 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
       def partIds: Seq[Int] = Nil
       def schemaNames: Seq[String] = Nil
       def keySize: Int = 0
+      def writeToMapBr(rb: RecordBuilderBase): Unit = {}
     }
 
     override def outputRange: Option[RvRange] = None

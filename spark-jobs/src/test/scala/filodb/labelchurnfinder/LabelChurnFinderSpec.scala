@@ -27,6 +27,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
+  var sparkSession: SparkSession = _
 
   val now = 1752700000000L
   val jobConfig = ConfigFactory.parseString(
@@ -67,6 +68,9 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
   override def afterAll(): Unit = {
     offheapMem.free()
+    if (sparkSession != null) {
+      sparkSession.stop()
+    }
   }
 
   it("should simulate bulk part key records being written into raw for processing") {
@@ -96,9 +100,19 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     }
   }
 
-  it ("should run LCF job for one namespace and workspace") {
+  private def localSparkConf(): SparkConf = {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
+    // Pin driver/executor to loopback so tests pass regardless of WiFi/VPN state.
+    // Without this, InetAddress.getLocalHost resolves to the WiFi IP on macOS,
+    // causing Spark internal RPC to bind on a non-loopback address that may not be reachable.
+    sparkConf.set("spark.driver.host", "127.0.0.1")
+    sparkConf.set("spark.driver.bindAddress", "127.0.0.1")
+    sparkConf
+  }
+
+  it ("should run LCF job for one namespace and workspace") {
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = bulk_ns0
@@ -107,12 +121,12 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
     sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    val spark = SparkSession.builder()
+    sparkSession = SparkSession.builder()
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
 
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
@@ -126,12 +140,10 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2),
     )
-    spark.stop()
   }
 
   it ("should run LCF job for multiple namespaces and workspaces") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = "bulk_ns.*"
@@ -140,11 +152,11 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
     sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    val spark = SparkSession.builder()
+    sparkSession = SparkSession.builder()
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
@@ -158,12 +170,10 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2),
     )
-    spark.stop()
   }
 
   it ("should run LCF job for different time range") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     val filterConfig = ConfigFactory.parseString(
       s"""
          |filodb.labelchurnfinder.pk-filters.0._ns_ = "bulk_ns.*"
@@ -173,11 +183,11 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
     val lcf = new LabelChurnFinder(settings2)
     sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    val spark = SparkSession.builder()
+    sparkSession = SparkSession.builder()
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(spark)).collect()
+    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
@@ -191,14 +201,12 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2)
     )
-    spark.stop()
   }
 
   it ("should call publishLabelStats when actionOnLabelStats is invoked") {
-    val sparkConf = new SparkConf(loadDefaults = true)
-    sparkConf.setMaster("local[2]")
+    val sparkConf = localSparkConf()
     sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    val spark = SparkSession.builder()
+    sparkSession = SparkSession.builder()
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
@@ -219,6 +227,7 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     sketch7d.update("value3")
 
     // Create a test DataFrame with valid HLL sketches
+    val spark = sparkSession
     import spark.implicits._
     val testDf = Seq(
       ("ws1", "All", "pod", 100L, 200L, 300L,
@@ -231,8 +240,6 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
 
     // Verify publishLabelStats was called once
     verify(mockProducer, times(1)).publishLabelStats(any[DataFrame])
-
-    spark.stop()
   }
 
 }

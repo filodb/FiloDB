@@ -1,6 +1,7 @@
 package filodb.coordinator.client
 
 import java.net.URI
+import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import com.esotericsoftware.kryo.{Kryo, Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.io._
@@ -27,6 +28,7 @@ object KryoInit {
     kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
     kryo.register(classOf[Schema], new SchemaSerializer)
     kryo.register(classOf[PartitionSchema], new PartSchemaSerializer)
+    kryo.register(classOf[ReentrantReadWriteLock], new ReentrantReadWriteLockSerializer)
 
     initOtherFiloClasses(kryo)
     initQueryEngine2Classes(kryo)
@@ -183,5 +185,16 @@ class PartSchemaSerializer extends KryoSerializer[PartitionSchema] {
   override def write(kryo: Kryo, output: Output, schema: PartitionSchema): Unit = {
     val schemas = FilodbSettings.globalOrDefault.schemas
     require(schema == schemas.part)
+  }
+}
+
+class ReentrantReadWriteLockSerializer extends KryoSerializer[ReentrantReadWriteLock] {
+  override def write(kryo: Kryo, output: Output, lock: ReentrantReadWriteLock): Unit = {
+    // No state needs to be written; locks restore cleanly to an unlocked state
+  }
+
+  override def read(kryo: Kryo, input: Input, typ: Class[ReentrantReadWriteLock]): ReentrantReadWriteLock = {
+    // Create a fresh lock when deserialized
+    new ReentrantReadWriteLock
   }
 }

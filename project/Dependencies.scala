@@ -24,13 +24,13 @@ object Dependencies {
   val ficusVersion      = "1.5.2" // Updated for Scala 2.13
   val kamonBundleVersion = "2.7.3"
   val otelVersion       = "1.54.1"
+  val otelVersionAlpha  = otelVersion + "-alpha"
   val otelInstVersion   = "2.20.1-alpha"
   val monixKafkaVersion = "1.0.0-RC7"
-  val sparkVersion      = "3.4.0"
+  val sparkVersion      = "4.0.0"
   val sttpVersion       = "1.7.2" // Updated for Scala 2.13
   val grpcVersion       = "1.50.0"
-  val arrowVersion      = "11.0.0" // latest version is 15, but unfortunately it breaks Spark compatibility; we cannot
-                                   // move to spark 4.0 yet; when we do move to Spark 4.0, do upgrade Arrow as well
+  val arrowVersion      = "15.0.2"
 
   /* Dependencies shared */
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.5.6"
@@ -53,6 +53,7 @@ object Dependencies {
     "io.opentelemetry"             % "opentelemetry-sdk-metrics"            % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-otlp"          % otelVersion,
     "io.opentelemetry"             % "opentelemetry-exporter-logging-otlp"  % otelVersion,
+    "io.opentelemetry"             % "opentelemetry-exporter-prometheus"    % otelVersionAlpha,
     "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry-java8" % otelInstVersion,
     "io.opentelemetry.instrumentation" % "opentelemetry-oshi"                    % otelInstVersion,
     "org.scala-lang.modules" %% "scala-collection-compat" % "2.11.0",
@@ -177,7 +178,7 @@ object Dependencies {
     "com.google.protobuf"    % "protobuf-java"             % "2.5.0",
     "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2", // Updated for Scala 2.13
     "com.softwaremill.quicklens" %% "quicklens"            % "1.9.7", // Updated for Scala 2.13
-    "org.antlr" % "antlr4-runtime" % "4.9.1"
+    "org.antlr" % "antlr4-runtime" % "4.13.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
@@ -240,8 +241,8 @@ object Dependencies {
   )
 
   lazy val gatlingDeps = Seq(
-      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.5.0" % "test,it", // 3.5.0 is first version compiled against Scala 2.13
-      "io.gatling"            % "gatling-test-framework"    % "3.5.0" % "test,it"  // 3.5.0 is first version compiled against Scala 2.13
+      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.15.1" % "test,it", // 3.5.0 is first version compiled against Scala 2.13
+      "io.gatling"            % "gatling-test-framework"    % "3.15.1" % "test,it"  // 3.5.0 is first version compiled against Scala 2.13
   )
 
   //  lazy val stressDeps = Seq(

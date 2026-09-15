@@ -421,17 +421,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private[memstore] val blockMemorySize = {
-    val size = if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
-      val numNodes = filodbConfig.getInt("min-num-nodes-in-cluster")
-      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
-      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
-      val blockMemForDatasetPercent = storeConfig.shardMemPercent // fraction of block memory for this dataset
-      val numShardsPerNode = Math.ceil(numShards / numNodes.toDouble)
-      logger.info(s"Calculating Block memory size with automatic allocation strategy. " +
-        s"Dataset dataset=$ref has blockMemForDatasetPercent=$blockMemForDatasetPercent " +
-        s"numShardsPerNode=$numShardsPerNode")
-      (availableMemoryBytes * blockMemoryManagerPercent *
-        blockMemForDatasetPercent / 100 / 100 / numShardsPerNode).toLong
+    val size = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
+      AutoMemoryAllocUtil.getPerShardBlockMemoryAllocSize(filodbConfig, numShards, ref, storeConfig)
     } else {
       storeConfig.shardMemSize
     }
@@ -676,6 +667,12 @@ class TimeSeriesShard(val ref: DatasetRef,
           schemas.part.binSchema.singleColValues(nextPart.base, nextPart.offset, label, rows)
         partLoopIndx += 1
       }
+      if (rows.size == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(
+          s"Some shards returned a result size greater than $limit;" +
+            " apply more filters or reduce the query time-range.")
+      }
       shardStats.partkeyLabelScans.increment(partLoopIndx)
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
@@ -714,6 +711,12 @@ class TimeSeriesShard(val ref: DatasetRef,
 
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
+      }
+      if (rows.size == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(
+          s"Some shards returned a result size greater than $limit;" +
+            " apply more filters or reduce the query time-range.")
       }
       querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
@@ -1994,9 +1997,17 @@ class TimeSeriesShard(val ref: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
-      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit).iterator.map { pk =>
+      val result = partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime, limit)
+      if (result.length == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(
+          s"Some shards returned a result size greater than $limit;" +
+            " apply more filters or reduce the query time-range.")
+      }
+      result.iterator.map { pk =>
         val partKeyMap = convertPartKeyWithTimesToMap(
           PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
         partKeyMap ++ Map(
@@ -2005,6 +2016,12 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     } else {
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, limit)
+      if (partIds.length == limit) {
+        querySession.resultCouldBePartial = true
+        querySession.partialResultsReason = Some(
+          s"Some shards returned a result size greater than $limit;" +
+            " apply more filters or reduce the query time-range.")
+      }
       val inMem = InMemPartitionIterator2(partIds)
       val inMemPartKeys = inMem.map { p =>
         convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}

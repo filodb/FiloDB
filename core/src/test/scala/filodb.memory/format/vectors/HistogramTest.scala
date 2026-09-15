@@ -545,7 +545,11 @@ class HistogramTest extends NativeVectorTest {
         for (i <- 1 until b.numBuckets) {
           val bucketTop = b.bucketTop(i)
           val index = b.startIndexPositiveBuckets + i - 1
-          bucketTop shouldEqual Math.pow(b.base, index + 1) +- epsilon
+          val expected = Math.pow(b.base, index + 1)
+          // bucketTop is computed via exp(n * log(base)) for perf, which can diverge from pow(base, n)
+          // by a few ULPs at large magnitudes. Scale the tolerance with the expected value's magnitude
+          // instead of using a fixed absolute epsilon, which is too tight for large bucket tops.
+          bucketTop shouldEqual expected +- (epsilon * Math.max(1.0, Math.abs(expected)))
         }
       }
     }
