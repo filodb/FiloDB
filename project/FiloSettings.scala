@@ -109,6 +109,11 @@ object FiloSettings {
     "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
     "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
     "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
+    // Filter.EqualsRegex / NotEqualsRegex hold a compiled java.util.regex.Pattern, which rides
+    // along in ExecPlans over akka remoting. Kryo has no serializer for Pattern and falls back to
+    // the reflective FieldSerializer, which cannot be constructed without this open. Note these
+    // opens are NOT recursive, so java.base/java.util above does not cover java.util.regex.
+    "--add-opens=java.base/java.util.regex=ALL-UNNAMED",
     "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
     "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
     "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
