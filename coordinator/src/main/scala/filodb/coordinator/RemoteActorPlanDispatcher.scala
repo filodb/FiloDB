@@ -16,7 +16,7 @@ import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 // is instantiated and utilized to fulfill dispatch.
 case class RemoteActorPlanDispatcher(path: String, clusterName: String) extends PlanDispatcher {
 
-  override def dispatch(
+  override def doDispatch(
      plan: ExecPlanWithClientParams, source: ChunkSource
   )(implicit sched: Scheduler): Task[QueryResponse] = {
     val serialization = akka.serialization.SerializationExtension(ActorSystemHolder.system)
@@ -28,10 +28,10 @@ case class RemoteActorPlanDispatcher(path: String, clusterName: String) extends 
     } else {
       ActorPlanDispatcher(deserializedActorRef, clusterName)
     }
-    dispatcher.dispatch(plan, source)
+    dispatcher.doDispatch(plan, source)
   }
 
-  def dispatchStreaming
+  def doDispatchStreaming
   (plan: ExecPlanWithClientParams, source: ChunkSource)
   (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
 

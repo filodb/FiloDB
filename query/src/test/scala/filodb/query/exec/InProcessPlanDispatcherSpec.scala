@@ -220,7 +220,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {
   // run locally withing any check.
-  override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+  override def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
     plan.execPlan.execute(memStore, querySession)
   }
@@ -228,7 +228,7 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
   override def clusterName: String = ???
 
   override def isLocalCall: Boolean = true
-  override def dispatchStreaming(plan: ExecPlanWithClientParams,
+  override def doDispatchStreaming(plan: ExecPlanWithClientParams,
                                  source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     plan.execPlan.executeStreaming(memStore, querySession)
   }

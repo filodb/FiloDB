@@ -32,7 +32,7 @@ case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends 
 
   val clusterName = InetAddress.getLocalHost().getHostName()
 
-  override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler):
+  override def doDispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler):
   Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
@@ -120,7 +120,7 @@ case class GrpcPlanDispatcher(endpoint: String, requestTimeoutMs: Long) extends 
   // for these GRPC dispatchers, we need to implement this method. Currently, it does not make sense to implement
   // streaming in this dispatcher.
 
-  def dispatchStreaming
+  def doDispatchStreaming
   (plan: ExecPlanWithClientParams, source: ChunkSource)
   (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     ???
