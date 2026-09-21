@@ -148,10 +148,16 @@ object Submodules {
     )
 
   lazy val http = (project in file("http"))
-    .dependsOn(core, grpc, coordinator % "compile->compile; test->test")
+    .dependsOn(
+      core % "compile->compile; it->test",
+      grpc,
+      coordinator % "compile->compile; test->test; it->test"
+    )
+    .configs(IntegrationTest)
     .settings(
       commonSettings,
       name := "http",
+      itSettings,
       libraryDependencies ++= httpDeps
     )
 
