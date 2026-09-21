@@ -206,14 +206,19 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   // Future optimization: group by token range and batch?
   def write(ref: DatasetRef,
             chunksets: Observable[ChunkSet],
-            diskTimeToLiveSeconds: Long = 259200): Future[Response] = {
+            diskTimeToLiveSeconds: Long = 259200,
+            writeToIngestionTimeIndex: Boolean = true): Future[Response] = {
     chunksets.mapParallelUnordered(writeParallelism) { chunkset =>
       val start = System.currentTimeMillis()
       val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
            val future =
              for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
                    if writeChunksResp == Success
-                   writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, writeTimeIndexTtlSeconds)
+                   // Skip the ingestion_time_index (write-time index) write when disabled for this dataset.
+                   // Chunks are still persisted; a skipped index write yields Success so the flow is unchanged.
+                   writeIndicesResp  <- if (writeToIngestionTimeIndex)
+                                          writeIndices(ref, partBytes, chunkset, writeTimeIndexTtlSeconds)
+                                        else Future.successful(Success)
                    if writeIndicesResp == Success
              } yield {
                writeChunksetLatency.record(System.currentTimeMillis() - start)
