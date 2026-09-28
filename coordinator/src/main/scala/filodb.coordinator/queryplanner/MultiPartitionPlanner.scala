@@ -141,6 +141,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
     } else logicalPlan match {
+      case la: LabelAudit                     => materializeLabelAudit(la, qContext)
       case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
       case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
@@ -1357,6 +1358,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
     case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
+    case la: LabelAudit                => la.copy(startMs = startMs, endMs = endMs)
   }
 
   private def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -1382,6 +1384,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                  _: LabelNames |
                  _: LabelCardinality    => Map("match[]" -> LogicalPlanParser.metadataMatchToQuery(lp))
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
+            case _: LabelAudit          =>
+              throw new IllegalStateException("unreachable: LabelAudit is materialized by materializeLabelAudit")
           }
           createMetadataRemoteExec(qContext, p, params, lp)
         }
@@ -1396,9 +1400,36 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _: LabelAudit =>
+          throw new IllegalStateException("unreachable: LabelAudit is materialized by materializeLabelAudit")
       }
     }
     PlanResult(execPlan::Nil)
+  }
+
+  /**
+   * LabelAudit data is not in FiloDB shards, so every partition, the local one included, is called on its
+   * remote endpoint. The rows are concatenated.
+   */
+  private def materializeLabelAudit(lp: LabelAudit, qContext: QueryContext): ExecPlan = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val timeRange = TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000)
+    // Filter values are quoted, as in the /v2/label/ params.
+    val filter = lp.filters
+      .map(f => f.column + f.filter.operatorString + "\"" + f.filter.valuesStrings.head + "\"")
+      .mkString(",")
+    val urlParams = lp.params + ("filter" -> filter)
+    val remoteExecs = resolveMetadataPartitions(lp, queryParams)
+      .flatMap(_.proportionMap.values)
+      // A time-split assignment can list a partition more than once; the audit isn't time-ranged.
+      .distinctBy(_.httpEndPoint)
+      .map(pd => createMetadataRemoteExec(qContext,
+        PartitionAssignment(pd.partitionName, pd.httpEndPoint, timeRange, pd.grpcEndPoint, pd.workUnit), urlParams, lp))
+    remoteExecs match {
+      case Nil         => EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
+      case one :: Nil  => one
+      case _           => PartKeysDistConcatExec(qContext, inProcessPlanDispatcher, remoteExecs)
+    }
   }
 
   /**
@@ -1424,7 +1455,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
     val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
     // SeriesKeysByFilters stores its filters directly; getNonMetricShardKeyFilters doesn't extract them
-    // via getRawSeriesFilters (which only handles RawSeries/LabelValues/LabelNames leaves).
+    // via getRawSeriesFilters (which only handles RawSeries/LabelValues/LabelAudit/LabelNames leaves).
     val shardKeyFilterGroups = lp match {
       case skbf: SeriesKeysByFilters =>
         Seq(skbf.filters.filter(f => dataset.options.shardKeyColumns.contains(f.column)))

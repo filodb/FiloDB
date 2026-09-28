@@ -60,6 +60,7 @@ sealed trait LogicalPlan {
       case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
       case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
       case l: LabelValues              => l.copy(filters = filters)
+      case a: LabelAudit               => a.copy(filters = filters)
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
       case c: TsCardinalities          => c  // immutable & no members need to be updated
@@ -104,6 +105,7 @@ sealed trait LogicalPlan {
       case lp: ApplyLimitFunction          => hasOptimizeWithAgg(lp.vectors)
       case lp: RawSeries                   => false
       case lp: LabelValues                 => false
+      case lp: LabelAudit                  => false
       case lp: LabelCardinality            => false
       case lp: LabelNames                  => false
       case lp: TsCardinalities             => false
@@ -284,6 +286,22 @@ case class LabelValues(labelNames: Seq[String],
                        startMs: Long,
                        endMs: Long) extends MetadataQueryPlan
 
+
+/**
+ * Label audit. Its data is not in FiloDB shards: the multi-partition planner sends it to the remote endpoint
+ * of every partition and concatenates the rows; `params` are passed through to those calls as-is.
+ */
+final case class LabelAudit(filters: Seq[ColumnFilter],
+                            params: Map[String, String],
+                            startMs: Long,
+                            endMs: Long) extends MetadataQueryPlan {
+  // Keep failure routing (HighAvailabilityPlanner) from sending it to a buddy cluster as a PromQL query.
+  override def isRoutable: Boolean = false
+}
+
+object LabelAudit {
+  val OnlyMultiPartition = "LabelAudit can only be planned by MultiPartitionPlanner"
+}
 
 case class LabelCardinality( filters: Seq[ColumnFilter],
                              startMs: Long,
@@ -1043,6 +1061,7 @@ object LogicalPlan {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
         case lp: LabelValues           => lp.filters toSet
+        case lp: LabelAudit            => lp.filters.toSet
         case lp: LabelNames            => lp.filters toSet
         case lp: RawSeries             => lp.filters toSet
         case lp: RawChunkMeta          => lp.filters toSet
@@ -1072,6 +1091,7 @@ object LogicalPlan {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
         case lp: LabelValues => (lp.filters toSet, true)
+        case lp: LabelAudit => (lp.filters.toSet, true)
         case lp: LabelNames => (lp.filters toSet, true)
         case lp: RawSeries => (lp.filters toSet, true)
         case lp: RawChunkMeta => (lp.filters toSet, true)
@@ -1100,6 +1120,7 @@ object LogicalPlan {
       l match {
         case lp: RawSeries    => lp.filters
         case lp: LabelValues  => lp.filters
+        case lp: LabelAudit   => lp.filters
         case lp: LabelNames  => lp.filters
         case _                => Seq.empty
       }

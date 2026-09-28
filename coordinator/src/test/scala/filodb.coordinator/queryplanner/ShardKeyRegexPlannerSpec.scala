@@ -10,9 +10,10 @@ import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId, PlanValidationSpec, SortFunctionId, TsCardinalities}
+import filodb.query.{BinaryOperator, InstantFunctionId, LabelAudit, LogicalPlan, MiscellaneousFunctionId,
+  PlanValidationSpec, SortFunctionId, TsCardinalities}
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.core.query.Filter.{Equals, isRegex}
+import filodb.core.query.Filter.{Equals, EqualsRegex, isRegex}
 import filodb.prometheus.parse.Parser
 import filodb.query.InstantFunctionId.{Exp, HistogramQuantile, Ln}
 import filodb.query.exec._
@@ -418,6 +419,25 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+  }
+
+  it ("should pass a LabelAudit to the multi-partition planner without expanding shard key regexes") {
+    var matcherCalls = 0
+    val countingMatcher = (filters: Seq[ColumnFilter]) => { matcherCalls += 1; shardKeyMatcherFn(filters) }
+    val engine = new ShardKeyRegexPlanner(dataset, mpp, countingMatcher, simplePartitionLocationProvider,
+      queryConfig, false)
+    val lp = LabelAudit(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", EqualsRegex("App-.*"))),
+      Map("audit" -> "label_count"), 1000000, 5000000)
+
+    val execPlan = engine.materialize(lp, QueryContext(
+      origQueryParams = PromQlQueryParams("", 1000, 20, 5000, Some("/api/v1/audit")),
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    // A regex _ns_ routes by workspace: mpp's metadata partitions are a single remote one.
+    val remote = execPlan.asInstanceOf[MetadataRemoteExec]
+    remote.queryEndpoint shouldEqual "remote-url/api/v1/audit"
+    remote.urlParams shouldEqual Map("audit" -> "label_count", "filter" -> """_ws_="demo",_ns_=~"App-.*"""")
+    matcherCalls shouldEqual 0
   }
 
   it ("should generate ExecPlan for TsCardinalities") {

@@ -292,6 +292,7 @@ import filodb.query.exec._
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: LabelNames                 => rawClusterMaterialize(qContext, logicalPlan)
+        case _: LabelAudit                 => throw new UnsupportedOperationException(LabelAudit.OnlyMultiPartition)
       }
     }
     else logicalPlan match {
@@ -305,6 +306,7 @@ import filodb.query.exec._
       case lp: BinaryJoin                  => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
+      case _: LabelAudit                   => throw new UnsupportedOperationException(LabelAudit.OnlyMultiPartition)
       case lp: TsCardinalities             => materializeTSCardinalityPlan(qContext, lp)
       case lp: SeriesKeysByFilters         => rawClusterMaterialize(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)

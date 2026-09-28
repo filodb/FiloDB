@@ -497,6 +497,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp, forceInProcess)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp, forceInProcess)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp, forceInProcess)
+      case _: LabelAudit                   => throw new UnsupportedOperationException(LabelAudit.OnlyMultiPartition)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp, forceInProcess)
       case lp: TsCardinalities             => materializeTsCardinalities(qContext, lp, forceInProcess)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp, forceInProcess)

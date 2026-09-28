@@ -91,6 +91,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext, forceInProcess: Boolean)
   : PlanResult = logicalPlan match {
         case lp: LabelValues                  => this.materializeLabelValues(lp, qContext)
+        case _: LabelAudit                    => throw new UnsupportedOperationException(LabelAudit.OnlyMultiPartition)
         case lp: TsCardinalities              => this.materializeTsCardinalities(lp, qContext)
         case lp: SeriesKeysByFilters          => this.materializeSeriesKeysFilters(lp, qContext)
         case lp: LabelNames                   => this.materializeLabelNames(lp, qContext)
