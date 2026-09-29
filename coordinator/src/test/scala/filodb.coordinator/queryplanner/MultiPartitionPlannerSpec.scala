@@ -11,13 +11,14 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query.Filter.Equals
+import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RoutingConfig}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.ADD
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
+import filodb.query.{LabelAudit, LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters,
+  TsCardinalities}
 import filodb.query.exec._
 
 
@@ -2995,6 +2996,100 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         plannerParams = PlannerParams(processMultiPartition = true)))
       val remoteExecQuery = execPlan.asInstanceOf[MetadataRemoteExec].promQlQueryParams.promQl
       remoteExecQuery shouldEqual query
+    }
+  }
+
+  describe("LabelAudit") {
+    val auditParams = Map("audit" -> "long_label_values", "limit" -> "5")
+    val auditLp = LabelAudit(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", EqualsRegex("App-.*"))),
+      auditParams, startSeconds * 1000, endSeconds * 1000)
+    val auditQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v1/audit"))
+
+    def auditEngine(assignments: List[PartitionAssignment]): MultiPartitionPlanner = {
+      val provider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          assignments
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] = assignments
+      }
+      new MultiPartitionPlanner(provider, localPlanner, "local", dataset, queryConfig, false)
+    }
+
+    def plan(engine: MultiPartitionPlanner, processMultiPartition: Boolean = true): ExecPlan =
+      engine.materialize(auditLp, QueryContext(origQueryParams = auditQueryParams,
+        plannerParams = PlannerParams(processMultiPartition = processMultiPartition)))
+
+    it("should call every partition's remote endpoint, the local one too, and concatenate the rows") {
+      val execPlan = plan(auditEngine(List(
+        PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000, endSeconds * 1000), workUnit = "wu"),
+        PartitionAssignment("local", "local-url", TimeRange(startSeconds * 1000, endSeconds * 1000), workUnit = "wu"))))
+
+      execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual true
+      val remotes = execPlan.children.map(_.asInstanceOf[MetadataRemoteExec])
+      remotes.map(_.queryEndpoint) shouldEqual Seq("remote-url/api/v1/audit", "local-url/api/v1/audit")
+      // The audit params plus the quoted filter; never `labels`.
+      remotes.foreach(_.urlParams shouldEqual auditParams + ("filter" -> """_ws_="demo",_ns_=~"App-.*""""))
+      remotes.foreach(_.queryContext.plannerParams.processMultiPartition shouldEqual false)
+    }
+
+    it("should call a partition once when a time split lists it more than once") {
+      val execPlan = plan(auditEngine(List(
+        PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1),
+          workUnit = "wu"),
+        PartitionAssignment("remote", "remote-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000),
+          workUnit = "wu"))))
+
+      execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual true
+      execPlan.asInstanceOf[MetadataRemoteExec].queryEndpoint shouldEqual "remote-url/api/v1/audit"
+    }
+
+    it("should return an empty result, not fall back to the local planner, when there are no partitions") {
+      plan(auditEngine(Nil)).isInstanceOf[EmptyResultExec] shouldEqual true
+    }
+
+    it("should be rejected by the local planners") {
+      val thrown = intercept[UnsupportedOperationException] {
+        plan(auditEngine(Nil), processMultiPartition = false)
+      }
+      thrown.getMessage shouldEqual LabelAudit.OnlyMultiPartition
+    }
+
+    it("should route to the namespace's partition for Equals _ws_ and _ns_, else to the workspace's partitions") {
+      val nsPartition = PartitionAssignment("ns-partition", "ns-url",
+        TimeRange(startSeconds * 1000, endSeconds * 1000), workUnit = "wu")
+      val wsPartitions = List(nsPartition,
+        PartitionAssignment("other-partition", "other-url", TimeRange(startSeconds * 1000, endSeconds * 1000),
+          workUnit = "wu"))
+      val provider = new PartitionLocationProvider {
+        override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+          if (routingKey == Map("_ws_" -> "demo", "_ns_" -> "App-1")) List(nsPartition) else Nil
+        override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                           timeRange: TimeRange): List[PartitionAssignment] = wsPartitions
+      }
+      // A dataset whose shard keys are _ws_ and _ns_, as for Prometheus data.
+      val multiShardDataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
+      val multiShardPlanner = new SingleClusterPlanner(multiShardDataset, Schemas(multiShardDataset.schema), mapperRef,
+        earliestRetainedTimestampFn = 0, queryConfig, "raw")
+      val engine = new MultiPartitionPlanner(provider, multiShardPlanner, "local", multiShardDataset, queryConfig)
+      def endpoints(filters: Seq[ColumnFilter]): Seq[String] = {
+        val execPlan = engine.materialize(auditLp.copy(filters = filters), QueryContext(
+          origQueryParams = auditQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
+        (if (execPlan.children.isEmpty) Seq(execPlan) else execPlan.children)
+          .map(_.asInstanceOf[MetadataRemoteExec].queryEndpoint)
+      }
+
+      endpoints(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1")))) shouldEqual
+        Seq("ns-url/api/v1/audit")
+      endpoints(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", EqualsRegex("App-.*")))) shouldEqual
+        Seq("ns-url/api/v1/audit", "other-url/api/v1/audit")
+      endpoints(Seq(ColumnFilter("_ws_", Equals("demo")))) shouldEqual
+        Seq("ns-url/api/v1/audit", "other-url/api/v1/audit")
+    }
+
+    it("should replace filters and keep its params") {
+      val replaced = auditLp.replaceFilters(Seq(ColumnFilter("_ws_", Equals("other"))))
+      replaced shouldEqual auditLp.copy(filters = Seq(ColumnFilter("_ws_", Equals("other"))))
+      auditLp.isRoutable shouldEqual false
     }
   }
 }
