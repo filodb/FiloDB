@@ -39,6 +39,12 @@ object QueryConfig {
     val stitchDisabledTenantColumn = queryConfig.getString("routing.disabled-remote-stitch-tenant-column-name")
     val useLegacyMetadataRouting = queryConfig.as[Option[Boolean]](
       "routing.use-legacy-metadata-routing").getOrElse(false)
+    val enableTimeSplitAggregatePushdown = queryConfig.as[Option[Boolean]](
+      "routing.enable-time-split-aggregate-pushdown").getOrElse(false)
+    val timeSplitAggregatePushdownTenants: Set[String] =
+      if (queryConfig.hasPath("routing.time-split-aggregate-pushdown-tenants"))
+        queryConfig.getStringList("routing.time-split-aggregate-pushdown-tenants").asScala.toSet
+      else Set.empty
 
     val rc = RoutingConfig(
       supportRemoteRawExport,
@@ -47,7 +53,9 @@ object QueryConfig {
       periodOfUncertaintyMs,
       tenantsWithDisabledRemoteStitch,
       stitchDisabledTenantColumn,
-      useLegacyMetadataRouting
+      useLegacyMetadataRouting,
+      enableTimeSplitAggregatePushdown,
+      timeSplitAggregatePushdownTenants
     )
 
     val scCachingEnabled = queryConfig.as[Boolean]("single.cluster.cache.enabled")
@@ -98,7 +106,9 @@ case class RoutingConfig(
                           periodOfUncertaintyMs: Long                    = (5 minutes).toMillis,
                           tenantsWithDisabledRemoteStitch: Set[String]   = Set.empty,
                           stitchDisabledTenantColumn: String             = "",
-                          useLegacyMetadataRouting: Boolean              = false
+                          useLegacyMetadataRouting: Boolean              = false,
+                          enableTimeSplitAggregatePushdown: Boolean      = false,
+                          timeSplitAggregatePushdownTenants: Set[String] = Set.empty
                         )
 
 case class CachingConfig(
