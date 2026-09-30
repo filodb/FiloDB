@@ -1081,13 +1081,17 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they
    *   span more than one non-metric shard key prefix.
    */
-  //scalastyle:off method.length cyclomatic.complexity
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
     timeSplitAggregatePushdownMerge(logicalPlan) match {
-      case Some(overlapMerge) => return materializeTimeSplitAggregatePushdown(logicalPlan, qContext, overlapMerge)
-      case None               =>
+      case Some(overlapMerge) => materializeTimeSplitAggregatePushdown(logicalPlan, qContext, overlapMerge)
+      case None               => materializeSplitLeafPlanDefault(logicalPlan, qContext)
     }
+  }
+
+  //scalastyle:off method.length cyclomatic.complexity
+  private def materializeSplitLeafPlanDefault(logicalPlan: LogicalPlan,
+                                               qContext: QueryContext): PlanResult = {
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val lookbackMs = getLookBackMillis(logicalPlan).max
@@ -1399,6 +1403,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     val uncertaintyMs = queryConfig.routingConfig.periodOfUncertaintyMs
     val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
     require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
+    logger.info(s"Time-split aggregate pushdown: overlapMerge=$overlapMerge, partitions=${partitions.size}, " +
+      s"queryId=${qContext.queryId}, promQl=${qParams.promQl}")
 
     val execPlans = partitions.zipWithIndex.flatMap { case (assignment, i) =>
       // Instants t whose window [t - offset - lookback, t - offset] can see data in [assignStart, assignEnd]
