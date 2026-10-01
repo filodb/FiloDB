@@ -2300,12 +2300,35 @@ object ProtoConverters extends StrictLogging {
     }
   }
 
+  // StitchOverlapMerge
+  implicit class StitchOverlapMergeToProtoConverter(m: filodb.query.exec.StitchOverlapMerge) {
+    def toProto: GrpcMultiPartitionQueryService.StitchOverlapMerge = m match {
+      case filodb.query.exec.StitchOverlapMerge.NaNOnConflict =>
+        GrpcMultiPartitionQueryService.StitchOverlapMerge.NAN_ON_CONFLICT
+      case filodb.query.exec.StitchOverlapMerge.Sum => GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_SUM
+      case filodb.query.exec.StitchOverlapMerge.Max => GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_MAX
+      case filodb.query.exec.StitchOverlapMerge.Min => GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_MIN
+    }
+  }
+
+  implicit class StitchOverlapMergeFromProtoConverter(m: GrpcMultiPartitionQueryService.StitchOverlapMerge) {
+    def fromProto: filodb.query.exec.StitchOverlapMerge = m match {
+      case GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_SUM => filodb.query.exec.StitchOverlapMerge.Sum
+      case GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_MAX => filodb.query.exec.StitchOverlapMerge.Max
+      case GrpcMultiPartitionQueryService.StitchOverlapMerge.OVERLAP_MIN => filodb.query.exec.StitchOverlapMerge.Min
+      case GrpcMultiPartitionQueryService.StitchOverlapMerge.NAN_ON_CONFLICT |
+           GrpcMultiPartitionQueryService.StitchOverlapMerge.UNRECOGNIZED =>
+        filodb.query.exec.StitchOverlapMerge.NaNOnConflict
+    }
+  }
+
   // StitchRvsExec
   implicit class StitchRvsExecToProtoConverter(sre: StitchRvsExec) {
     def toProto(): GrpcMultiPartitionQueryService.StitchRvsExec = {
       val builder = GrpcMultiPartitionQueryService.StitchRvsExec.newBuilder()
       builder.setNonLeafExecPlan(sre.asInstanceOf[filodb.query.exec.NonLeafExecPlan].toProto)
       sre.outputRvRange.foreach(orr => builder.setOutputRvRange(orr.toProto))
+      builder.setOverlapMerge(sre.overlapMerge.toProto)
       builder.build()
     }
   }
@@ -2322,7 +2345,8 @@ object ProtoConverters extends StrictLogging {
         queryContext,
         dispatcher,
         outputRvRange,
-        children
+        children,
+        overlapMerge = sre.getOverlapMerge.fromProto
       )
       execPlan.getRangeVectorTransformersList().asScala.foreach(t => p.addRangeVectorTransformer(t.fromProto(queryContext)))
       p
