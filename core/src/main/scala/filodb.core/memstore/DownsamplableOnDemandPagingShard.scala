@@ -88,7 +88,6 @@ class DownsamplableOnDemandPagingShard (
       }
     }
     import scala.concurrent.duration._
-    val result = Await.result(resultingFuture, 60.seconds)
     resultingFuture
   }
 }
