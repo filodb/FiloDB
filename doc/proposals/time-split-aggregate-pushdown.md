@@ -55,6 +55,66 @@ original query step grid so that results of all partitions line up. The **entire
 partition for its range. Each partition returns small, pre-aggregated results instead of raw series, and there is no
 raw export limit.
 
+## Worked Example: Delta Counter
+
+Setup:
+
+* One series `http_requests{_ws_="tenant-a", _ns_="app"}` with **delta** temporality, written every minute on the
+  minute. Each sample is the number of requests in the minute before it: `60` up to 10:09, and `120` from 10:10
+  (traffic doubles at the split).
+* The shard key moves from P1 to P2 at `ts = 10:10`. Samples with timestamps before 10:10 are in P1, and samples from
+  10:10 onwards are in P2. The sample at 10:10 (covering 10:09–10:10) is in P2.
+* Query `sum(rate(http_requests[5m]))` over `[10:00, 10:20]` with a 1m step. So `L = 5m`, `o = 0`, and assume
+  `U = 1m`.
+
+**Step 1: per-partition ranges.** Using `[s_i + o - U, e_i + o + L + U]`, clamped to the query range:
+
+| Assignment | Data range | Pushed-down query range | Why |
+|---|---|---|---|
+| P1 | `(…, 10:10)` | `[10:00, 10:16]` | first assignment starts at query start; end = 10:10 + 5m + 1m |
+| P2 | `[10:10, …)` | `[10:09, 10:20]` | start = 10:10 − 1m; last assignment ends at query end |
+
+Both ranges are already on the 1m step grid. The overlap is `[10:09, 10:16]`.
+
+**Step 2: each partition runs the full `sum(rate(...))`.** The resulting exec plan looks like:
+
+```
+E~StitchRvsExec(overlapMerge = Sum) on InProcessPlanDispatcher         (query service)
+-E~ sum(rate(http_requests{...}[5m]))  [10:00, 10:16] step 1m           (P1, local or remote)
+-E~ sum(rate(http_requests{...}[5m]))  [10:09, 10:20] step 1m           (P2, local or remote)
+```
+
+For delta counters `rate` is `sum(samples in (t − 5m, t]) / 300s`. Each partition divides by the **full** window
+length even when it holds only part of the window, so the two partial rates add up exactly. Each partition returns
+one pre-aggregated value per step:
+
+| t | P1 samples in window | P1 result | P2 samples in window | P2 result | Merged (Sum) | Stitched raw (reference) |
+|---|---|---|---|---|---|---|
+| 10:08 | 10:04–10:08: 5 × 60 = 300 | 1.0 | (not queried) | | **1.0** | 1.0 |
+| 10:09 | 10:05–10:09: 5 × 60 = 300 | 1.0 | none | NaN | **1.0** | 1.0 |
+| 10:10 | 10:06–10:09: 4 × 60 = 240 | 0.8 | 10:10: 120 | 0.4 | **1.2** | 360 / 300 = 1.2 |
+| 10:11 | 10:07–10:09: 180 | 0.6 | 10:10–10:11: 240 | 0.8 | **1.4** | 1.4 |
+| 10:12 | 10:08–10:09: 120 | 0.4 | 10:10–10:12: 360 | 1.2 | **1.6** | 1.6 |
+| 10:13 | 10:09: 60 | 0.2 | 10:10–10:13: 480 | 1.6 | **1.8** | 1.8 |
+| 10:14 | none | NaN | 10:10–10:14: 600 | 2.0 | **2.0** | 2.0 |
+| 10:15 | none | NaN | 10:11–10:15: 600 | 2.0 | **2.0** | 2.0 |
+| 10:16 | none | NaN | 10:12–10:16: 600 | 2.0 | **2.0** | 2.0 |
+| 10:17 | (not queried) | | 10:13–10:17: 600 | 2.0 | **2.0** | 2.0 |
+
+**Step 3: merge on the query service.** `StitchRvsExec(overlapMerge = Sum)` matches rows by result key (here the
+empty key of `sum`; with `sum by (job)` it would be each `job`) and by timestamp. Where only one child has a non-NaN
+value it is used as is, and where both do they are added. The merged column matches what the raw-export path
+computes from the stitched raw samples at every step, while only 17 + 12 aggregated values cross the network instead
+of the raw samples of every matching series.
+
+Notes on the example:
+
+* P1 already has nothing to contribute from 10:14 on, since the window `(10:09, 10:14]` excludes 10:09. The extra
+  P1 steps (and P2's 10:09 step) come from the uncertainty margin `U`. They cost a little work and return NaN.
+* With a **cumulative** counter the same plan is used, but each partition extrapolates `rate` over its part of the
+  window and the increase between the last P1 sample and the first P2 sample is only covered by extrapolation, so
+  the overlap steps are slightly low (see assumption 3).
+
 ## Eligibility
 
 The plan must be `Aggregate(op, PeriodicSeriesWithWindowing(RawSeries, fn, window, ...))` with no aggregate params,
@@ -249,9 +309,18 @@ the gateways' switch time are configured slightly differently.
 1. Deploy with the flag off everywhere. The proto field is backward compatible.
 2. Confirm the move procedure above holds: moves are scheduled with configuration pushed ahead, gateways route by
    sample timestamp, and no sample is dropped or written to both partitions (assumptions 1 and 2).
-3. Enable for one or a few tenants with `time-split-aggregate-pushdown-tenants`. Compare results against the
-   raw-export path around recent splits, and compare query-service heap and latency for queries spanning splits.
-4. Enable broadly by emptying the allow list.
+3. Enable first for tenants whose metrics are predominantly delta counters, essentially the tenants with
+   pre-aggregation enabled. For delta counters the pushdown gives exactly the same results as the raw-export path
+   (see the [worked example](#worked-example-delta-counter) and assumption 3), so these tenants get the heap, latency
+   and raw export limit benefits with no change in results. Add them with `time-split-aggregate-pushdown-tenants`.
+   Compare results against the raw-export path around recent splits, and compare query-service heap and latency for
+   queries spanning splits.
+4. For tenants with mostly cumulative counters, decide per tenant whether the small underestimate of
+   `rate`/`increase` (under 1% in the measured setup, and only at some instants in the overlap) is acceptable. Add the
+   tenants for which it is to the allow list. Tenants that sum over few series, or over series scraped in lockstep,
+   see larger errors and may be better left on raw export.
+5. Enable broadly by emptying the allow list only once the remaining tenants are known to tolerate the cumulative
+   counter error.
 
 ## Future Work
 
