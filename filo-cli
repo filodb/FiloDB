@@ -2,8 +2,12 @@
 
 # set -x
 SCALA_VERSION="2.13"
-FILO_VERSION=$(cat version.sbt | sed -e 's/.*"\(.*\)"/\1/g')
-CLI_FILE=`pwd`"/cli/target/scala-$SCALA_VERSION/filo-cli-$FILO_VERSION"
+CLI_DIR=`pwd`"/cli/target/scala-$SCALA_VERSION"
+# The version comes from the git branch (see project/FiloVersion.scala), so pick the newest CLI jar.
+function find_cli_file {
+    ls -t "$CLI_DIR"/filo-cli-* 2>/dev/null | head -1
+}
+CLI_FILE=$(find_cli_file)
 
 function isJava8(){
     if [[ "$JAVA" ]]; then
@@ -40,6 +44,7 @@ check_sbt $SBT
 if [ ! -f "$CLI_FILE" ];then
     # run assembly if file doesn't exist
     $SBT cli/assembly
+    CLI_FILE=$(find_cli_file)
     # initialize DB on first run
     $CLI_FILE --command init
 fi
