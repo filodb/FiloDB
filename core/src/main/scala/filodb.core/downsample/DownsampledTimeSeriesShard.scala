@@ -14,6 +14,7 @@ import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.lucene.search.CollectionTerminatedException
+import org.apache.lucene.store.AlreadyClosedException
 
 import filodb.core.{DatasetRef, Types, Utils}
 import filodb.core.binaryrecord2.RecordSchema
@@ -37,6 +38,7 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val indexEntriesRefreshed = FilodbMetrics.counter("index-entries-refreshed", tags)
   val indexEntriesPurged = FilodbMetrics.counter("index-entries-purged", tags)
   val indexRefreshFailed = FilodbMetrics.counter("index-refresh-failed", tags)
+  val indexFatalError = FilodbMetrics.counter("index-fatal-error", tags)
   val indexPurgeFailed = FilodbMetrics.counter("index-purge-failed", tags)
   val indexEntries = FilodbMetrics.gauge("downsample-store-index-entries", tags)
   val indexRamBytes = FilodbMetrics.bytesGauge("downsample-store-index-ram-bytes", tags)
@@ -66,6 +68,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   val creationTime = System.currentTimeMillis()
   @volatile var isReadyForQuery = false
+
+  @volatile private var fatalIndexError = false
 
   private val downsampleTtls = downsampleConfig.ttls
   private val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
@@ -248,13 +252,24 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       s"every ${rawStoreConfig.flushInterval}")
     houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
       rawStoreConfig.flushInterval).mapEval { _ =>
-      purgeExpiredIndexEntries()
-      indexRefresh()
+      // Once the index has hit a fatal, unrecoverable error there is no point retrying - the
+      // Lucene IndexWriter is closed for good and every call below would just fail again.
+      if (fatalIndexError) Task.unit else {
+        purgeExpiredIndexEntries()
+        indexRefresh()
+      }
     }.map { _ =>
-      partKeyIndex.refreshReadersBlocking()
-      indexRefreshCount += 1
-      cardManager.triggerCardinalityCount(indexRefreshCount)
+      if (!fatalIndexError) {
+        partKeyIndex.refreshReadersBlocking()
+        indexRefreshCount += 1
+        cardManager.triggerCardinalityCount(indexRefreshCount)
+      }
     }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
+  }
+
+  private def isFatalIndexException(t: Throwable): Boolean = t match {
+    case _: AlreadyClosedException => true
+    case _                         => Option(t.getCause).exists(isFatalIndexException)
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
@@ -310,8 +325,18 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       }
       .onErrorHandle { e =>
         stats.indexRefreshFailed.increment()
-        logger.error(s"Error occurred when refreshing downsample index " +
-          s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+        if (isFatalIndexException(e)) {
+          stats.indexFatalError.increment()
+          fatalIndexError = true
+          isReadyForQuery = false
+          partKeyIndex.notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis())
+          logger.error(s"FATAL error refreshing downsample index, index writer is no longer usable - " +
+            s"marking shard not ready for query and halting further index refresh attempts " +
+            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+        } else {
+          logger.error(s"Error occurred when refreshing downsample index " +
+            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+        }
         0L
       }
   }
