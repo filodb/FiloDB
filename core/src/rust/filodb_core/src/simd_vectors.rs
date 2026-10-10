@@ -211,3 +211,222 @@ pub extern "system" fn Java_filodb_memory_format_vectors_SimdNativeMethods_00024
         Ok(result)
     })
 }
+
+// ── HistogramVector batch sum ────────────────────────────────────────
+//
+// Accelerates RowHistogramReader.sum(start, end) for SUBTYPE_H_SIMPLE (delta histograms).
+// Walks sections, unpacks NibblePack delta-encoded blobs, and accumulates bucket sums
+// — all in one JNI call instead of per-histogram JVM round-trips.
+//
+// HistogramVector memory layout (off-heap):
+//   +0   i32  numBytes (BinaryVector length header)
+//   +4   u16  WireFormat
+//   +6   u16  numHistograms
+//   +8   u8   formatCode
+//   +9   u16  bucketDefNumBytes
+//   +11  [u8] bucket definition
+//   +(11+bucketDefNumBytes)  Sections...
+//
+// Section layout:
+//   +0  u16  sectionNumBytes (data after this 4-byte header)
+//   +2  u8   numElements (max 255)
+//   +3  u8   sectionType (0=Normal, 1=Drop)
+//   +4  Blobs: [u16 blobLen][NibblePacked delta values]...
+
+const HIST_OFFSET_BUCKET_DEF_SIZE: usize = 9;
+const HIST_OFFSET_BUCKET_DEF: usize = 11;
+
+/// Read a little-endian u16 from a raw pointer at byte offset.
+#[inline(always)]
+unsafe fn read_u16_at(base: *const u8, offset: usize) -> u16 {
+    let ptr = base.add(offset) as *const u16;
+    u16::from_le(ptr.read_unaligned())
+}
+
+/// Read a u8 from a raw pointer at byte offset.
+#[inline(always)]
+unsafe fn read_u8_at(base: *const u8, offset: usize) -> u8 {
+    *base.add(offset)
+}
+
+/// Read a little-endian i64, handling end-of-buffer safely (< 8 bytes remaining).
+#[inline(always)]
+unsafe fn read_i64_safe(ptr: *const u8, remaining: usize) -> i64 {
+    if remaining >= 8 {
+        i64::from_le((ptr as *const i64).read_unaligned())
+    } else {
+        let mut word: i64 = 0;
+        for i in 0..remaining {
+            word |= (*ptr.add(i) as i64 & 0xff) << (8 * i);
+        }
+        word
+    }
+}
+
+/// Unpack 8 NibblePacked values. Returns bytes consumed, or 0 on error.
+/// Direct port of Scala NibblePack.unpack8().
+#[inline(always)]
+unsafe fn nibble_unpack8(input: *const u8, input_len: usize, output: &mut [i64; 8]) -> usize {
+    if input_len == 0 { return 0; }
+
+    let nonzero_mask = *input as u32;
+    if nonzero_mask == 0 {
+        *output = [0i64; 8];
+        return 1;
+    }
+    if input_len < 2 { return 0; }
+
+    let nibble_word = *input.add(1) as u32 & 0xff;
+    let num_bits = ((nibble_word >> 4) + 1) * 4;
+    let trailing_zeroes = (nibble_word & 0x0f) * 4;
+    let total_bytes = 2 + (num_bits * (nonzero_mask.count_ones()) + 7) / 8;
+
+    if (total_bytes as usize) > input_len { return 0; }
+
+    let mask: i64 = if num_bits >= 64 { -1i64 } else { (1i64 << num_bits) - 1 };
+    let mut buf_index: usize = 2;
+    let mut bit_cursor: u32 = 0;
+
+    let mut in_word = read_i64_safe(input.add(buf_index), input_len - buf_index);
+    buf_index += 8;
+
+    for bit in 0..8u32 {
+        if (nonzero_mask & (1 << bit)) != 0 {
+            let remaining = 64 - bit_cursor;
+            let shifted_in = ((in_word as u64) >> bit_cursor) as i64;
+            let mut out_word = shifted_in & mask;
+
+            if remaining <= num_bits && buf_index < total_bytes as usize {
+                if buf_index < input_len {
+                    in_word = read_i64_safe(input.add(buf_index), input_len - buf_index);
+                    buf_index += 8;
+                    if remaining < num_bits {
+                        out_word |= (in_word << remaining as i64) & mask;
+                    }
+                } else {
+                    return 0;
+                }
+            }
+            output[bit as usize] = out_word << trailing_zeroes;
+            bit_cursor = (bit_cursor + num_bits) % 64;
+        } else {
+            output[bit as usize] = 0;
+        }
+    }
+    total_bytes as usize
+}
+
+/// Unpack a full NibblePack delta-encoded blob into cumulative Long[] bucket values.
+/// Port of Scala DeltaSink: prefix-sum of deltas to reconstruct cumulative values.
+#[inline(always)]
+unsafe fn nibble_unpack_delta(
+    blob_data: *const u8, blob_len: usize, values: &mut [i64], num_buckets: usize,
+) -> bool {
+    let mut offset: usize = 0;
+    let mut current: i64 = 0;
+    let mut bucket_idx: usize = 0;
+    let mut raw = [0i64; 8];
+
+    while bucket_idx < num_buckets && offset < blob_len {
+        let consumed = nibble_unpack8(blob_data.add(offset), blob_len - offset, &mut raw);
+        if consumed == 0 { return false; }
+        offset += consumed;
+
+        let elems = std::cmp::min(8, num_buckets - bucket_idx);
+        for n in 0..elems {
+            current += raw[n];
+            values[bucket_idx + n] = current;
+        }
+        bucket_idx += 8;
+    }
+    true
+}
+
+/// Batch sum of histogram bucket values across rows [start_row, end_row] inclusive.
+/// Returns number of histograms summed, or -1 on error.
+fn histogram_batch_sum_inner(
+    vector_addr: usize, start_row: usize, end_row: usize,
+    out_addr: usize, num_buckets: usize,
+) -> i32 {
+    let base = vector_addr as *const u8;
+    let out = out_addr as *mut f64;
+
+    // Zero the output accumulator
+    for i in 0..num_buckets {
+        unsafe { *out.add(i) = 0.0; }
+    }
+
+    // Parse header
+    let bucket_def_num_bytes = unsafe { read_u16_at(base, HIST_OFFSET_BUCKET_DEF_SIZE) } as usize;
+    let first_section_addr = vector_addr + HIST_OFFSET_BUCKET_DEF + bucket_def_num_bytes;
+    let vector_total_bytes = unsafe { (base as *const i32).read_unaligned().to_le() } as usize + 4;
+    let vector_end = vector_addr + vector_total_bytes;
+
+    // Temp buffer for one histogram's bucket values
+    let mut values = vec![0i64; num_buckets];
+    let mut summed: i32 = 0;
+    let mut global_elem: usize = 0;
+    let mut section_addr = first_section_addr;
+
+    // Walk sections
+    while global_elem <= end_row && section_addr < vector_end {
+        let sect_base = section_addr as *const u8;
+        let sect_num_bytes = unsafe { read_u16_at(sect_base, 0) } as usize;
+        let sect_num_elems = unsafe { read_u8_at(sect_base, 2) } as usize;
+
+        if sect_num_elems == 0 { break; }
+
+        let mut blob_ptr = section_addr + 4; // skip 4-byte section header
+        let sect_data_end = section_addr + 4 + sect_num_bytes;
+
+        for _local_i in 0..sect_num_elems {
+            if blob_ptr >= sect_data_end || blob_ptr >= vector_end { break; }
+
+            let blob_base = blob_ptr as *const u8;
+            let blob_len = unsafe { read_u16_at(blob_base, 0) } as usize;
+
+            if global_elem >= start_row && global_elem <= end_row {
+                for v in values.iter_mut() { *v = 0; }
+
+                let ok = unsafe {
+                    nibble_unpack_delta((blob_ptr + 2) as *const u8, blob_len, &mut values, num_buckets)
+                };
+                if ok {
+                    for b in 0..num_buckets {
+                        unsafe { *out.add(b) += values[b] as f64; }
+                    }
+                    summed += 1;
+                }
+            }
+
+            blob_ptr += 2 + blob_len;
+            global_elem += 1;
+            if global_elem > end_row { break; }
+        }
+
+        section_addr = sect_data_end;
+    }
+    summed
+}
+
+/// JNI: Batch sum of histogram bucket values for SUBTYPE_H_SIMPLE vectors.
+///
+/// Scala companion: `SimdNativeMethods.histogramBatchSum`
+#[no_mangle]
+pub extern "system" fn Java_filodb_memory_format_vectors_SimdNativeMethods_00024_histogramBatchSum(
+    mut env: JNIEnv,
+    _class: JClass,
+    vector_addr: jlong,
+    start_row: jint,
+    end_row: jint,
+    out_addr: jlong,
+    num_buckets: jint,
+) -> jint {
+    jni_exec(&mut env, |_| -> JavaResult<i32> {
+        let result = histogram_batch_sum_inner(
+            vector_addr as usize, start_row as usize, end_row as usize,
+            out_addr as usize, num_buckets as usize,
+        );
+        Ok(result)
+    })
+}
