@@ -11,6 +11,7 @@ import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.kafka._

@@ -64,12 +64,16 @@ final case class PeriodicSamplesMapper(startMs: Long,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (startMs < endMs && stepMs < querySession.queryConfig.minStepMs) // range query with small step
-      throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
+    // a per-query override (from PlannerParams) takes precedence over the cluster-wide QueryConfig default.
+    val minStepMs = querySession.qContext.plannerParams.minStepMsOpt.getOrElse(querySession.queryConfig.minStepMs)
+    if (startMs < endMs && stepMs < minStepMs) // range query with small step
+      throw new BadQueryException(s"step should be at least ${minStepMs/1000}s")
     val valColType = ResultSchema.valueColumnType(sourceSchema)
     // If a max and min column is present, the ExecPlan's job is to put it into column 3
     val hasMaxMinCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 3 &&
                       sourceSchema.columns(2).name == "max" && sourceSchema.columns(3).name == "min"
+    val hasHistSumCountCols = valColType == ColumnType.DoubleColumn && sourceSchema.colIDs.length == 3 &&
+      sourceSchema.columns(1).name == "sum" && sourceSchema.columns(2).name == "count"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
 
@@ -108,6 +112,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
             s"windowLength=$windowLength")
+          val mutableRow = if (hasHistSumCountCols) new HistAvgAggTransientRow() else new TransientRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val minResolutionMs = rdrv.minResolutionMs
           val chunkedDRangeFunc = rangeFuncGen().asChunkedD
@@ -126,7 +131,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           }
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    extendedWindow, chunkedDRangeFunc, querySession), outputRvRange)
+                    extendedWindow, chunkedDRangeFunc, querySession, mutableRow), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
       case _: RangeFunction[_] if valColType == ColumnType.LongColumn =>
@@ -249,6 +254,11 @@ object FiloQueryConfig {
   val isInclusiveRange = systemConfig.getBoolean("filodb.query.inclusive-range")
 }
 
+object ChunkedWindowIterator {
+  // Needs to be a power of 2 minus 1 for bitwise AND to work correctly below. With 255, we check every 256 windows
+  val timeoutCheckFrequencyMask = 255
+}
+
 /**
  * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
  * to compute each window as fast as possible on multiple rows at a time.
@@ -297,6 +307,10 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
     // the compiler. Copy to a local variable to reduce some overhead.
     val wit = windowIt
 
+    import ChunkedWindowIterator.timeoutCheckFrequencyMask
+    if ((querySession.timeoutCheckCountDuringScan.incrementAndGet() & timeoutCheckFrequencyMask) == 0) {
+      querySession.qContext.checkQueryTimeout(this.getClass.getName)
+    }
     wit.nextWindow()
     while (wit.hasNext) {
       val nextInfo = wit.next()

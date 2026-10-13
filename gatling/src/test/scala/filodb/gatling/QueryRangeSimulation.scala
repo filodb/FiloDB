@@ -31,12 +31,12 @@ trait QueryRangeSimulation extends Simulation {
   def promQL: String
 
   def runLoadTest(): Unit = {
-    //val baseUrl = "http://localhost:8080"
-    val baseUrl = "http://localhost:9900"
+    val baseUrl = "http://localhost:8080/promql/promperf/"
+    //val baseUrl = "http://localhost:9900"
     val numApps = 1
     val testDuration = 3.minutes
     // Before each run, change this to the right timestamp relevant to data stored in server
-    val startSecs = 1769277850L
+    val startSecs = 1786120177L
     // Log all HTTP requests
     val context: LoggerContext = LoggerFactory.getILoggerFactory.asInstanceOf[LoggerContext]
     context.getLogger("io.gatling").setLevel(Level.INFO)
@@ -46,6 +46,7 @@ trait QueryRangeSimulation extends Simulation {
     } yield {
       Seq(Map("query" -> promQL.replace("$appNum", x.toString)))
     }
+    print(s"jobNameFeeder: $jobNameFeeder")
     val jobFeeder = Iterator.continually(jobNameFeeder.flatten).flatten
     val endSecs = startSecs + 3 * 60 * 60 // 3hrs
 
@@ -57,7 +58,7 @@ trait QueryRangeSimulation extends Simulation {
         .exec(
           http("query_range")
             .get("api/v1/query_range")
-            .queryParam("query", f"$${query}")
+            .queryParam("query", f"#{query}")
             .queryParam("start", startSecs)
             .queryParam("end", endSecs)
             .queryParam("step", "60")

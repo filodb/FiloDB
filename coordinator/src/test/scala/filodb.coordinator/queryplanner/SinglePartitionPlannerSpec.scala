@@ -7,7 +7,7 @@ import monix.execution.Scheduler
 import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -144,6 +144,14 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
+  }
+
+  it("should reject a LabelAudit, which only the multi-partition planner can plan") {
+    val lp = LabelAudit(Seq(ColumnFilter("_ws_", Filter.Equals("demo"))), Map.empty, 1000000, 2000000)
+    val thrown = intercept[UnsupportedOperationException] {
+      engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("", 1000, 10, 2000)))
+    }
+    thrown.getMessage shouldEqual LabelAudit.OnlyMultiPartition
   }
 
   it("should generate Exec plan for Metadata query") {

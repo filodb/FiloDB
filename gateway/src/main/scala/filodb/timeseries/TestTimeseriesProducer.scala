@@ -265,8 +265,9 @@ object TestTimeseriesProducer extends StrictLogging {
       }
       updateBuckets(n % histBucketScheme.numBuckets)
       val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
-      val count = util.Random.nextInt(100).toDouble
-      val sum = buckets.sum.toDouble
+      // Doing a plus one since we do not want only count or only sum to equal zero, which makes it invalid data.
+      val count = util.Random.nextInt(99).toDouble + 1
+      val sum = buckets.sum.toDouble + 1
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
                      wsUTF8   -> workspace.utf8,

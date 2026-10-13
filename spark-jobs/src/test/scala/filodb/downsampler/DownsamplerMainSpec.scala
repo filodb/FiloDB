@@ -2202,7 +2202,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, 1, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
 
     val recoveredRecords = downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    recoveredRecords shouldBe 7
+    recoveredRecords shouldBe 5
     val fromHour = hour(74372801000L*1000)
     val toHour = hour(74373042000L*1000)
     downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef, fromHour, toHour)

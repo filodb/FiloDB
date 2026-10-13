@@ -8,15 +8,36 @@ import monix.execution.atomic.AtomicBoolean
 import org.apache.arrow.memory.{AllocationListener, BufferAllocator, RootAllocator}
 
 import filodb.core.GlobalConfig
+import filodb.core.memstore.AutoMemoryAllocUtil
 import filodb.core.metrics.FilodbMetrics
 import filodb.memory.data.Shutdown
 
-object FlightAllocator {
+object FlightAllocator extends StrictLogging {
 
-  private val rootAllocatorMaxSize = GlobalConfig.systemConfig.getBytes("filodb.flight.root-allocator-max-memory")
-  lazy private val rootAllocator = new RootAllocator(rootAllocatorMaxSize)
-  private val flightServerMaxAlloc = GlobalConfig.systemConfig.getBytes("filodb.flight.server.allocator-limit")
-  private val flightClientMaxAlloc = GlobalConfig.systemConfig.getBytes("filodb.flight.client.allocator-limit")
+  val filodbConfig = GlobalConfig.systemConfig.getConfig("filodb")
+
+  private val rootAllocatorMaxSize: Long =
+    if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig))
+      AutoMemoryAllocUtil.getFlightRPCMemoryAllocSize(filodbConfig)
+    else
+      filodbConfig.getBytes("flight.root-allocator-max-memory")
+
+  lazy private val rootAllocator = {
+    require(rootAllocatorMaxSize > 0, s"Flight root allocator max size must be > 0, but was $rootAllocatorMaxSize")
+    logger.info(s"Creating flight root allocator with limit: $rootAllocatorMaxSize bytes")
+    new RootAllocator(rootAllocatorMaxSize)
+  }
+  private val flightServerMaxAlloc: Long = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
+    AutoMemoryAllocUtil.getFlightServerMemoryAllocSize(filodbConfig)
+  } else {
+    filodbConfig.getBytes("flight.server.allocator-limit")
+  }
+
+  private val flightClientMaxAlloc: Long = if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig)) {
+    AutoMemoryAllocUtil.getFlightClientMemoryAllocSize(filodbConfig)
+  } else {
+    filodbConfig.getBytes("flight.client.allocator-limit")
+  }
 
   /**
    * We need metrics to track both total allocated memory (counter) and currently used memory (up-down counter which
@@ -47,10 +68,17 @@ object FlightAllocator {
     }
   }
 
-  lazy val serverAllocator: BufferAllocator = rootAllocator.newChildAllocator("FilodbFlightServer",
-                                                                  serverAllocationListener, 0, flightServerMaxAlloc)
-  lazy val clientAllocator: BufferAllocator = rootAllocator.newChildAllocator("FilodbFlightClient",
-                                                                  clientAllocationListener, 0, flightClientMaxAlloc)
+  lazy val serverAllocator: BufferAllocator = {
+    logger.info(s"Creating flight server allocator with limit: $flightServerMaxAlloc bytes")
+    rootAllocator.newChildAllocator("FilodbFlightServer",
+      serverAllocationListener, 0, flightServerMaxAlloc)
+
+  }
+  lazy val clientAllocator: BufferAllocator = {
+    logger.info(s"Creating flight client allocator with limit: $flightClientMaxAlloc bytes")
+    rootAllocator.newChildAllocator("FilodbFlightClient",
+      clientAllocationListener, 0, flightClientMaxAlloc)
+  }
 
   /**
    * Use only for unit testing

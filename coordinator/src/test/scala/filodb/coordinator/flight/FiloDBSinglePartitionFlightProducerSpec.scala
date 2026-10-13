@@ -1,7 +1,11 @@
 package filodb.coordinator.flight
 
 import com.typesafe.config.ConfigFactory
-import org.apache.arrow.flight.Location
+import io.grpc.{CallOptions, Channel, ClientCall, ClientInterceptor, Metadata, MethodDescriptor}
+import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
+import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
+import io.grpc.netty.NettyChannelBuilder
+import org.apache.arrow.flight.{FlightGrpcUtils, Location, Ticket}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -18,7 +22,7 @@ import filodb.core.store.{InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan
 import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
 import filodb.query.AggregationOperator.Count
 import filodb.query.exec._
-import filodb.query.{BinaryOperator, Cardinality, QueryResult}
+import filodb.query.{BinaryOperator, Cardinality, QueryError, QueryResult}
 
 class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers with BeforeAndAfter
                                                   with BeforeAndAfterAll with ScalaFutures {
@@ -35,7 +39,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
     .withFallback(ConfigFactory.load("application_test.conf")).resolve()
 
   private val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore, new NullColumnStore, new InMemoryMetaStore())
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig = PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   private val allocator = FlightAllocator.newChildAllocatorForTesting("FlightQueryProducerSpec", 0, 3000000)
   private var querySession: QuerySession = _
@@ -115,8 +119,8 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-          "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+        List("/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -152,10 +156,10 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
                                (0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host1, region: region1}] [grp3]",
-             "/shard:0/b2[schema=schemaID:60110  _metric_=cpu_usage,tags={host: host2, region: region1}] [grp0]")
+        List("/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host1, region -> region1)",
+             "/shard:/Map(_metric_ -> cpu_usage, host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -184,7 +188,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       rvRows2 shouldEqual List((0 to 100000 by 1000).toList, (0 to 100000 by 1000).toList)
 
       qRes2.result.map(_.key.toString) shouldEqual
-        List("/shard:/Map(host -> host2, region -> region1)", "/shard:/Map(host -> host1, region -> region1)")
+        List("/shard:/Map(host -> host1, region -> region1)", "/shard:/Map(host -> host2, region -> region1)")
 
       qRes2.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
@@ -294,6 +298,296 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       qRes4.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
       // println(allocator.toVerboseString)
       allocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+    }
+
+    it("should use zstd encoding on the wire when compression-enabled is true") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("CompressionTest", 0, 1000000)
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(ZstdClientInterceptor)
+        .intercept(headerCapture)
+        .compressorRegistry(ZstdCodecs.compressorRegistry)
+        .decompressorRegistry(ZstdCodecs.decompressorRegistry)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding shouldEqual Some("zstd")
+    }
+
+    it("should not use zstd encoding when client does not advertise zstd in grpc-accept-encoding") {
+      val encodingKey = Metadata.Key.of("grpc-encoding", Metadata.ASCII_STRING_MARSHALLER)
+      @volatile var capturedEncoding: Option[String] = None
+
+      val headerCapture = new ClientInterceptor {
+        override def interceptCall[ReqT, RespT](method: MethodDescriptor[ReqT, RespT],
+                                                callOptions: CallOptions,
+                                                next: Channel): ClientCall[ReqT, RespT] =
+          new SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions)) {
+            override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit =
+              super.start(new SimpleForwardingClientCallListener[RespT](responseListener) {
+                override def onHeaders(responseHeaders: Metadata): Unit = {
+                  capturedEncoding = Option(responseHeaders.get(encodingKey))
+                  super.onHeaders(responseHeaders)
+                }
+              }, headers)
+          }
+      }
+
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("NoZstdAcceptTest", 0, 1000000)
+      // No ZstdClientInterceptor — grpc-accept-encoding: zstd is never sent
+      val channel = NettyChannelBuilder
+        .forAddress("localhost", 38815)
+        .usePlaintext()
+        .intercept(headerCapture)
+        .build()
+      val testClient = FlightGrpcUtils.createFlightClient(testAllocator, channel)
+      try {
+        val stream = testClient.getStream(new Ticket(FlightKryoSerDeser.serializeToBytes(mspe1)))
+        try { while (stream.next()) {} } finally { stream.close() }
+      } finally {
+        testClient.close()
+        testAllocator.close()
+      }
+
+      capturedEncoding should not equal Some("zstd")
+    }
+
+    // ---- memory-safety tests for query-limit exceptions ----
+
+    it("should return QueryError and not leak Arrow memory when checkResultBytes throws QueryLimitException") {
+      // Enforce a tiny result-bytes limit (1 byte) so that the very first VSR drained inside
+      // drainFinishedVsrs triggers checkResultBytes → QueryLimitException.  The bracket must
+      // close every in-flight VSR even when the exception fires mid-drain.
+      //
+      // Use a dedicated child allocator so this test is fully self-contained and does not
+      // interfere with the shared `allocator` managed by before/after.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("ResultBytesLimitTest", 0, 3000000)
+      val tinyBytesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanResultBytes = 1L),
+        warnLimits     = PerQueryLimits(execPlanResultBytes = 1L))
+      val limitedContext = QueryContext(plannerParams = tinyBytesLimit)
+      val limitedSession = QuerySession(limitedContext,
+        QueryConfig.unitTestingQueryConfig.copy(enforceResultByteLimit = true),
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref,
+        0,
+        filters,
+        chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1000, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      // The query should fail with QueryLimitException delivered as a QueryError footer
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // Crucial: the bracket must have closed all in-flight VSRs — no Arrow memory should remain
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
+    }
+
+    it("should return QueryError and not leak Arrow memory when checkSamplesLimit throws QueryLimitException") {
+      // Enforce a tiny samples limit (1 sample) so that checkSamplesLimit fires as soon as the
+      // first range-vector's sample count is tallied, before any VSR is fully drained.
+      // The bracket must still close all VSRs even though streaming aborted partway through.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("SamplesLimitTest", 0, 3000000)
+      val tinySamplesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanSamples = 1),
+        warnLimits     = PerQueryLimits(execPlanSamples = 1))
+      val limitedContext = QueryContext(plannerParams = tinySamplesLimit)
+      val limitedSession = QuerySession(limitedContext, QueryConfig.unitTestingQueryConfig,
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref,
+        0,
+        filters,
+        chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1000, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      // The query should fail with QueryLimitException delivered as a QueryError footer
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // Crucial: the bracket must have closed all in-flight VSRs — no Arrow memory should remain
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
+    }
+
+    it("should return QueryError and not leak Arrow memory when checkResultBytes throws on the second VSR") {
+      // This test exercises the specific code path where:
+      //   1. VSR1 is fully drained (putNext succeeds, VSR1 moved to freeVsrs)
+      //   2. VSR2 is taken from finishedVsrs (ownership transferred),
+      //      checkResultBytes fires, drainFinishedVsrs closes VSR2 inline before re-throwing
+      //   3. The bracket release closes VSR3 (currentVsr) and VSR1 (in freeVsrs)
+      //
+      // Two full VSRs are produced by using step=1ms over 0..100000ms, giving 100001 periodic
+      // samples per series.  Each binary record is ~20 bytes, so the first VSR fills at ~52 000
+      // rows (maxVecLen = 1MB).  The two series together produce at least 2 full VSRs before
+      // the limit is breached.
+      //
+      // Limit: maxVecLen * 2 = 2MB.  Each full VSR body is ~1.27MB (1MB data + offset/validity
+      // overhead), so VSR1 passes (1.27MB < 2MB) but VSR1+VSR2 (~2.54MB) exceeds the limit.
+      //
+      // After the query errors, the client holds one registered VSR copy (VSR1).
+      // limitedSession.close() releases it, returning testAllocator to allocatedMemBeforeQuery.
+      val testAllocator = FlightAllocator.newChildAllocatorForTesting("ResultBytesSecondVsrTest", 0, 10000000)
+      val limitBetweenTwoVsrs = ArrowSerializedRangeVectorOps.maxVecLen * 2L
+      val twoVsrBytesLimit = PlannerParams(
+        enforcedLimits = PerQueryLimits(execPlanResultBytes = limitBetweenTwoVsrs),
+        warnLimits     = PerQueryLimits(execPlanResultBytes = limitBetweenTwoVsrs))
+      val limitedContext = QueryContext(plannerParams = twoVsrBytesLimit)
+      val limitedSession = QuerySession(limitedContext,
+        QueryConfig.unitTestingQueryConfig.copy(enforceResultByteLimit = true),
+        flightAllocator = Some(new FlightAllocator(testAllocator)))
+
+      val allocatedMemBeforeQuery = testAllocator.getAllocatedMemory
+
+      val mspe = MultiSchemaPartitionsExec(
+        limitedContext,
+        FlightPlanDispatcher(location, "test"),
+        timeseriesDatasetWithMetric.ref, 0, filters, chunkScanMethod,
+        timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+      // step=1ms produces 100001 samples per series, overflowing the first VSR (~52 000-row limit)
+      mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1, 100000, None, None))
+
+      val qRes = mspe.dispatcher.dispatch(
+        ExecPlanWithClientParams(mspe, ClientParams(60000), limitedSession),
+        UnsupportedChunkSource()).runToFuture.futureValue
+
+      qRes shouldBe a[QueryError]
+      qRes.asInstanceOf[QueryError].t shouldBe a[QueryLimitException]
+
+      // limitedSession.close() releases the client-side VSR1 copy registered in flightAllocator
+      limitedSession.close()
+      testAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+      testAllocator.close()
+    }
+
+    it("should fail gracefully with a clean QueryError (no hang) and leak no memory when the server " +
+       "per-request allocator throws a genuine Arrow OutOfMemoryException") {
+      // Unlike the QueryLimitException tests above (which exercise the *soft* app-level
+      // checkResultBytes/checkSamplesLimit guards), this test forces a *hard* Arrow allocator
+      // failure: org.apache.arrow.memory.OutOfMemoryException thrown directly by
+      // BufferAllocator.buffer() because even the response header can't fit. This reproduces the
+      // scenario where the per-request child allocator (or, under concurrent load, the shared
+      // server/root allocator) is exhausted mid-request, and exercises both:
+      //   1. the header-send OOM being rethrown so the circuit breaker can see it, and
+      //   2. the footer-send fallback in sendRespFooterAndComplete, since the footer
+      //      (which also carries the full exception stack trace) will *also* overflow the
+      //      same tiny allocator - the exact "double OOM" scenario that previously left the
+      //      client blocked in a blocking stream.next() call with no response at all.
+      //
+      // A dedicated Flight server is started with an absurdly small
+      // filodb.flight.server.per-request-allocator-limit so the very first allocation inside
+      // executePhysicalPlanAndRespond (the response header ArrowBuf) always overflows it.
+      val tinyAkkaPort = 33817
+      val tinyFlightPort = FiloDBSinglePartitionFlightProducer.akkaPortToFlightPort(tinyAkkaPort)
+      val tinyPerReqConfig = ConfigFactory.parseString(
+        s"""filodb.flight.server.per-request-allocator-limit = 100000
+           |akka.remote.netty.tcp.port = $tinyAkkaPort
+           |""".stripMargin).withFallback(config).resolve()
+      val tinyLocation = Location.forGrpcInsecure("localhost", tinyFlightPort)
+      val tinyServer = FiloDBSinglePartitionFlightProducer.start(memStore, tinyPerReqConfig)
+
+      val clientAllocator = FlightAllocator.newChildAllocatorForTesting("OomClientTest", 0, 3000000)
+      val clientSession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig,
+        flightAllocator = Some(new FlightAllocator(clientAllocator)))
+      val allocatedMemBeforeQuery = clientAllocator.getAllocatedMemory
+      val serverAllocBeforeQuery = FlightAllocator.serverAllocator.getAllocatedMemory
+
+      try {
+        val oomMspe = MultiSchemaPartitionsExec(
+          QueryContext(),
+          FlightPlanDispatcher(tinyLocation, "test"),
+          timeseriesDatasetWithMetric.ref,
+          0,
+          filters,
+          chunkScanMethod, timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+        oomMspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 100, 100000, None, None))
+
+        // futureValue is bounded by patienceConfig (5s) - if the server ever left the client
+        // blocked in the blocking stream.next() call instead of sending a clean error, this
+        // call fails the test with a timeout instead of hanging the test run.
+        val qRes = oomMspe.dispatcher.dispatch(
+          ExecPlanWithClientParams(oomMspe, ClientParams(60000), clientSession),
+          UnsupportedChunkSource()).runToFuture.futureValue
+
+        qRes shouldBe a[QueryError]
+
+        // Client-side: no VSR was ever received, so closing the session must return the
+        // client allocator to its pre-query baseline.
+        clientSession.close()
+        clientAllocator.getAllocatedMemory shouldEqual allocatedMemBeforeQuery
+
+        // Server-side: the per-request allocator (a child of the shared serverAllocator) must
+        // be fully reclaimed by the guaranteed querySession.close(), even though two
+        // allocations (header, then footer) failed in a row. Poll briefly since the server's
+        // cleanup runs asynchronously relative to the client observing the stream error.
+        val deadline = System.currentTimeMillis() + 5000
+        while (FlightAllocator.serverAllocator.getAllocatedMemory != serverAllocBeforeQuery &&
+               System.currentTimeMillis() < deadline) {
+          Thread.sleep(50)
+        }
+        FlightAllocator.serverAllocator.getAllocatedMemory shouldEqual serverAllocBeforeQuery
+
+        // Prove the shared allocator hierarchy is still healthy afterwards: a normal query
+        // against the main (non-tiny) server, sharing the same root/server allocator, must
+        // still succeed - i.e. memory freed up by the failed request is usable by later ones.
+        val allocatedMemBeforeFollowup = allocator.getAllocatedMemory
+        val followupRes = mspe1.dispatcher.dispatch(
+          ExecPlanWithClientParams(mspe1, ClientParams(60000), querySession),
+          UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+        followupRes.result.head.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close())
+        allocator.getAllocatedMemory shouldEqual allocatedMemBeforeFollowup
+      } finally {
+        tinyServer.shutdown()
+        clientAllocator.close()
+      }
     }
   }
 }

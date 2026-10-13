@@ -91,7 +91,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                             localPartitionName: String,
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
-                            val flightEnabled: Boolean,
+                            val flightEnabled: Boolean = false,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
                             channels: ConcurrentMap[String, ManagedChannel] =
                             new ConcurrentHashMap[String, ManagedChannel]().asScala,
@@ -141,6 +141,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
     } else logicalPlan match {
+      case la: LabelAudit                     => materializeLabelAudit(la, qContext)
       case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
       case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
@@ -1357,6 +1358,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
     case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
+    case la: LabelAudit                => la.copy(startMs = startMs, endMs = endMs)
   }
 
   private def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -1364,12 +1366,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
     // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
     // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
     // is a metadata operation and shares common components with other metadata endpoints.
-    val partitions = lp match {
-      case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-      case _                          => getMetadataPartitions(lp.filters,
-        TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
-    }
-
+    val partitions = resolveMetadataPartitions(lp, queryParams)
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
       localPartitionPlanner.materialize(lp, qContext)
@@ -1387,6 +1384,8 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
                  _: LabelNames |
                  _: LabelCardinality    => Map("match[]" -> LogicalPlanParser.metadataMatchToQuery(lp))
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
+            case _: LabelAudit          =>
+              throw new IllegalStateException("unreachable: LabelAudit is materialized by materializeLabelAudit")
           }
           createMetadataRemoteExec(qContext, p, params, lp)
         }
@@ -1401,9 +1400,103 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _: LabelAudit =>
+          throw new IllegalStateException("unreachable: LabelAudit is materialized by materializeLabelAudit")
       }
     }
     PlanResult(execPlan::Nil)
+  }
+
+  /**
+   * LabelAudit data is not in FiloDB shards, so every partition, the local one included, is called on its
+   * remote endpoint. The rows are concatenated.
+   */
+  private def materializeLabelAudit(lp: LabelAudit, qContext: QueryContext): ExecPlan = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val timeRange = TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000)
+    // Filter values are quoted, as in the /v2/label/ params.
+    val filter = lp.filters
+      .map(f => f.column + f.filter.operatorString + "\"" + f.filter.valuesStrings.head + "\"")
+      .mkString(",")
+    val urlParams = lp.params + ("filter" -> filter)
+    val remoteExecs = resolveMetadataPartitions(lp, queryParams)
+      .flatMap(_.proportionMap.values)
+      // A time-split assignment can list a partition more than once; the audit isn't time-ranged.
+      .distinctBy(_.httpEndPoint)
+      .map(pd => createMetadataRemoteExec(qContext,
+        PartitionAssignment(pd.partitionName, pd.httpEndPoint, timeRange, pd.grpcEndPoint, pd.workUnit), urlParams, lp))
+    remoteExecs match {
+      case Nil         => EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
+      case one :: Nil  => one
+      case _           => PartKeysDistConcatExec(qContext, inProcessPlanDispatcher, remoteExecs)
+    }
+  }
+
+  /**
+   * Builds the routing key identifying the partition assignment for one group of shard key filters.
+   *
+   * Matches Equals explicitly so the value comes from the case class field. Filter itself declares no
+   * `value` member, so a bare `filter.value` compiles only through an implicit identity conversion -
+   * this file used to import akka.util.Helpers.Requiring, whose `value` returns the wrapped object
+   * itself. That put the filter's toString ("Equals(myWs)") in the routing key rather than its value
+   * ("myWs"), matched no assignment, and sent metadata queries to the local partition instead of
+   * fanning them out.
+   *
+   * Only called when every shard key filter is an Equals, so a non-Equals cannot reach here.
+   */
+  private def buildRoutingMap(group: Seq[ColumnFilter],
+                              nonMetricCols: Seq[String]): Map[String, String] =
+    nonMetricCols.flatMap(shardKeyCol =>
+      group.collectFirst {
+        case ColumnFilter(c, Equals(value)) if c == shardKeyCol => c -> value.toString
+      }
+    ).toMap
+
+  private def resolveMetadataPartitions(lp: MetadataQueryPlan, queryParams: PromQlQueryParams) = {
+    val timeRange = TimeRange(queryParams.startSecs * 1000L, queryParams.endSecs * 1000L)
+    // SeriesKeysByFilters stores its filters directly; getNonMetricShardKeyFilters doesn't extract them
+    // via getRawSeriesFilters (which only handles RawSeries/LabelValues/LabelAudit/LabelNames leaves).
+    val shardKeyFilterGroups = lp match {
+      case skbf: SeriesKeysByFilters =>
+        Seq(skbf.filters.filter(f => dataset.options.shardKeyColumns.contains(f.column)))
+      case _ =>
+        LogicalPlan.getNonMetricShardKeyFilters(lp, dataset.options.shardKeyColumns)
+    }
+    val nonMetricCols = dataset.options.nonMetricShardColumns
+
+    val areEqualFilters = shardKeyFilterGroups.forall(columnFilters =>
+      columnFilters.
+        forall(
+          colFilter =>
+            colFilter.filter match {
+              case _: Equals => true
+              case _ => false
+            }
+        ))
+
+    val shouldFallback = queryConfig.routingConfig.useLegacyMetadataRouting || !areEqualFilters ||
+      shardKeyFilterGroups.isEmpty ||
+      !shardKeyFilterGroups.forall(group => nonMetricCols.forall(col => group.exists(_.column == col)))
+
+    // this will preserve the legacy routing logic.
+
+    lp match {
+      case lc: LabelCardinality =>
+        getPartitions(lc, queryParams)
+
+      case _ =>
+        if (shouldFallback) {
+          getMetadataPartitions(lp.filters, timeRange)
+        } else {
+          shardKeyFilterGroups
+            .map(buildRoutingMap(_, nonMetricCols))
+            // getPartitionsTrait, not the getPartitions kept for backward compatibility: the traffic
+            // router rejects a V1 read for a namespace converted to the V2 schema with "please use the
+            // V2 read API", which leaves this branch with no assignments and falls back to local.
+            .flatMap(routingMap => partitionLocationProvider.getPartitionsTrait(routingMap, timeRange))
+            .distinct
+        }
+    }
   }
 
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
@@ -1414,7 +1507,7 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
       getPartitions(lp, queryParams, infiniteTimeRange = true)
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
-                  s"dispatching to all authorized partitions")
+        s"dispatching to all authorized partitions")
       getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
     }
     val execPlan = if (partitions.isEmpty) {

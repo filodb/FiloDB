@@ -213,15 +213,19 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
   override def checkResultBytes(resultSize: Long, queryConfig: QueryConfig, queryWarnings: QueryWarnings): Unit = {
     super.checkResultBytes(resultSize, queryConfig, queryWarnings)
-    finalPlan.lookupRes.foreach(plr =>
-      if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
-        queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
-        val msg =
-          s"Query scanned ${plr.dataBytesScannedCtr.get()} bytes, which exceeds a max warn limit of " +
-            s"${queryContext.plannerParams.warnLimits.rawScannedBytes} bytes allowed to be scanned per shard. "
-        qLogger.info(queryContext.getQueryLogLine(msg))
-      }
-    )
+    // finalPlan can be null in Multi Partition queries where the FiloDBMultiPartitionFlightProducer needs
+    // to route the query to the right shard and the finalPlan is not created in that case.  So check for null.
+    if (finalPlan != null) {
+      finalPlan.lookupRes.foreach(plr =>
+        if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
+          queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
+          val msg =
+            s"Query scanned ${plr.dataBytesScannedCtr.get()} bytes, which exceeds a max warn limit of " +
+              s"${queryContext.plannerParams.warnLimits.rawScannedBytes} bytes allowed to be scanned per shard. "
+          qLogger.info(queryContext.getQueryLogLine(msg))
+        }
+      )
+    }
   }
 }
 

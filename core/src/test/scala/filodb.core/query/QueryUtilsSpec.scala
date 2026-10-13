@@ -4,6 +4,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.must.Matchers
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
+import filodb.core.binaryrecord2.RecordBuilderBase
 import filodb.core.metadata.Column.ColumnType
 
 class QueryUtilsSpec extends AnyFunSpec with Matchers{
@@ -23,6 +24,7 @@ class QueryUtilsSpec extends AnyFunSpec with Matchers{
       def partIds = Nil
       def schemaNames = Nil
       def keySize: Int = size
+      def writeToMapBr(rb: RecordBuilderBase): Unit = {}
     }
 
     // Minimal RangeVector with configurable numRows, outputRange, keySize

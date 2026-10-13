@@ -72,6 +72,7 @@ object LogicalPlanUtils extends StrictLogging {
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: LabelAudit                  => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
       case lp: TsCardinalities             => val now = System.currentTimeMillis()
@@ -111,6 +112,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRange)
       case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
       case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelAudit               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: TsCardinalities          => lp  // immutable & no members need to be updated
@@ -359,6 +361,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ApplyLimitFunction          => getPeriodicSeriesPlan(lp.vectors)
       case lp: RawSeries                   => None
       case lp: LabelValues                 => None
+      case lp: LabelAudit                  => None
       case lp: LabelNames                  => None
       case lp: LabelCardinality            => None
       case lp: SeriesKeysByFilters         => None

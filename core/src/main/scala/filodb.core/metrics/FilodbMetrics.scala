@@ -15,6 +15,7 @@ import io.opentelemetry.api.common.{AttributeKey, Attributes}
 import io.opentelemetry.api.metrics._
 import io.opentelemetry.exporter.logging.otlp.OtlpJsonLoggingMetricExporter
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter
+import io.opentelemetry.exporter.prometheus.PrometheusHttpServer
 import io.opentelemetry.instrumentation.oshi.SystemMetrics
 import io.opentelemetry.instrumentation.runtimemetrics.java8.{Classes, Cpu, GarbageCollector, MemoryPools, Threads}
 import io.opentelemetry.sdk.OpenTelemetrySdk
@@ -48,7 +49,9 @@ case class OTelMetricsConfig(exportIntervalSeconds: Int = 60,
                              // one of client cert/key or p12 keystore must be provided for mTLS
                              otlpClientCertPath: Option[String],
                              otlpClientKeyPath: Option[String],
-                             otlpClientP12KeystorePath: Option[String])
+                             otlpClientP12KeystorePath: Option[String],
+                             prometheusEnabled: Boolean = false,
+                             prometheusPort: Int = 9464)
 
 /**
  * Factory interface for creating MetricExporter instances
@@ -133,8 +136,10 @@ object OTelMetricsConfig {
       otlpTrustedCertsPath = metricsConfig.as[Option[String]]("otlp-trusted-certs-path"),
       otlpClientCertPath = metricsConfig.as[Option[String]]("otlp-client-cert-path"),
       otlpClientKeyPath = metricsConfig.as[Option[String]]("otlp-client-key-path"),
-      otlpClientP12KeystorePath = metricsConfig.as[Option[String]]("otlp-client-p12-keystore-path")
+      otlpClientP12KeystorePath = metricsConfig.as[Option[String]]("otlp-client-p12-keystore-path"),
       // TODO add support for passwords if needed later
+      prometheusEnabled = metricsConfig.as[Boolean]("prometheus-enabled"),
+      prometheusPort = metricsConfig.as[Int]("prometheus-port")
     )
   }
 }
@@ -284,6 +289,14 @@ private class FilodbMetrics(filodbMetricsConfig: Config) extends StrictLogging {
     val sdkMeterProviderBuilder = SdkMeterProvider.builder()
       .setResource(resource)
       .registerMetricReader(metricReader)
+
+    if (otelConfig.prometheusEnabled) {
+      val prometheusReader = PrometheusHttpServer.builder()
+        .setPort(otelConfig.prometheusPort)
+        .build()
+      sdkMeterProviderBuilder.registerMetricReader(prometheusReader)
+      logger.info(s"OTel Prometheus scrape endpoint enabled on port ${otelConfig.prometheusPort}")
+    }
     if (otelConfig.exponentialHistogram) {
       sdkMeterProviderBuilder.registerView(InstrumentSelector.builder().setType(InstrumentType.HISTOGRAM).build(),
         View.builder().setAggregation(Aggregation.base2ExponentialBucketHistogram(64, 20)).build())

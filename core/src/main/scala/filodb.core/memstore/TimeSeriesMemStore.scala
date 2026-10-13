@@ -49,16 +49,10 @@ extends TimeSeriesStore with StrictLogging {
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
 
   private[memstore] lazy val ingestionMemory = {
-    if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
-      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
-      val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")
-      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
-      val lucenePercent = filodbConfig.getDouble("memstore.memory-alloc.lucene-memory-percent")
-      require(Math.abs(nativeMemoryManagerPercent + blockMemoryManagerPercent + lucenePercent - 100) < 0.001,
-        s"Configured Block($nativeMemoryManagerPercent), Native($blockMemoryManagerPercent) " +
-        s"and Lucene($lucenePercent) memory percents don't sum to 100.0")
-      (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
-    } else filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
+    if (AutoMemoryAllocUtil.isAutoMemoryConfigEnabled(filodbConfig))
+      AutoMemoryAllocUtil.getIngestionMemoryAllocSize(filodbConfig)
+    else
+      filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
   }
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
@@ -209,9 +203,10 @@ extends TimeSeriesStore with StrictLogging {
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
+                          limit: Int,
+                          querySession: QuerySession): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, fetchFirstLastSampleTimes,
-      end, start, limit)).getOrElse(Iterator.empty)
+      end, start, limit, querySession)).getOrElse(Iterator.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)

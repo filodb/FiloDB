@@ -354,7 +354,10 @@ case class PlannerParams(applicationId: String = "filodb",
                          buddyGrpcTimeoutMs: Option[Long] = None,
                          localShardMapper: Option[ActiveShardMapper] = None,
                          buddyShardMapper: Option[ActiveShardMapper] = None,
-                         samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig()
+                         samplesScannedConfig: SamplesScannedConfig = SamplesScannedConfig(),
+                         // Overrides QueryConfig.minStepMs for this query when set. Passed from the query service
+                         // so clients can request a smaller minimum step (e.g. 1s) than the cluster default.
+                         minStepMsOpt: Option[Long] = None
                         )
 
 object PlannerParams {
@@ -509,6 +512,8 @@ case class QuerySession(qContext: QueryContext,
                         preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
 
   val queryStats: QueryStats = QueryStats()
+  // used to track number of times timeout is checked during query execution, to gate and control excessive checks
+  val timeoutCheckCountDuringScan = new AtomicInteger(0)
   val warnings: QueryWarnings = QueryWarnings()
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false
@@ -568,8 +573,8 @@ case class QueryStats() {
   @volatile private var containsNilKey = false;
 
   private val lock = new ReentrantReadWriteLock()
-  private val readLock = lock.readLock()
-  private val writeLock = lock.writeLock()
+  private def readLock = lock.readLock()
+  private def writeLock = lock.writeLock()
 
   override def toString: String = {
     readLock.lock()

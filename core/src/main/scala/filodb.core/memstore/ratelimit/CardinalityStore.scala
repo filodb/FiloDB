@@ -1,5 +1,7 @@
 package filodb.core.memstore.ratelimit
 
+import filodb.core.GlobalConfig
+
 /**
  * The data stored in each node of the Cardinality Store trie
  *
@@ -87,7 +89,12 @@ trait CardinalityStore {
 }
 
 object CardinalityStore {
-  // See scanChildren doc for details.
-  val MAX_RESULT_SIZE = 5000
+  // See scanChildren doc for details. Configurable via `filodb.metering-max-result-size`.
+  // NOTE: this cap applies per shard per scan, and also serves as the default overflow
+  // threshold for TsCardReduceExec, so raising it affects both cardinality query paths.
+  val MAX_RESULT_SIZE: Int =
+    if (GlobalConfig.systemConfig.hasPath("filodb.metering-max-result-size")) {
+      GlobalConfig.systemConfig.getInt("filodb.metering-max-result-size")
+    } else 5000
   val OVERFLOW_PREFIX = Seq("_overflow_")
 }

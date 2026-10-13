@@ -11,7 +11,7 @@ import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -74,6 +74,14 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
   val dsRef = dataset.ref
   val schemas = Schemas(dataset.schema)
+
+  it("should reject a LabelAudit, which only the multi-partition planner can plan") {
+    val lp = LabelAudit(Seq(ColumnFilter("_ws_", Filter.Equals("demo"))), Map.empty, 1000000, 2000000)
+    val thrown = intercept[UnsupportedOperationException] {
+      longTermPlanner.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("", 1000, 10, 2000)))
+    }
+    thrown.getMessage shouldEqual LabelAudit.OnlyMultiPartition
+  }
 
   it("should direct raw-cluster-only queries to raw planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
