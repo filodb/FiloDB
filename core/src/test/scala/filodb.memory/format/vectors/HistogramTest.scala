@@ -146,6 +146,82 @@ class HistogramTest extends NativeVectorTest {
         hist.quantile(0.999, 0, max, evenDistribution = true)
     }
 
+    describe("quantileEvenFloatRounded") {
+      // Integer power-of-2 scheme: the only scheme the float-rounded mode supports.
+      val scheme = GeometricBuckets(2, 2, 64, minusOne = true)
+      def hist(perBucket: Long*): LongHistogram = {
+        val counts = perBucket.toArray ++ Array.fill(64 - perBucket.length)(0L)
+        LongHistogram(scheme, counts.scanLeft(0L)(_ + _).tail)
+      }
+      val qs = Seq(0.25, 0.5, 0.9, 0.95, 0.99, 0.999)
+
+      // Expected values in these tests come from an independent single-precision Java implementation
+      // of the even-distribution algorithm.  Producers that publish percentiles that way emit exactly
+      // these numbers, so equality is exact: any drift (double arithmetic, missing rounding, or float
+      // widening such as 1.2599999904632568) would make FiloDB disagree with the published series.
+      it("should reproduce single-precision, 2-decimal-rounded percentiles exactly") {
+        val h = hist(243, 5)
+        qs.map(h.quantileEvenFloatRounded(_, 2.0)) shouldEqual Seq(1.26, 1.51, 1.92, 1.97, 2.0, 2.0)
+        // and it is genuinely different from mode 1 (double precision, unrounded)
+        h.quantileEvenFloatRounded(0.9, 2.0) should not equal h.quantile(0.9, 0, 2.0, evenDistribution = true)
+      }
+
+      it("should reproduce float rounding of mid-size values (rounded value is cast back to float)") {
+        val h = hist(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 5, 8, 13, 36, 54)
+        qs.map(h.quantileEvenFloatRounded(_, 998821.0)) shouldEqual
+          Seq(265117.16, 478235.7, 887521.4, 938857.25, 979925.94, 996767.6)
+      }
+
+      it("should follow float precision for values above 2^24, where float spacing exceeds the rounding step") {
+        val counts = new Array[Long](28)
+        counts(26) = 7
+        counts(27) = 11
+        val h = hist(counts.toIndexedSeq: _*)
+        val max = 2.0e8
+        qs.map(h.quantileEvenFloatRounded(_, max)) shouldEqual
+          Seq(1.11149056e8, 1.47922368e8, 1.85198992e8, 1.90680848e8, 1.9813616e8, 1.99813616e8)
+        // at q=0.9 double precision gives 185198988.8: off by more than the 0.01 rounding step
+        Math.abs(h.quantileEvenFloatRounded(0.9, max) - h.quantile(0.9, 0, max, evenDistribution = true)) should
+          be > 1.0
+      }
+
+      it("should return NaN when every sample is in bucket 0 (no percentiles are produced)") {
+        hist(17).quantileEvenFloatRounded(0.5, 1.0).isNaN shouldEqual true
+      }
+
+      it("should handle out-of-range q and empty histograms like quantile") {
+        val h = hist(243, 5)
+        h.quantileEvenFloatRounded(-0.1, 2.0) shouldEqual Double.NegativeInfinity
+        h.quantileEvenFloatRounded(1.1, 2.0) shouldEqual Double.PositiveInfinity
+        hist().quantileEvenFloatRounded(0.5, 2.0).isNaN shouldEqual true
+      }
+
+      it("should fall back to mode 1 (even distribution) when max is NaN") {
+        val h = hist(243, 5)
+        qs.foreach { q =>
+          val expected = h.quantile(q, 0, Double.NaN, evenDistribution = true)
+          val actual = h.quantileEvenFloatRounded(q, Double.NaN)
+          if (expected.isNaN) actual.isNaN shouldEqual true else actual shouldEqual expected
+        }
+      }
+
+      it("should fall back to mode 1 (even distribution) for unsupported bucket layouts") {
+        val counts = Array[Long](1, 3, 6, 10, 15, 21, 28, 36)
+        val unsupported = Seq(
+          LongHistogram(GeometricBuckets(2, 2, 8), counts),                   // no minusOne
+          LongHistogram(GeometricBuckets(2, 2, 8, minusOne = true), counts),  // not 64 buckets
+          LongHistogram(CustomBuckets(Array(1, 2, 4, 8, 16, 32, 64, 128)), counts))
+        unsupported.foreach { h =>
+          qs.foreach { q =>
+            h.quantileEvenFloatRounded(q, 100.0) shouldEqual h.quantile(q, 0, 100.0, evenDistribution = true)
+          }
+        }
+        val exp = MutableHistogram(Base2ExpHistogramBuckets(3, -5, 11),
+                                   Array[Double](0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
+        exp.quantileEvenFloatRounded(0.5, 1.5) shouldEqual exp.quantile(0.5, 0, 1.5, evenDistribution = true)
+      }
+    }
+
     it("should calculate quantile correctly for exponential bucket histograms") {
       val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
       val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
