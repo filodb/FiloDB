@@ -372,26 +372,28 @@ object TracingUtil extends StrictLogging  {
   }
 
   private def getRemoteTrace(md: Metadata): Span.Remote = {
+    // Use the configured scheme: a trace id parsed with a different width than the rest of the cluster
+    // loses its value when propagated to other nodes, and is then exported as an all-zero trace id
+    val identifierScheme = Kamon.identifierScheme
     val traceIdKey = Metadata.Key.of(TRACE_ID_HEADER, Metadata.ASCII_STRING_MARSHALLER)
     val traceIdentifier =
-      if (md.containsKey(traceIdKey))
-        Identifier.Scheme.Single.traceIdFactory.from(md.get(traceIdKey))
-      else
-        Identifier.Scheme.Single.traceIdFactory.generate()
+      Option(md.get(traceIdKey))
+        .map(parseTraceId(identifierScheme, _))
+        .filterNot(_.isEmpty)
+        .getOrElse(identifierScheme.traceIdFactory.generate())
 
     val spanIdKey = Metadata.Key.of(SPAN_ID_HEADER, Metadata.ASCII_STRING_MARSHALLER)
     val spanIdentifier =
-      if (md.containsKey(spanIdKey))
-        Identifier.Scheme.Single.traceIdFactory.from(md.get(spanIdKey))
-      else
-        Identifier.Scheme.Single.traceIdFactory.generate()
+      Option(md.get(spanIdKey))
+        .map(identifierScheme.spanIdFactory.from)
+        .filterNot(_.isEmpty)
+        .getOrElse(identifierScheme.spanIdFactory.generate())
 
     val parentSpanId = Metadata.Key.of(PARENT_SPAN_ID_HEADER, Metadata.ASCII_STRING_MARSHALLER)
     val parentSpanIdentifier =
-      if (md.containsKey(parentSpanId))
-        Identifier.Scheme.Single.traceIdFactory.from(md.get(parentSpanId))
-      else
-        Identifier.Empty
+      Option(md.get(parentSpanId))
+        .map(identifierScheme.spanIdFactory.from)
+        .getOrElse(Identifier.Empty)
 
     val sampled = Metadata.Key.of(TRACE_SAMPLED_HEADER, Metadata.ASCII_STRING_MARSHALLER)
     val sampleTrace = if (md.containsKey(sampled)) "1".equals(md.get(sampled)) else false
@@ -401,4 +403,11 @@ object TracingUtil extends StrictLogging  {
     else
       Span.Remote(spanIdentifier, parentSpanIdentifier, Trace.create(traceIdentifier, SamplingDecision.DoNotSample))
   }
+
+  // B3 trace ids are either 64 or 128 bit. The 16 byte factory only accepts 128 bit ids, so left pad 64 bit ones.
+  private def parseTraceId(identifierScheme: Identifier.Scheme, traceId: String): Identifier =
+    if (identifierScheme.traceIdFactory == Identifier.Factory.SixteenBytesIdentifier && traceId.length == 16)
+      identifierScheme.traceIdFactory.from(s"0000000000000000$traceId")
+    else
+      identifierScheme.traceIdFactory.from(traceId)
 }
