@@ -141,7 +141,8 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         val instantFunction = InstantFunction.histogram(function, source)
         if (instantFunction.isHToDoubleFunc || instantFunction.isHMaxMinToDoubleFunc) {
           // Hist to Double function, so output schema is double
-          source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
+          source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn,
+            source.columns(1).isCumulative)))
         } else { source }
       case cType: ColumnType          =>
         source
