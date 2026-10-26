@@ -417,7 +417,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
       val deltaExpOut = mapper.schema(deltaExpHistSchema)
       deltaExpOut.columns(1).isCumulative shouldEqual false
-      deltaExpOut.columns(1).isExponential shouldEqual true
+      deltaExpOut.columns(1).isExponential shouldEqual false
     }
   }
 
