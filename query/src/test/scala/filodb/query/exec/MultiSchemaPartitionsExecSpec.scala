@@ -331,10 +331,11 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 1
     val resultIt = result.result(0).rows().map(r=>(r.getLong(0), r.getDouble(1)))
 
-    val expected = (start to end by step).zip(Seq(Double.NaN, 0.049167, 0.078333, 0.115278, 0.145))
+    // histogram dataset is delta temporality, so rate = sum of bucket(16) deltas in the 5m window / 300 seconds
+    val expected = (start to end by step).zip(Seq(1.0 / 300, 20.0 / 300, 57.0 / 300, 116.0 / 300, 193.0 / 300))
     resultIt.zip(expected.toIterator).foreach { case (res, exp) =>
       res._1 shouldEqual exp._1
-      if (!java.lang.Double.isNaN(exp._2)) res._2 shouldEqual exp._2 +- 0.00001
+      res._2 shouldEqual exp._2 +- 0.00001
     }
   }
 

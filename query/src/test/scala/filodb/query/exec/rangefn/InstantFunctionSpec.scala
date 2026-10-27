@@ -389,6 +389,56 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
                                  InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
   }
 
+   it("should preserve temporality of histogram column when applying hist to double functions") {
+    import filodb.core.metadata.Column.ColumnType
+    val tsCol = ColumnInfo("timestamp", ColumnType.TimestampColumn)
+    val deltaHistSchema = ResultSchema(Seq(tsCol, ColumnInfo("h", ColumnType.HistogramColumn,
+                                                             isCumulative = false)), 1)
+    val cumulHistSchema = ResultSchema(Seq(tsCol, ColumnInfo("h", ColumnType.HistogramColumn,
+                                                             isCumulative = true)), 1)
+    val deltaExpHistSchema = ResultSchema(Seq(tsCol, ColumnInfo("h", ColumnType.HistogramColumn,
+                                                                isCumulative = false, isExponential = true)), 1)
+
+    val histToDoubleFuncs = Seq(
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket, Seq(StaticFuncArgs(16.0, rangeParams))),
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile, Seq(StaticFuncArgs(0.99, rangeParams))),
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramFraction,
+                                       Seq(StaticFuncArgs(0.0, rangeParams), StaticFuncArgs(16.0, rangeParams))))
+
+    histToDoubleFuncs.foreach { mapper =>
+      val deltaOut = mapper.schema(deltaHistSchema)
+      deltaOut.columns.map(_.colType) shouldEqual Seq(ColumnType.TimestampColumn, ColumnType.DoubleColumn)
+      deltaOut.columns(1).isCumulative shouldEqual false
+      deltaOut.columns(1).isExponential shouldEqual false
+
+      val cumulOut = mapper.schema(cumulHistSchema)
+      cumulOut.columns.map(_.colType) shouldEqual Seq(ColumnType.TimestampColumn, ColumnType.DoubleColumn)
+      cumulOut.columns(1).isCumulative shouldEqual true
+
+      val deltaExpOut = mapper.schema(deltaExpHistSchema)
+      deltaExpOut.columns(1).isCumulative shouldEqual false
+      deltaExpOut.columns(1).isExponential shouldEqual false
+    }
+  }
+
+  it("should preserve temporality of histogram column when applying hist max/min to double functions") {
+    import filodb.core.metadata.Column.ColumnType
+    val mapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile,
+                                                  Seq(StaticFuncArgs(0.99, rangeParams)))
+    // histMaxMinDS histogram column is configured with delta=true
+    histMaxMinSchema.columns(1).isCumulative shouldEqual false
+    val deltaOut = mapper.schema(histMaxMinSchema)
+    deltaOut.columns.map(_.colType) shouldEqual Seq(ColumnType.TimestampColumn, ColumnType.DoubleColumn)
+    deltaOut.columns(1).isCumulative shouldEqual false
+
+    val cumulHistMaxMinSchema = histMaxMinSchema.copy(columns = histMaxMinSchema.columns.map {
+      case c if c.colType == ColumnType.TimestampColumn => c
+      case c => c.copy(isCumulative = true)
+    })
+    val cumulOut = mapper.schema(cumulHistMaxMinSchema)
+    cumulOut.columns(1).isCumulative shouldEqual true
+  }
+
   it("should test date time functions") {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
