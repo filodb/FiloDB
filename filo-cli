@@ -2,7 +2,7 @@
 
 # set -x
 SCALA_VERSION="2.13"
-FILO_VERSION=$(cat version.sbt | sed -e 's/.*"\(.*\)"/\1/g')
+FILO_VERSION=$(sed -n 's/.*version := "\(.*\)".*/\1/p' version.sbt)
 CLI_FILE=`pwd`"/cli/target/scala-$SCALA_VERSION/filo-cli-$FILO_VERSION"
 
 function isJava8(){
