@@ -9,12 +9,12 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.MetricsTestData
 import filodb.memory.format.UnsafeUtils
-import filodb.memory.format.vectors.{CustomBuckets, HistogramWithBuckets, LongHistogram}
+import filodb.memory.format.vectors.{CustomBuckets, HistogramWithBuckets, LongHistogram, MutableHistogram}
 import filodb.query.QueryResult
 
 // scalastyle:off null
@@ -507,8 +507,112 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
 
+  it("should sum overlapping values when overlapMerge is Sum") {
+    val rvs = Seq(
+      Seq((10L, 1d), (20L, 2d), (30L, 3d), (40L, Double.NaN)),
+      Seq((30L, 10d), (40L, 20d), (50L, 30d))
+    )
+    val expected = Seq((10L, 1d), (20L, 2d), (30L, 13d), (40L, 20d), (50L, 30d))
+    mergeAndValidate(rvs, expected, StitchOverlapMerge.Sum)
+  }
+
+  it("should sum overlapping values of three RVs and emit NaN for gaps when overlapMerge is Sum") {
+    val rvs = Seq(
+      Seq((10L, 1d), (20L, 1d)),
+      Seq((20L, 2d)),
+      Seq((20L, 3d), (40L, 3d))
+    )
+    val expected = Seq((10L, 1d), (20L, 6d), (30L, Double.NaN), (40L, 3d))
+    mergeAndValidate(rvs, expected, StitchOverlapMerge.Sum)
+  }
+
+  it("should emit NaN when all overlapping values are NaN when overlapMerge is Sum") {
+    val rvs = Seq(
+      Seq((10L, 1d), (20L, Double.NaN)),
+      Seq((20L, Double.NaN), (30L, 2d))
+    )
+    val expected = Seq((10L, 1d), (20L, Double.NaN), (30L, 2d))
+    mergeAndValidate(rvs, expected, StitchOverlapMerge.Sum)
+  }
+
+  it("should pick max and min of overlapping values when overlapMerge is Max and Min") {
+    val rvs = Seq(
+      Seq((10L, 1d), (20L, 5d), (30L, 3d)),
+      Seq((20L, 4d), (30L, 7d), (40L, 2d))
+    )
+    mergeAndValidate(rvs, Seq((10L, 1d), (20L, 5d), (30L, 7d), (40L, 2d)), StitchOverlapMerge.Max)
+    mergeAndValidate(rvs, Seq((10L, 1d), (20L, 4d), (30L, 3d), (40L, 2d)), StitchOverlapMerge.Min)
+  }
+
+  it("should sum overlapping histograms when overlapMerge is Sum") {
+    val buckets = CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity))
+    val h1 = LongHistogram(buckets, Array(1L, 2L, 3L))
+    val h2 = LongHistogram(buckets, Array(10L, 20L, 30L))
+    val rvs = Seq(
+      Seq((10L, h1), (20L, h1), (30L, h1)),
+      Seq((20L, h2), (30L, HistogramWithBuckets.empty), (40L, h2))
+    )
+    val expected = Seq(
+      (10L, h1),
+      (20L, MutableHistogram(buckets, Array(11d, 22d, 33d))),
+      (30L, h1),
+      (40L, h2)
+    )
+    mergeAndValidateHistogram(rvs, expected, StitchOverlapMerge.Sum)
+  }
+
+  it("should fail to merge overlapping histograms when overlapMerge is Max") {
+    val buckets = CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity))
+    val h1 = LongHistogram(buckets, Array(1L, 2L, 3L))
+    val rvs = Seq(Seq((10L, h1)), Seq((10L, h1)))
+    intercept[IllegalArgumentException] {
+      mergeAndValidateHistogram(rvs, Seq((10L, h1)), StitchOverlapMerge.Max)
+    }
+  }
+
+  it("should sum overlapping partial results in compose when overlapMerge is Sum") {
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
+      Some(RvRange(10, 10, 60)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]),
+      overlapMerge = StitchOverlapMerge.Sum)
+    val rs = ResultSchema(List(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
+    // Partition 1 has results up to 40 and partition 2 from 30, both have partial results for 30 and 40
+    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty,
+      Seq((10L, 1d), (20L, 1d), (30L, 0.5d), (40L, 0.25d)), RvRange(10, 10, 40))))
+    val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty,
+      Seq((30L, 0.5d), (40L, 0.75d), (50L, 1d)), RvRange(30, 10, 50))))
+    val output = exec.compose(Observable.fromIterable(Seq(res0, res1).zipWithIndex), Task.eval(null),
+      QuerySession.makeForTestingOnly()).toListL.runToFuture.futureValue
+    output.size shouldEqual 1
+    compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))),
+      Seq((10L, 1d), (20L, 1d), (30L, 1d), (40L, 1d), (50L, 1d), (60L, Double.NaN)).toIterator)
+  }
+
+  it("should sum overlapping histogram partial results in compose when overlapMerge is Sum") {
+    val buckets = CustomBuckets(Array(1.0, 2.0, Double.PositiveInfinity))
+    val h1 = LongHistogram(buckets, Array(1L, 2L, 3L))
+    val h2 = LongHistogram(buckets, Array(10L, 20L, 30L))
+    def histRv(data: Seq[(Long, HistogramWithBuckets)], range: RvRange): RangeVector = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor =
+        new NoCloseCursor(data.iterator.map(r => new TransientHistRow(r._1, r._2)))
+      override def outputRange: Option[RvRange] = Some(range)
+    }
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
+      Some(RvRange(10, 10, 30)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]),
+      overlapMerge = StitchOverlapMerge.Sum)
+    val rs = ResultSchema(List(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("h", HistogramColumn)), 1)
+    val res0 = QueryResult("id", rs, Seq(histRv(Seq((10L, h1), (20L, h1)), RvRange(10, 10, 20))))
+    val res1 = QueryResult("id", rs, Seq(histRv(Seq((20L, h2), (30L, h2)), RvRange(20, 10, 30))))
+    val output = exec.compose(Observable.fromIterable(Seq(res0, res1).zipWithIndex), Task.eval(null),
+      QuerySession.makeForTestingOnly()).toListL.runToFuture.futureValue
+    output.size shouldEqual 1
+    compareIterHist(output.head.rows().map(r => (r.getLong(0), r.getHistogram(1).asInstanceOf[HistogramWithBuckets])),
+      Seq((10L, h1), (20L, MutableHistogram(buckets, Array(11d, 22d, 33d))), (30L, h2)).toIterator)
+  }
+
   def mergeAndValidateHistogram(rvs: Seq[Seq[(Long, HistogramWithBuckets)]],
-                                expected: Seq[(Long, HistogramWithBuckets)]): Unit = {
+                                expected: Seq[(Long, HistogramWithBuckets)],
+                                overlapMerge: StitchOverlapMerge = StitchOverlapMerge.NaNOnConflict): Unit = {
     val inputSeq = rvs.map { rows =>
       new NoCloseCursor(rows.iterator.map(r => new TransientHistRow(r._1, r._2)))
     }
@@ -517,13 +621,15 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case (t1, _) :: (t2, _) :: _ => t2 - t1
       case _ => 1
     }
-    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
+    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)),
+        overlapMerge = overlapMerge, isHistogram = true)
       .map(r => (r.getLong(0), r.getHistogram(1).asInstanceOf[HistogramWithBuckets]))
 
     compareIterHist(result, expected.toIterator)
   }
 
-  def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)]): Unit = {
+  def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)],
+                       overlapMerge: StitchOverlapMerge = StitchOverlapMerge.NaNOnConflict): Unit = {
     val inputSeq = rvs.map { rows =>
       new NoCloseCursor(rows.iterator.map(r => new TransientRow(r._1, r._2)))
     }
@@ -533,7 +639,8 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case (t1, _) :: (t2, _) :: _ => t2 - t1
       case _                       => 1
     }
-    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
+    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)),
+        overlapMerge = overlapMerge)
       .map(r => (r.getLong(0), r.getDouble(1)))
     compareIter(result, expected.toIterator)
   }

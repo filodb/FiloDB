@@ -1081,9 +1081,17 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
    * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they
    *   span more than one non-metric shard key prefix.
    */
-  //scalastyle:off method.length
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
+    timeSplitAggregatePushdownMerge(logicalPlan) match {
+      case Some(overlapMerge) => materializeTimeSplitAggregatePushdown(logicalPlan, qContext, overlapMerge)
+      case None               => materializeSplitLeafPlanDefault(logicalPlan, qContext)
+    }
+  }
+
+  //scalastyle:off method.length cyclomatic.complexity
+  private def materializeSplitLeafPlanDefault(logicalPlan: LogicalPlan,
+                                               qContext: QueryContext): PlanResult = {
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val lookbackMs = getLookBackMillis(logicalPlan).max
@@ -1271,17 +1279,162 @@ class MultiPartitionPlanner(val partitionLocationProvider: PartitionLocationProv
   }
   //scalastyle:on method.length
 
-  def supportRemoteRawExport(lp: LogicalPlan): Boolean = {
-    val matchingColumnNameForDisabledTenants = queryConfig.routingConfig.stitchDisabledTenantColumn
-    val matchingColumnValues = lp.planColumnFilters().filter(_ match {
-      case ColumnFilter(name, Equals(_: String)) if name == matchingColumnNameForDisabledTenants         => true
-      case _                                                                                             => false
-    }).map(f => f.filter.valuesStrings.head.asInstanceOf[String]).toSet
-    // Check if any value in this set is present in disabled tenants
-    val isDisabledTenant = matchingColumnValues
-                            .intersect(queryConfig.routingConfig.tenantsWithDisabledRemoteStitch).nonEmpty
-    queryConfig.routingConfig.supportRemoteRawExport && !isDisabledTenant
+  def supportRemoteRawExport(lp: LogicalPlan): Boolean =
+    queryConfig.routingConfig.supportRemoteRawExport && !isRemoteStitchDisabledTenant(lp)
 
+  /**
+   * Values of the tenant column (stitchDisabledTenantColumn, e.g. _ws_) the plan filters on with equality
+   */
+  private def planTenants(lp: LogicalPlan): Set[String] = {
+    val tenantColumn = queryConfig.routingConfig.stitchDisabledTenantColumn
+    lp.planColumnFilters().filter(_ match {
+      case ColumnFilter(name, Equals(_: String)) if name == tenantColumn => true
+      case _                                                             => false
+    }).map(f => f.filter.valuesStrings.head.asInstanceOf[String]).toSet
+  }
+
+  private def isRemoteStitchDisabledTenant(lp: LogicalPlan): Boolean =
+    planTenants(lp).intersect(queryConfig.routingConfig.tenantsWithDisabledRemoteStitch).nonEmpty
+
+  /**
+   * True if the time-split aggregate pushdown allow list is empty (all tenants allowed), or if every tenant the plan
+   * filters on with equality is on the allow list. Plans without an equality filter on the tenant column are not
+   * allowed when the allow list is non-empty.
+   */
+  private def isTimeSplitAggregatePushdownAllowedTenant(lp: LogicalPlan): Boolean = {
+    val allowedTenants = queryConfig.routingConfig.timeSplitAggregatePushdownTenants
+    if (allowedTenants.isEmpty) true
+    else {
+      val tenants = planTenants(lp)
+      tenants.nonEmpty && tenants.subsetOf(allowedTenants)
+    }
+  }
+
+  /**
+   * Time-split aggregate pushdown: an alternative to the remote raw export for a small set of queries whose leaf
+   * spans partitions split across time (ingestion of the shard key moved from partition P1 to P2 at time `ts`).
+   *
+   * Consider `sum(rate(foo[L]))` over [start, end] with start < ts < end. The raw export approach computes the
+   * instants in (ts, ts + L] on the query service after exporting raw samples from both partitions. For queries of
+   * the form `agg(fn(foo[L]))` where fn over a window W split into disjoint W1 (data in P1) and W2 (data in P2)
+   * satisfies fn(W) = fn(W1) (+) fn(W2), and agg uses the same (+), the whole query can be pushed down to each
+   * partition for overlapping time ranges and the partial results combined per timestamp on the query service:
+   *
+   * {{{
+   *   P1 evaluates agg(fn(foo[L])) for instants [start, ts + offset + L + U]
+   *   P2 evaluates agg(fn(foo[L])) for instants [ts + offset - U, end]
+   *   StitchRvsExec(overlapMerge = (+)) combines them; outside the overlap only one partition has a value
+   * }}}
+   * where U is the configured period-of-uncertainty around the split.
+   *
+   * Eligible (agg, fn) pairs and their merge:
+   *   - sum with rate, increase, sum_over_time, count_over_time => Sum
+   *   - max with max_over_time                                  => Max
+   *   - min with min_over_time                                  => Min
+   * Not eligible (and planned with the existing raw export path): count/group/avg/topk/quantile etc. (a series
+   * present in both partitions within the overlap would be counted twice or cannot be decomposed), instant
+   * selectors and last_over_time (P1 would contribute a stale value), irate/idelta/deriv (not additive),
+   * subqueries, @ modifier, function args, and plans with more than one routing key.
+   *
+   * ASSUMPTIONS / DISCLAIMERS:
+   *   The move from P1 to P2 is scheduled for a future time ts, and the routing configuration is pushed to all
+   *   ingestion gateways before ts. See doc/proposals/time-split-aggregate-pushdown.md.
+   *   1. A sample is ingested into exactly one partition: nothing is dropped at the switch and nothing is written to
+   *      both partitions. If samples were dual-written, sum-based results in the overlap would double count. The raw
+   *      export path does not have this problem since stitched raw samples with the same timestamp are de-duplicated.
+   *   2. Gateways route each sample by its own timestamp, so every series is split cleanly at ts: all samples before
+   *      ts in P1, all samples from ts onwards in P2. If gateways routed by processing time instead, samples near ts
+   *      could land out of order across partitions and cumulative rate/increase could come out too high or too low
+   *      (delta counters would stay exact).
+   *   3. rate/increase of CUMULATIVE counters are APPROXIMATE within the overlap window and UNDERESTIMATE the true
+   *      value. Each partition computes the rate on its portion of the window with Prometheus-style extrapolation,
+   *      so the increase between a series' last P1 sample and its first P2 sample is covered only by extrapolation,
+   *      and a partition with fewer than 2 samples in its portion of the window contributes nothing (NaN). For a sum
+   *      over many series with staggered scrape phases the dip is small (about -0.7% for 25 series, 30s scrapes, 5m
+   *      lookback; see TimeSplitAggregatePushdownSpec). A sum over few series approaches the single-series worst
+   *      case: about -4% for 10s scrapes / 5m lookback, -14% for 30s / 5m, -29% for 60s / 5m, -5% for 60s / 30m.
+   *      For DELTA counters rate/increase is a plain sum over the window and the pushdown is exact. sum_over_time,
+   *      count_over_time, max_over_time and min_over_time are exact as well.
+   *   4. Counter resets across the split are not an issue since each partition computes its own portion.
+   *   5. Partition assignments are assumed to be sorted and time-disjoint, like the rest of this planner.
+   *
+   * Enabled with query.routing.enable-time-split-aggregate-pushdown, honoring the remote stitch disabled tenants.
+   * When query.routing.time-split-aggregate-pushdown-tenants is non-empty, only those tenants get the pushdown.
+   *
+   * @return the merge to use in StitchRvsExec if the plan is eligible for time-split aggregate pushdown
+   */
+  private def timeSplitAggregatePushdownMerge(lp: LogicalPlan): Option[StitchOverlapMerge] = {
+    if (!queryConfig.routingConfig.enableTimeSplitAggregatePushdown || isRemoteStitchDisabledTenant(lp) ||
+        !isTimeSplitAggregatePushdownAllowedTenant(lp)) None
+    else lp match {
+      case Aggregate(op, psw: PeriodicSeriesWithWindowing, Nil, _)
+        if psw.series.isInstanceOf[RawSeries] && psw.atMs.isEmpty && psw.functionArgs.isEmpty &&
+          getRoutingKeys(lp).size == 1 =>
+        (op, psw.function) match {
+          case (AggregationOperator.Sum, RangeFunctionId.Rate | RangeFunctionId.Increase |
+                                         RangeFunctionId.SumOverTime | RangeFunctionId.CountOverTime) =>
+            Some(StitchOverlapMerge.Sum)
+          case (AggregationOperator.Max, RangeFunctionId.MaxOverTime) => Some(StitchOverlapMerge.Max)
+          case (AggregationOperator.Min, RangeFunctionId.MinOverTime) => Some(StitchOverlapMerge.Min)
+          case _                                                      => None
+        }
+      case _ => None
+    }
+  }
+
+  /**
+   * Materializes a plan eligible for time-split aggregate pushdown (see timeSplitAggregatePushdownMerge for the
+   * eligibility, assumptions and disclaimers). The entire plan is pushed down to every partition assignment for
+   * all the instants whose window (including offset) can see data of that assignment, extended by the period of
+   * uncertainty on both sides. Partial results are merged per timestamp using StitchRvsExec with the overlapMerge.
+   *
+   * MultiPartitionReduceAggregateExec cannot be used to combine the partial results since the row aggregators
+   * zip rows of the children positionally and expect the same time range from all children.
+   */
+  private def materializeTimeSplitAggregatePushdown(logicalPlan: LogicalPlan,
+                                                    qContext: QueryContext,
+                                                    overlapMerge: StitchOverlapMerge): PlanResult = {
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val (queryStartMs, queryEndMs) = (1000 * qParams.startSecs, 1000 * qParams.endSecs)
+    val stepMs = 1000 * qParams.stepSecs
+    val isInstantQuery = qParams.startSecs == qParams.endSecs
+    val lookbackMs = getLookBackMillis(logicalPlan).max
+    val offsetMs = getOffsetMillis(logicalPlan).max
+    val uncertaintyMs = queryConfig.routingConfig.periodOfUncertaintyMs
+    val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
+    require(partitions.nonEmpty, s"Partition assignments is not expected to be empty for query ${qParams.promQl}")
+    logger.info(s"Time-split aggregate pushdown: overlapMerge=$overlapMerge, partitions=${partitions.size}, " +
+      s"queryId=${qContext.queryId}, promQl=${qParams.promQl}")
+
+    val execPlans = partitions.zipWithIndex.flatMap { case (assignment, i) =>
+      // Instants t whose window [t - offset - lookback, t - offset] can see data in [assignStart, assignEnd]
+      // are in [assignStart + offset, assignEnd + offset + lookback], extended by the uncertainty on both sides.
+      // The first and last assignments are open ended towards the query start and end respectively.
+      val fromMs = if (i == 0) queryStartMs
+                   else (assignment.timeRange.startMs + offsetMs - uncertaintyMs).max(queryStartMs)
+      val toMs = if (i == partitions.size - 1) queryEndMs
+                 else (assignment.timeRange.endMs.min(queryEndMs) + offsetMs + lookbackMs + uncertaintyMs)
+                        .min(queryEndMs)
+      val rangeOpt = if (isInstantQuery) {
+        if (fromMs <= queryStartMs && queryStartMs <= toMs) Some(TimeRange(queryStartMs, queryStartMs)) else None
+      } else {
+        // align to the step grid of the original query so that the results of all partitions line up
+        val startOnGrid = snapToStep(fromMs, stepMs, queryStartMs)
+        val endOnGrid = queryStartMs + ((toMs - queryStartMs) / stepMs) * stepMs
+        if (startOnGrid <= endOnGrid) Some(TimeRange(startOnGrid, endOnGrid)) else None
+      }
+      rangeOpt.map(range => materializeForAssignment(logicalPlan, assignment, qContext, Some(range)))
+    }
+
+    val resPlan = if (execPlans.size == 1) {
+      execPlans.head
+    } else {
+      // StitchRvsExec requires a positive step, which instant queries may not carry
+      val rvRange = RvRange(queryStartMs, if (isInstantQuery) stepMs.max(1000L) else stepMs, queryEndMs)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), PlannerUtil.localPlansFirst(execPlans),
+        overlapMerge = overlapMerge)
+    }
+    PlanResult(Seq(resPlan))
   }
 
   /**

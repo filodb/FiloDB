@@ -7,7 +7,7 @@ import filodb.core.{DatasetRef, GdeltTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{ColumnFilter, ColumnInfo, CustomRangeVectorKey, NoCloseCursor, QueryConfig, QueryContext, QueryStats, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientRow}
 import filodb.core.store.AllChunkScan
-import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
+import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec, StitchOverlapMerge, StitchRvsExec}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -135,6 +135,18 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val execPlan = MultiSchemaPartitionsExec(qContext, inProcessDispatcher,
       dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan.toProto.fromProto(qContext) shouldEqual execPlan
+  }
+
+  it("should convert StitchRvsExec with overlapMerge to proto and back") {
+    val dsRef = DatasetRef("raw-metrics")
+    val children = Seq(0, 1).map(shard => MultiSchemaPartitionsExec(qContext, inProcessDispatcher,
+      dsRef, shard, filters, AllChunkScan, "_metric_"))
+    Seq(StitchOverlapMerge.NaNOnConflict, StitchOverlapMerge.Sum, StitchOverlapMerge.Max,
+        StitchOverlapMerge.Min).foreach { overlapMerge =>
+      val execPlan = StitchRvsExec(qContext, inProcessDispatcher, Some(RvRange(1000, 100, 2000)), children,
+        overlapMerge = overlapMerge)
+      execPlan.toProto.fromProto(qContext) shouldEqual execPlan
+    }
   }
 
   it("should convert PartKeyLuceneIndexRecord to proto and back") {
