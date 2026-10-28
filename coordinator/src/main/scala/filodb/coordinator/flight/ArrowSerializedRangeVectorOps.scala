@@ -11,7 +11,7 @@ import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.jctools.queues.MpscArrayQueue
 import spire.syntax.cfor.cforRange
 
-import filodb.core.Utils
+import filodb.core.{GlobalConfig, Utils}
 import filodb.core.binaryrecord2.{RecordSchema, SingleRecordBuilder}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.query._
@@ -31,8 +31,11 @@ object ArrowSerializedRangeVectorOps {
     new Schema(util.Arrays.asList(isRvk, rvkBr))
   }
 
-  // TODO later, this should not be hard-coded
-  private[flight] val maxVecLen = 1048576 // 1 MB
+  // Size of the data buffer of each Arrow batch (VSR); also bounds the largest single serialized row/proto.
+  // Each message on the wire is somewhat larger (offsets, validity), so the Flight client's
+  // filodb.flight.client.max-inbound-message-size needs to leave headroom above this.
+  private[flight] val maxVecLen: Int =
+    Math.toIntExact(GlobalConfig.systemConfig.getBytes("filodb.flight.server.max-vector-length"))
   val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
   private[flight] val maxVsrs = 50
 
