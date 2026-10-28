@@ -112,6 +112,23 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
+  it("should count the bytes that an index lookup reads") {
+    val start = System.currentTimeMillis()
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+        keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
+      }
+    val end = System.currentTimeMillis()
+    keyIndex.refreshReadersBlocking()
+
+    val before = ByteCountingDirectory.threadBytesRead()
+    val partIds = keyIndex.partIdsFromFilters(Seq(ColumnFilter("Actor2Code", Filter.Equals("GOV".utf8))), start, end)
+    val bytes = ByteCountingDirectory.threadBytesRead() - before
+
+    partIds.length should be > 0
+    bytes should be > 0L
+  }
+
   it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
