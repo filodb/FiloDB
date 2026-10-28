@@ -418,12 +418,18 @@ final case class HistogramMaxQuantileImpl() extends HMaxMinToDoubleIFunction {
  */
 final case class HistogramMaxQuantileEvenImpl() extends HMaxMinToDoubleIFunction {
   /**
-    * @param scalarParams - two values: quantile (0 to 1) and mode (0=linear, 1=even distribution).
+    * @param scalarParams - two values: quantile (0 to 1) and mode (0=linear, 1=even distribution,
+    *                       2=even distribution in single precision rounded to 2 decimals).
+    *                       Any other mode is treated as linear.
     */
   final def apply(hist: Histogram, max: Double, min: Double = Double.NaN, scalarParams: Seq[Double]): Double = {
-    require(scalarParams.length == 2, "Quantile (between 0 and 1) and mode (0=linear, 1=even) required")
-    val evenDistribution = scalarParams(1) == 1.0
-    hist.quantile(scalarParams(0), 0, max, evenDistribution)
+    require(scalarParams.length == 2,
+      "Quantile (between 0 and 1) and mode (0=linear, 1=even, 2=even float-rounded) required")
+    scalarParams(1) match {
+      case 1.0 => hist.quantile(scalarParams(0), 0, max, evenDistribution = true)
+      case 2.0 => hist.quantileEvenFloatRounded(scalarParams(0), max)
+      case _   => hist.quantile(scalarParams(0), 0, max)
+    }
   }
 }
 

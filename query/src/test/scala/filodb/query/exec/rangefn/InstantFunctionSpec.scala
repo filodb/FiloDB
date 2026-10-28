@@ -366,6 +366,41 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
                                  InstantFunctionId.HistogramMaxQuantileEven, Seq(0.9, 1.0), histMaxMinSchema)
   }
 
+  it("should compute histogram_max_quantile_even with mode=2 as mode=1 for unsupported bucket layouts") {
+    // the fixture uses GeometricBuckets(2, 2, 8): not the integer power-of-2 64-bucket layout,
+    // so float-rounded mode must fall back to plain even distribution end-to-end
+    val (data, histRV) = MMD.histMaxMinRV(100000L, numSamples = 7)
+    val expected = data.map { row =>
+      val _hist = row(3).asInstanceOf[bv.LongHistogram]
+      val _max = row(5).asInstanceOf[Double]
+      _hist.quantile(0.9, 0, _max, evenDistribution = true)
+    }
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramMaxQuantileEven, Seq(0.9, 2.0), histMaxMinSchema)
+  }
+
+  it("should route histogram_max_quantile_even mode=2 to the float-rounded quantile") {
+    val counts = Array[Long](243, 5) ++ Array.fill(62)(0L)
+    val hist = bv.LongHistogram(bv.GeometricBuckets(2, 2, 64, minusOne = true), counts.scanLeft(0L)(_ + _).tail)
+    val fn = HistogramMaxQuantileEvenImpl()
+    fn(hist, 2.0, Double.NaN, Seq(0.9, 2.0)) shouldEqual 1.92
+    fn(hist, 2.0, Double.NaN, Seq(0.9, 2.0)) should not equal fn(hist, 2.0, Double.NaN, Seq(0.9, 1.0))
+  }
+
+  it("should treat an invalid histogram_max_quantile_even mode as linear (mode=0)") {
+    val (data, _) = MMD.histMaxMinRV(100000L, numSamples = 7)
+    val expected = data.map { row =>
+      val _hist = row(3).asInstanceOf[bv.LongHistogram]
+      val _max = row(5).asInstanceOf[Double]
+      _hist.quantile(0.9, 0, _max)
+    }
+    Seq(3.0, -1.0, 1.5).foreach { mode =>
+      val (_, rv) = MMD.histMaxMinRV(100000L, numSamples = 7)
+      applyFunctionAndAssertResult(Array(rv), Array(expected.toIterator),
+                                   InstantFunctionId.HistogramMaxQuantileEven, Seq(0.9, mode), histMaxMinSchema)
+    }
+  }
+
   it("should return proper schema after applying histogram_max_quantile_even") {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantileEven,
                                                                  Seq(StaticFuncArgs(0.99, rangeParams),
