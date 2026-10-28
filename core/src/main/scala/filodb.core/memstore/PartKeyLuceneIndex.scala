@@ -92,10 +92,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   val luceneQueryCacheHitRate = FilodbMetrics.gauge("index-lucene-query-cache-hit-rate",
     Map("dataset" -> ref.dataset, "shard" -> shardNum.toString))
 
-  val fsDirectory = if (useMemoryMappedImpl)
-    new MMapDirectory(indexDiskLocation)
-  else
-    new NIOFSDirectory(indexDiskLocation)
+  // Wrapped so that queries can report the bytes they read. See ByteCountingDirectory.
+  val fsDirectory = new ByteCountingDirectory(
+    if (useMemoryMappedImpl) new MMapDirectory(indexDiskLocation) else new NIOFSDirectory(indexDiskLocation))
 
   private val analyzer = new StandardAnalyzer()
 
