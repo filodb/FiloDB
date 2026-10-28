@@ -346,7 +346,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           // is expensive, but we do it to handle data sizing for metrics that have
           // continuous churn. See capDataScannedPerShardCheck method.
           val startNs = Utils.currentThreadCpuTimeNanos
+          val luceneBytesBefore = ByteCountingDirectory.threadBytesRead()
           val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+          val luceneBytesRead = ByteCountingDirectory.threadBytesRead() - luceneBytesBefore
           val _schema = recs.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
@@ -361,6 +363,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             }.getOrElse("multiple")
           }.toList
           querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(recs.length)
+          querySession.queryStats.getLuceneBytesReadCounter(metricGroupBy).addAndGet(luceneBytesRead)
           querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
           val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
           val samplesScannedCounter = querySession.queryStats.getSamplesScannedCounter(metricGroupBy)
