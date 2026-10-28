@@ -175,18 +175,13 @@ trait Histogram extends Ordered[Histogram] {
    * single-precision Float and the result is rounded to 2 decimals, then to the nearest Float.
    * The returned Double is the shortest decimal for that Float (e.g. 1.26, not 1.2599999904632568).
    *
-   * Only supported for the integer power-of-2 layout `GeometricBuckets(2, 2, 64, minusOne = true)`.
-   * Other layouts, or a NaN `max`, fall back to `quantile(q, 0, max, evenDistribution = true)`.
+   * a NaN `max`, fall back to `quantile(q, 0, max, evenDistribution = true)`.
    * Returns NaN when every sample is in bucket 0.
    */
   //scalastyle:off method.length
   //scalastyle:off cyclomatic.complexity
   def quantileEvenFloatRounded(q: Double, max: Double): Double = {
-    val supported = this match {
-      case h: HistogramWithBuckets => h.buckets == Histogram.FloatRoundedBuckets
-      case _                       => false
-    }
-    if (!supported || max.isNaN) quantile(q, 0, max, evenDistribution = true)
+    if (max.isNaN) quantile(q, 0, max, evenDistribution = true)
     else if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (topBucketValue <= 0 || topBucketValue == bucketValue(0)) Double.NaN
