@@ -541,15 +541,19 @@ case class Stat() {
   val samplesScanned = new AtomicLong
   val resultBytes = new AtomicLong
   val cpuNanos = new AtomicLong
+  // Bytes requested from the part-key Lucene index files (not disk I/O). See ByteCountingDirectory.
+  val luceneBytesRead = new AtomicLong
 
   override def toString: String = s"(timeSeriesScanned=$timeSeriesScanned, " +
-    s"dataBytesScanned=$dataBytesScanned, samplesScanned=$samplesScanned, resultBytes=$resultBytes, cpuNanos=$cpuNanos)"
+    s"dataBytesScanned=$dataBytesScanned, samplesScanned=$samplesScanned, resultBytes=$resultBytes, " +
+    s"cpuNanos=$cpuNanos, luceneBytesRead=$luceneBytesRead)"
   def add(s: Stat): Unit = {
     timeSeriesScanned.addAndGet(s.timeSeriesScanned.get())
     dataBytesScanned.addAndGet(s.dataBytesScanned.get())
     samplesScanned.addAndGet(s.samplesScanned.get())
     resultBytes.addAndGet(s.resultBytes.get())
     cpuNanos.addAndGet(s.cpuNanos.get())
+    luceneBytesRead.addAndGet(s.luceneBytesRead.get())
   }
 }
 
@@ -875,6 +879,17 @@ case class QueryStats() {
   def getCpuNanosCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
     getOrPutEmptyStat(theNs).cpuNanos
+  }
+
+  /**
+   * Counter for bytes requested from the part-key Lucene index files by the query
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getLuceneBytesReadCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && keyToEntryIndex.size == 1) keyToEntryIndex.head._1 else group
+    getOrPutEmptyStat(theNs).luceneBytesRead
   }
 
   /**

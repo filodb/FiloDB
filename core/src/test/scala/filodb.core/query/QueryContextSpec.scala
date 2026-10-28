@@ -116,6 +116,23 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     keyBuffer.clear()
   }
 
+  it("should track luceneBytesRead and merge it with Stat.add") {
+    val stats = QueryStats()
+    stats.getLuceneBytesReadCounter(Seq("g1")).addAndGet(100)
+    stats.getLuceneBytesReadCounter(Seq("g1")).addAndGet(50)
+    stats.getLuceneBytesReadCounter(Seq("g2")).addAndGet(7)
+    stats.getLuceneBytesReadCounter(Seq("g1")).get() shouldEqual 150
+    stats.getLuceneBytesReadCounter(Seq("g2")).get() shouldEqual 7
+
+    val a = Stat()
+    a.luceneBytesRead.addAndGet(5)
+    val b = Stat()
+    b.luceneBytesRead.addAndGet(6)
+    a.add(b)
+    a.luceneBytesRead.get() shouldEqual 11
+    a.toString should include ("luceneBytesRead=11")
+  }
+
   it("should correctly add samples-scanned to QueryStats") {
     {
       // Empty -- effectively a no-op; should not throw.
