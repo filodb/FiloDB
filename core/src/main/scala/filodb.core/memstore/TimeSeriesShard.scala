@@ -2119,7 +2119,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val startNs = Utils.currentThreadCpuTimeNanos
+        val luceneBytesBefore = ByteCountingDirectory.threadBytesRead()
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        querySession.queryStats.getLuceneBytesReadCounter(metricGroupBy)
+          .addAndGet(ByteCountingDirectory.threadBytesRead() - luceneBytesBefore)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
         querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
         querySession.queryStats.getCpuNanosCounter(metricGroupBy).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
