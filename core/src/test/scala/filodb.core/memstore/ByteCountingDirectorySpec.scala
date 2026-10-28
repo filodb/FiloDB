@@ -90,6 +90,24 @@ class ByteCountingDirectorySpec extends AnyFunSpec with Matchers {
         ByteCountingDirectory.threadBytesRead() shouldEqual before
         in.close()
       }
+
+      it("should credit reads to the thread that created the clone") {
+        val in = dir.openInput(FileName, IOContext.DEFAULT)
+        val clone = in.clone() // created on this thread
+        val before = ByteCountingDirectory.threadBytesRead()
+        val otherThreadDelta = new AtomicLong(-1)
+        val t = new Thread(() => {
+          val b = ByteCountingDirectory.threadBytesRead()
+          clone.readBytes(new Array[Byte](20), 0, 20) // read on another thread
+          otherThreadDelta.set(ByteCountingDirectory.threadBytesRead() - b)
+        })
+        t.start()
+        t.join()
+        // The bytes are credited to the creating thread (this one), not to the reading thread.
+        otherThreadDelta.get() shouldEqual 0
+        ByteCountingDirectory.threadBytesRead() - before shouldEqual 20
+        in.close()
+      }
     }
   }
 }
