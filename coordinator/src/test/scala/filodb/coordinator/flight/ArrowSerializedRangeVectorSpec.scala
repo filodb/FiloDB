@@ -79,7 +79,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       )
 
       // Convert to ArrowSerializedRangeVector2 instances
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.length shouldEqual 2
@@ -119,7 +119,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.foreach(s => VSRDebug.debug(s.asInstanceOf[ArrowSerializedRangeVector]))
@@ -164,7 +164,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.length shouldEqual 1
@@ -206,7 +206,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv3, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.length shouldEqual 3
@@ -245,7 +245,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
 
       // Should have created multiple VSRs
       allVsrs.length shouldEqual 2
@@ -346,7 +346,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.length shouldEqual 1
@@ -374,7 +374,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       val srv = srvs.head
@@ -409,7 +409,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       val cursor = srvs.head.rows()
@@ -447,7 +447,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       allVsrs.length shouldEqual 1
 
       // Verify the offset chain directly: offsetBuffer[i+1] >= offsetBuffer[i] for every row.
@@ -498,7 +498,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         rv, recSchema, "testExecPlan", queryStats, allocator, vsrs
       )
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
 
       // Byte exhaustion must have triggered exactly one additional VSR allocation.
       allVsrs.length shouldEqual 2
@@ -531,7 +531,7 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
         )
       }
 
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val srvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
 
       srvs.length shouldEqual numRvs

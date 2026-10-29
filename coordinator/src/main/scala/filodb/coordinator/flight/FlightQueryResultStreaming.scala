@@ -375,7 +375,6 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   // to avoid errors. Dont send the VSRs out since it will break the state continuity across VSRs
                   logger.debug(s"Understand why we see SRV and Arrow Results: queryContext=${execPlan.queryContext}")
                 }
-                state.flightVsr.setRowCount(0) // reset vectors before each RV is loaded, this resets fields counts too
                 Task.eval {
                   // This lambda triggers intensive iterators and calculations; runs on query sched
                   FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
