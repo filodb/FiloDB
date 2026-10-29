@@ -123,9 +123,7 @@ object ArrowSerializedRangeVectorOps {
                                  state: VsrPopulationState): Unit = {
 
     def updateVsrLengthInState(): Unit = {
-        state.currentIsRvkVec.setValueCount(state.rowNum)
-        state.currentRvkBrVec.setValueCount(state.rowNum)
-        state.currentVsr.setRowCount(state.rowNum)
+        state.currentVsr.setRowCount(state.rowNum) // resets the field vectors value count as well
     }
 
     def addNewVsr(): Unit = {

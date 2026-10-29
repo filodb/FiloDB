@@ -73,7 +73,7 @@ private[flight] final class FlightBackpressure(listener: ServerStreamListener, q
         math.max(queryContext.queryTimeRemaining, 0L).millis,
         Task.defer(Task.raiseError(QueryTimeoutException(
           System.currentTimeMillis() - queryContext.submitTime, classOf[FlightBackpressure].getName)))
-      ).asyncBoundary // resume on the Flight IO scheduler rather than the gRPC callback thread
+      ).asyncBoundary // resume on the default (query) scheduler rather than the gRPC callback thread
     }
   }
 }
@@ -152,7 +152,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
 
       val execTask = executePlan(q, querySession).flatMap { res =>
         logger.debug(s"Query execution pipeline constructed by Flight producer for queryPlanId=${q.planId}")
-        FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+        FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
         streamResults(res, flightAllocator, listener, q, querySpan, backpressure)
       }.onErrorRecover {
         // if for any reason streamResults thew exception, do it here
@@ -182,7 +182,12 @@ trait FlightQueryResultStreaming extends StrictLogging {
           querySpan.finish()
           querySession.close()
         })
-        .runToFuture(QueryScheduler.flightIoScheduler)
+        // Entire server-side pipeline runs on the query scheduler, just like QueryActor. Nothing here blocks:
+        // listener.putNext/putMetadata only enqueue onto gRPC's write queue (Netty does the socket I/O) and
+        // slow clients are handled by the non-blocking FlightBackpressure. executeAsync hops off the
+        // gRPC executor thread immediately.
+        .executeAsync
+        .runToFuture(queryScheduler)
     }
   }
 
@@ -231,8 +236,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                             backpressure: FlightBackpressure
                            ): Task[Unit] = {
 
-    // This method has portions that need to run on Flight IO scheduler and portions that need to run
-    // on Query scheduler. The portions that run on Query scheduler are marked clearly.
+    // This method runs entirely on the Query scheduler. Serialization of RVs into VSRs and
+    // sending them to the listener are interleaved without any thread hops.
 
     // Order of messages to be sent as part of Flight response:
     // 1. Header: ResultSchema
@@ -242,7 +247,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
       case qe: QueryError =>
         Task.eval {
           logger.debug(s"Streaming error for queryPlanId=${execPlan.planId}")
-          FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+          FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
           // rethrow so circuit breaker can handle
           if (qe.t.isInstanceOf[QueryTimeoutException] || qe.t.isInstanceOf[OutOfMemoryException]) throw qe.t
           sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
@@ -250,7 +255,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
       case res: QueryResult =>
         Task.eval {
           logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
-          FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+          FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
           // ownership of metadata buf is now with flight listener and hence not closed here
           flightAllocator.checkAllocatorLimits(execPlan.queryContext)
           logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
@@ -258,7 +263,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
         }.flatMap { _ =>
           Task.eval {
             logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             // here we initialize the state object with emoty flightVsr which
             // will be populated when we need to send VSR over the wire as response
             flightAllocator.withRequestAllocator { a =>
@@ -280,7 +285,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
               Task.tailRecM(resultSize) { bytes =>
                 if (state.finishedVsrs.isEmpty) Task.now(Right(bytes))
                 else backpressure.awaitReady.map { _ =>
-                  FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                  FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                   val vsr = state.finishedVsrs.remove(0) // take ownership; no longer in finishedVsrs
                   try {
                     var newBytes = bytes
@@ -312,7 +317,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
                 }
               }
 
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             listener.start(state.flightVsr)
             var numResultSamples = 0
             var resultSize = 0L
@@ -343,7 +348,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
               Observable.fromIterable(resultVsrs).mapEval { vsr =>
                 // wait (non-blocking) for the client to be ready BEFORE overwriting flightVsr
                 backpressure.awaitReady.map { _ =>
-                  FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                  FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                   val unloader = new VectorUnloader(vsr)
                   val loader = new VectorLoader(state.flightVsr)
                   Using.resource(unloader.getRecordBatch) { rb =>
@@ -370,10 +375,9 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   // to avoid errors. Dont send the VSRs out since it will break the state continuity across VSRs
                   logger.debug(s"Understand why we see SRV and Arrow Results: queryContext=${execPlan.queryContext}")
                 }
-                state.flightVsr.getFieldVectors.forEach(_.setValueCount(0)) // reset vectors before each RV is loaded
-                state.flightVsr.setRowCount(0)
+                state.flightVsr.setRowCount(0) // reset vectors before each RV is loaded, this resets fields counts too
                 Task.eval {
-                  // This lambda triggers intensive iterators and calculations and should be done on query sched
+                  // This lambda triggers intensive iterators and calculations; runs on query sched
                   FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                   flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                   logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
@@ -394,11 +398,11 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   } {
                     throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
                   }
-                }.executeOn(queryScheduler).asyncBoundary.flatMap { _ =>
+                }.flatMap { _ =>
                   drainFinishedVsrs(resultSize, "next").map(resultSize = _)
                 }
               }.completedL.flatMap { _ =>
-                FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+                FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                 // Move the partially-filled currentVsr into finishedVsrs first so the bracket
                 // release can close it if drainFinishedVsrs throws below.
                 // scalastyle:off null
@@ -418,7 +422,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
             //   • state.currentVsr   — partially-filled VSR not yet moved to finishedVsrs
             //                         (non-null only if populateRvContentsIntoVsrs threw before the
             //                          pre-send finalisation ran — safety net)
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             Task.eval {
               state.flightVsr.close()
               // close any VSRs removed from finishedVsrs mid-drain but not yet in freeVsrs
@@ -439,7 +443,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
               // scalastyle:on null
             }
           }.map { _ =>
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             sendRespFooterAndComplete(listener, flightAllocator, execPlan,
               querySpan, res.queryStats, None,
               res.mayBePartial, res.partialResultReason, res.warnings)

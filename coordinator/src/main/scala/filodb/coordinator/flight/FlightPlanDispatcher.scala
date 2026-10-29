@@ -155,7 +155,10 @@ case class FlightPlanDispatcher(location: Location,
         case _ =>
       }
       QueryError(plan.queryContext.queryId, QueryStats(), ex)
-    }.executeOn(QueryScheduler.flightIoScheduler).asyncBoundary
+    // Only the blocking stream.next() loop above runs on the (virtual-thread) Flight IO scheduler; the result
+    // is handed back to the query scheduler explicitly so that downstream plan processing never lands on, or
+    // spawns, additional virtual threads.
+    }.executeOn(QueryScheduler.flightIoScheduler).asyncBoundary(QueryScheduler.queryScheduler)
   }
 
   def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
