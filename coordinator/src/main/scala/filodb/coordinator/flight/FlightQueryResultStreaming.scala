@@ -1,8 +1,9 @@
 package filodb.coordinator.flight
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 import scala.util.Using
 
 import com.typesafe.scalalogging.StrictLogging
@@ -10,7 +11,7 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.catnap.CircuitBreaker
 import monix.eval.Task
-import monix.execution.Scheduler
+import monix.execution.{Callback, Scheduler}
 import monix.execution.exceptions.ExecutionRejectedException
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -31,6 +32,50 @@ import filodb.query.exec.ExecPlan
 
 object FlightQueryResultStreaming {
   val ACCEPT_RESPONSE_VERSION1 = "1.0"
+}
+
+/**
+ * Non-blocking bridge from gRPC flow control to a Monix Task.
+ * Must be constructed before `listener.start()` since gRPC does not allow changing the
+ * onReady handler once the call has started.
+ *
+ * `awaitReady` completes immediately if the listener is ready to accept another batch, otherwise it
+ * suspends (without parking a thread) until gRPC signals readiness. It fails if the client cancels
+ * the stream, or if the query deadline passes while waiting.
+ */
+private[flight] final class FlightBackpressure(listener: ServerStreamListener, queryContext: QueryContext) {
+  // scalastyle:off null
+  private val waiter = new AtomicReference[Callback[Throwable, Unit]](null)
+
+  private def cancelledEx = CallStatus.CANCELLED.withDescription("client cancelled stream").toRuntimeException
+
+  private def wakeWaiter(): Unit = {
+    val cb = waiter.getAndSet(null)
+    if (cb != null) {
+      if (listener.isCancelled) cb.onError(cancelledEx) else cb.onSuccess(())
+    }
+  }
+  // scalastyle:on null
+
+  listener.setOnReadyHandler(() => wakeWaiter())
+  listener.setOnCancelHandler(() => wakeWaiter())
+
+  val awaitReady: Task[Unit] = Task.suspend {
+    if (listener.isCancelled) Task.raiseError(cancelledEx)
+    else if (listener.isReady) Task.unit
+    else {
+      Task.cancelable[Unit] { cb =>
+        waiter.set(cb)
+        // re-check to avoid a lost wakeup between the isReady check and the registration
+        if (listener.isReady || listener.isCancelled) wakeWaiter()
+        Task.eval { waiter.compareAndSet(cb, null); () } // scalastyle:ignore null
+      }.timeoutTo(
+        math.max(queryContext.queryTimeRemaining, 0L).millis,
+        Task.defer(Task.raiseError(QueryTimeoutException(
+          System.currentTimeMillis() - queryContext.submitTime, classOf[FlightBackpressure].getName)))
+      ).asyncBoundary // resume on the default (query) scheduler rather than the gRPC callback thread
+    }
+  }
 }
 
 /**
@@ -85,6 +130,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
     if (checkTimeoutBeforeQueryExec(listener, q.queryContext)) {
       return
     }
+    // must be installed before listener.start()
+    val backpressure = new FlightBackpressure(listener, q.queryContext)
     val querySpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
       .start()
@@ -105,8 +152,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
 
       val execTask = executePlan(q, querySession).flatMap { res =>
         logger.debug(s"Query execution pipeline constructed by Flight producer for queryPlanId=${q.planId}")
-        FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-        streamResults(res, flightAllocator, listener, q, querySpan)
+        FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
+        streamResults(res, flightAllocator, listener, q, querySpan, backpressure)
       }.onErrorRecover {
         // if for any reason streamResults thew exception, do it here
         case f: FlightRuntimeException =>
@@ -135,7 +182,12 @@ trait FlightQueryResultStreaming extends StrictLogging {
           querySpan.finish()
           querySession.close()
         })
-        .runToFuture(QueryScheduler.flightIoScheduler)
+        // Entire server-side pipeline runs on the query scheduler, just like QueryActor. Nothing here blocks:
+        // listener.putNext/putMetadata only enqueue onto gRPC's write queue (Netty does the socket I/O) and
+        // slow clients are handled by the non-blocking FlightBackpressure. executeAsync hops off the
+        // gRPC executor thread immediately.
+        .executeAsync
+        .runToFuture(queryScheduler)
     }
   }
 
@@ -180,11 +232,12 @@ trait FlightQueryResultStreaming extends StrictLogging {
                             flightAllocator: FlightAllocator,
                             listener: ServerStreamListener,
                             execPlan: ExecPlan,
-                            querySpan: Span
+                            querySpan: Span,
+                            backpressure: FlightBackpressure
                            ): Task[Unit] = {
 
-    // This method has portions that need to run on Flight IO scheduler and portions that need to run
-    // on Query scheduler. The portions that run on Query scheduler are marked clearly.
+    // This method runs entirely on the Query scheduler. Serialization of RVs into VSRs and
+    // sending them to the listener are interleaved without any thread hops.
 
     // Order of messages to be sent as part of Flight response:
     // 1. Header: ResultSchema
@@ -194,7 +247,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
       case qe: QueryError =>
         Task.eval {
           logger.debug(s"Streaming error for queryPlanId=${execPlan.planId}")
-          FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+          FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
           // rethrow so circuit breaker can handle
           if (qe.t.isInstanceOf[QueryTimeoutException] || qe.t.isInstanceOf[OutOfMemoryException]) throw qe.t
           sendRespFooterAndComplete(listener, flightAllocator, execPlan, querySpan, qe.queryStats, Some(qe.t))
@@ -202,7 +255,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
       case res: QueryResult =>
         Task.eval {
           logger.debug(s"Streaming result for queryPlanId=${execPlan.planId}")
-          FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+          FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
           // ownership of metadata buf is now with flight listener and hence not closed here
           flightAllocator.checkAllocatorLimits(execPlan.queryContext)
           logger.debug(s"Sending header for queryPlanId=${execPlan.planId}")
@@ -210,7 +263,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
         }.flatMap { _ =>
           Task.eval {
             logger.debug(s"Sending RVs for queryPlanId=${execPlan.planId}")
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             // here we initialize the state object with emoty flightVsr which
             // will be populated when we need to send VSR over the wire as response
             flightAllocator.withRequestAllocator { a =>
@@ -225,41 +278,46 @@ trait FlightQueryResultStreaming extends StrictLogging {
             //   • finishedVsrs — remaining unsent VSRs, closed by the bracket
             //   • freeVsrs     — already sent VSRs, closed by the bracket
             // The VSR that triggered the exception is closed inline in the catch before re-throwing.
-            def drainFinishedVsrs(resultSize: Long, label: String): Long = {
-              FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
-              var bytes = resultSize
-              while (state.finishedVsrs.nonEmpty) {
-                val vsr = state.finishedVsrs.remove(0) // take ownership; no longer in finishedVsrs
-                try {
-                  val unloader = new VectorUnloader(vsr)
-                  val loader = new VectorLoader(state.flightVsr)
-                  Using.resource(unloader.getRecordBatch) { rb =>
-                    val vsrBytes = rb.computeBodyLength()
-                    bytes += vsrBytes
-                    res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
-                    execPlan.checkResultBytes(bytes, queryConfig, res.warnings)
-                    loader.load(rb)
+            // Each iteration first awaits listener readiness (non-blocking) so batches are not buffered for
+            // slow clients. The wait happens BEFORE the VSR is removed from finishedVsrs, so a cancel/timeout
+            // while waiting leaves it tracked for the bracket release to close.
+            def drainFinishedVsrs(resultSize: Long, label: String): Task[Long] =
+              Task.tailRecM(resultSize) { bytes =>
+                if (state.finishedVsrs.isEmpty) Task.now(Right(bytes))
+                else backpressure.awaitReady.map { _ =>
+                  FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
+                  val vsr = state.finishedVsrs.remove(0) // take ownership; no longer in finishedVsrs
+                  try {
+                    var newBytes = bytes
+                    val unloader = new VectorUnloader(vsr)
+                    val loader = new VectorLoader(state.flightVsr)
+                    Using.resource(unloader.getRecordBatch) { rb =>
+                      val vsrBytes = rb.computeBodyLength()
+                      newBytes += vsrBytes
+                      res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                      execPlan.checkResultBytes(newBytes, queryConfig, res.warnings)
+                      loader.load(rb)
+                    }
+                    logger.debug(s"Putting $label vsr into flight response for " +
+                      s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
+                      s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                      s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
+                    listener.putNext()
+                    val offered = state.freeVsrs.offer(vsr) // return to free pool for reuse
+                    if (!offered) Shutdown.haltAndCatchFire(
+                      new IllegalStateException("Failed to add VSR to free pool"))
+                    Left(newBytes)
+                  } catch {
+                    case t: Throwable =>
+                      // vsr is not in finishedVsrs or freeVsrs; close here so bracket can't leak it.
+                      // Any remaining finishedVsrs items are closed by the bracket release.
+                      vsr.close()
+                      throw t
                   }
-                  logger.debug(s"Putting $label vsr into flight response for " +
-                    s"queryPlanId=${execPlan.planId} rowCount=${state.flightVsr.getRowCount} " +
-                    s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
-                    s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
-                  listener.putNext()
-                  val offered = state.freeVsrs.offer(vsr) // return to free pool for reuse
-                  if (!offered) Shutdown.haltAndCatchFire(
-                    new IllegalStateException("Failed to add VSR to free pool"))
-                } catch {
-                  case t: Throwable =>
-                    // vsr is not in finishedVsrs or freeVsrs; close here so bracket can't leak it.
-                    // Any remaining finishedVsrs items are closed by the bracket release.
-                    vsr.close()
-                    throw t
                 }
               }
-              bytes
-            }
 
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             listener.start(state.flightVsr)
             var numResultSamples = 0
             var resultSize = 0L
@@ -287,22 +345,26 @@ trait FlightQueryResultStreaming extends StrictLogging {
               execPlan.checkSamplesLimit(numResultSamples, res.warnings)
               // load each result vsr into the flightVsr and send it over the wire to listener
               // ownership of the VSR is now with flight listener and hence not closed here
-              Observable.fromIterable(resultVsrs).map { vsr =>
-                val unloader = new VectorUnloader(vsr)
-                val loader = new VectorLoader(state.flightVsr)
-                Using.resource(unloader.getRecordBatch) { rb =>
-                  val vsrBytes = rb.computeBodyLength()
-                  resultSize += vsrBytes
-                  res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
-                  execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
-                  loader.load(rb)
-                }
-                logger.debug(s"Putting arrow vsr directly into flight response queryPlanId=${execPlan.planId} " +
-                  s"rowCount=${state.flightVsr.getRowCount} " +
-                  s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
-                  s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
+              Observable.fromIterable(resultVsrs).mapEval { vsr =>
+                // wait (non-blocking) for the client to be ready BEFORE overwriting flightVsr
+                backpressure.awaitReady.map { _ =>
+                  FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
+                  val unloader = new VectorUnloader(vsr)
+                  val loader = new VectorLoader(state.flightVsr)
+                  Using.resource(unloader.getRecordBatch) { rb =>
+                    val vsrBytes = rb.computeBodyLength()
+                    resultSize += vsrBytes
+                    res.queryStats.getResultBytesCounter(Nil).addAndGet(vsrBytes)
+                    execPlan.checkResultBytes(resultSize, queryConfig, res.warnings)
+                    loader.load(rb)
+                  }
+                  logger.debug(s"Putting arrow vsr directly into flight response queryPlanId=${execPlan.planId} " +
+                    s"rowCount=${state.flightVsr.getRowCount} " +
+                    s"vectorSize0=${state.flightVsr.getVector(0).getValueCount} " +
+                    s"vectorSize1=${state.flightVsr.getVector(1).getValueCount}")
 
-                listener.putNext()
+                  listener.putNext()
+                }
               }.completedL
             } else {
               val recSchema = res.resultSchema.toRecordSchema
@@ -313,10 +375,8 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   // to avoid errors. Dont send the VSRs out since it will break the state continuity across VSRs
                   logger.debug(s"Understand why we see SRV and Arrow Results: queryContext=${execPlan.queryContext}")
                 }
-                state.flightVsr.getFieldVectors.forEach(_.setValueCount(0)) // reset vectors before each RV is loaded
-                state.flightVsr.setRowCount(0)
                 Task.eval {
-                  // This lambda triggers intensive iterators and calculations and should be done on query sched
+                  // This lambda triggers intensive iterators and calculations; runs on query sched
                   FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                   flightAllocator.checkAllocatorLimits(execPlan.queryContext)
                   logger.debug(s"Serializing RV into Arrow for queryPlanId=${execPlan.planId} ")
@@ -337,17 +397,17 @@ trait FlightQueryResultStreaming extends StrictLogging {
                   } {
                     throw new IllegalStateException("FlightAllocator is already closed, cannot populate VSRs")
                   }
-                }.executeOn(queryScheduler).asyncBoundary.map { _ =>
-                  resultSize = drainFinishedVsrs(resultSize, "next")
+                }.flatMap { _ =>
+                  drainFinishedVsrs(resultSize, "next").map(resultSize = _)
                 }
-              }.completedL.map { _ =>
-                FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+              }.completedL.flatMap { _ =>
+                FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
                 // Move the partially-filled currentVsr into finishedVsrs first so the bracket
                 // release can close it if drainFinishedVsrs throws below.
                 // scalastyle:off null
                 if (state.currentVsr != null) state.finishedVsrs += state.finishAndGetCurrentVsr()
                 // scalastyle:on null
-                resultSize = drainFinishedVsrs(resultSize, "last")
+                drainFinishedVsrs(resultSize, "last").map(resultSize = _)
               }
             }
           } { state =>
@@ -361,7 +421,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
             //   • state.currentVsr   — partially-filled VSR not yet moved to finishedVsrs
             //                         (non-null only if populateRvContentsIntoVsrs threw before the
             //                          pre-send finalisation ran — safety net)
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             Task.eval {
               state.flightVsr.close()
               // close any VSRs removed from finishedVsrs mid-drain but not yet in freeVsrs
@@ -382,7 +442,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
               // scalastyle:on null
             }
           }.map { _ =>
-            FiloSchedulers.assertThreadName(FiloSchedulers.FlightIoSchedName)
+            FiloSchedulers.assertThreadName(FiloSchedulers.QuerySchedName)
             sendRespFooterAndComplete(listener, flightAllocator, execPlan,
               querySpan, res.queryStats, None,
               res.mayBePartial, res.partialResultReason, res.warnings)

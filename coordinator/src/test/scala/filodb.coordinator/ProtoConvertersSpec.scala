@@ -115,7 +115,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       )
 
       // Convert to ArrowSerializedRangeVector2 instances
-      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.currentVsr)
+      val allVsrs = vsrs.finishedVsrs ++ Seq(vsrs.finishAndGetCurrentVsr())
       val asrvs = ArrowSerializedRangeVectorOps.convertVsrsIntoArrowSrvs(allVsrs.toSeq, resSchema)
       asrvs.foreach { a =>
         val roundTrip = a.toProto.fromProto

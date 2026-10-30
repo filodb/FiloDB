@@ -1,8 +1,10 @@
 package filodb.core.query
 
+import java.lang.management.ManagementFactory
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
+import com.sun.management.HotSpotDiagnosticMXBean
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.atomic.AtomicBoolean
 import org.apache.arrow.memory.{AllocationListener, BufferAllocator, RootAllocator}
@@ -24,6 +26,18 @@ object FlightAllocator extends StrictLogging {
 
   lazy private val rootAllocator = {
     require(rootAllocatorMaxSize > 0, s"Flight root allocator max size must be > 0, but was $rootAllocatorMaxSize")
+
+    // validate that the root allocator max size is less than the JVM's max direct memory size
+    val hsDiag = ManagementFactory.getPlatformMXBean(classOf[HotSpotDiagnosticMXBean])
+    if (hsDiag != null) {
+      // Retrieves the flag value as configured
+      val maxDirectMemoryStr = hsDiag.getVMOption("MaxDirectMemorySize").getValue
+      var maxDirectMem = java.lang.Long.parseLong(maxDirectMemoryStr)
+      // "0" means it was not set explicitly; it defaults to the max heap size (-Xmx)
+      if (maxDirectMem == 0) maxDirectMem = Runtime.getRuntime.maxMemory
+      require(rootAllocatorMaxSize < maxDirectMem, "Flight root allocator max size must be less than" +
+        s" the JVM's max direct memory size, but was $rootAllocatorMaxSize >= $maxDirectMem")
+    }
     logger.info(s"Creating flight root allocator with limit: $rootAllocatorMaxSize bytes")
     new RootAllocator(rootAllocatorMaxSize)
   }
@@ -40,31 +54,34 @@ object FlightAllocator extends StrictLogging {
   }
 
   /**
-   * We need metrics to track both total allocated memory (counter) and currently used memory (up-down counter which
-   * gets aggregated as a gauge eventually.
+   * We need metrics to track total allocated memory (counter), currently used memory (gauge) and peak (gauge).
    */
   private val serverAllocated = FilodbMetrics.bytesCounter("flight-allocated-memory", Map("allocator" -> "server"))
   private val clientAllocated = FilodbMetrics.bytesCounter("flight-allocated-memory", Map("allocator" -> "client"))
-  private val serverUsedMem = FilodbMetrics.bytesUpDownCounter("flight-used-memory", Map("allocator" -> "server"))
-  private val clientUsedMem = FilodbMetrics.bytesUpDownCounter("flight-used-memory", Map("allocator" -> "client"))
+  private val serverUsedMem = FilodbMetrics.bytesGauge("flight-used-memory", Map("allocator" -> "server"))
+  private val clientUsedMem = FilodbMetrics.bytesGauge("flight-used-memory", Map("allocator" -> "client"))
+  private val serverPeakMem = FilodbMetrics.bytesGauge("flight-peak-memory", Map("allocator" -> "server"))
+  private val clientPeakMem = FilodbMetrics.bytesGauge("flight-peak-memory", Map("allocator" -> "client"))
 
   private val serverAllocationListener = new AllocationListener {
     override def onAllocation(size: Long): Unit = {
       serverAllocated.increment(size)
-      serverUsedMem.increment(size)
+      serverUsedMem.update(serverAllocator.getAllocatedMemory.toDouble)
+      serverPeakMem.update(serverAllocator.getPeakMemoryAllocation.toDouble)
     }
 
     override def onRelease(size: Long): Unit = {
-      serverUsedMem.increment(-size)
+      serverUsedMem.update(serverAllocator.getAllocatedMemory.toDouble)
     }
   }
   private val clientAllocationListener = new AllocationListener {
     override def onAllocation(size: Long): Unit = {
       clientAllocated.increment(size)
-      clientUsedMem.increment(size)
+      clientUsedMem.update(clientAllocator.getAllocatedMemory.toDouble)
+      clientPeakMem.update(clientAllocator.getPeakMemoryAllocation.toDouble)
     }
     override def onRelease(size: Long): Unit = {
-      clientUsedMem.increment(-size)
+      clientUsedMem.update(clientAllocator.getAllocatedMemory.toDouble)
     }
   }
 
