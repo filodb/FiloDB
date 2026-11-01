@@ -271,7 +271,7 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
     querySession: QuerySession)
-extends WrappedCursor(rv.rows()) with StrictLogging {
+extends WrappedCursor(rv.rows()) {
   require(step > 0, s"Adjusted step $step not > 0")
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.

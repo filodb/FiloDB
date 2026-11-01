@@ -11,7 +11,7 @@ import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.jctools.queues.MpscArrayQueue
 import spire.syntax.cfor.cforRange
 
-import filodb.core.Utils
+import filodb.core.{GlobalConfig, Utils}
 import filodb.core.binaryrecord2.{RecordSchema, SingleRecordBuilder}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.query._
@@ -31,8 +31,11 @@ object ArrowSerializedRangeVectorOps {
     new Schema(util.Arrays.asList(isRvk, rvkBr))
   }
 
-  // TODO later, this should not be hard-coded
-  private[flight] val maxVecLen = 1048576 // 1 MB
+  // Size of the data buffer of each Arrow batch (VSR); also bounds the largest single serialized row/proto.
+  // Each message on the wire is somewhat larger (offsets, validity), so the Flight client's
+  // filodb.flight.client.max-inbound-message-size needs to leave headroom above this.
+  private[flight] val maxVecLen: Int =
+    Math.toIntExact(GlobalConfig.systemConfig.getBytes("filodb.flight.server.max-vector-length"))
   val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
   private[flight] val maxVsrs = 50
 
@@ -61,10 +64,12 @@ object ArrowSerializedRangeVectorOps {
                         freeVsrs: MpscArrayQueue[VectorSchemaRoot] = new MpscArrayQueue[VectorSchemaRoot](maxVsrs),
                         finishedVsrs: ArrayBuffer[VectorSchemaRoot] = ArrayBuffer.empty)   {
 
+    /**
+     * Seals the current VSR by setting its row count (and the value counts of its vectors), and hands it over.
+     * Row count is set only here, once per VSR, rather than after every RV is populated.
+     */
     def finishAndGetCurrentVsr(): VectorSchemaRoot = {
       if (currentVsr != null) {
-        currentIsRvkVec.setValueCount(rowNum)
-        currentRvkBrVec.setValueCount(rowNum)
         currentVsr.setRowCount(rowNum)
         val result = currentVsr
         currentVsr = null
@@ -119,17 +124,8 @@ object ArrowSerializedRangeVectorOps {
                                  allocator: BufferAllocator,
                                  state: VsrPopulationState): Unit = {
 
-    def updateVsrLengthInState(): Unit = {
-        state.currentIsRvkVec.setValueCount(state.rowNum)
-        state.currentRvkBrVec.setValueCount(state.rowNum)
-        state.currentVsr.setRowCount(state.rowNum)
-    }
-
     def addNewVsr(): Unit = {
-      if (state.currentVsr != null) {
-        updateVsrLengthInState()
-        state.finishedVsrs += state.currentVsr
-      }
+      if (state.currentVsr != null) state.finishedVsrs += state.finishAndGetCurrentVsr()
 
       if (state.freeVsrs.isEmpty) {
         state.currentVsr = VectorSchemaRoot.create(arrowSrvSchema, allocator)
@@ -144,7 +140,9 @@ object ArrowSerializedRangeVectorOps {
         state.currentIsRvkVec = state.currentVsr.getVector(0).asInstanceOf[org.apache.arrow.vector.BitVector]
         state.currentRvkBrVec = state.currentVsr.getVector(1)
           .asInstanceOf[org.apache.arrow.vector.VarBinaryVector]
-        state.currentVsr.getFieldVectors.forEach(_.reset())
+        // reset the two vectors of arrowSrvSchema directly; getFieldVectors allocates
+        state.currentIsRvkVec.reset()
+        state.currentRvkBrVec.reset()
       }
 
       state.rowNum = 0
@@ -192,7 +190,7 @@ object ArrowSerializedRangeVectorOps {
         // If the RV has formulated rows, serialize the entire RV as a single proto object
         // and skip row iteration and BR building
         FlightProtoSerDeser.serializeSrvToArrowVsr(srv, state) { () => addNewVsr() }
-        updateVsrLengthInState()
+        // no need to set vsr row count here; done when finishAndGetCurrentVsr() is called
       case _ =>
         // Serialize the RV key and output range as a proto header row, then iterate data rows
         FlightProtoSerDeser.serializeRvKeyToArrowVsr(rv.key, rv.outputRange, state) { () => addNewVsr() }
@@ -213,7 +211,7 @@ object ArrowSerializedRangeVectorOps {
                 addNullRow()
               }
             }
-            updateVsrLengthInState()
+            // no need to set vsr row count here; done when finishAndGetCurrentVsr() is called
           }
         } finally {
           ChunkMap.releaseAllSharedLocks()
