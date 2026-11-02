@@ -99,6 +99,12 @@ object ResultSchema {
     require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")
     schema.columns(1).colType
   }
+
+  def valueColumn(schema: ResultSchema): ColumnInfo = {
+    require(schema.isTimeSeries, s"Schema $schema is not time series based, cannot continue query")
+    require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")
+    schema.columns(1)
+  }
 }
 
 /**
