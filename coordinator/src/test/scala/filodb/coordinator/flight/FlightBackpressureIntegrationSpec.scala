@@ -44,7 +44,7 @@ class FlightBackpressureIntegrationSpec extends AnyFunSpec with Matchers with Be
   private val memStore = new TimeSeriesMemStore(config.getConfig("filodb"), new NullColumnStore,
     new NullColumnStore, new InMemoryMetaStore())
   memStore.setup(dataset.ref, Schemas(dataset.schema), 0, TestData.storeConf, 1)
-  // several series; combined with the 1ms step below the result spans ~20 VSRs of ~1MB, far more than the
+  // several series; combined with the 1ms step below the result spans many full VSRs, far more than the
   // client's prefetch can absorb
   private val rawData = (1 to 4).flatMap { i =>
     timeSeriesData(Map("host".utf8 -> s"host$i".utf8, "region".utf8 -> "region1".utf8)).take(1000)

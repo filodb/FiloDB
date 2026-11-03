@@ -6,8 +6,10 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Using
 
 import org.apache.arrow.memory.BufferAllocator
-import org.apache.arrow.vector.{BitVector, BitVectorHelper, VarBinaryVector, VectorSchemaRoot}
+import org.apache.arrow.vector.{BaseVariableWidthVector, BitVector, BitVectorHelper, VarBinaryVector,
+                                VectorSchemaRoot}
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
+import org.apache.arrow.vector.util.DataSizeRoundingUtil
 import org.jctools.queues.MpscArrayQueue
 import spire.syntax.cfor.cforRange
 
@@ -36,7 +38,45 @@ object ArrowSerializedRangeVectorOps {
   // filodb.flight.client.max-inbound-message-size needs to leave headroom above this.
   private[flight] val maxVecLen: Int =
     Math.toIntExact(GlobalConfig.systemConfig.getBytes("filodb.flight.server.max-vector-length"))
-  val maxNumRows = maxVecLen / 15 // assume 15 bytes per row on average, so we don't exceed maxVecLen
+
+  // Row capacity of each VSR, chosen so the rvkBr vector's offset+validity allocation is exactly maxVecLen / 4.
+  //
+  // Why it matters: the rvkBr VarBinaryVector has two allocations (see BaseVariableWidthVector.allocateNew):
+  //   1. the data buffer: maxVecLen bytes, holding the serialized rows
+  //   2. one combined offset+validity buffer, sized by row count: a 4-byte offset per row (plus one extra
+  //      offset) and a 1-bit validity flag per offset, each part rounded up to a multiple of 8 bytes
+  // Arrow rounds every allocation below its 16 MiB chunk size up to the next power of two
+  // (DefaultRoundingPolicy), so (2) is never its exact size. If it needs even a few bytes more than
+  // maxVecLen / 4, Arrow allocates maxVecLen / 2. That memory is reserved and zeroed on every request.
+  //
+  // Example with maxVecLen = 256 KiB, so budget = 64 KiB = 65,536 bytes:
+  //   old cap, maxVecLen / 15 = 17,476 rows: 69,912 offset + 2,192 validity = 72,104 bytes -> Arrow gives 128 KiB
+  //   new cap, 15,885 rows:                  63,544 offset + 1,992 validity = 65,536 bytes -> Arrow gives  64 KiB
+  //   one more row, 15,886 rows:             63,552 offset + 1,992 validity = 65,544 bytes -> Arrow gives 128 KiB
+  // Per VSR this is 256 + 64 + 4 (isRvk bits) = 324 KiB instead of 256 + 128 + 8 = 392 KiB, ~17% less.
+  // At 1 MiB the same rule gives 63,549 rows and 1.27 MiB per VSR instead of 1.53 MiB.
+  //
+  // The cap works out to ~maxVecLen / 16.5 rows, i.e. it assumes rows average >= 16.5 bytes. A (timestamp, double)
+  // BinaryRecord is 20 bytes and RV key rows are larger, so the data buffer normally fills before the row cap is
+  // reached. Only results with many empty (0-byte, NaN-removed) rows hit the cap, and they just start a new VSR
+  // slightly earlier.
+  val maxNumRows: Int = {
+    val budget = maxVecLen / 4L
+    // Exact bytes Arrow requests for the offset+validity buffer of a VarBinaryVector with numRows rows, before
+    // power-of-two rounding. Mirrors BaseValueVector.computeCombinedBufferSize(numRows + 1, OFFSET_WIDTH).
+    def offsetAndValidityBytes(numRows: Int): Long = {
+      val numOffsets = numRows + 1L // VarBinaryVector keeps one more offset than rows
+      DataSizeRoundingUtil.roundUpTo8Multiple(numOffsets * BaseVariableWidthVector.OFFSET_WIDTH) +
+        DataSizeRoundingUtil.roundUpTo8Multiple((numOffsets + 7) / 8)
+    }
+    // Start from the closed form: 4 bytes offset + 1/8 byte validity = 33/8 bytes per row, so
+    // budget * 8 / 33 = maxVecLen / 16.5 rows (15,887 for 256 KiB). It ignores the extra offset and the 8-byte
+    // rounding, so it can overshoot the budget by a few bytes (15,887 rows needs 65,544 bytes). Step down until
+    // the exact size fits: here two steps, to 15,885. Runs once at class load.
+    var numRows = (budget * 8 / 33).toInt
+    while (numRows > 0 && offsetAndValidityBytes(numRows) > budget) numRows -= 1
+    numRows
+  }
   private[flight] val maxVsrs = 50
 
   def emptyVectorSchemaRoot(allocator: BufferAllocator): VectorSchemaRoot = {
@@ -128,8 +168,9 @@ object ArrowSerializedRangeVectorOps {
       if (state.currentVsr != null) state.finishedVsrs += state.finishAndGetCurrentVsr()
 
       if (state.freeVsrs.isEmpty) {
+        // No VectorSchemaRoot.allocateNew() here: it would allocate and zero default-sized buffers
+        // that the per-vector allocateNew calls below immediately release and replace.
         state.currentVsr = VectorSchemaRoot.create(arrowSrvSchema, allocator)
-        state.currentVsr.allocateNew()
         state.currentIsRvkVec = state.currentVsr.getVector(0).asInstanceOf[org.apache.arrow.vector.BitVector]
         state.currentIsRvkVec.allocateNew(maxNumRows)
         state.currentRvkBrVec = state.currentVsr.getVector(1)

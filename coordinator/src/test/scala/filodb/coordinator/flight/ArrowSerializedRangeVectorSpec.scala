@@ -267,7 +267,8 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       val key = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("counter")))
 
       // Create a large dataset that will span multiple VSRs
-      // we choose 52424 because next RVK is written at row 52425, and new VSR is created for 52426
+      // we choose N rows (computed below) so that the next RVK is written at the last row of the first VSR,
+      // and a new VSR is created for the data row after it
       // Here is the math:
       // For key Map("metric" -> "counter"):
       //  - BinaryRecord = 4B header + 4B fixed field + 2B map len + 7B key (1+6) + 9B value (2+7) = 26 bytes
@@ -275,19 +276,21 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
       //  - Proto RvRange (fields 3×int64): 3+5+3 = 11 bytes, wrapped as field 2: 1+1+11 = 13 bytes
       //  - RvKey total = 28+13 = 41 bytes, wrapped in RvMetadata oneof field 2: 1+1+41 = 43 bytes
       //
-      // maxVectorLen = 1048576 (1 MB)
+      // maxVectorLen = ArrowSerializedRangeVectorOps.maxVecLen
       // proto RvMetadata bytes = 43, data row bytes = 20
       // Since we are trying to spill over the second RV key, we subtract 2*43 before dividing it by data record size.
       // Flooring that gives us number of records we can fit in the first VSR before we have to spill over to second VSR
       // for the next RVK.
-      // NumRecords N = floor((1048576 - 2×43) / 20) = floor(52424.5) = 52424
+      // NumRecords N = floor((maxVecLen - 2×43) / 20)  (e.g. 13102 for 256 KiB)
       //
-      // 52424 data rows fill the first VSR leaving < 20 bytes free after RVK)
+      // N data rows fill the first VSR leaving < 20 bytes free after RVK)
       // This tests the edge case where RVK is at the last row of a VSR, and next data row goes into new VSR.
       // If content of vector is modified, we may need to adjust this number to ensure RVK is at last row of VSR.
       // Do by adding temporary print statements in ArrowSerializedRangeVectorOps.populateRvContentsIntoVsrs to
       // find the row number when RVK is written and when new VSR is created.
-      val largeDataset = (1 to 52424).map { i =>
+      val numRows = (ArrowSerializedRangeVectorOps.maxVecLen - 2 * 43) / 20
+      assert(numRows + 2 < ArrowSerializedRangeVectorOps.maxNumRows, "test relies on byte-overflow spill")
+      val largeDataset = (1 to numRows).map { i =>
         (i.toLong * 1000, i.toDouble)
       }
 
@@ -479,12 +482,12 @@ class ArrowSerializedRangeVectorSpec extends AnyFunSpec with Matchers with Befor
 
     it("data rows should spill to a new VSR when the byte buffer fills before the row count limit") {
       // Each (timestamp, Double) record occupies 20 bytes on the wire (4 header + 8 Long + 8 Double).
-      // maxVecLen / 20 rows exhaust the 1 MB data buffer well before maxNumRows is reached,
+      // maxVecLen / 20 rows exhaust the data buffer before maxNumRows (~maxVecLen / 16.5) is reached,
       // so the VSR split here is driven by byte exhaustion (the spill path in requireBytes),
       // not the row-count check.
       import ArrowSerializedRangeVectorOps.{maxNumRows, maxVecLen}
 
-      val rowCount = maxVecLen / 20 + 500          // 52 928, well below maxNumRows (~69 905)
+      val rowCount = maxVecLen / 20 + 500          // below maxNumRows (~maxVecLen / 16.5)
       assert(rowCount < maxNumRows, "test relies on byte-overflow spill, not row-count overflow")
 
       val key  = CustomRangeVectorKey(Map(UTF8Str("metric") -> UTF8Str("spill_test")))

@@ -466,12 +466,11 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
       //   3. The bracket release closes VSR3 (currentVsr) and VSR1 (in freeVsrs)
       //
       // Two full VSRs are produced by using step=1ms over 0..100000ms, giving 100001 periodic
-      // samples per series.  Each binary record is ~20 bytes, so the first VSR fills at ~52 000
-      // rows (maxVecLen = 1MB).  The two series together produce at least 2 full VSRs before
-      // the limit is breached.
+      // samples per series.  Each binary record is ~20 bytes, so the first VSR fills at ~maxVecLen / 20
+      // rows.  The two series together produce at least 2 full VSRs before the limit is breached.
       //
-      // Limit: maxVecLen * 2 = 2MB.  Each full VSR body is ~1.27MB (1MB data + offset/validity
-      // overhead), so VSR1 passes (1.27MB < 2MB) but VSR1+VSR2 (~2.54MB) exceeds the limit.
+      // Limit: maxVecLen * 2.  Each full VSR body is ~1.25 * maxVecLen (data + offset/validity
+      // overhead), so VSR1 passes but VSR1+VSR2 (~2.5 * maxVecLen) exceeds the limit.
       //
       // After the query errors, the client holds one registered VSR copy (VSR1).
       // limitedSession.close() releases it, returning testAllocator to allocatedMemBeforeQuery.
@@ -492,7 +491,7 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
         FlightPlanDispatcher(location, "test"),
         timeseriesDatasetWithMetric.ref, 0, filters, chunkScanMethod,
         timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
-      // step=1ms produces 100001 samples per series, overflowing the first VSR (~52 000-row limit)
+      // step=1ms produces 100001 samples per series, overflowing the first VSR
       mspe.addRangeVectorTransformer(PeriodicSamplesMapper(0, 1, 100000, None, None))
 
       val qRes = mspe.dispatcher.dispatch(
