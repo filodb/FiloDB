@@ -240,4 +240,21 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
       mapper(Observable.fromIterable(Seq(rv)), session, 100000, resultSchema, Nil)
     }
   }
+
+  it("should preserve delta temporality of the value column in the output schema") {
+    import filodb.core.metadata.Column.ColumnType
+    val tsCol = ColumnInfo("timestamp", ColumnType.TimestampColumn)
+    // No range function: the mapper only resamples raw values onto the step grid (e.g. the inner part of a
+    // subquery), so values stay delta. A later rate()/increase() picks its algorithm from isCumulative.
+    val mapper = exec.PeriodicSamplesMapper(100000L, 10000L, 200000L, None, None)
+
+    Seq(ColumnType.DoubleColumn, ColumnType.LongColumn, ColumnType.IntColumn).foreach { colType =>
+      val deltaOut = mapper.schema(ResultSchema(Seq(tsCol, ColumnInfo("value", colType, isCumulative = false)), 1))
+      deltaOut.columns(1).colType shouldEqual ColumnType.DoubleColumn
+      withClue(s"delta $colType source: ") { deltaOut.columns(1).isCumulative shouldEqual false }
+
+      val cumulOut = mapper.schema(ResultSchema(Seq(tsCol, ColumnInfo("value", colType, isCumulative = true)), 1))
+      withClue(s"cumulative $colType source: ") { cumulOut.columns(1).isCumulative shouldEqual true }
+    }
+  }
 }
