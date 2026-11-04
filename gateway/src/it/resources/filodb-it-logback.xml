@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Integration-test logging for gateway/src/it (KafkaGatewayIngestionSpec).
+
+  Why this file exists: core/src/test/resources/logback-test.xml is on the it classpath
+  (gateway dependsOn core % "it->test"). That config routes the `filodb` logger to a FILE
+  with additivity="false", so FiloDB's ingestion diagnostics never reach the CI console.
+  To make the ingestion path observable in CI we force THIS config with
+  -Dlogback.configurationFile=filodb-it-logback.xml (set on the gateway IntegrationTest
+  fork's javaOptions). The unique name cannot be shadowed by any other logback-test.xml.
+
+  Everything routes to STDOUT so the CI job output shows the ingest path: schema
+  resolution ("Unknown schema ID N will be ignored"), container version/empty checks
+  ("[Container Empty] ..."), ingestion start/errors, and per-shard row counts.
+-->
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>[%date{ISO8601}] %-5level %logger{30} [%thread] - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- The ingestion path: schema resolution, container version/empty checks, row counts. -->
+  <logger name="filodb.core.memstore" level="DEBUG"/>
+  <logger name="filodb.coordinator" level="DEBUG"/>
+  <logger name="filodb.kafka" level="DEBUG"/>
+
+  <!-- Keep Kafka client + testcontainers chatter down so the ingestion logs stand out. -->
+  <logger name="org.apache.kafka" level="WARN"/>
+  <logger name="org.testcontainers" level="INFO"/>
+  <logger name="com.github.dockerjava" level="WARN"/>
+  <logger name="akka" level="WARN"/>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

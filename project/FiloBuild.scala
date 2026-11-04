@@ -204,10 +204,17 @@ object Submodules {
   //    )
 
   lazy val gateway = (project in file("gateway"))
-    .dependsOn(coordinator % "compile->compile; test->test", prometheus, cassandra, kafka)
+    .dependsOn(core % "it->test",
+      coordinator % "compile->compile; test->test; it->test", prometheus, cassandra, kafka)
+    .configs(IntegrationTest)
     .settings(
       commonSettings,
       name := "filodb-gateway",
+      itSettings,
+      // Force the it-run to use gateway/src/it/resources/filodb-it-logback.xml (unique name so it
+      // can't be shadowed by core's logback-test.xml, which sends filodb logs to a FILE). This makes
+      // the ingestion path visible in CI stdout. Appends, so jdk21ModuleOpens/-Xmx2G are preserved.
+      javaOptions in IntegrationTest += "-Dlogback.configurationFile=filodb-it-logback.xml",
       libraryDependencies ++= gatewayDeps,
       gatewayAssemblySettings,
       PB.protoSources in Compile += baseDirectory.value / "src" / "main" / "protobuf",
