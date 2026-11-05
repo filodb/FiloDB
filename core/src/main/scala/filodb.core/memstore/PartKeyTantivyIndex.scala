@@ -337,6 +337,13 @@ class PartKeyTantivyIndex(ref: DatasetRef,
     debox.Buffer.unsafe(results)
   }
 
+  override def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
+                                            func: BytesRef => Unit): Int = {
+    val records = partKeyRecordsFromFilters(columnFilters, startTime, endTime)
+    records.foreach(record => func(new BytesRef(record.partKey)))
+    records.size
+  }
+
   override def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                                          limit: Int): Seq[PartKeyLuceneIndexRecord] = {
     val results = searchFromFilters(columnFilters, startTime, endTime, limit, TantivyNativeMethods.queryPartKeyRecords)

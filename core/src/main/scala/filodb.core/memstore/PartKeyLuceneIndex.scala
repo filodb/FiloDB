@@ -404,7 +404,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                            colName: String, limit: Int = LABEL_NAMES_AND_VALUES_DEFAULT_LIMIT): Seq[String] = {
-    require(facetEnabledForLabel(colName),
+    require(colName == LABEL_LIST || facetEnabledForLabel(colName), // LABEL_LIST is always faceted
       s"Faceting not enabled for label $colName; labelValuesEfficient should not have been called")
 
     val readerStateCache = if (schema.options.shardKeyColumns.contains(colName)) readerStateCacheShardKeys
