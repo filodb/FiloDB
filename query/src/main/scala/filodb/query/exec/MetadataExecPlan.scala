@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.TimeSeriesStore
+import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
@@ -245,6 +245,11 @@ trait LabelCardinalityExecPlan extends MetadataExecPlan {
    * Parameter deciding the sketch size to be used for approximating cardinality
    */
   val logK = 10
+
+  /**
+   * Max number of labels whose cardinality is returned when reading the labels of the matching part keys
+   */
+  val maxLabels = 200
 }
 final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                             dispatcher: PlanDispatcher,
@@ -448,6 +453,29 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
+      case memstore: TimeSeriesMemStore if querySession.queryConfig.labelCardinalityPartKeyScanEnabled =>
+        // add the labels of each matching part key to the sketches while searching the index, instead of facets
+        val sketchMap = scala.collection.mutable.Map[ZeroCopyUTF8String, CpcSketch]()
+        memstore.foreachPartKeyLabelWithFilters(dataset, shard, filters, endMs, startMs) { (label, value) =>
+          // label and value point into buffers reused across part keys, so copy what is kept
+          if (value.numBytes > 0) {
+            var sketch = sketchMap.getOrElse(label, null)
+            if (sketch == null && sketchMap.size < maxLabels) {
+              sketch = new CpcSketch(logK)
+              sketchMap.put(ZeroCopyUTF8String(label.asNewByteArray), sketch)
+            }
+            if (sketch != null) {
+              sketch.update(value.asNewByteArray)
+            } else {
+              querySession.resultCouldBePartial = true
+              querySession.partialResultsReason = Some(s"Matching time series have more than $maxLabels labels")
+            }
+          }
+        }
+        if (sketchMap.isEmpty) Observable.empty else Observable.now(IteratorBackedRangeVector(
+          CustomRangeVectorKey.empty, UTF8MapIteratorRowReader(Iterator(sketchMap.map {
+            case (label, sketch) => (label, ZeroCopyUTF8String(sketch.toByteArray))
+          }.toMap)), None))
       case memstore: TimeSeriesStore =>
         // first get the list of label names, then fetch each label value and add to CPC sketch
         val labelNames = memstore.labelNames(dataset, shard, filters, endMs, startMs)

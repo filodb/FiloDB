@@ -92,6 +92,7 @@ trait ExecPlan extends QueryCommand {
            _: PartKeysExec |
            _: MetadataDistConcatExec |
            _: LabelCardinalityExec |
+           _: LabelCardinalityReduceExec |
            _: TsCardExec |
            _: LabelValuesExec                                         =>
         cfg.recordContainerOverrides("filodb-query-exec-metadataexec")

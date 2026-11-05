@@ -417,6 +417,13 @@ abstract class PartKeyIndexRaw(ref: DatasetRef,
                                 limit: Int = Int.MaxValue): Seq[PartKeyLuceneIndexRecord]
 
   /**
+   * Run some code for each partKey matchin column filter
+   */
+  def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
+                                   startTime: Long,
+                                   endTime: Long, func: (BytesRef) => Unit): Int
+
+  /**
    * Fetch partId given partKey. This is slower since it would do an index search
    * instead of a key-lookup.
    */
@@ -452,13 +459,6 @@ abstract class PartKeyIndexDownsampled(ref: DatasetRef,
    * Run some code for each ingesting partKey which has endTime != Long.MaxValue
    */
   def foreachPartKeyStillIngesting(func: (Int, BytesRef) => Unit): Int
-
-  /**
-   * Run some code for each partKey matchin column filter
-   */
-  def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
-                                   startTime: Long,
-                                   endTime: Long, func: (BytesRef) => Unit): Int
 
 }
 
