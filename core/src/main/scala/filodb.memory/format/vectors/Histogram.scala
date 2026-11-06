@@ -169,6 +169,65 @@ trait Histogram extends Ordered[Histogram] {
   //scalastyle:on method.length
   //scalastyle:on cyclomatic.complexity
 
+  /**
+   * Even-distribution quantile computed the way some producers compute percentiles at the source:
+   * same algorithm as `quantile(q, 0, max, evenDistribution = true)`, but every intermediate is a
+   * single-precision Float and the result is rounded to 2 decimals, then to the nearest Float.
+   * The returned Double is the shortest decimal for that Float (e.g. 1.26, not 1.2599999904632568).
+   *
+   * a NaN `max`, fall back to `quantile(q, 0, max, evenDistribution = true)`.
+   * Returns NaN when every sample is in bucket 0.
+   */
+  //scalastyle:off method.length
+  //scalastyle:off cyclomatic.complexity
+  def quantileEvenFloatRounded(q: Double, max: Double): Double = {
+    if (max.isNaN) quantile(q, 0, max, evenDistribution = true)
+    else if (q < 0) Double.NegativeInfinity
+    else if (q > 1) Double.PositiveInfinity
+    else if (topBucketValue <= 0 || topBucketValue == bucketValue(0)) Double.NaN
+    else {
+      val n = topBucketValue.toLong
+      val maxL = max.toLong
+      val breakPointF: Float = (n - 1) * q.toFloat + 1
+      val breakPoint = breakPointF.toLong
+      val interpolate: Float = breakPointF - breakPoint
+      // j-th of `s` samples evenly spread over [left, left + width); the last sample overall is `max`
+      def xi(s: Long, left: Long, width: Float, j: Long, globalIndex: Long): Float =
+        if (globalIndex >= n) maxL.toFloat else left + j * width / (s + 1)
+      def interp(xi: Float, xi1: Float): Float = xi + (xi1 - xi) * interpolate
+      def round(v: Float): Double = java.lang.Float.toString((Math.floor(v * 100.0 + 0.5) / 100.0).toFloat).toDouble
+
+      var result = Double.NaN
+      var bucketStartSample = 1L   // global index of the first sample in bucket i
+      var Xi = 0f                  // X[breakPoint], valid when pendingSample
+      var pendingSample = false    // X[breakPoint + 1] is the first sample of a later bucket
+      var i = 0
+      while (i < numBuckets && result.isNaN) {
+        val s = (bucketValue(i) - (if (i == 0) 0d else bucketValue(i - 1))).toLong
+        if (s != 0 && bucketStartSample + s > breakPoint) {
+          val left = if (i == numBuckets - 1 && s == 1) maxL else Math.pow(2, i).toLong
+          val right = if (i == numBuckets - 1) maxL else Math.min(Math.pow(2, i + 1).toLong, maxL)
+          val width = (right - left).toFloat
+          val bucketSampleIndex = breakPoint - bucketStartSample + 1
+          if (pendingSample) {
+            result = round(interp(Xi, xi(s, left, width, 1, breakPoint)))
+          } else {
+            Xi = xi(s, left, width, bucketSampleIndex, breakPoint)
+            if (interpolate <= Histogram.FloatRoundedEpsilon) result = round(Xi)
+            else if (breakPoint == n) result = round(interp(Xi, maxL.toFloat))
+            else if (bucketSampleIndex + 1 > s) pendingSample = true
+            else result = round(interp(Xi, xi(s, left, width, bucketSampleIndex + 1, breakPoint + 1)))
+          }
+        }
+        bucketStartSample += s
+        i += 1
+      }
+      result
+    }
+  }
+  //scalastyle:on method.length
+  //scalastyle:on cyclomatic.complexity
+
   private def log2(v: Double) = Math.log(v) / Math.log(2)
 
   /**
@@ -294,6 +353,12 @@ trait Histogram extends Ordered[Histogram] {
 
 object Histogram {
   val empty = MutableHistogram(HistogramBuckets.emptyBuckets, Array.empty)
+
+  // The only bucket layout supported by `quantileEvenFloatRounded`: integer power-of-2 buckets,
+  // bucket i holding integer samples in [2^i, 2^(i+1) - 1]
+  val FloatRoundedBuckets = GeometricBuckets(2, 2, 64, minusOne = true)
+  // interpolation weights at or below this are treated as landing exactly on a sample
+  val FloatRoundedEpsilon = 0.001f
 }
 
 trait HistogramWithBuckets extends Histogram {
