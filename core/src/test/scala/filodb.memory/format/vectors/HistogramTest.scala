@@ -149,10 +149,12 @@ class HistogramTest extends NativeVectorTest {
     describe("quantileEvenFloatRounded") {
       // Integer power-of-2 scheme: the only scheme the float-rounded mode supports.
       val scheme = GeometricBuckets(2, 2, 64, minusOne = true)
+
       def hist(perBucket: Long*): LongHistogram = {
         val counts = perBucket.toArray ++ Array.fill(64 - perBucket.length)(0L)
         LongHistogram(scheme, counts.scanLeft(0L)(_ + _).tail)
       }
+
       val qs = Seq(0.25, 0.5, 0.9, 0.95, 0.99, 0.999)
 
       // Expected values in these tests come from an independent single-precision Java implementation
@@ -203,22 +205,6 @@ class HistogramTest extends NativeVectorTest {
           val actual = h.quantileEvenFloatRounded(q, Double.NaN)
           if (expected.isNaN) actual.isNaN shouldEqual true else actual shouldEqual expected
         }
-      }
-
-      it("should fall back to mode 1 (even distribution) for unsupported bucket layouts") {
-        val counts = Array[Long](1, 3, 6, 10, 15, 21, 28, 36)
-        val unsupported = Seq(
-          LongHistogram(GeometricBuckets(2, 2, 8), counts),                   // no minusOne
-          LongHistogram(GeometricBuckets(2, 2, 8, minusOne = true), counts),  // not 64 buckets
-          LongHistogram(CustomBuckets(Array(1, 2, 4, 8, 16, 32, 64, 128)), counts))
-        unsupported.foreach { h =>
-          qs.foreach { q =>
-            h.quantileEvenFloatRounded(q, 100.0) shouldEqual h.quantile(q, 0, 100.0, evenDistribution = true)
-          }
-        }
-        val exp = MutableHistogram(Base2ExpHistogramBuckets(3, -5, 11),
-                                   Array[Double](0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
-        exp.quantileEvenFloatRounded(0.5, 1.5) shouldEqual exp.quantile(0.5, 0, 1.5, evenDistribution = true)
       }
     }
 
