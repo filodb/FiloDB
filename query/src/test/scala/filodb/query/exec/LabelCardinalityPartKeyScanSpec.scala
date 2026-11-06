@@ -42,9 +42,9 @@ class LabelCardinalityPartKeyScanSpec extends AnyFunSpec with Matchers with Scal
   val scanQueryConfig = facetQueryConfig.copy(labelCardinalityPartKeyScanEnabled = true)
 
   val facetMemStore = new TimeSeriesMemStore(baseConfig, new NullColumnStore, new NullColumnStore,
-    new InMemoryMetaStore(), Some(new FixedMaxPartitionsEvictionPolicy(1000)))
+    new InMemoryMetaStore(), Some(new FixedMaxPartitionsEvictionPolicy(10000)))
   val scanMemStore = new TimeSeriesMemStore(noFacetsConfig, new NullColumnStore, new NullColumnStore,
-    new InMemoryMetaStore(), Some(new FixedMaxPartitionsEvictionPolicy(1000)))
+    new InMemoryMetaStore(), Some(new FixedMaxPartitionsEvictionPolicy(10000)))
 
   val ref = timeseriesDatasetMultipleShardKeys.ref
   val now = System.currentTimeMillis()
@@ -63,6 +63,9 @@ class LabelCardinalityPartKeyScanSpec extends AnyFunSpec with Matchers with Scal
     ) ++ (0 until 150).map { i =>
       // every series has its own label, as with dynamic labels
       ("dynamic_labels", commonTags ++ Map("instance" -> s"host$i:8787", s"label_$i" -> "value"))
+    } ++ Seq(100, 150).flatMap { numLabels =>
+      // labels with 1000 values each, whose sketches take about 45KB and 67KB in total
+      (0 until 1000).map(i => (s"wide_$numLabels", commonTags ++ (0 until numLabels).map(l => s"l$l" -> s"v$i")))
     },
     Seq( // shard 1
       ("http_req_total", commonTags ++ Map("instance" -> "host3:9090", "job" -> "svc", "unicode_tag" -> "uniπtag")),
@@ -169,6 +172,37 @@ class LabelCardinalityPartKeyScanSpec extends AnyFunSpec with Matchers with Scal
     Seq("_ws_", "_ns_", "_metric_", "_type_", "instance").foreach(label => result.contains(label) shouldEqual true)
     mayBePartial shouldEqual true
     partialReason shouldEqual Some("Matching time series have more than 200 labels")
+  }
+
+  it("should return the cardinality of labels whose sketches do not fit in one record") {
+    Seq(100, 150).foreach { numLabels =>
+      Seq(true, false).foreach { scan =>
+        val (result, mayBePartial, _) = labelCardinality(scan, filtersFor(s"wide_$numLabels"))
+        result.keySet shouldEqual (0 until numLabels).map(l => s"l$l").toSet ++ Set("_ws_", "_ns_", "_metric_", "_type_")
+        (0 until numLabels).foreach(l => result(s"l$l") shouldEqual 1000 +- 50)
+        mayBePartial shouldEqual false
+      }
+    }
+  }
+
+  it("should split merged sketches into rows when they are not presented") {
+    val qContext = QueryContext()
+    val leaves = shardSeries.indices.map { shard =>
+      LabelCardinalityExec(qContext, dispatcher(scanMemStore, scanQueryConfig), ref, shard, filtersFor("wide_150"),
+        now - 5000, now)
+    }
+    val plan = LabelCardinalityReduceExec(qContext, dispatcher(scanMemStore, scanQueryConfig), leaves)
+    (plan.execute(scanMemStore, QuerySession(qContext, scanQueryConfig)).runToFuture.futureValue: @unchecked) match {
+      case QueryResult(_, _, response, _, _, _, _) =>
+        // read each row before advancing, since the row reader is reused
+        val labelsPerRow = response.head.rows().map { r =>
+          val row = r.asInstanceOf[BinaryRecordRowReader]
+          row.schema.toStringPairs(row.recordBase, row.recordOffset).map(_._1)
+        }.toList
+        labelsPerRow.size should be > 1
+        labelsPerRow.flatten.sorted shouldEqual
+          ((0 until 150).map(l => s"l$l") ++ Seq("_ws_", "_ns_", "_metric_", "_type_")).sorted
+    }
   }
 
   it("should return label names with filters when faceting is disabled for all labels") {
