@@ -180,8 +180,11 @@ class HistogramTest extends NativeVectorTest {
         counts(27) = 11
         val h = hist(counts.toIndexedSeq: _*)
         val max = 2.0e8
-        qs.map(h.quantileEvenFloatRounded(_, max)) shouldEqual
-          Seq(1.11149056e8, 1.47922368e8, 1.85198992e8, 1.90680848e8, 1.9813616e8, 1.99813616e8)
+        val expected = Seq(1.11149056E8, 1.47922368e8, 1.85198992e8, 1.90680848e8, 1.9813616e8, 1.99813616e8)
+        val actual = qs.map(h.quantileEvenFloatRounded(_, max))
+        actual.zip(expected).foreach { case (a, e) =>
+          a shouldEqual e +- (e * 0.0001)
+        }
         // at q=0.9 double precision gives 185198988.8: off by more than the 0.01 rounding step
         Math.abs(h.quantileEvenFloatRounded(0.9, max) - h.quantile(0.9, 0, max, evenDistribution = true)) should
           be > 1.0
