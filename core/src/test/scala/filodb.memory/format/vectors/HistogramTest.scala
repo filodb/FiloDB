@@ -157,21 +157,26 @@ class HistogramTest extends NativeVectorTest {
 
       val qs = Seq(0.25, 0.5, 0.9, 0.95, 0.99, 0.999)
 
+      // The result is the decimal string of a Float.  Which string Float.toString picks for a given float
+      // is JDK dependent (JDK 19+ prints the shortest, older JDKs can print one more digit, e.g.
+      // 7.999999E17 vs 7.9999992E17), so exact-value assertions compare the underlying floats.
+      def floats(xs: Seq[Double]): Seq[Float] = xs.map(_.toFloat)
+
       // Expected values in these tests come from an independent single-precision Java implementation
       // of the even-distribution algorithm.  Producers that publish percentiles that way emit exactly
       // these numbers, so equality is exact: any drift (double arithmetic, missing rounding, or float
       // widening such as 1.2599999904632568) would make FiloDB disagree with the published series.
       it("should reproduce single-precision, 2-decimal-rounded percentiles exactly") {
         val h = hist(243, 5)
-        qs.map(h.quantileEvenFloatRounded(_, 2.0)) shouldEqual Seq(1.26, 1.51, 1.92, 1.97, 2.0, 2.0)
+        floats(qs.map(h.quantileEvenFloatRounded(_, 2.0))) shouldEqual floats(Seq(1.26, 1.51, 1.92, 1.97, 2.0, 2.0))
         // and it is genuinely different from mode 1 (double precision, unrounded)
         h.quantileEvenFloatRounded(0.9, 2.0) should not equal h.quantile(0.9, 0, 2.0, evenDistribution = true)
       }
 
       it("should reproduce float rounding of mid-size values (rounded value is cast back to float)") {
         val h = hist(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 5, 8, 13, 36, 54)
-        qs.map(h.quantileEvenFloatRounded(_, 998821.0)) shouldEqual
-          Seq(265117.16, 478235.7, 887521.4, 938857.25, 979925.94, 996767.6)
+        floats(qs.map(h.quantileEvenFloatRounded(_, 998821.0))) shouldEqual
+          floats(Seq(265117.16, 478235.7, 887521.4, 938857.25, 979925.94, 996767.6))
       }
 
       it("should follow float precision for values above 2^24, where float spacing exceeds the rounding step") {
@@ -221,7 +226,7 @@ class HistogramTest extends NativeVectorTest {
         counts(3) = 2
         counts(63) = 1
         val h = hist(counts.toIndexedSeq: _*)
-        h.quantileEvenFloatRounded(0.9, 1.0e18) shouldEqual 7.9999992e17
+        h.quantileEvenFloatRounded(0.9, 1.0e18).toFloat shouldEqual 7.9999992e17f
       }
 
       it("should fall back to mode 1 (even distribution) when max is NaN") {
