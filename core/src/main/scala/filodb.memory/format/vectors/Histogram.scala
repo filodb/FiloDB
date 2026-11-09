@@ -175,7 +175,12 @@ trait Histogram extends Ordered[Histogram] {
    * single-precision Float and the result is rounded to 2 decimals, then to the nearest Float.
    * The returned Double is the shortest decimal for that Float (e.g. 1.26, not 1.2599999904632568).
    *
-   * a NaN `max`, fall back to `quantile(q, 0, max, evenDistribution = true)`.
+   * Precondition: the histogram uses the integer power-of-2 layout `GeometricBuckets(2, 2, 64, minusOne = true)`
+   * (bucket i holds integer samples in [2^i, 2^(i+1) - 1]).  This is NOT checked: bucket edges are
+   * hardcoded, so any other layout silently gives wrong values.  Callers must only use this for
+   * histograms known to have that layout.
+   *
+   * A NaN `max` falls back to `quantile(q, 0, max, evenDistribution = true)`.
    * Returns NaN when every sample is in bucket 0.
    */
   //scalastyle:off method.length
@@ -205,9 +210,12 @@ trait Histogram extends Ordered[Histogram] {
       while (i < numBuckets && result.isNaN) {
         val s = (bucketValue(i) - (if (i == 0) 0d else bucketValue(i - 1))).toLong
         if (s != 0 && bucketStartSample + s > breakPoint) {
+          // The last bucket is open-ended: its upper edge is `max`.  A lone sample in it is `max` itself
+          // (its lower edge collapses to `max`), as the source algorithm treats it.
           val left = if (i == numBuckets - 1 && s == 1) maxL else Math.pow(2, i).toLong
           val right = if (i == numBuckets - 1) maxL else Math.min(Math.pow(2, i + 1).toLong, maxL)
-          val width = (right - left).toFloat
+          // `max` below the bucket's lower edge (inconsistent max column) must not extrapolate below the bucket
+          val width = Math.max(0f, (right - left).toFloat)
           val bucketSampleIndex = breakPoint - bucketStartSample + 1
           if (pendingSample) {
             result = round(interp(Xi, xi(s, left, width, 1, breakPoint)))
@@ -354,9 +362,6 @@ trait Histogram extends Ordered[Histogram] {
 object Histogram {
   val empty = MutableHistogram(HistogramBuckets.emptyBuckets, Array.empty)
 
-  // The only bucket layout supported by `quantileEvenFloatRounded`: integer power-of-2 buckets,
-  // bucket i holding integer samples in [2^i, 2^(i+1) - 1]
-  val FloatRoundedBuckets = GeometricBuckets(2, 2, 64, minusOne = true)
   // interpolation weights at or below this are treated as landing exactly on a sample
   val FloatRoundedEpsilon = 0.001f
 }

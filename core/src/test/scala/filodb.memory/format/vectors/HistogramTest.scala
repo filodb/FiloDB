@@ -201,6 +201,29 @@ class HistogramTest extends NativeVectorTest {
         hist().quantileEvenFloatRounded(0.5, 2.0).isNaN shouldEqual true
       }
 
+      it("should not extrapolate below the bucket when max is below the bucket's lower edge") {
+        // 5 samples all in bucket 1 = [2, 3], but the max column says 1 (inconsistent).  The bucket's
+        // upper edge would be below its lower edge; width must clamp to 0 (as mode 1 does) so the
+        // samples sit at the lower edge 2.0 rather than being extrapolated below it (e.g. 1.5).
+        val h = hist(0, 5)
+        h.quantileEvenFloatRounded(0.25, 1.0) shouldEqual 2.0
+        h.quantileEvenFloatRounded(0.5, 1.0) shouldEqual 2.0
+        // mode 1 agrees on where the samples sit
+        h.quantile(0.5, 0, 1.0, evenDistribution = true) shouldEqual 2.0
+      }
+
+      it("should place a lone sample in the last bucket at max") {
+        // 2 samples in bucket 3 and 1 sample in the last bucket (63).  The percentile at q=0.9 sits
+        // between the 2nd sample (bucket 3) and the lone sample in bucket 63, so the lone sample's value
+        // matters: it is `max` itself, not the bucket's nominal lower edge 2^63.  Expected value comes
+        // from the single-precision Java implementation of the algorithm.
+        val counts = Array.fill(64)(0L)
+        counts(3) = 2
+        counts(63) = 1
+        val h = hist(counts.toIndexedSeq: _*)
+        h.quantileEvenFloatRounded(0.9, 1.0e18) shouldEqual 7.9999992e17
+      }
+
       it("should fall back to mode 1 (even distribution) when max is NaN") {
         val h = hist(243, 5)
         qs.foreach { q =>
