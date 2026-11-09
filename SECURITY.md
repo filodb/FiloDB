@@ -1,6 +1,5 @@
 # Report a security vulnerability
 
-## How to report a security vulnerability
 
 FiloDB prioritizes the security of its open source project and values the contributions of the security research community.
 If you believe that you have discovered a security vulnerability in our open source software,
