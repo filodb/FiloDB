@@ -405,6 +405,22 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       schemaWithPredefKeys.consumeMapItems(recordBase, recordOff, 6, valuesCheckConsumer)
     }
 
+    it("should read back map fields larger than 32KB") {
+      val mapSchema = new RecordSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)))
+      // each entry is 1 + 9 key bytes + 2 + 90 value bytes = 102 bytes; 322 entries is just over 32KB
+      Seq(321, 322, 640).foreach { numEntries =>
+        val map = (0 until numEntries).map(i => f"label_$i%03d" -> ("v" * 90)).toMap
+        val builder = new RecordBuilder(MemFactory.onHeapFactory, 128 * 1024)
+        builder.startNewRecord(mapSchema)
+        builder.addMap(map.map { case (k, v) => ZCUTF8(k) -> ZCUTF8(v) })
+        builder.endRecord()
+
+        builder.allContainers.head.foreach { case (base, offset) =>
+          mapSchema.toStringPairs(base, offset).toMap shouldEqual map
+        }
+      }
+    }
+
     it("should add map fields with addMap() and populate unique hashes") {
       val labels = Map("job" -> "prometheus",
                        "dc" -> "AWS-USE", "instance" -> "0123892E342342A90",

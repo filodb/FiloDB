@@ -357,7 +357,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    */
   def consumeMapItems(base: Any, offset: Long, index: Int, consumer: MapItemConsumer): Unit = {
     val mapOffset = offset + UnsafeUtils.getInt(base, offset + offsets(index))
-    val mapNumBytes = UnsafeUtils.getShort(base, mapOffset).toInt
+    val mapNumBytes = UnsafeUtils.getShort(base, mapOffset) & 0x0FFFF   // up to 64KB, so unsigned
     var curOffset = mapOffset + 2
     val endOffset = curOffset + mapNumBytes
     var itemIndex = 0
