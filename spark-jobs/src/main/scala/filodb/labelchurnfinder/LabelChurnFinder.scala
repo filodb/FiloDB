@@ -3,6 +3,7 @@ package filodb.labelchurnfinder
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.DurationInt
+import scala.util.control.NonFatal
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
@@ -23,7 +24,7 @@ import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
-object LabelChurnFinderMain extends App {
+object LabelChurnFinderMain extends App with StrictLogging {
   Kamon.init()
   KamonShutdownHook.registerShutdownHook()
 
@@ -37,6 +38,8 @@ object LabelChurnFinderMain extends App {
     FilodbMetrics.counter("lcf_labels_published_total")
   @transient private lazy val kafkaFailures       =
     FilodbMetrics.counter("lcf_kafka_publish_failures_total")
+  @transient private lazy val icebergExportDuration =
+    FilodbMetrics.timeHistogram("lcf_iceberg_export_duration", TimeUnit.MILLISECONDS)
 
   private val dsSettings = new DownsamplerSettings()
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
@@ -52,13 +55,31 @@ object LabelChurnFinderMain extends App {
   private val labelsAcc     = spark.sparkContext.longAccumulator("lcf_labels_published")
   private val workspacesAcc = spark.sparkContext.longAccumulator("lcf_workspaces_published")
 
-  private val labelStats     = labelChurnFinder.computeLabelStats(spark)
+  private val partKeys       = labelChurnFinder.scanPartKeys(spark)
+
+  // Export to Iceberg before publishing to Kafka.
+  // A failed export does not block the Kafka stats.
+  // cache() lets the stats below reuse this single scan.
+  if (dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.iceberg-export.enabled")) {
+    partKeys.cache()
+    val exportStartMs = System.currentTimeMillis()
+    try {
+      new PartKeyIcebergExporter(dsSettings.filodbConfig).exportPartKeys(spark, partKeys)
+    } catch {
+      case NonFatal(e) =>
+        logger.error("Export of partKeys to Iceberg failed, continuing with publishing label stats", e)
+    }
+    icebergExportDuration.record(System.currentTimeMillis() - exportStartMs)
+  }
+
+  private val labelStats     = labelChurnFinder.computeLabelStats(labelChurnFinder.explodeLabels(partKeys))
   private val publishToKafka = dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.publish-to-kafka")
   private val producer = if (publishToKafka)
     Some(new LabelStatsKafkaProducer(dsSettings.filodbConfig, failuresAcc, labelsAcc, workspacesAcc))
   else None
 
   labelChurnFinder.actionOnLabelStats(labelStats, producer)
+  partKeys.unpersist() // release the cache before the wait below, the partKeys are not used anymore
 
   // After the Spark job completes, read accumulator totals and record to OTel on the driver
   workspacesPublished.increment(workspacesAcc.value)
@@ -89,6 +110,12 @@ object LabelChurnFinder {
 }
 
 case class LabelValRow(ws: String, ns: String, label: String, labelVal: String, endTime: Long)
+
+/**
+ * One time series (partKey) from the Cassandra partKeys table, with all of its labels decoded.
+ */
+case class PartKeyRow(ws: String, ns: String, metric: String, labels: Map[String, String],
+                      startTime: Long, endTime: Long)
 
 /**
  * Requires following typesafe config properties:
@@ -128,10 +155,10 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     dsSettings.filodbConfig.as[Option[Int]]("labelchurnfinder.num-salts").getOrElse(50)
 
   /**
-   * Returns iterator of LcfRow objects containing label/value for given token range split and shard.
+   * Returns iterator of PartKeyRow objects, one per time series, for given token range split and shard.
    */
-  private def fetchLabelValues(split: (String, String),
-                       shard: Int): Iterator[LabelValRow] = {
+  private def fetchPartKeys(split: (String, String),
+                       shard: Int): Iterator[PartKeyRow] = {
     colStore.scanPartKeysByStartEndTimeRangeNoAsync(datasetRef, shard, split, 0,
         Long.MaxValue, 0, Long.MaxValue)
       .flatMap { pk  =>
@@ -146,22 +173,17 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
         if (filterMatches) {
           val ws = pkPairs.find(_._1 == "_ws_").map(_._2).getOrElse("unknown!!")
           val ns = pkPairs.find(_._1 == "_ns_").map(_._2).getOrElse("unknown!!")
-          pkPairs.map { case (label, labelVal) =>
-            LabelValRow(ws, ns, label, labelVal, pk.endTime)
-          }
+          val metric = pkPairs.find(_._1 == "_metric_").map(_._2).getOrElse("unknown!!")
+          Seq(PartKeyRow(ws, ns, metric, pkPairs.toMap, pk.startTime, pk.endTime))
         } else Nil
       }
   }
 
   /**
-   * Returns DataFrame with columns:
-   * WsCol, NsCol, LabelCol, Ats1hWithLabelCol, LabelCard1hCol, LabelCard3dCol, LabelCard7dCol, Churn7dCol,
-   * Churn3dCol, LabelValueUsageCol
-   *
-   * The spark session is not closed by this method.
+   * Scans the partKeys table and returns one PartKeyRow per time series matching the pk-filters.
    */
   // scalastyle:off
-  def computeLabelStats(spark: SparkSession): DataFrame = {
+  def scanPartKeys(spark: SparkSession): Dataset[PartKeyRow] = {
 
     logger.info(s"This is the Label Churn Finder. Starting job for dataset=$datasetName with filters=$filters")
 
@@ -179,13 +201,32 @@ class LabelChurnFinder(dsSettings: DownsamplerSettings) extends Serializable wit
     }
     logger.info(s"Splits count: ${splits.size}, partKeysV2TableEnabled=${colStore.partKeysV2TableEnabled}")
     import spark.implicits._
-    val labelsAndValuesDf = splits
+    splits
         .toDF("startToken", "endToken", "shard")
         .flatMap { split =>
-          fetchLabelValues((split.getString(0), split.getString(1)), split.getInt(2))
+          fetchPartKeys((split.getString(0), split.getString(1)), split.getInt(2))
         }
-    computeChurnAndUsage(labelsAndValuesDf, tMinus3d, tMinus7d)
   }
+
+  /**
+   * Returns one LabelValRow per label of every time series in partKeys.
+   */
+  def explodeLabels(partKeys: Dataset[PartKeyRow]): Dataset[LabelValRow] = {
+    import partKeys.sparkSession.implicits._
+    partKeys.flatMap { pk =>
+      pk.labels.map { case (label, labelVal) => LabelValRow(pk.ws, pk.ns, label, labelVal, pk.endTime) }
+    }
+  }
+
+  /**
+   * Returns DataFrame with columns:
+   * WsCol, NsCol, LabelCol, Ats1hWithLabelCol, LabelCard1hCol, LabelCard3dCol, LabelCard7dCol, Churn7dCol,
+   * Churn3dCol, LabelValueUsageCol
+   *
+   * The spark session is not closed by this method.
+   */
+  def computeLabelStats(labelsAndValuesDf: Dataset[LabelValRow]): DataFrame =
+    computeChurnAndUsage(labelsAndValuesDf, tMinus3d, tMinus7d)
 
   /**
    * Returns DataFrame with columns:

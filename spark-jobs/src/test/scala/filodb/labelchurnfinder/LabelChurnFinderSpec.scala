@@ -126,7 +126,8 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .config(sparkConf)
       .getOrCreate()
 
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
+    val labelStats = lcf.computeLabelStats(lcf.explodeLabels(lcf.scanPartKeys(sparkSession)))
+    val result = lcf.countsFromSketches(labelStats).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
@@ -156,7 +157,8 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
+    val labelStats = lcf.computeLabelStats(lcf.explodeLabels(lcf.scanPartKeys(sparkSession)))
+    val result = lcf.countsFromSketches(labelStats).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
@@ -170,6 +172,40 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       ("bulk_ws", "_metric_", 1, 1),
       ("bulk_ws", "pod", numPods/2, numPods/2),
     )
+  }
+
+  it ("should scan one PartKeyRow per time series with all labels and start and end times") {
+    val filterConfig = ConfigFactory.parseString(
+      s"""
+         |filodb.labelchurnfinder.pk-filters.0._ns_ = "bulk_ns.*"
+         |filodb.labelchurnfinder.pk-filters.0._ws_ = "b.*_ws"
+         |""".stripMargin)
+    val settings2 = new DownsamplerSettings(filterConfig.withFallback(jobConfig.withFallback(baseConf)))
+    val lcf = new LabelChurnFinder(settings2)
+    sparkSession = SparkSession.builder()
+      .appName("LabelChurnFinder")
+      .config(localSparkConf().set("spark.serializer", "org.apache.spark.serializer.KryoSerializer"))
+      .getOrCreate()
+
+    val rows = lcf.scanPartKeys(sparkSession).collect()
+    rows.length shouldEqual numContainers + 1
+    val byContainer = rows.map(r => r.labels("container") -> r).toMap
+
+    // series with an even index are still ingesting, so their end time is Long.MaxValue
+    val active = byContainer("container4")
+    active.ws shouldEqual "bulk_ws"
+    active.ns shouldEqual "bulk_ns0"
+    active.metric shouldEqual "bulkmetric"
+    active.labels shouldEqual Map("_ws_" -> "bulk_ws", "_ns_" -> "bulk_ns0", "_metric_" -> "bulkmetric",
+      "pod" -> "pod4", "instance" -> "instance4", "container" -> "container4")
+    active.startTime shouldEqual now + 4
+    active.endTime shouldEqual Long.MaxValue
+
+    // series with an odd index have stopped ingesting
+    val ended = byContainer("container5")
+    ended.ns shouldEqual "bulk_ns1"
+    ended.startTime shouldEqual now + 5
+    ended.endTime shouldEqual now + 5 + 500
   }
 
   it ("should run LCF job for different time range") {
@@ -187,7 +223,8 @@ class LabelChurnFinderSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
       .appName("LabelChurnFinder")
       .config(sparkConf)
       .getOrCreate()
-    val result = lcf.countsFromSketches(lcf.computeLabelStats(sparkSession)).collect()
+    val labelStats = lcf.computeLabelStats(lcf.explodeLabels(lcf.scanPartKeys(sparkSession)))
+    val result = lcf.countsFromSketches(labelStats).collect()
     result.length shouldEqual 6
     val cards = result.map { row => (row.getAs[String](WsCol),
                                      row.getAs[String](LabelCol),
