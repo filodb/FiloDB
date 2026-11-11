@@ -146,6 +146,99 @@ class HistogramTest extends NativeVectorTest {
         hist.quantile(0.999, 0, max, evenDistribution = true)
     }
 
+    describe("quantileEvenFloatRounded") {
+      // Integer power-of-2 scheme: the only scheme the float-rounded mode supports.
+      val scheme = GeometricBuckets(2, 2, 64, minusOne = true)
+
+      def hist(perBucket: Long*): LongHistogram = {
+        val counts = perBucket.toArray ++ Array.fill(64 - perBucket.length)(0L)
+        LongHistogram(scheme, counts.scanLeft(0L)(_ + _).tail)
+      }
+
+      val qs = Seq(0.25, 0.5, 0.9, 0.95, 0.99, 0.999)
+
+      // The result is the decimal string of a Float.  Which string Float.toString picks for a given float
+      // is JDK dependent (JDK 19+ prints the shortest, older JDKs can print one more digit, e.g.
+      // 7.999999E17 vs 7.9999992E17), so exact-value assertions compare the underlying floats.
+      def floats(xs: Seq[Double]): Seq[Float] = xs.map(_.toFloat)
+
+      // Expected values in these tests come from an independent single-precision Java implementation
+      // of the even-distribution algorithm.  Producers that publish percentiles that way emit exactly
+      // these numbers, so equality is exact: any drift (double arithmetic, missing rounding, or float
+      // widening such as 1.2599999904632568) would make FiloDB disagree with the published series.
+      it("should reproduce single-precision, 2-decimal-rounded percentiles exactly") {
+        val h = hist(243, 5)
+        floats(qs.map(h.quantileEvenFloatRounded(_, 2.0))) shouldEqual floats(Seq(1.26, 1.51, 1.92, 1.97, 2.0, 2.0))
+        // and it is genuinely different from mode 1 (double precision, unrounded)
+        h.quantileEvenFloatRounded(0.9, 2.0) should not equal h.quantile(0.9, 0, 2.0, evenDistribution = true)
+      }
+
+      it("should reproduce float rounding of mid-size values (rounded value is cast back to float)") {
+        val h = hist(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 5, 8, 13, 36, 54)
+        floats(qs.map(h.quantileEvenFloatRounded(_, 998821.0))) shouldEqual
+          floats(Seq(265117.16, 478235.7, 887521.4, 938857.25, 979925.94, 996767.6))
+      }
+
+      it("should follow float precision for values above 2^24, where float spacing exceeds the rounding step") {
+        val counts = new Array[Long](28)
+        counts(26) = 7
+        counts(27) = 11
+        val h = hist(counts.toIndexedSeq: _*)
+        val max = 2.0e8
+        val expected = Seq(1.11149056E8, 1.47922368e8, 1.85198992e8, 1.90680848e8, 1.9813616e8, 1.99813616e8)
+        val actual = qs.map(h.quantileEvenFloatRounded(_, max))
+        actual.zip(expected).foreach { case (a, e) =>
+          a shouldEqual e +- (e * 0.0001)
+        }
+        // at q=0.9 double precision gives 185198988.8: off by more than the 0.01 rounding step
+        Math.abs(h.quantileEvenFloatRounded(0.9, max) - h.quantile(0.9, 0, max, evenDistribution = true)) should
+          be > 1.0
+      }
+
+      it("should return NaN when every sample is in bucket 0 (no percentiles are produced)") {
+        hist(17).quantileEvenFloatRounded(0.5, 1.0).isNaN shouldEqual true
+      }
+
+      it("should handle out-of-range q and empty histograms like quantile") {
+        val h = hist(243, 5)
+        h.quantileEvenFloatRounded(-0.1, 2.0) shouldEqual Double.NegativeInfinity
+        h.quantileEvenFloatRounded(1.1, 2.0) shouldEqual Double.PositiveInfinity
+        hist().quantileEvenFloatRounded(0.5, 2.0).isNaN shouldEqual true
+      }
+
+      it("should not extrapolate below the bucket when max is below the bucket's lower edge") {
+        // 5 samples all in bucket 1 = [2, 3], but the max column says 1 (inconsistent).  The bucket's
+        // upper edge would be below its lower edge; width must clamp to 0 (as mode 1 does) so the
+        // samples sit at the lower edge 2.0 rather than being extrapolated below it (e.g. 1.5).
+        val h = hist(0, 5)
+        h.quantileEvenFloatRounded(0.25, 1.0) shouldEqual 2.0
+        h.quantileEvenFloatRounded(0.5, 1.0) shouldEqual 2.0
+        // mode 1 agrees on where the samples sit
+        h.quantile(0.5, 0, 1.0, evenDistribution = true) shouldEqual 2.0
+      }
+
+      it("should place a lone sample in the last bucket at max") {
+        // 2 samples in bucket 3 and 1 sample in the last bucket (63).  The percentile at q=0.9 sits
+        // between the 2nd sample (bucket 3) and the lone sample in bucket 63, so the lone sample's value
+        // matters: it is `max` itself, not the bucket's nominal lower edge 2^63.  Expected value comes
+        // from the single-precision Java implementation of the algorithm.
+        val counts = Array.fill(64)(0L)
+        counts(3) = 2
+        counts(63) = 1
+        val h = hist(counts.toIndexedSeq: _*)
+        h.quantileEvenFloatRounded(0.9, 1.0e18).toFloat shouldEqual 7.9999992e17f
+      }
+
+      it("should fall back to mode 1 (even distribution) when max is NaN") {
+        val h = hist(243, 5)
+        qs.foreach { q =>
+          val expected = h.quantile(q, 0, Double.NaN, evenDistribution = true)
+          val actual = h.quantileEvenFloatRounded(q, Double.NaN)
+          if (expected.isNaN) actual.isNaN shouldEqual true else actual shouldEqual expected
+        }
+      }
+    }
+
     it("should calculate quantile correctly for exponential bucket histograms") {
       val bucketScheme = Base2ExpHistogramBuckets(3, -5, 11) // 0.707 to 1.68
       val hist = MutableHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
