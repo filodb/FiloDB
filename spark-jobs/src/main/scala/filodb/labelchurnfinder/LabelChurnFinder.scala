@@ -40,6 +40,8 @@ object LabelChurnFinderMain extends App with StrictLogging {
     FilodbMetrics.counter("lcf_kafka_publish_failures_total")
   @transient private lazy val icebergExportDuration =
     FilodbMetrics.timeHistogram("lcf_iceberg_export_duration", TimeUnit.MILLISECONDS)
+  @transient private lazy val icebergExportFailures =
+    FilodbMetrics.counter("lcf_iceberg_export_failures_total")
 
   private val dsSettings = new DownsamplerSettings()
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
@@ -67,6 +69,7 @@ object LabelChurnFinderMain extends App with StrictLogging {
       new PartKeyIcebergExporter(dsSettings.filodbConfig).exportPartKeys(spark, partKeys)
     } catch {
       case NonFatal(e) =>
+        icebergExportFailures.increment()
         logger.error("Export of partKeys to Iceberg failed, continuing with publishing label stats", e)
     }
     icebergExportDuration.record(System.currentTimeMillis() - exportStartMs)
