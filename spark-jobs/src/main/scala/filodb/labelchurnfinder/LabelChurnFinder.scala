@@ -47,6 +47,30 @@ object LabelChurnFinderMain extends App with StrictLogging {
   private val labelChurnFinder = new LabelChurnFinder(dsSettings)
   private val sparkConf = new SparkConf(loadDefaults = true)
   sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
+  // Team shared secrets are exposed as env vars
+  // the AppleConnect S3A provider reads them from spark.hadoop.* properties
+  private val appleConnectEnvToConf = Map(
+    "s3_ac_username"    -> "spark.hadoop.fs.s3a.appleconnect.username",
+    "s3_ac_password"    -> "spark.hadoop.fs.s3a.appleconnect.password",
+    "s3_totp_secret"    -> "spark.hadoop.fs.s3a.appleconnect.totpSecret",
+    "s3_ac_device_id"   -> "spark.hadoop.fs.s3a.appleconnect.deviceId",
+    "aws_dev_role"      -> "spark.hadoop.fs.s3a.appleconnect.awsrole",
+    "s3_aws_account_id" -> "spark.hadoop.fs.s3a.appleconnect.accountId"
+  )
+  // Only these are printed in full, for the rest only the length is logged
+  private val nonSecretEnvNames = Set("s3_ac_username", "aws_dev_role", "s3_aws_account_id")
+  appleConnectEnvToConf.foreach { case (envName, confKey) =>
+    sys.env.get(envName) match {
+      case Some(value) =>
+        sparkConf.set(confKey, value)
+        val shown = if (nonSecretEnvNames.contains(envName)) value else "<hidden>"
+        logger.info(s"AppleConnect env var $envName is set: value=$shown length=${value.length}")
+      case None =>
+        logger.warn(s"AppleConnect env var $envName is not set")
+    }
+  }
+
   val spark = SparkSession.builder()
     .appName("LabelChurnFinder")
     .config(sparkConf)
