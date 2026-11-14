@@ -509,7 +509,13 @@ case class QuerySession(qContext: QueryContext,
                         var flightAllocator: Option[FlightAllocator] = None,
                         // in case of target schemas, when the child Exec plan is run, if the
                         //  the execution happens locally and thus no serialization is necessary
-                        preventRangeVectorSerialization: Boolean = false) extends StrictLogging {
+                        preventRangeVectorSerialization: Boolean = false,
+                        // Eviction locks adopted from in-process child sessions whose results were not
+                        // serialized. Deliberately a constructor param so that `copy` shares the same
+                        // instance: children are dispatched with a copy of the parent session, and locks
+                        // they hand over must be released when the original parent session closes.
+                        adoptedLocks: AdoptedEvictionLocks = new AdoptedEvictionLocks)
+  extends StrictLogging {
 
   val queryStats: QueryStats = QueryStats()
   // used to track number of times timeout is checked during query execution, to gate and control excessive checks
@@ -528,10 +534,66 @@ case class QuerySession(qContext: QueryContext,
   def close(skipAllocatorClose: Boolean = false): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
+    adoptedLocks.releaseAll()
+    closeAllocator(skipAllocatorClose)
+  }
+
+  /**
+   * Closes this session, but instead of releasing its eviction locks (its own and any it adopted),
+   * hands them over to `parent`, which releases them when it closes.
+   *
+   * Use this when the results produced under this session are handed to `parent` without being
+   * serialized (preventRangeVectorSerialization): such range vectors are lazy and read block memory
+   * when the parent iterates them, so the memory must stay protected from reclamation until then.
+   * If `parent` has already closed (e.g. it was cancelled), the locks are released right away.
+   */
+  def closeAndTransferLocks(parent: QuerySession, skipAllocatorClose: Boolean = false): Unit = {
+    lock.foreach(parent.adoptedLocks.adopt(_, qContext.queryId))
+    lock = None
+    adoptedLocks.transferTo(parent.adoptedLocks)
+    closeAllocator(skipAllocatorClose)
+  }
+
+  private def closeAllocator(skipAllocatorClose: Boolean): Unit = {
     if (!skipAllocatorClose) {
       flightAllocator.foreach(_.close())
       flightAllocator = None
     }
+  }
+}
+
+/**
+ * Thread-safe set of eviction locks a QuerySession holds on behalf of in-process children.
+ * Once released (the owning session closed), any lock adopted afterwards is released immediately,
+ * so a child finishing after its parent was cancelled cannot leak a shared lock.
+ */
+final class AdoptedEvictionLocks {
+  private val held = ArrayBuffer[(EvictionLock, String)]()
+  private var released = false
+
+  def adopt(lock: EvictionLock, holderId: String): Unit = adoptAll(Seq(lock -> holderId))
+
+  /** Moves all locks held here to `other`; this instance is then considered released. */
+  def transferTo(other: AdoptedEvictionLocks): Unit = if (other ne this) other.adoptAll(drain())
+
+  /** Releases all held locks. Idempotent. */
+  def releaseAll(): Unit = drain().foreach { case (l, id) => l.releaseSharedLock(id) }
+
+  def numHeld: Int = synchronized(held.size)
+
+  private def adoptAll(locks: Seq[(EvictionLock, String)]): Unit = {
+    val accepted = synchronized {
+      if (!released) held ++= locks
+      !released
+    }
+    if (!accepted) locks.foreach { case (l, id) => l.releaseSharedLock(id) }
+  }
+
+  private def drain(): Seq[(EvictionLock, String)] = synchronized {
+    released = true
+    val all = held.toList
+    held.clear()
+    all
   }
 }
 
