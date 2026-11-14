@@ -123,9 +123,11 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
   import filodb.query.AggregateClause.ClauseType
 
-  val clauseLabelSet : Set[ZeroCopyUTF8String] = {
-    if (clauseOpt.isEmpty) Set()
-    else clauseOpt.get.labels.map(ZeroCopyUTF8String(_)).toSet
+  // Array rather than Set: clauses typically name a handful of labels, which are matched by a linear scan
+  // directly against the binary part key (see RangeVectorKey.selectLabels)
+  val clauseLabels: Array[ZeroCopyUTF8String] = {
+    if (clauseOpt.isEmpty) Array.empty
+    else clauseOpt.get.labels.distinct.map(ZeroCopyUTF8String(_)).toArray
   }
 
   protected[exec] def args: String = {
@@ -147,15 +149,13 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
-    def grouping(rv: RangeVector): RangeVectorKey = {
-      val rvLabelValues = rv.key.labelValues
-      val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = clauseOpt.map { clause =>
-        clause.clauseType match {
-          case ClauseType.By => rvLabelValues.filter(lv => clauseLabelSet.contains(lv._1))
-          case ClauseType.Without => rvLabelValues.filterNot(lv => clauseLabelSet.contains(lv._1))
-        }
-      }.getOrElse(Map())
-      CustomRangeVectorKey(groupBy)
+    // Without a by/without clause every RV falls into the same group, so avoid materializing the
+    // label map of each RV (labelValues decodes the full part key into a Map, which is expensive).
+    def grouping(rv: RangeVector): RangeVectorKey = clauseOpt match {
+      case None => CustomRangeVectorKey.empty
+      // decode only the labels kept by the clause, rather than all labels and then filtering
+      case Some(clause) =>
+        CustomRangeVectorKey(rv.key.selectLabels(clauseLabels, include = clause.clauseType == ClauseType.By))
     }
 
     // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path

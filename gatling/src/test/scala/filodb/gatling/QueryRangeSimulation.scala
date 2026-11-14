@@ -54,8 +54,8 @@ trait QueryRangeSimulation extends Simulation {
   def expectNonEmptyResult: Boolean = true
 
   def runLoadTest(): Unit = {
-    //val baseUrl = "http://localhost:8080/promql/promperf/"
-    val baseUrl = "http://localhost:9900"
+    val baseUrl = "http://localhost:8080/promql/promperf/"
+    //val baseUrl = "http://localhost:9900"
     val numApps = 1
     val testDuration = 3.minutes
     // Before each run, change this to the right timestamp relevant to data stored in server
@@ -128,7 +128,7 @@ class SumOfSumOverTimeQueryRangeSimulation extends QueryRangeSimulation {
 }
 
 class ZeroResultQueryRangeSimulation extends QueryRangeSimulation {
-  override val queryName = "SumOfSumOverTime"
+  override val queryName = "ZeroResult"
   override val promQL = """heap_usage0{_ns_="App-$appNum",_ws_="demo"} < 0"""
   override val numUsers = 30
   override val expectNonEmptyResult = false
