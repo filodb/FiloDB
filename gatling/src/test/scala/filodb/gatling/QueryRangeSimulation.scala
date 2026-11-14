@@ -54,8 +54,8 @@ trait QueryRangeSimulation extends Simulation {
   def expectNonEmptyResult: Boolean = true
 
   def runLoadTest(): Unit = {
-    val baseUrl = "http://localhost:8080/promql/promperf/"
-    //val baseUrl = "http://localhost:9900"
+    //val baseUrl = "http://localhost:8080/promql/promperf/"
+    val baseUrl = "http://localhost:9900"
     val numApps = 1
     val testDuration = 3.minutes
     // Before each run, change this to the right timestamp relevant to data stored in server
